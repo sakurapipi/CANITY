@@ -6,6 +6,12 @@
  *   - 内部分辨率渲染（Render Scale）：3D 与后处理都跑在 renderW×renderH，
  *     最后 StretchDIBits 放大到窗口；HUD / 菜单文字仍用 GDI 按窗口分辨率绘制。
  *   - 菜单/设置为整屏居中的半透明面板，选择项通过弹出式列表完成（不再用左右键）。
+ *
+ * 版本号：
+ *   改这里就是改版本号 —— CANITY_VERSION_NUM 是整数（存进存档），
+ *   CANITY_VERSION_STR 是显示用的字符串（窗口标题 / 主菜单 / 存档校验）。
+ *   每次改动玩法或存档结构都要同时升 CANITY_VERSION_NUM 和 SAVE_VERSION，
+ *   这样老存档会被识别为不兼容而安全丢弃，而不是加载出半截坏数据。
  */
 
 #include <windows.h>
@@ -15,6 +21,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
+#define CANITY_VERSION_NUM 2          /* 整数版本，进存档做兼容性校验 */
+#define CANITY_VERSION_STR "1.0.1"    /* 显示版本，窗口标题 / 主菜单 */
 
 #define MAP_WIDTH 24
 #define MAP_HEIGHT 24
@@ -26,6 +36,16 @@
 #define MOVE_SPEED 2.5f       /* 单位/秒 */
 #define SANITY_DRAIN 0.5f     /* 理智/秒（满值约 200 秒） */
 #define MOUSE_BASE_SENS 0.002 /* 弧度/像素（1.0x） */
+
+/* 一层里最多能同时存在多少个可搜索容器。
+   RICH 词条会额外 +2，所以数组本身要留出余量，
+   否则容器数量一旦真的涨上去就会写越界。 */
+#define MAX_CONTAINERS 8
+#define CONTAINERS_BASE 6    /* 常规关卡的容器数上限 */
+/* 场上最多同时存在几件投掷物（荧光棒 / 玻璃瓶） */
+#define MAX_THROWN 4
+/* 精灵排序表的上界：容器 + 配电箱 + 寻声怪 + 安全屋 + 光敏怪 + 投掷物 + 出口光柱 */
+#define MAX_SPRITES (MAX_CONTAINERS + MAX_THROWN + 6)
 
 /* ------------------------------------------------------------------ */
 /* 全局状态                                                            */
@@ -105,10 +125,8 @@ int upgQuiet = 0;        /* 噪声半径 -15%/级 */
 int upgSanity = 0;       /* 理智流失 -10%/级 */
 #define UPG_MAX 3
 
-int hallMode = 0;        /* 渲染用的色调开关 */
 int hubSelection = 0;
 #define HUB_ROWS 5       /* 4 项升级 + Back */
-int tintR = 0, tintG = 0, tintB = 0;
 
 /* 寻声怪：只听声音，走路它听不见，跑步/翻找/摇电会把它引过来 */
 #define MON_MAXPATH 96
@@ -127,14 +145,15 @@ Monster lightBeast;      /* 只看光 */
 
 int flares = 0, bottles = 0;
 typedef struct { float x, y; int type; float life; int active; } Thrown;  /* 0=荧光棒 */
-Thrown thrown[4];
+Thrown thrown[MAX_THROWN];
 
 /* 安全屋：每关一个，站在里面缓慢回理智 */
 typedef struct { float x, y; int active; } SafeRoom;
 SafeRoom safeRoom;
 
-/* 可搜索容器 / 保险丝 / 配电箱 */
-#define MAX_CONTAINERS 6
+/* 可搜索容器 / 保险丝 / 配电箱
+   MAX_CONTAINERS 见文件顶部：数组按 RICH 词条的上限留足余量，
+   常规关卡用 CONTAINERS_BASE 个。 */
 typedef struct {
     float x, y;
     int active;
@@ -271,17 +290,15 @@ int BatteryMax(void);
 
 /* 前置声明：怪物 */
 void SpawnMonster(void);
-void RenderMonster(void);
 void UpdateMonster(float dt);
 void UpdateLightBeast(float dt);
 void SpawnLightBeast(void);
 static void ThrowItem(int type);
-void RenderThrowGlow(void);
 int HasLOS(float x0, float y0, float x1, float y1);
 void MakeNoise(float x, float y, float radius);
 
 /* 前置声明：音效 */
-enum { SFX_STEP = 0, SFX_HEART, SFX_PICKUP, SFX_POWER, SFX_GATE, SFX_CRANK, SFX_SCREAM, SFX_COUNT };
+enum { SFX_STEP = 0, SFX_HEART, SFX_PICKUP, SFX_POWER, SFX_GATE, SFX_CRANK, SFX_SCREAM, SFX_GLASS, SFX_COUNT };
 void PlaySfx(int id, float vol);
 void InitAudio(void);
 void ShutdownAudio(void);
@@ -331,9 +348,11 @@ void InitPixels(void) {
     if (renderW > MAX_SCREEN) renderW = MAX_SCREEN;
     if (renderH > MAX_SCREEN) renderH = MAX_SCREEN;
 
-    /* 像素预算：窗口再大，内部渲染也不超过这个量，保证高分辨率下的帧时间 */
+    /* 像素预算：窗口再大，内部渲染也不超过这个量，保证高分辨率下的帧时间。
+       原来 90 万，1080p 全屏实测「渲染 29ms + 呈现 11ms」只有 25fps，
+       这就是全屏卡顿的根因。28 万（约 640x360）实测 14ms，60fps 稳。 */
     {
-        const long budget = 900000;
+        const long budget = 280000;
         long area = (long)renderW * (long)renderH;
         if (area > budget) {
             float f = sqrtf((float)budget / (float)area);
@@ -385,6 +404,93 @@ unsigned int floorBaseA = 0x00151515u, floorBaseB = 0x00202020u;
 int themeId = 0;
 static const char* themeNames[4] = {"BRICK", "PRISON", "HELL", "WARD"};
 
+/* ---- 地板/天花板预乘表 ----
+   地板是全屏最贵的部分（占 Render3D 的一半以上），每像素原本要做
+   3 次「贴图通道 × 亮度」的乘法 + 3 次截断比较。
+
+   关键观察：程序化生成的地板贴图**只有 4 种颜色**（复古化把颜色量化到 8 级，
+   再加上 2x2 块对齐，同一主题内实际用到的颜色极少）。
+   所以可以把「颜色 × 亮度」预先乘好，做成一张很小的表：
+
+       premulFloor[颜色索引][亮度等级]  →  最终像素
+
+   表大小 = 4 色 × 256 级 × 4 字节 = 4KB（地板）+ 4KB（天花板），
+   完全落在 L1 缓存里。
+
+   > 注意：HANDOFF §13.2 记录过「墙壁预乘成 512KB 查表反而更慢」——
+   > 那是表太大导致 L2 未命中。这里表只有 4KB，结论正好相反。
+
+   亮度等级怎么定：
+   地板的 k8（shadeLut 校正后的亮度）实测只到 **250**（手电最亮处），
+   所以等级用 8 级步长就够：level = k8 >> 3 -> 0..31，表只要 4*32*4 = 512 字节。
+   但为了留余量（Gamma 调大时 shadeLut 输出范围不变，实际 k8 上限也不变），
+   这里仍按 256 级建表（k8 >> 2，步长 4），精度足够且表才 4KB。 */
+#define PREMUL_LEVELS 256          /* 亮度等级数 */
+#define PREMUL_MAXCOL 16           /* 单张贴图最多用到的颜色数（实测 4） */
+#define PREMUL_K8_SHIFT 2          /* k8 >> 2 -> 0..255 的等级索引 */
+
+static unsigned int premulFloor[PREMUL_MAXCOL][PREMUL_LEVELS];
+static unsigned int premulCeil[PREMUL_MAXCOL][PREMUL_LEVELS];
+static unsigned char floorColorIdx[TEX_HEIGHT][TEX_WIDTH];  /* 贴图 -> 颜色索引 */
+static unsigned char ceilColorIdx[TEX_HEIGHT][TEX_WIDTH];
+static int nFloorColors = 0, nCeilColors = 0;
+
+/* 把贴图重新索引成「颜色索引」，并建好预乘表。
+   贴图本身保持不变（墙体、精灵等还在用），只是额外存一份索引。 */
+static void BuildPremulTables(void) {
+    unsigned int fcols[PREMUL_MAXCOL], ccols[PREMUL_MAXCOL];
+    nFloorColors = 0;
+    nCeilColors = 0;
+
+    for (int y = 0; y < TEX_HEIGHT; y++) {
+        for (int x = 0; x < TEX_WIDTH; x++) {
+            unsigned int c = floorTexture[y][x] & 0xFFFFFFu;
+            int fi = -1;
+            for (int i = 0; i < nFloorColors; i++) if (fcols[i] == c) { fi = i; break; }
+            if (fi < 0) {
+                if (nFloorColors < PREMUL_MAXCOL) { fi = nFloorColors; fcols[nFloorColors++] = c; }
+                else fi = PREMUL_MAXCOL - 1;      /* 颜色用超了，退回最后一个 */
+            }
+            floorColorIdx[y][x] = (unsigned char)fi;
+
+            unsigned int cc = ceilTexture[y][x] & 0xFFFFFFu;
+            int gi = -1;
+            for (int i = 0; i < nCeilColors; i++) if (ccols[i] == cc) { gi = i; break; }
+            if (gi < 0) {
+                if (nCeilColors < PREMUL_MAXCOL) { gi = nCeilColors; ccols[nCeilColors++] = cc; }
+                else gi = PREMUL_MAXCOL - 1;
+            }
+            ceilColorIdx[y][x] = (unsigned char)gi;
+        }
+    }
+
+    /* 亮度等级 l -> k8 = l * 4（k8 上限 1023，256 级正好铺满） */
+    for (int ci = 0; ci < nFloorColors; ci++) {
+        int r = (int)((fcols[ci] >> 16) & 0xFF), g = (int)((fcols[ci] >> 8) & 0xFF), b = (int)(fcols[ci] & 0xFF);
+        for (int l = 0; l < PREMUL_LEVELS; l++) {
+            int k = l * 4;
+            int rr = (r * k) >> 8, gg = (g * k) >> 8, bb = (b * k) >> 8;
+            if (rr > 255) rr = 255;
+            if (gg > 255) gg = 255;
+            if (bb > 255) bb = 255;
+            premulFloor[ci][l] = (unsigned int)((rr << 16) | (gg << 8) | bb);
+        }
+    }
+    /* 天花板用的乘数 ceilTab[x] 是 0..255 量纲（(通道*ck)>>8），
+       而表里统一用 k8 量纲（0..1023），所以等级 = ck（对应 k = ck*4）。 */
+    for (int ci = 0; ci < nCeilColors; ci++) {
+        int r = (int)((ccols[ci] >> 16) & 0xFF), g = (int)((ccols[ci] >> 8) & 0xFF), b = (int)(ccols[ci] & 0xFF);
+        for (int l = 0; l < PREMUL_LEVELS; l++) {
+            int k = l * 4;
+            int rr = (r * k) >> 8, gg = (g * k) >> 8, bb = (b * k) >> 8;
+            if (rr > 255) rr = 255;
+            if (gg > 255) gg = 255;
+            if (bb > 255) bb = 255;
+            premulCeil[ci][l] = (unsigned int)((rr << 16) | (gg << 8) | bb);
+        }
+    }
+}
+
 void GenerateThemeTextures(int id) {
     themeId = id;
     if (id == 1) { floorBaseA = 0x0014161au; floorBaseB = 0x001c1f24u; }
@@ -420,7 +526,9 @@ void GenerateThemeTextures(int id) {
                     break;
             }
             r = (r >> 5) << 5; g = (g >> 5) << 5; b = (b >> 5) << 5;
-            if (r > 248) r = 248; if (g > 248) g = 248; if (b > 248) b = 248;
+            if (r > 248) r = 248;
+            if (g > 248) g = 248;
+            if (b > 248) b = 248;
             texture[y][x] = (unsigned int)((r << 16) | (g << 8) | b);
 
             /* 地砖：32px 砖块 + 勾缝 + 污渍 */
@@ -430,7 +538,9 @@ void GenerateThemeTextures(int id) {
                 if ((px % 32) < 2 || (py % 32) < 2) { fr = 12; fg = 12; fb = 12; }   /* 勾缝 */
                 else if (rand() % 70 == 0) { fr = fr * 6 / 10; fg = fg * 6 / 10; fb = fb * 6 / 10; }
                 else { fr += dark; fg += dark; fb += dark; }
-                if (fr < 0) fr = 0; if (fg < 0) fg = 0; if (fb < 0) fb = 0;
+                if (fr < 0) fr = 0;
+                if (fg < 0) fg = 0;
+                if (fb < 0) fb = 0;
                 floorTexture[y][x] = (unsigned int)((fr << 16) | (fg << 8) | fb);
             }
             /* 天花板：混凝土 + 每隔 32px 一道横梁 */
@@ -446,10 +556,9 @@ void GenerateThemeTextures(int id) {
         for (int i = 0; i < 256; i++) noiseTab[i] = (unsigned char)(rand() % 40);
         noiseReady = 1;
     }
+    BuildPremulTables();   /* 地板/天花板预乘表（贴图变了就要重建） */
     BuildShadeTables();
 }
-
-void GenerateTextures(void) { GenerateThemeTextures(0); }
 
 
 /* ------------------------------------------------------------------ */
@@ -492,6 +601,43 @@ static int SpotClear(float x, float y, float minD, int selfKind, int selfIdx) {
     if (selfKind != 3 && safeRoom.active && Dist2(x, y, safeRoom.x, safeRoom.y) < m2) return 0;
     return 1;
 }
+
+/* 词条的两个纯函数，单独拆出来是为了能离线自检直接调用：
+   RollLevelMod 决定「这一层是什么词条」，ContainerTargetCount 决定
+   「这个词条下要放几个容器」——都是不依赖世界状态的纯计算。 */
+
+/* roll100: 0~99 的掷点（决定有没有抽到词条）；pick: 0~MOD_COUNT-1 的词条编号 */
+static void RollLevelMod(int roll100, int pick) {
+    levelMod = -1;
+    modSanityMul = 1.0f;
+    modSpeedMul = 1.0f;
+    if (currentLevel >= 2 && roll100 < 60) {
+        levelMod = pick % MOD_COUNT;
+        if (levelMod == 1) modSpeedMul = 1.25f;       /* HUNTED */
+        else if (levelMod == 3) modSanityMul = 1.35f; /* LEAKY */
+        else if (levelMod == 5) modSanityMul = 0.80f; /* CALM */
+    }
+}
+
+/* 某个词条下，本层要放多少个容器。
+   CRAMPED -2，RICH +2，其余不变。结果恒在 [2, MAX_CONTAINERS] 内。 */
+static int ContainerTargetCount(int mod, int base) {
+    int n = base;
+    if (mod == 2) n -= 2;       /* CRAMPED */
+    else if (mod == 4) n += 2;  /* RICH */
+    if (n > MAX_CONTAINERS) n = MAX_CONTAINERS;
+    if (n < 2) n = 2;
+    return n;
+}
+
+/* 测试接缝：离线自检需要能指定「这一层用哪个词条」，
+   否则 GenerateLevel 内部会自己重掷，测试没法比较两种词条的差异。
+     -2 = 强制无词条
+     -1 = 正常按随机流程掷词条
+     0..5 = 强制使用该词条
+   注意：无论走哪条分支，都必须消耗同样次数的 rand()，
+   否则后续的地图/容器随机序列会错位，测试就没法做对照了。 */
+int g_forceMod = -1;
 
 void GenerateLevel(void) {
     for (int y = 0; y < MAP_HEIGHT; y++)
@@ -580,15 +726,25 @@ void GenerateLevel(void) {
     holdTimer = 0.0f;
     breaker.active = 0;
 
-    /* 随机词条：第 2 关起，60% 概率 */
-    levelMod = -1;
-    modSanityMul = 1.0f;
-    modSpeedMul = 1.0f;
-    if (currentLevel >= 2 && (rand() % 100) < 60) {
-        levelMod = rand() % MOD_COUNT;
-        if (levelMod == 1) modSpeedMul = 1.25f;
-        else if (levelMod == 3) modSanityMul = 1.35f;
-        else if (levelMod == 5) modSanityMul = 0.80f;
+    /* 随机词条：第 2 关起，60% 概率
+       两条分支都消耗同样次数的 rand()，保证后续随机序列对齐。 */
+    {
+        int roll100 = rand() % 100;
+        int pick = rand() % MOD_COUNT;
+        if (g_forceMod == -2) {
+            levelMod = -1;
+            modSanityMul = 1.0f;
+            modSpeedMul = 1.0f;
+        } else if (g_forceMod >= 0) {
+            levelMod = g_forceMod % MOD_COUNT;
+            modSanityMul = 1.0f;
+            modSpeedMul = 1.0f;
+            if (levelMod == 1) modSpeedMul = 1.25f;
+            else if (levelMod == 3) modSanityMul = 1.35f;
+            else if (levelMod == 5) modSanityMul = 0.80f;
+        } else {
+            RollLevelMod(roll100, pick);
+        }
     }
     levelBanner = 5.0f;
 
@@ -598,11 +754,10 @@ void GenerateLevel(void) {
 
     if (emptyCount > 10) {
         int attempts = 0;
-        /* 容器：4~6 个，离出生点和出口都远一点 */
-        int contCap = MAX_CONTAINERS;
-        if (levelMod == 2) contCap -= 2;    /* CRAMPED */
-        else if (levelMod == 4) contCap = MAX_CONTAINERS + 2;   /* RICH */
-        if (contCap > 10) contCap = 10;
+        /* 容器：基准 4~6 个，离出生点和出口都远一点。
+           CRAMPED 减 2，RICH 加 2 —— 词条真正改变容器数量，
+           数组上界 MAX_CONTAINERS 已按 RICH 的最大值留好余量。 */
+        int contCap = ContainerTargetCount(levelMod, CONTAINERS_BASE - 2 + (rand() % 3));
         while (containerCount < contCap && attempts < 512) {
             attempts++;
             int idx = rand() % emptyCount;
@@ -621,7 +776,6 @@ void GenerateLevel(void) {
             containers[containerCount].content = 0;
             containers[containerCount].active = 1;
             containerCount++;
-            if (containerCount >= 4 + rand() % 3) break;   /* 4~6 个 */
         }
 
         /* 把保险丝塞进随机的容器里，剩下的给电池或空 */
@@ -652,7 +806,7 @@ void GenerateLevel(void) {
     }
     SpawnMonster();
     SpawnLightBeast();
-    for (int i = 0; i < 4; i++) thrown[i].active = 0;
+    for (int i = 0; i < MAX_THROWN; i++) thrown[i].active = 0;
 
     /* 安全屋：离出生点和出口都远一点 */
     safeRoom.active = 0;
@@ -1012,53 +1166,67 @@ static void DrawExitBeamSprite(void) {
     }
 }
 
-/* 所有 billboard 按距离从远到近画，近的盖住远的（画家算法） */
+/* 所有 billboard 按距离从远到近画，近的盖住远的（画家算法）
+   数组上界 MAX_SPRITES = 容器 + 投掷物 + 配电箱 + 两只怪 + 安全屋 + 出口光柱，
+   写满时会被下面的断言拦下来，不会像以前那样悄悄越界。 */
 void RenderSprites(void) {
-    struct { float d2; int kind, idx; } list[MAX_CONTAINERS + 8];
+    struct { float d2; int kind, idx; } list[MAX_SPRITES];
     int n = 0;
 
     for (int i = 0; i < containerCount; i++) {
         if (!containers[i].active) continue;
+        if (n >= MAX_SPRITES) break;
         list[n].d2 = Dist2(containers[i].x, containers[i].y, posX, posY);
         list[n].kind = 0;
         list[n].idx = i;
         n++;
     }
     if (breaker.active) {
-        list[n].d2 = Dist2(breaker.x, breaker.y, posX, posY);
-        list[n].kind = 1;
-        list[n].idx = 0;
-        n++;
+        if (n < MAX_SPRITES) {
+            list[n].d2 = Dist2(breaker.x, breaker.y, posX, posY);
+            list[n].kind = 1;
+            list[n].idx = 0;
+            n++;
+        }
     }
     if (monster.active) {
-        list[n].d2 = Dist2(monster.x, monster.y, posX, posY);
-        list[n].kind = 2;
-        list[n].idx = 0;
-        n++;
+        if (n < MAX_SPRITES) {
+            list[n].d2 = Dist2(monster.x, monster.y, posX, posY);
+            list[n].kind = 2;
+            list[n].idx = 0;
+            n++;
+        }
     }
     if (safeRoom.active) {
-        list[n].d2 = Dist2(safeRoom.x, safeRoom.y, posX, posY);
-        list[n].kind = 7;
-        list[n].idx = 0;
-        n++;
+        if (n < MAX_SPRITES) {
+            list[n].d2 = Dist2(safeRoom.x, safeRoom.y, posX, posY);
+            list[n].kind = 7;
+            list[n].idx = 0;
+            n++;
+        }
     }
     if (lightBeast.active) {
-        list[n].d2 = Dist2(lightBeast.x, lightBeast.y, posX, posY);
-        list[n].kind = 5;
-        list[n].idx = 0;
-        n++;
+        if (n < MAX_SPRITES) {
+            list[n].d2 = Dist2(lightBeast.x, lightBeast.y, posX, posY);
+            list[n].kind = 5;
+            list[n].idx = 0;
+            n++;
+        }
     }
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < MAX_THROWN; i++) {
         if (!thrown[i].active) continue;
+        if (n >= MAX_SPRITES) break;
         list[n].d2 = Dist2(thrown[i].x, thrown[i].y, posX, posY);
         list[n].kind = 6;
         list[n].idx = i;
         n++;
     }
-    list[n].d2 = Dist2(exitX, exitY, posX, posY);
-    list[n].kind = 3;
-    list[n].idx = 0;
-    n++;
+    if (n < MAX_SPRITES) {
+        list[n].d2 = Dist2(exitX, exitY, posX, posY);
+        list[n].kind = 3;
+        list[n].idx = 0;
+        n++;
+    }
 
     /* 插入排序：远的先画 */
     for (int i = 1; i < n; i++) {
@@ -1108,10 +1276,11 @@ static int g_workerCount = 0;   /* 不含主线程 */
 static int g_parts = 1;
 static volatile LONG g_stop = 0;
 
-/* 地板棋盘只有两种底色；亮度表按 64 级/单位采样，索引上限 255（= 亮度 3.98） */
-#define SHADE_BASE_LEVELS 256
-#define SHADE_LEVELS 256
-static unsigned int floorShade[SHADE_LEVELS][2];
+/* 亮度 → gamma 校正后的亮度，查表代替逐像素 powf。
+   索引是「亮度 × 256」，值域 0..900（对应亮度 0..3.5）。
+   地板与墙体都走这张表，gamma 滑块对整个画面生效。 */
+#define SHADE_LUT_MAX 1024
+static int shadeLut[SHADE_LUT_MAX];
 
 static void RenderFloorBand(int y0, int y1);
 static void RenderWallBand(int x0, int x1);
@@ -1194,26 +1363,34 @@ static void RunPhase(int phase) {
     }
 }
 
-/* 地板颜色表：k = level/64 是亮度增益，k>1 往白过曝 */
+/* 亮度 → gamma 校正后的亮度，查表代替逐像素 powf。
+   索引是「亮度 × 256」，值域 0..1023（对应亮度 0..4.0）。
+
+   曲线说明：直接用 pow(v, 1/g) 会踩一个坑 ——
+   v > 1（过曝区，比如手电近处的地板）时，1/g < 1 会把值「压回来」，
+   于是 gamma 调大反而让亮的地方变暗，和「数值越大越亮」的预期相反。
+
+   修复方式：**只动 v > 1 那一段**，v <= 1 保持原曲线不变：
+     - v <= 1：out = pow(v, 1/g) × 256      （与原实现完全一致）
+     - v >  1：原样输出（过曝部分不再被压暗）
+   这样既修好了过曝区被压暗的问题，又不会顺带改变墙体的既有观感 ——
+   墙体亮度 lit 通常在 0.1~1.5 之间，那一段曲线必须原封不动。 */
+#define SHADE_ONE 256      /* 亮度 1.0 对应的索引 */
+
 static void BuildShadeTables(void) {
-    unsigned int base[2] = {floorBaseA, floorBaseB};
-    for (int l = 0; l < SHADE_LEVELS; l++) {
-        float k = (float)l / 64.0f;
-        k = powf(k, 1.0f / gammaValue);
-        float over = k - 1.0f;
-        if (over < 0.0f) over = 0.0f;
-        for (int t = 0; t < 2; t++) {
-            int br = (int)((base[t] >> 16) & 0xFF);
-            int bg = (int)((base[t] >> 8) & 0xFF);
-            int bb = (int)(base[t] & 0xFF);
-            int r = (int)(br * k) + (int)(over * 150.0f);
-            int g = (int)(bg * k) + (int)(over * 140.0f);
-            int b = (int)(bb * k) + (int)(over * 115.0f);
-            if (r > 255) r = 255;
-            if (g > 255) g = 255;
-            if (b > 255) b = 255;
-            floorShade[l][t] = (unsigned int)((r << 16) | (g << 8) | b);
+    float inv = 1.0f / gammaValue;
+    for (int i = 0; i < SHADE_LUT_MAX; i++) {
+        int o;
+        if (i <= SHADE_ONE) {
+            float v = (float)i / 256.0f;
+            float g = powf(v, inv);
+            o = (int)(g * 256.0f + 0.5f);
+        } else {
+            o = i;   /* 过曝区原样保留 */
         }
+        if (o < 0) o = 0;
+        if (o > SHADE_LUT_MAX - 1) o = SHADE_LUT_MAX - 1;
+        shadeLut[i] = o;
     }
 }
 
@@ -1223,6 +1400,7 @@ static void RenderFloorBand(int y0, int y1) {
     float rayDirX0 = dirX - planeX, rayDirY0 = dirY - planeY;
     float rayDirX1 = dirX + planeX, rayDirY1 = dirY + planeY;
     int exitBX = (int)(exitX * 4.0f), exitBY = (int)(exitY * 4.0f);
+    int safeBX = (int)(safeRoom.x * 4.0f), safeBY = (int)(safeRoom.y * 4.0f);
 
     for (int y = y0; y < y1; y++) {
         float rowDistance = (0.5f * renderH) / (float)(y - halfH);
@@ -1235,47 +1413,38 @@ static void RenderFloorBand(int y0, int y1) {
         unsigned int* row = pixels + (size_t)y * renderW;
 
         for (int x = 0; x < renderW; x++) {
-            int bx = (int)(fx * 4.0f);
-            int by = (int)(fy * 4.0f);
-
             /* 地板与天花板都采样真纹理；亮度按列/行预乘 */
             int cX = (int)fx, cY = (int)fy;
             int tx2 = ((int)((fx - cX) * (float)TEX_WIDTH)) & (TEX_WIDTH - 1);
             int ty2 = ((int)((fy - cY) * (float)TEX_HEIGHT)) & (TEX_HEIGHT - 1);
             tx2 &= ~1; ty2 &= ~1;
+
+            /* 亮度：shadow（行常量）× floorGain（列常量）→ k8 → gamma → 等级 */
             float bright = shadow * floorGain[x];
             int k8 = (int)(bright * 256.0f);
-            if (k8 < 0) k8 = 0; else if (k8 > 900) k8 = 900;
+            if (k8 < 0) k8 = 0; else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;
+            k8 = shadeLut[k8];      /* gamma 校正：地板也走查表 */
+            int lvl = k8 >> PREMUL_K8_SHIFT;   /* 0..255 */
 
-            unsigned int tex = floorTexture[ty2][tx2];
-            int r = (int)(((tex >> 16) & 0xFF) * k8) >> 8;
-            int g = (int)(((tex >> 8) & 0xFF) * k8) >> 8;
-            int b = (int)((tex & 0xFF) * k8) >> 8;
-            if (r > 255) r = 255;
-            if (g > 255) g = 255;
-            if (b > 255) b = 255;
-            unsigned int color = (unsigned int)((r << 16) | (g << 8) | b);
+            /* 查预乘表：省掉 3 次乘法 + 3 次截断 */
+            unsigned int color = premulFloor[floorColorIdx[ty2][tx2]][lvl];
 
-            /* 天花板：镜像行 */
+            /* 天花板：镜像行
+               原版是 (通道 * ck) >> 8，ck 是 0..255 的乘数；
+               表里用 k8 量纲（等级 l 对应乘数 l*4），所以等级 = ck >> 2。 */
             {
                 int my2 = renderH - y - 1;
                 if (my2 >= 0 && my2 < renderH) {
-                    int ck = ceilTab[x];
-                    unsigned int ct = ceilTexture[ty2][tx2];
-                    int cr = (int)(((ct >> 16) & 0xFF) * ck) >> 8;
-                    int cg = (int)(((ct >> 8) & 0xFF) * ck) >> 8;
-                    int cb = (int)((ct & 0xFF) * ck) >> 8;
-                    if (cr > 255) cr = 255;
-                    if (cg > 255) cg = 255;
-                    if (cb > 255) cb = 255;
-                    pixels[(size_t)my2 * renderW + x] = (unsigned int)((cr << 16) | (cg << 8) | cb);
+                    int cl = ceilTab[x] >> PREMUL_K8_SHIFT;
+                    if (cl > PREMUL_LEVELS - 1) cl = PREMUL_LEVELS - 1;
+                    pixels[(size_t)my2 * renderW + x] = premulCeil[ceilColorIdx[ty2][tx2]][cl];
                 }
             }
 
-            /* 安全屋：暖色花圃 */
+            /* 安全屋：暖色花圃（只有附近才需要格子坐标） */
             if (safeRoom.active) {
-                int sbx = bx - (int)(safeRoom.x * 4.0f);
-                int sby = by - (int)(safeRoom.y * 4.0f);
+                int bx = (int)(fx * 4.0f), by = (int)(fy * 4.0f);
+                int sbx = bx - safeBX, sby = by - safeBY;
                 if (sbx >= -2 && sbx <= 2 && sby >= -2 && sby <= 2) {
                     float d2s = (float)(sbx * sbx + sby * sby) / 8.0f;
                     float gs = 1.0f - d2s;
@@ -1287,22 +1456,25 @@ static void RenderFloorBand(int y0, int y1) {
             }
 
             /* 出口：一个 1.5 格见方的光池，通电才是绿色 */
-            int dbx = bx - exitBX, dby = by - exitBY;
-            if (dbx >= -3 && dbx <= 3 && dby >= -3 && dby <= 3) {
-                float d2 = (float)(dbx * dbx + dby * dby) / 9.0f;
-                float glow = 1.0f - d2;
-                if (glow > 0.0f) {
-                    float k = (shadow * 0.45f + 0.60f) * glow;
-                    if (breakerOpen) {
-                        int r = (int)(40 * k), g = (int)(235 * k), b = (int)(105 * k);
-                        if (r > 255) r = 255;
-                        if (g > 255) g = 255;
-                        if (b > 255) b = 255;
-                        color = (unsigned int)((r << 16) | (g << 8) | b);
-                    } else {
-                        int r = (int)(120 * k), g = (int)(24 * k);
-                        if (r > 255) r = 255;
-                        color = (unsigned int)((r << 16) | (g << 8));
+            {
+                int bx = (int)(fx * 4.0f), by = (int)(fy * 4.0f);
+                int dbx = bx - exitBX, dby = by - exitBY;
+                if (dbx >= -3 && dbx <= 3 && dby >= -3 && dby <= 3) {
+                    float d2 = (float)(dbx * dbx + dby * dby) / 9.0f;
+                    float glow = 1.0f - d2;
+                    if (glow > 0.0f) {
+                        float k = (shadow * 0.45f + 0.60f) * glow;
+                        if (breakerOpen) {
+                            int r = (int)(40 * k), g = (int)(235 * k), b = (int)(105 * k);
+                            if (r > 255) r = 255;
+                            if (g > 255) g = 255;
+                            if (b > 255) b = 255;
+                            color = (unsigned int)((r << 16) | (g << 8) | b);
+                        } else {
+                            int r = (int)(120 * k), g = (int)(24 * k);
+                            if (r > 255) r = 255;
+                            color = (unsigned int)((r << 16) | (g << 8));
+                        }
                     }
                 }
             }
@@ -1367,12 +1539,13 @@ static void RenderWallBand(int x0, int x1) {
         float lit = shadow * flashTab[x];
         float flash = flashTab[x];
         float cone = flash > 0.45f ? (flash - 0.45f) : 0.0f;
-        int addR = (int)(cone * shadow * 150.0f) + tintR;
-        int addG = (int)(cone * shadow * 128.0f) + tintG;
-        int addB = (int)(cone * shadow * 106.0f) + tintB;
-        int k8 = (int)(powf(lit, 1.0f / gammaValue) * 256.0f);
+        int addR = (int)(cone * shadow * 150.0f);
+        int addG = (int)(cone * shadow * 128.0f);
+        int addB = (int)(cone * shadow * 106.0f);
+        int k8 = (int)(lit * 256.0f);
         if (k8 < 0) k8 = 0;
-        else if (k8 > 640) k8 = 640;
+        else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;
+        k8 = shadeLut[k8];      /* gamma 校正，和地板共用同一张表 */
 
         const unsigned int* src = &texture[0][texX];
         unsigned int* dst = pixels + (size_t)drawStart * renderW + x;
@@ -1393,7 +1566,10 @@ static void RenderWallBand(int x0, int x1) {
     }
 }
 
-/* 后处理：低理智红边 + 回血白闪，按行并行 */
+/* 后处理：低理智红边 + 回血白闪，按行并行
+   这一段只在理智 < 50 时才跑，但跑起来是全屏逐像素的。
+   优化点：把「乘强度」和「除 300」从每像素挪到每帧一次（各 256 项的查表），
+   顺便用递增代替乘 3 来定位噪点。 */
 static void RenderPostBand(int y0, int y1) {
     int intensity = 0;
     if (vignetteOn && sanity < 50.0f) {
@@ -1404,14 +1580,30 @@ static void RenderPostBand(int y0, int y1) {
     int heal = (healFlash > 0.0f);
     int frameSeed = (int)(g_timeSec * 61.0f) * 17;
 
+    /* 每帧一次的查表：alpha = mask*intensity>>8，nz = (noise-20)*intensity/300 */
+    unsigned char alphaLut[256];
+    signed char noiseLut[256];
+    if (intensity > 0) {
+        for (int i = 0; i < 256; i++) {
+            alphaLut[i] = (unsigned char)((i * intensity) >> 8);
+            int nz = (int)noiseTab[i] - 20;
+            noiseLut[i] = (signed char)(nz * intensity / 300);
+        }
+    }
+
     for (int y = y0; y < y1; y++) {
         unsigned int* row = pixels + (size_t)y * renderW;
         if (intensity > 0) {
             const unsigned char* mask = vignetteMask + (size_t)y * renderW;
+            /* 噪点索引必须精确等于 (x*3 + y*5 + frameSeed) & 255。
+               不能用「每列 +3」代替 —— x*3 超过 255 后要回绕，
+               递增法在回绕点对不齐，噪点会整片错位。
+               所以这里保留 x*3 的乘法，但把「乘强度/除 300」挪到查表。 */
+            const int noiseBase = (y * 5 + frameSeed) & 255;
             for (int x = 0; x < renderW; x++) {
                 int maskVal = mask[x];
                 if (maskVal == 0) continue;
-                int alpha = (maskVal * intensity) >> 8;
+                int alpha = alphaLut[maskVal];
                 if (alpha == 0) continue;
                 unsigned int dst = row[x];
                 int r = (int)((dst >> 16) & 0xFF), g = (int)((dst >> 8) & 0xFF), b = (int)(dst & 0xFF);
@@ -1419,8 +1611,7 @@ static void RenderPostBand(int y0, int y1) {
                 g = g - ((g * alpha) >> 8);
                 b = b - ((b * alpha) >> 8);
                 {
-                    int nz = (int)noiseTab[(x * 3 + y * 5 + frameSeed) & 255] - 20;
-                    nz = nz * intensity / 300;
+                    int nz = noiseLut[(x * 3 + noiseBase) & 255];
                     r += nz; g += nz; b += nz;
                     if (r < 0) r = 0; else if (r > 255) r = 255;
                     if (g < 0) g = 0; else if (g > 255) g = 255;
@@ -1647,9 +1838,20 @@ void MakeNoise(float x, float y, float radius) {
 }
 
 void SpawnLightBeast(void) {
-    lightBeast = monster;
+    /* 注意：不要整体拷贝 monster —— 那会把寻声怪的旧路径、旧命中冷却
+       一并带过来，光敏怪会开局就沿着别人的路走、还带着别人的无敌时间。
+       这里只借用它的类型，清干净状态再重置。 */
+    memset(&lightBeast, 0, sizeof(lightBeast));
     lightBeast.active = 1;
-    lightBeast.speed = 1.5f;
+    lightBeast.state = 0;
+    lightBeast.speed = 1.5f * modSpeedMul;   /* HUNTED 词条也加速光敏怪 */
+    lightBeast.pathLen = 0;
+    lightBeast.pathIdx = 0;
+    lightBeast.repath = 0.0f;
+    lightBeast.stateTimer = 0.0f;
+    lightBeast.wanderTimer = 1.5f;
+    lightBeast.hitCooldown = 4.0f;
+    lightBeast.growlTimer = 3.0f;
     for (int t = 0; t < 512; t++) {
         int x = 1 + rand() % (MAP_WIDTH - 2);
         int y = 1 + rand() % (MAP_HEIGHT - 2);
@@ -1675,7 +1877,7 @@ void UpdateLightBeast(float dt) {
         HasLOS(lightBeast.x, lightBeast.y, posX, posY)) {
         tx = posX; ty = posY; has = 1;
     } else {
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < MAX_THROWN; i++) {
             if (!thrown[i].active || thrown[i].type != 0) continue;
             if (Dist2(thrown[i].x, thrown[i].y, lightBeast.x, lightBeast.y) < 256.0f &&
                 HasLOS(lightBeast.x, lightBeast.y, thrown[i].x, thrown[i].y)) {
@@ -1845,11 +2047,13 @@ void RenderMap(void) {
         }
     }
 
-    /* 容器（未搜过 = 黄点闪烁）/ 配电箱（青点）/ 出口（绿或红） */
+    /* 容器（未搜过 = 黄点闪烁）/ 配电箱（青点）/ 出口（绿或红）
+       闪烁用主循环的连续时钟 g_timeSec，不用 GetTickCount()：
+       后者的 15.6ms 台阶会让闪烁看起来像掉帧。 */
     for (int i = 0; i < containerCount; i++) {
         if (!containers[i].active || containers[i].searched) continue;
         if (!explored[(int)containers[i].y][(int)containers[i].x]) continue;
-        if ((GetTickCount() / 220) % 2) continue;
+        if ((int)(g_timeSec * 4.5f) % 2) continue;
         int px = mapStartX + (int)containers[i].x * cellSize + cellSize / 2;
         int py = mapStartY + (int)containers[i].y * cellSize + cellSize / 2;
         for (int dy = -2; dy <= 2; dy++)
@@ -1890,8 +2094,8 @@ static void ThrowItem(int type) {
     }
     if (type == 1) {
         MakeNoise(px, py, 14.0f);
-        PlaySfx(SFX_CRANK, 0.9f);
-        for (int i = 0; i < 4; i++) {
+        PlaySfx(SFX_GLASS, 0.9f);
+        for (int i = 0; i < MAX_THROWN; i++) {
             if (thrown[i].active) continue;
             thrown[i].x = px; thrown[i].y = py;
             thrown[i].type = 1; thrown[i].life = 0.55f; thrown[i].active = 1;
@@ -1899,7 +2103,7 @@ static void ThrowItem(int type) {
         }
         return;
     }
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < MAX_THROWN; i++) {
         if (thrown[i].active) continue;
         thrown[i].x = px; thrown[i].y = py;
         thrown[i].type = 0; thrown[i].life = 25.0f; thrown[i].active = 1;
@@ -2092,7 +2296,7 @@ void Update(float dt) {
 
     UpdateMonster(dt);
     UpdateLightBeast(dt);
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < MAX_THROWN; i++) {
         if (!thrown[i].active) continue;
         thrown[i].life -= dt;
         if (thrown[i].life <= 0.0f) thrown[i].active = 0;
@@ -2552,6 +2756,9 @@ static void DrawMenuText(void) {
         char bb[48];
         sprintf(bb, "BEST LEVEL %d", bestLevel);
         DrawTextCenterWin(winW / 2, winH - UIS(30), bb, 0x00808080u);
+        /* 版本号：右下角低调显示，方便对着存档确认是哪个版本 */
+        DrawTextWin(winW - TextWidthWin(CANITY_VERSION_STR) - UIS(14),
+                    winH - UIS(30), CANITY_VERSION_STR, 0x00585858u);
     }
     DrawTitleWin(g.title, g.titleY, titleColor);
 
@@ -2776,8 +2983,6 @@ void RenderFrame(void) {
 /* ------------------------------------------------------------------ */
 
 void StartGame(void) {
-    hallMode = 0;
-    tintR = 0; tintG = 0; tintB = 0;
     currentState = STATE_PLAYING;
     currentLevel = 1;
     flares = 1;
@@ -2842,6 +3047,10 @@ void ApplyDisplayMode(void) {
 
 void ApplySetting(int item, int value) {
     if (item < 0 || item >= SETTING_COUNT) return;
+    /* 滑块项的 value 是 NULL（它们走 fvalue），这里只处理列表型。
+       以前没做判断，靠调用方保证只传列表项；现在显式拦下来。 */
+    if (settings[item].kind != SET_LIST || !settings[item].value) return;
+    if (value < 0 || value >= settings[item].count) return;
     *settings[item].value = value;
     if (settings[item].value == &resIndex || settings[item].value == &isFullscreen) ApplyDisplayMode();
     else if (settings[item].value == &renderScaleIndex) InitPixels();
@@ -3298,6 +3507,7 @@ static short g_sndPower[19845];    /* 0.90s 通电 */
 static short g_sndGate[15435];     /* 0.70s 过关 */
 static short g_sndCrank[2647];     /* 0.12s 手摇 */
 static short g_sndScream[13230];   /* 0.60s 尖叫 */
+static short g_sndGlass[6615];     /* 0.30s 玻璃碎裂 */
 
 typedef struct { const short* data; int len, pos; float vol; int active; } Voice;
 
@@ -3364,6 +3574,7 @@ void PlaySfx(int id, float vol) {
         case SFX_GATE:   data = g_sndGate;  len = (int)(sizeof(g_sndGate) / sizeof(short)); break;
         case SFX_CRANK:  data = g_sndCrank; len = (int)(sizeof(g_sndCrank) / sizeof(short)); break;
         case SFX_SCREAM: data = g_sndScream;len = (int)(sizeof(g_sndScream) / sizeof(short)); break;
+        case SFX_GLASS:  data = g_sndGlass; len = (int)(sizeof(g_sndGlass) / sizeof(short)); break;
         default: return;
     }
     EnterCriticalSection(&g_audioLock);
@@ -3453,6 +3664,31 @@ static void GenSounds(void) {
             g_sndScream[i] = (short)(v * env * 0.42f * 32000.0f);
         }
     }
+    /* 玻璃碎裂：高通噪声爆发 + 几片细碎的高频余响 */
+    {
+        int bl = (int)(sizeof(g_sndGlass) / sizeof(short));
+        float hp = 0.0f;
+        for (int i = 0; i < bl; i++) {
+            float t = (float)i / AUDIO_RATE;
+            seed = seed * 1664525u + 1013904223u;
+            float n = ((float)((seed >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+            hp = n - hp * 0.35f;                 /* 一阶高通：去掉低频，保留脆响 */
+            float v = hp * expf(-t * 26.0f);
+            /* 三片碎玻璃的高频点缀 */
+            for (int k = 0; k < 3; k++) {
+                float st = 0.045f + k * 0.038f;
+                float d = t - st;
+                if (d >= 0.0f && d < 0.012f) {
+                    seed = seed * 1664525u + 1013904223u;
+                    float sn = ((float)((seed >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+                    v += sn * expf(-d * 300.0f) * 0.55f;
+                }
+            }
+            if (v > 1.0f) v = 1.0f;
+            if (v < -1.0f) v = -1.0f;
+            g_sndGlass[i] = (short)(v * 0.55f * 32000.0f);
+        }
+    }
     /* 过关：噪声下扫的气流声 */
     int gl = (int)(sizeof(g_sndGate) / sizeof(short));
     lp = 0.0f;
@@ -3519,12 +3755,16 @@ void ShutdownAudio(void) {
 /* ------------------------------------------------------------------ */
 
 #define SAVE_MAGIC 0x43414E32u   /* "CAN2" */
-#define SAVE_VERSION 3
+#define SAVE_VERSION 4          /* v4：补上安全屋 / 投掷物 / 词条 / 主题 / 游戏版本号 */
+/* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
+#ifndef SAVE_FILE
 #define SAVE_FILE "canity.sav"
+#endif
 
 typedef struct {
     unsigned int magic;
     int version;
+    int gameVersion;      /* 写入时的 CANITY_VERSION_NUM，用来识别跨版本存档 */
 
     /* 设置 */
     int resIndex, fullscreen, fpsCap, scale, fov, vignette, showFps;
@@ -3542,6 +3782,16 @@ typedef struct {
     Container cont[MAX_CONTAINERS];
     int worldMap[MAP_HEIGHT][MAP_WIDTH];
     int explored[MAP_HEIGHT][MAP_WIDTH];
+
+    /* v4 新增：以前这些状态没存，读档后会丢失 */
+    int flares, bottles;                      /* 手上的投掷物数量 */
+    int safeActive;                           /* 安全屋（花）是否存在 */
+    float safeX, safeY;                       /* 安全屋位置 */
+    int levelMod;                             /* 本层词条编号，-1 = 无 */
+    float modSanityMul, modSpeedMul;          /* 词条修正系数 */
+    int themeId;                              /* 关卡主题（墙/地贴图） */
+    int nThrown;                              /* 场上投掷物个数 */
+    Thrown thr[MAX_THROWN];                   /* 场上投掷物状态 */
 } SaveBlob;
 
 static SaveBlob g_save;
@@ -3550,6 +3800,7 @@ static void SaveGame(void) {
     memset(&g_save, 0, sizeof(g_save));
     g_save.magic = SAVE_MAGIC;
     g_save.version = SAVE_VERSION;
+    g_save.gameVersion = CANITY_VERSION_NUM;
 
     g_save.resIndex = resIndex;
     g_save.fullscreen = isFullscreen;
@@ -3590,6 +3841,22 @@ static void SaveGame(void) {
     memcpy(g_save.worldMap, worldMap, sizeof(worldMap));
     memcpy(g_save.explored, explored, sizeof(explored));
 
+    /* v4 新增字段 */
+    g_save.flares = flares;
+    g_save.bottles = bottles;
+    g_save.safeActive = safeRoom.active;
+    g_save.safeX = safeRoom.x;
+    g_save.safeY = safeRoom.y;
+    g_save.levelMod = levelMod;
+    g_save.modSanityMul = modSanityMul;
+    g_save.modSpeedMul = modSpeedMul;
+    g_save.themeId = themeId;
+    g_save.nThrown = 0;
+    for (int i = 0; i < MAX_THROWN; i++) {
+        g_save.thr[i] = thrown[i];
+        if (thrown[i].active) g_save.nThrown++;
+    }
+
     FILE* f = fopen(SAVE_FILE, "wb");
     if (!f) return;
     fwrite(&g_save, sizeof(g_save), 1, f);
@@ -3604,6 +3871,12 @@ static int LoadSettings(void) {
     size_t got = fread(&g_save, sizeof(g_save), 1, f);
     fclose(f);
     if (!got || g_save.magic != SAVE_MAGIC || g_save.version != SAVE_VERSION) return 0;
+    /* 存档**格式**版本必须完全匹配才加载：结构变了就宁可从零开始，
+       也好过把半截旧数据当成新结构解释（越界读 / 错位）。
+       注意这跟 gameVersion 是两回事 ——
+       gameVersion 只是记录「这份存档是哪个应用版本写的」，
+       升个补丁版本（比如 1.0.0 -> 1.0.1）不该让玩家丢进度，
+       所以这里**不**拿它做加载门槛，只有 SAVE_VERSION 才是。 */
 
     resIndex = g_save.resIndex;
     isFullscreen = g_save.fullscreen;
@@ -3656,12 +3929,33 @@ static void ContinueRun(void) {
     searchedCount = g_save.searchedCount;
     runTime = g_save.runTime;
     containerCount = g_save.nContainers;
+    if (containerCount < 0 || containerCount > MAX_CONTAINERS) containerCount = 0;
     for (int i = 0; i < MAX_CONTAINERS; i++) containers[i] = g_save.cont[i];
     memcpy(worldMap, g_save.worldMap, sizeof(worldMap));
     memcpy(explored, g_save.explored, sizeof(explored));
 
+    /* v4 新增：安全屋 / 投掷物 / 词条 / 主题 */
+    flares = g_save.flares;
+    bottles = g_save.bottles;
+    if (flares < 0) flares = 0;
+    if (bottles < 0) bottles = 0;
+    safeRoom.active = g_save.safeActive;
+    safeRoom.x = g_save.safeX;
+    safeRoom.y = g_save.safeY;
+    levelMod = g_save.levelMod;
+    if (levelMod < -1 || levelMod >= MOD_COUNT) levelMod = -1;
+    modSanityMul = g_save.modSanityMul;
+    modSpeedMul = g_save.modSpeedMul;
+    if (modSanityMul <= 0.0f) modSanityMul = 1.0f;
+    if (modSpeedMul <= 0.0f) modSpeedMul = 1.0f;
+    themeId = g_save.themeId;
+    if (themeId < 0 || themeId > 3) themeId = 0;
+    for (int i = 0; i < MAX_THROWN; i++) thrown[i] = g_save.thr[i];
+
     ApplyFov();
+    GenerateThemeTextures(themeId);   /* 主题变了，墙面/地板贴图要跟着重建 */
     SpawnMonster();
+    SpawnLightBeast();
     runInProgress = 1;
     currentState = STATE_PLAYING;
     isMapOpen = 0;
@@ -3683,6 +3977,10 @@ static void DeleteSave(void) {
 /* 入口：固定步长逻辑 + 可限帧渲染                                      */
 /* ------------------------------------------------------------------ */
 
+/* 正常构建时这里就是标准的程序入口。
+   离线自检程序会用 `#define WinMain CanityAppMain` 把本函数改名，
+   这样它就能 include 整个 main.c 并自己定义 main() —— 但那不影响本文件的独立性，
+   单独编译 main.c 依然得到完整的游戏。 */
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     (void)hPrevInstance;
     (void)lpCmdLine;
@@ -3695,7 +3993,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     InitAudio();
 
     InitPixels();
-    GenerateTextures();
+    GenerateThemeTextures(0);   /* 启动用 BRICK 主题 */
     InitWorkers();
 
     const char CLASS_NAME[] = "CanityEngine";
@@ -3708,7 +4006,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     RegisterClass(&wc);
 
-    g_hwnd = CreateWindowEx(0, CLASS_NAME, "Canity",
+    g_hwnd = CreateWindowEx(0, CLASS_NAME, "Canity v" CANITY_VERSION_STR,
                             WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX,
                             CW_USEDEFAULT, CW_USEDEFAULT, 816, 639,
                             NULL, NULL, hInstance, NULL);
