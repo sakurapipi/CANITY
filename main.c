@@ -23,8 +23,8 @@
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 2          /* 整数版本，进存档做兼容性校验 */
-#define CANITY_VERSION_STR "1.0.1"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_NUM 8          /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_STR "1.5.1"    /* 显示版本，窗口标题 / 主菜单 */
 
 #define MAP_WIDTH 24
 #define MAP_HEIGHT 24
@@ -44,8 +44,39 @@
 #define CONTAINERS_BASE 6    /* 常规关卡的容器数上限 */
 /* 场上最多同时存在几件投掷物（荧光棒 / 玻璃瓶） */
 #define MAX_THROWN 4
-/* 精灵排序表的上界：容器 + 配电箱 + 寻声怪 + 安全屋 + 光敏怪 + 投掷物 + 出口光柱 */
-#define MAX_SPRITES (MAX_CONTAINERS + MAX_THROWN + 6)
+/* 场上最多同时存在几枚飞行中的玻璃瓶 */
+#define MAX_SHOTS 4
+
+/* ------------------------------------------------------------------ */
+/* 难度曲线                                                            */
+/* ------------------------------------------------------------------ */
+/* 原则：难度只从「怪物压力」上来，**不动理智的时间预算**。
+   理智是整局共用的计时器（100 点 ÷ 0.5/秒 = 200 秒），GenerateLevel 里
+   不会重置它。如果按层数放大理智流失，那不是难度曲线，是「越往后死得越早」
+   的反向曲线 —— 所以 SANITY_DRAIN 保持常量，难度只改怪物。 */
+#define MONSTER_SPEED_BASE 1.45f    /* 寻声怪基础速度 */
+#define LIGHTBEAST_SPEED_BASE 1.50f /* 光敏怪基础速度 */
+#define MONSTER_SPEED_STEP 0.03f    /* 每层 +0.03 */
+#define MONSTER_SPEED_MAX 1.85f     /* 层数曲线的基础上限（第 14 层到顶）*/
+#define MONSTER_SPEED_FINAL_MAX 2.40f /* 叠加 HUNTED 词条后的最终上限 */
+/* 最终上限 2.40 < MOVE_SPEED 2.50：玩家永远走得比怪快。
+   基础上限留 1.85 是为了让 HUNTED 的 ×1.25 在深层仍有意义
+   （1.85 × 1.25 = 2.3125，不会顶到最终上限）。 */
+#define HIT_COOLDOWN_BASE 4.0f      /* 被抓后的无敌时间，基础值 */
+#define HIT_COOLDOWN_MIN 3.0f       /* 深层收紧到 3.0 秒 */
+#define HIT_COOLDOWN_START_LEVEL 6  /* 从第 6 层开始收紧 */
+/* 精灵排序表的上界：容器 + 配电箱 + 寻声怪 + 安全屋 + 光敏怪 + 投掷物 + 出口光柱
+   + 飞行中的玻璃瓶
+   注意：跳脸虫不在这个表里 —— 它是屏幕空间 overlay，由 RenderFrame 直接画。 */
+#define MAX_SPRITES (MAX_CONTAINERS + MAX_THROWN + 6 + MAX_SHOTS)
+
+/* 内部渲染的像素预算上限。
+   窗口再大，内部渲染分辨率也不超过这个像素数 —— 这是全屏帧时间的保护阀。
+   1080p 全屏实测：90 万 → 渲染 29ms + 呈现 11ms（只有 25fps）；
+   28 万（约 640x360）→ 14ms，60fps 稳。
+   注意：bench_canity.c 复刻了同一套分辨率计算，用的是这里的常量，
+   不要在两处各写一份数字（上一轮就因为这里漏改，基准一直在测已废弃的配置）。 */
+#define PIXEL_BUDGET 280000
 
 /* ------------------------------------------------------------------ */
 /* 全局状态                                                            */
@@ -78,6 +109,8 @@ int renderScaleIndex = 0;                              /* 0..3 = 100/75/50/25%�
 const int renderScales[4] = {100, 75, 50, 25};
 float mouseSens = 1.0f;                                /* 0.2x - 3.0x，滑块调节 */
 int vignetteOn = 1;                                    /* 低理智红边特效 */
+int hudDetail = 1;                                     /* 0=Minimal 1=Normal 2=Full */
+int qteHint = 1;                                       /* 0=Minimal（只留大键+倒计时）1=Full（带说明） */
 int fovIndex = 2;                                      /* 66 / 75 / 85 / 95 / 105 度 */
 static const float fovPlaneLen[5] = {0.6494f, 0.7673f, 0.9163f, 1.0926f, 1.2972f};
 
@@ -101,12 +134,95 @@ float healFlash = 0.0f;      /* 回血白闪剩余秒数 */
 
 float sanity = 100.0f;
 
+/* ------------------------------------------------------------------ */
+/* 状态效果框架                                                        */
+/* ------------------------------------------------------------------ */
+/* ApplyFov 在下面会被用到（视野收窄要重算相机平面），
+   它的定义在文件后部，这里先做前置声明。 */
+void ApplyFov(void);
+
+/* 玩家身上可以叠加若干「状态效果」（debuff）。每个效果有独立的强度与
+   剩余时间，到期自动失效。强度统一是 0..1，1 = 最强。
+   目前定义了三种效果，全部由寄生怪施加（见 v1.2.0）：
+     FX_BLIND  视野收窄（FOV 从当前档位逐步压到最窄）
+     FX_SLOW   移速下降
+     FX_DRAIN  理智额外流失
+   设计成「一组可叠加的全局状态」而不是把效果写死在某只怪里，
+   以后加新怪只要往里塞一个效果就行，不用改渲染/逻辑主流程。 */
+#define FX_COUNT 3
+enum { FX_BLIND = 0, FX_SLOW, FX_DRAIN };
+
+typedef struct {
+    float strength;    /* 0..1，1 = 最强 */
+    float remain;      /* 剩余秒数 */
+} StatusFx;
+
+static StatusFx g_fx[FX_COUNT];
+
+/* 效果强度总览：给 HUD 用。返回 0 表示没有该效果。 */
+static float FxStrength(int kind) {
+    if (kind < 0 || kind >= FX_COUNT) return 0.0f;
+    return g_fx[kind].strength;
+}
+
+/* 施加 / 刷新一个状态效果。
+   新强度取「当前强度」与「新强度」的较大值 —— 寄生怪反复附着时
+   不会把已有的强效果削弱掉。剩余时间取较大值。 */
+void ApplyFx(int kind, float strength, float duration) {
+    if (kind < 0 || kind >= FX_COUNT) return;
+    if (strength < 0.0f) strength = 0.0f;
+    if (strength > 1.0f) strength = 1.0f;
+    if (g_fx[kind].strength < strength) g_fx[kind].strength = strength;
+    if (g_fx[kind].remain < duration) g_fx[kind].remain = duration;
+    /* 视野收窄要立刻生效 */
+    if (kind == FX_BLIND) ApplyFov();
+}
+
+/* 推进所有效果的计时。到期归零。
+   返回 1 表示某个效果的强度发生了变化 —— 调用方需要重算 FOV。
+   用一个很小的 epsilon 判到期：浮点累加 1.0 秒后往往剩下 1e-7 这样的正数，
+   直接判 `remain <= 0` 会让效果多活一帧。 */
+static int UpdateFx(float dt) {
+    int changed = 0;
+    for (int i = 0; i < FX_COUNT; i++) {
+        if (g_fx[i].remain <= 0.0f) continue;
+        float before = g_fx[i].strength;
+        g_fx[i].remain -= dt;
+        if (g_fx[i].remain <= 0.0001f) {
+            g_fx[i].remain = 0.0f;
+            g_fx[i].strength = 0.0f;
+        }
+        if (g_fx[i].strength != before) changed = 1;
+    }
+    return changed;
+}
+
+/* 清除全部状态效果（换关、读档、死亡时调用） */
+static void ClearFx(void) {
+    for (int i = 0; i < FX_COUNT; i++) {
+        g_fx[i].strength = 0.0f;
+        g_fx[i].remain = 0.0f;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* 怪物血量：现在玻璃瓶能砸怪，所以怪需要有血                            */
+/* ------------------------------------------------------------------ */
+/* 之前怪只有「碰到就扣玩家理智」一种交互，没有受击的概念。
+   加上血量后，玻璃瓶成了唯一的武器 —— 被砸中的怪会掉血、
+   短暂后退并进入硬直，砸够了就驱离。 */
+#define MONSTER_HP 3         /* 寻声怪：3 瓶 */
+#define LIGHTBEAST_HP 2      /* 光敏怪：2 瓶（它更难缠，脆一点更合理） */
+#define MONSTER_STUN 1.2f    /* 被砸中后的硬直秒数 */
+#define MONSTER_FLEE_DIST 3.0f /* 被驱离时后退的距离 */
+
 /* 每关随机词条：给每层一点变化 */
 #define MOD_COUNT 6
 int levelMod = -1;
 float modSanityMul = 1.0f;
 float modSpeedMul = 1.0f;
 float levelBanner = 0.0f;      /* 进关后显示词条名的秒数 */
+float safeZoneMsg = 0.0f;      /* 进入安全屋后提示「SAFE ZONE」的剩余秒数 */
 static const char* modNames[MOD_COUNT] = {"DARK", "HUNTED", "CRAMPED", "LEAKY", "RICH", "CALM"};
 static const char* modDesc[MOD_COUNT] = {
     "FLASHLIGHT STARTS LOW",
@@ -139,17 +255,95 @@ typedef struct {
     int pathLen, pathIdx;
     float repath, stateTimer, wanderTimer, hitCooldown, growlTimer;
     float speed;
+    int hp;                    /* 剩余血量，被玻璃瓶砸会掉 */
+    float stun;                /* 硬直剩余秒数，期间不能移动 */
+    /* 寄生怪专用（其它两只怪不用这几个字段） */
+    int attached;              /* 1 = 已附着在玩家身上 */
+    float ramp;                /* 附着深度 0..1，1 = 效果拉满 */
+    float attachTimer;         /* 在范围内待了多久（累计），用于「缠上来」的进度 */
+    float offX, offY;          /* 附着时趴在玩家背后的世界坐标偏移 */
 } Monster;
 Monster monster;
 Monster lightBeast;      /* 只看光 */
+
+/* ------------------------------------------------------------------ */
+/* 跳脸虫（Face Jumper）—— QTE 怪                                      */
+/* ------------------------------------------------------------------ */
+/* 机制：它从远处**弹射**到玩家脸上，然后是一场两阶段的 QTE：
+ *
+ *   阶段一「躲开」：虫子跳到面前，屏幕上给出倒计时，
+ *                    玩家必须在这段时间内按 SPACE 把它推开。
+ *                    躲开了它就消失，本关不再出现。
+ *
+ *   阶段二「按键」：没躲开，它跿上脸，
+ *                    屏幕上显示一个随机键（A / S / D / F），
+ *                    玩家必须在倒计时内按下那个键。
+ *
+ *   两步都错 → 惩罚：扣理智 + 短时 debuff。
+ *
+ * 为什么是 QTE 而不是「贴上来施加 debuff」：
+ *   QTE 把攻击变成**反应**，节奏感强，而且**每次都是不同的事件**，
+ *   不像持续 debuff 那样会变成「常态化的背景惩罚」。
+ *   跳脸虫也符合恐怖游戏的直觉 —— 它扑上来的那一瞬间才是可怕的地方。
+ *
+ * 它每关按概率出现（第 3 层起），不是每关必出 —— 稀有才有惊吓感。 */
+#define JUMPER_APPEAR_CHANCE 35   /* 每关出现的概率（百分比） */
+#define JUMPER_MIN_LEVEL 3        /* 第几层开始可能出现 */
+#define JUMPER_APPROACH_TIME 1.1f /* 从远处弹到面前的秒数 */
+#define JUMPER_DODGE_WINDOW 1.0f  /* 阶段一：躲开的时间窗 */
+#define JUMPER_QTE_WINDOW 1.5f    /* 阶段二：按键的时间窗 */
+#define JUMPER_FAIL_SANITY 20.0f  /* 失败的理智惩罚 */
+#define JUMPER_FAIL_FX_TIME 3.0f  /* 失败的 debuff 持续时间 */
+#define JUMPER_FAIL_FX_POWER 0.55f/* 失败的 debuff 强度 */
+
+/* 阶段 */
+enum { JMP_IDLE = 0, JMP_APPROACH, JMP_DODGE, JMP_QTE, JMP_DONE };
+
+/* 阶段二要按的随机键：0=A 1=S 2=D 3=F */
+#define JMP_KEY_COUNT 4
+
+static Monster parasite;   /* 复用 Monster 结构体（只需要位置和几个状态字段） */
+
+/* QTE 运行时状态 */
+static int jumperPhase = JMP_IDLE;
+static float jumperTimer = 0.0f;     /* 当前阶段的倒计时 */
+static int jumperQteKey = 0;         /* 阶段二要按的键编号 */
+static int jumperResolved = 0;       /* 本次事件是否已结算（防止重复结算） */
+static float jumperTrigger = -1.0f;  /* 本关什么时候触发（秒）；<0 = 本关不出现 */
 
 int flares = 0, bottles = 0;
 typedef struct { float x, y; int type; float life; int active; } Thrown;  /* 0=荧光棒 */
 Thrown thrown[MAX_THROWN];
 
+/* ------------------------------------------------------------------ */
+/* 飞行投掷物（玻璃瓶 = 唯一的武器）                                    */
+/* ------------------------------------------------------------------ */
+/* 荧光棒是「扔在地上持续发光」的静止物，玻璃瓶则是「飞出去砸东西」的弹丸。
+   两者机制不同，所以分成两个系统：
+     thrown[]  —— 静止物（荧光棒 / 瓶子碎片），只管显示与被光敏怪追踪
+     shot[]    —— 飞行物（玻璃瓶），带速度，撞到怪就结算伤害
+   之前玻璃瓶是「瞬间在落点碎裂」，没有飞行过程，也就无从「砸中怪」。 */
+#define SHOT_SPEED 9.0f      /* 玻璃瓶飞行速度，单位/秒 */
+#define SHOT_RADIUS 0.35f    /* 命中判定半径（怪也是半径 0.24 的量级） */
+#define SHOT_DAMAGE 1        /* 一瓶砸掉几点血 */
+typedef struct {
+    float x, y;
+    float vx, vy;
+    int active;
+    float life;      /* 最长飞行时间，防止卡在墙里 */
+    float age;       /* 已经飞了多久：第一帧不判墙（出生点可能就贴着墙） */
+} Shot;
+static Shot shot[MAX_SHOTS];
+
 /* 安全屋：每关一个，站在里面缓慢回理智 */
 typedef struct { float x, y; int active; } SafeRoom;
 SafeRoom safeRoom;
+/* 安全屋的作用半径（单位：格）。
+   注意 Dist2() 返回的是**平方距离**，所以比较时要平方。
+   之前直接写 `Dist2(...) < 0.60f`，实际范围只有 sqrt(0.6)=0.78 格 ——
+   比安全屋的视觉大小还小，玩家站在看得见花的地方 HUD 却不亮。
+   现在统一用这个常量：1.0 格，平方后是 1.0f。 */
+#define SAFE_ZONE_RADIUS 1.0f
 
 /* 可搜索容器 / 保险丝 / 配电箱
    MAX_CONTAINERS 见文件顶部：数组按 RICH 词条的上限留足余量，
@@ -209,9 +403,29 @@ float gammaValue = 1.0f;
 float gammaBuilt = -1.0f;
 
 int keys[256] = {0};
+
+/* 「本帧按下的键」—— QTE 需要边沿触发，不能用 keys[]（那是持续状态）。
+   窗口过程收到 WM_KEYDOWN 时把键记在这里，逻辑层每帧消费一次后清空。
+   这样「按早了」（QTE 还没开始时按）不会被误判成「按对了」。 */
+int keyPressed[256] = {0};
+
+/* 清除本帧的按键边沿。
+   注意：**不能**在 Update() 开头清 —— 主循环一帧可能跑多次 Update
+   （120Hz 逻辑 vs 60Hz 渲染，一帧通常跑 2 次），
+   那样第一个 Update 就把按键清掉了，QTE 会吞掉一半的输入。
+   所以边沿由主循环在一批逻辑更新**跑完之后**统一清。 */
+static void ClearKeyEdges(void) {
+    for (int i = 0; i < 256; i++) keyPressed[i] = 0;
+}
+
 POINT lastMousePos;
 int firstMouseMove = 1;
 int isMapOpen = 0;
+/* 小地图有两种形态：
+     0 = 角落小窗（默认）—— 一边走一边看，不挡视野
+     1 = 全屏 —— 停下来仔细规划路线
+   按 M 切换形态，按 M 关闭。再按 M 会先切形态，再按一次才关闭。 */
+int mapFullScreen = 0;
 
 unsigned int* pixels = NULL;
 unsigned char* vignetteMask = NULL;
@@ -248,6 +462,11 @@ static const char* optFps[5] = {"30", "60", "120", "144", "Unlimited"};
 static const char* optScale[4] = {"100%", "75%", "50%", "25%"};
 static const char* optFov[5] = {"66", "75", "85", "95", "105"};
 static const char* optOnOff[2] = {"OFF", "ON"};
+/* HUD 详细度：游戏画面上放多少字。
+   Minimal = 只留必须实时知道的数值；Full = 全部显示。 */
+static const char* optHud[3] = {"Minimal", "Normal", "Full"};
+/* QTE 提示详细度：Full = 带英文说明，Minimal = 只留大按键和倒计时条 */
+static const char* optQte[2] = {"Minimal", "Full"};
 
 static SettingItem settings[] = {
     {"Resolution",   SET_LIST,   optRes,   5, &resIndex,         NULL,      0,    0,    0, 1},
@@ -260,6 +479,8 @@ static SettingItem settings[] = {
     {"Volume",       SET_SLIDER, NULL,     0, NULL,              &volumeF,  0.0f, 1.0f, 0.05f, 3},
     {"Sanity FX",    SET_LIST,   optOnOff, 2, &vignetteOn,       NULL,      0,    0,    0, 3},
     {"Show FPS",     SET_LIST,   optOnOff, 2, &showFps,          NULL,      0,    0,    0, 3},
+    {"HUD Detail",   SET_LIST,   optHud,   3, &hudDetail,        NULL,      0,    0,    0, 3},
+    {"QTE Hint",     SET_LIST,   optQte,   2, &qteHint,          NULL,      0,    0,    0, 3},
 };
 #define SETTING_COUNT ((int)(sizeof(settings) / sizeof(settings[0])))
 
@@ -293,6 +514,7 @@ void SpawnMonster(void);
 void UpdateMonster(float dt);
 void UpdateLightBeast(float dt);
 void SpawnLightBeast(void);
+void SpawnParasite(void);
 static void ThrowItem(int type);
 int HasLOS(float x0, float y0, float x1, float y1);
 void MakeNoise(float x, float y, float radius);
@@ -352,7 +574,7 @@ void InitPixels(void) {
        原来 90 万，1080p 全屏实测「渲染 29ms + 呈现 11ms」只有 25fps，
        这就是全屏卡顿的根因。28 万（约 640x360）实测 14ms，60fps 稳。 */
     {
-        const long budget = 280000;
+        const long budget = PIXEL_BUDGET;
         long area = (long)renderW * (long)renderH;
         if (area > budget) {
             float f = sqrtf((float)budget / (float)area);
@@ -583,9 +805,28 @@ static int Blocked(float x, float y) {
     return 0;
 }
 
-/* 按 FOV 设置重建相机平面：长度 = tan(fov/2)，方向与朝向垂直 */
+/* 弹丸的墙判定：只用**点**，不套玩家的碰撞半径。
+   Blocked() 带 0.24 的半径，那是给玩家用的；弹丸如果也用它，
+   出生点附近稍微贴墙就会立刻判定为「撞墙」—— 瓶子一扔就碎。
+   这里改成取所在格子的中心来判断，边界行为稳定。 */
+static int ShotBlocked(float x, float y) {
+    int cx = (int)floorf(x), cy = (int)floorf(y);
+    if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return 1;
+    return worldMap[cy][cx] ? 1 : 0;
+}
+
+/* 按 FOV 设置重建相机平面：长度 = tan(fov/2)，方向与朝向垂直
+   状态效果 FX_BLIND 会把视野往最窄的一档压 —— 这是「致盲」的实现。
+   不改 fovIndex 本身（那是玩家的设置项），而是算一个临时的有效 FOV，
+   这样效果一结束，视野立刻回到玩家设的值。 */
 void ApplyFov(void) {
     float L = fovPlaneLen[fovIndex];
+    float blind = FxStrength(FX_BLIND);
+    if (blind > 0.0f) {
+        /* 与最窄档（66 度，fovPlaneLen[0]）线性插值 */
+        float narrow = fovPlaneLen[0];
+        L = narrow + (L - narrow) * (1.0f - blind);
+    }
     planeX = -dirY * L;
     planeY = dirX * L;
 }
@@ -628,6 +869,36 @@ static int ContainerTargetCount(int mod, int base) {
     if (n > MAX_CONTAINERS) n = MAX_CONTAINERS;
     if (n < 2) n = 2;
     return n;
+}
+
+/* ------------------------------------------------------------------ */
+/* 难度曲线：全是纯函数，只吃层数，方便离线自检                        */
+/* ------------------------------------------------------------------ */
+
+/* 怪物速度随层数线性上升，但**永远慢于玩家走速 MOVE_SPEED**。
+   玩家走 2.5，怪最快 2.40 —— 你永远跑得掉，但「跑掉」的代价越来越大：
+   走路完全静音，而翻找箱子会发出半径 8 的噪声，怪跑得快意味着
+   「搜箱子」在深层更危险。压迫感来自空间被压缩，不是来自时间被砍短。
+
+   modMul 是 HUNTED 词条的倍率（1.25）。它叠在层数曲线之后，
+   最后统一夹到 MONSTER_SPEED_FINAL_MAX —— 这条夹取保证了
+   「即使在最深的一层 + HUNTED，怪也不会跑得比玩家快」。 */
+static float MonsterSpeedFor(int level, float base, float modMul) {
+    if (level < 1) level = 1;
+    float s = base + MONSTER_SPEED_STEP * (float)(level - 1);
+    if (s > MONSTER_SPEED_MAX) s = MONSTER_SPEED_MAX;
+    s *= modMul;
+    if (s > MONSTER_SPEED_FINAL_MAX) s = MONSTER_SPEED_FINAL_MAX;
+    return s;
+}
+
+/* 被抓后的无敌时间：深层收紧，让连续被抓不再是无解连击。
+   第 6 层开始，每深一层减 0.1 秒，第 15 层触到下限 3.0 秒。 */
+static float HitCooldownFor(int level) {
+    if (level < HIT_COOLDOWN_START_LEVEL) return HIT_COOLDOWN_BASE;
+    float t = HIT_COOLDOWN_BASE - 0.1f * (float)(level - HIT_COOLDOWN_START_LEVEL + 1);
+    if (t < HIT_COOLDOWN_MIN) t = HIT_COOLDOWN_MIN;
+    return t;
 }
 
 /* 测试接缝：离线自检需要能指定「这一层用哪个词条」，
@@ -686,7 +957,9 @@ void GenerateLevel(void) {
                 worldMap[ry + oy][rx + ox] = 0;
     }
 
-    if (levelMod == 0) battery = (float)BatteryMax() * 0.55f;   /* DARK */
+    /* DARK 词条（手电起始电量低）的处理放在掷出词条之后 ——
+       原来它写在掷词条之前，用的是**上一层**的 levelMod，
+       导致「拿到 DARK 的这一层不生效，要等下一层才生效」。 */
 
     posX = 1.5f; posY = 1.5f;
     dirX = 1.0f; dirY = 0.0f;
@@ -748,6 +1021,10 @@ void GenerateLevel(void) {
     }
     levelBanner = 5.0f;
 
+    /* DARK：手电起始电量只有 55%。必须放在掷词条之后，
+       否则用的是上一层的 levelMod，词条会延迟一层生效。 */
+    if (levelMod == 0) battery = (float)BatteryMax() * 0.55f;
+
     /* 本关需要的保险丝：2 根起，每 3 关 +1，最多 4 */
     fusesNeeded = 2 + currentLevel / 3;
     if (fusesNeeded > 4) fusesNeeded = 4;
@@ -806,6 +1083,17 @@ void GenerateLevel(void) {
     }
     SpawnMonster();
     SpawnLightBeast();
+    /* 跳脸虫：第 3 层起按概率出现，不是每关必出 ——
+       稀有才有惊吓感。触发时机也随机（进关 8~20 秒后），
+       不然一进关就跳出来太突兀。 */
+    if (currentLevel >= JUMPER_MIN_LEVEL && rand() % 100 < JUMPER_APPEAR_CHANCE) {
+        jumperTrigger = 8.0f + (float)(rand() % 13);   /* 8~20 秒 */
+    } else {
+        jumperTrigger = -1.0f;
+    }
+    jumperPhase = JMP_IDLE;
+    jumperTimer = 0.0f;
+    parasite.active = 0;
     for (int i = 0; i < MAX_THROWN; i++) thrown[i].active = 0;
 
     /* 安全屋：离出生点和出口都远一点 */
@@ -854,6 +1142,14 @@ static inline void PutPixelBlend(int x, int y, unsigned int color, float alpha) 
     int b = (int)((color & 0xFF) * alpha + (dst & 0xFF) * (1.0f - alpha));
     pixels[y * renderW + x] = (unsigned int)((r << 16) | (g << 8) | b);
 }
+
+/* 在**渲染坐标**上画一行 1:1 的点阵字（小地图的标题用）。
+   DrawTextWin 用的是窗口坐标，这里是另一套坐标系，所以单独写一个。 */
+static void PutTextRaw(int x, int y, const char* t, unsigned int color);
+static int TextWidthRaw(const char* t);
+static int UIS(int v);
+#define FONT_H 12
+#define FONT_W 8
 
 /* ShowCursor 是引用计数的，跨状态切换很容易把引用数弄歪；
    这里用 GetCursorInfo 把光标状态直接拧到目标值 */
@@ -1058,6 +1354,15 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
                 int r = (int)(((color >> 16) & 0xFF) * sh);
                 int g = (int)(((color >> 8) & 0xFF) * sh);
                 int b = (int)((color & 0xFF) * sh);
+                /* 硬直期间身体发白 —— 玩家一眼看出「我砸中了它」。
+                   这是砸中唯一可靠的视觉反馈（音效只是一瞬间）。 */
+                if (m->stun > 0.0f) {
+                    float k = m->stun / MONSTER_STUN;
+                    if (k > 1.0f) k = 1.0f;
+                    r = r + (int)((235 - r) * k);
+                    g = g + (int)((245 - g) * k);
+                    b = b + (int)((255 - b) * k);
+                }
                 *col = (unsigned int)((r << 16) | (g << 8) | b);
             }
             wrote = 1;
@@ -1069,28 +1374,227 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
 static void DrawMonsterSprite(void) { DrawBeastSprite(&monster, 0x00ff4020u); }
 static void DrawLightBeastSprite(void) { DrawBeastSprite(&lightBeast, 0x00c8f0ffu); }
 
+/* 跳脸虫的脸：预渲染成一张 128x128 的纹理，每帧只做采样 + 缩放。
+   逐像素现画的话，800x600 实测 11ms/帧 —— QTE 是实时反应，
+   掉帧就等于「玩家看不清提示」，所以必须预渲染。
+
+   纹理格式：高字节 = 颜色索引（1..6），低 24 位 = 原始 RGB。
+   每帧要按「逼近程度」整体调亮度，所以查表 g_jumperShade[色][亮度档]，
+   避免逐像素做浮点乘加（脸几乎占满屏幕，这是热路径上的主要开销）。 */
+#define JUMPER_TEX_SIZE 128
+#define JMP_COL_EDGE  1      /* 外缘 */
+#define JMP_COL_SKIN  2      /* 皮肤 */
+#define JMP_COL_DEEP  3      /* 皮肤深色 */
+#define JMP_COL_MOUTH 4      /* 口腔 */
+#define JMP_COL_TOOTH 5      /* 牙 */
+#define JMP_COL_EYE   6      /* 眼睛（单独处理亮度） */
+#define JMP_SHADE_STEPS 64   /* 亮度档数 */
+
+static unsigned int g_jumperTex[JUMPER_TEX_SIZE * JUMPER_TEX_SIZE];
+static unsigned int g_jumperShade[8][JMP_SHADE_STEPS];
+static int g_jumperTexReady = 0;
+
+static void BuildJumperTexture(void) {
+    if (g_jumperTexReady) return;
+    int S = JUMPER_TEX_SIZE;
+    float c = (S - 1) * 0.5f;
+    for (int y = 0; y < S; y++) {
+        for (int x = 0; x < S; x++) {
+            float dx = ((float)x - c) / c;
+            float dy = ((float)y - c) / c;
+            float d2 = dx * dx + dy * dy;
+            unsigned int col = 0;
+            unsigned int idx = 0;
+            if (d2 <= 1.0f) {
+                if (d2 > 0.7396f) { col = 0x00140c08; idx = JMP_COL_EDGE; }   /* 外缘 */
+                else if (d2 > 0.5184f) { col = 0x002c1a12; idx = JMP_COL_SKIN; }
+                else { col = 0x003c2418; idx = JMP_COL_DEEP; }
+
+                /* 嘴：中央的大裂口 */
+                float mdy = (dy - 0.12f) * 2.3f;
+                float md2 = dx * dx + mdy * mdy;
+                if (md2 < 0.3025f && dy > -0.15f) {
+                    if (md2 < 0.1764f) { col = 0x00000000; idx = JMP_COL_MOUTH; }  /* 口腔全黑 */
+                    else { col = 0x00201010; idx = JMP_COL_MOUTH; }
+                    /* 牙：上下两排锯齿 */
+                    if (md2 > 0.16f) {
+                        int toothRow = (int)((dy + 0.15f) * 40.0f);
+                        if ((toothRow & 1) == 0) { col = 0x00d8d0b0; idx = JMP_COL_TOOTH; }
+                    }
+                }
+
+                /* 眼睛：两个发光的点 */
+                float edy = (dy + 0.42f) * 1.5f;
+                float edy2 = edy * edy;
+                float ex1 = dx + 0.34f, ex2 = dx - 0.34f;
+                float e1sq = ex1 * ex1 + edy2;
+                float e2sq = ex2 * ex2 + edy2;
+                if (e1sq < 0.0169f || e2sq < 0.0169f) { col = 0x00ff0000u; idx = JMP_COL_EYE; }
+            }
+            g_jumperTex[(size_t)y * S + x] = (idx << 24) | (col & 0x00FFFFFFu);
+        }
+    }
+
+    /* 亮度查表：色 × 亮度档。
+       亮度因子 = 0.45 + 0.55*t，t 在 0..1，分成 64 档。 */
+    {
+        static const unsigned int base[8] = {
+            0,
+            0x00140c08,   /* EDGE */
+            0x002c1a12,   /* SKIN */
+            0x003c2418,   /* DEEP */
+            0x00000000,   /* MOUTH（黑） */
+            0x00d8d0b0,   /* TOOTH */
+            0x00ff0000,   /* EYE（用不到，这里只是占位） */
+            0
+        };
+        for (int ci = 0; ci < 8; ci++) {
+            for (int s = 0; s < JMP_SHADE_STEPS; s++) {
+                float t = (float)s / (float)(JMP_SHADE_STEPS - 1);
+                float k = 0.45f + 0.55f * t;
+                unsigned int b = base[ci];
+                int r = (int)(((b >> 16) & 0xFF) * k);
+                int g = (int)(((b >> 8) & 0xFF) * k);
+                int bl = (int)((b & 0xFF) * k);
+                g_jumperShade[ci][s] = (unsigned int)((r << 16) | (g << 8) | bl);
+            }
+        }
+    }
+    g_jumperTexReady = 1;
+}
+
+/* 跳脸虫：它不是世界里的一个 billboard，而是**扑向镜头的东西**。
+   所以用屏幕空间直接绘制：以画面中心为基准，尺寸随逼近程度放大，
+   阶段二（跿上脸）时几乎占满整个屏幕 —— 这是它最吓人的瞬间。 */
+static void DrawParasiteSprite(void) {
+    if (!parasite.active) return;
+    BuildJumperTexture();
+
+    /* 逼近程度 0..1：ramp 在阶段一被用作进度，阶段二恒为 1 */
+    float t = parasite.ramp;
+    if (jumperPhase == JMP_DODGE || jumperPhase == JMP_QTE) t = 1.0f;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+
+    /* 亮度查表的下标（每帧算一次，不是每像素） */
+    int shadeIdx = (int)(t * (float)(JMP_SHADE_STEPS - 1) + 0.5f);
+    if (shadeIdx < 0) shadeIdx = 0;
+    if (shadeIdx >= JMP_SHADE_STEPS) shadeIdx = JMP_SHADE_STEPS - 1;
+    int eyeG = 90 + (int)(165.0f * t);
+    if (eyeG > 255) eyeG = 255;
+
+    /* 尺寸：阶段一从小到大，阶段二几乎铺满屏幕 */
+    float sizeF;
+    if (jumperPhase == JMP_QTE) sizeF = 1.15f;
+    else if (jumperPhase == JMP_DODGE) sizeF = 0.55f + 0.35f * t;
+    else sizeF = 0.18f + 0.37f * t;
+
+    int half = (int)((float)(renderH < renderW ? renderH : renderW) * 0.42f * sizeF);
+    if (half < 4) half = 4;
+    if (half * 2 >= renderH) half = renderH / 2 - 1;
+
+    int cx = renderW / 2;
+    int cy = renderH / 2;
+
+    /* 抖动：逼近时疯狂抖动，制造不安感 */
+    float jitterAmp = (jumperPhase == JMP_QTE) ? 7.0f : (jumperPhase == JMP_DODGE ? 4.0f : 1.5f);
+    float jx = sinf((float)g_timeSec * 47.0f) * jitterAmp;
+    float jy = sinf((float)g_timeSec * 39.0f) * jitterAmp;
+
+    /* 呼吸：整体缓慢缩放，像在喘气 */
+    float breathe = 1.0f + sinf((float)g_timeSec * 12.0f) * 0.05f * (0.4f + t);
+    int h = (int)(half * breathe);
+    if (h < 3) h = 3;
+
+    /* ------------------------------------------------------------ */
+    /* 关键：脸是**预渲染**的纹理，不是逐像素算出来的。            */
+    /* 逐像素画一张脸要 15 次浮点乘加，800x600 下实测 11ms/帧 —— */
+    /* QTE 是实时反应，掉帧就等于「玩家看不见提示」。              */
+    /* 改成：纹理只画一次（64x64），每帧只是采样 + 缩放。          */
+    /* ------------------------------------------------------------ */
+    const unsigned int* src = g_jumperTex;
+    int sw = JUMPER_TEX_SIZE;
+
+    /* 纹理坐标范围：从左上角覆盖到右下角。
+       注意是**双向缩放**：源纹理 128x128 要放大成 (2h+1) 见方，
+       所以必须遍历**目标**像素、反查源纹理。
+       早先写成「遍历源像素、每源像素只画 1 个目标点」，
+       画面只剩 1/81 的内容 —— 性能指标很漂亮，画面全黑。
+       **这就是「光看性能提升不够」的又一个例子。**
+
+       性能：逐像素做 (dx*sw)/side 整数除法，578 见方就是 33 万次除法，
+       实测 4.3ms —— 除法是瓶颈。改成：
+         1) 定点数增量代替除法（sx16 每步加固定值，右移取整）
+         2) 按圆形轮廓裁剪每行的 x 范围（圆外整段跳过） */
+    int side = 2 * h + 1;
+    int x0 = cx - h;
+    int y0 = cy - h;
+    /* 抖动：整块纹理偏移，不逐像素算 */
+    x0 += (int)jx;
+    y0 += (int)jy;
+
+    /* 定点步长：每前进一个目标像素，源纹理坐标前进 (sw/side) */
+    int step16 = (sw << 16) / side;
+    if (step16 < 1) step16 = 1;
+
+    /* 纹理空间的圆形轮廓参数 */
+    float tc = (sw - 1) * 0.5f;
+    float tr2 = tc * tc;
+
+    for (int dy = 0; dy < side; dy++) {
+        int py = y0 + dy;
+        if (py < 0 || py >= renderH) continue;
+
+        /* 反查源纹理行 */
+        int sy = (dy * sw) / side;
+        const unsigned int* srow = src + (size_t)sy * sw;
+
+        /* 按圆裁剪这一行的 x 范围：
+           源行相对圆心的竖直偏移 -> 允许的半宽 -> 换算成目标 x 范围 */
+        float dyS = (float)sy - tc;
+        float rem = tr2 - dyS * dyS;
+        int dxLo = 0, dxHi = side - 1;
+        if (rem > 0.0f) {
+            float halfW = sqrtf(rem);
+            float sxLo = tc - halfW, sxHi = tc + halfW;
+            dxLo = (int)(sxLo * (float)side / (float)sw);
+            dxHi = (int)(sxHi * (float)side / (float)sw);
+            if (dxLo < 0) dxLo = 0;
+            if (dxHi > side - 1) dxHi = side - 1;
+        }
+
+        unsigned int* row = pixels + (size_t)py * renderW;
+        /* 定点源坐标：从 dxLo 对应的源位置开始 */
+        int sx16 = (dxLo * sw / side) << 16;
+
+        for (int dx = dxLo; dx <= dxHi; dx++) {
+            int px = x0 + dx;
+            if (px < 0 || px >= renderW) { sx16 += step16; continue; }
+            unsigned int c = srow[sx16 >> 16];
+            sx16 += step16;
+            unsigned int ci = c >> 24;
+            if (!ci) continue;                  /* 透明 */
+
+            /* 眼睛要随逼近程度变亮：单独处理 */
+            if (ci == JMP_COL_EYE) {
+                row[px] = (unsigned int)(eyeG << 16);   /* 血红的眼睛 */
+                continue;
+            }
+            /* 其余颜色走亮度查表 */
+            row[px] = g_jumperShade[ci][shadeIdx];
+        }
+    }
+}
+
+/* 荧光棒：扔在地上持续发光。
+   注意：玻璃瓶曾经也会进这个数组（type==1，画成碎片），
+   现在瓶子改成了飞行弹丸（shot[]），这条路径已经不存在了。 */
 static void DrawFlareSprite(int idx) {
     if (!thrown[idx].active) return;
-    int isBottle = (thrown[idx].type == 1);
     SpriteBox s = ProjectSprite(thrown[idx].x, thrown[idx].y, 0.0f, 0.30f);
     if (!s.ok) return;
     int spanX = s.x1 - s.x0;
     int spanY = s.y1 - s.y0;
-
-    if (isBottle) {
-        /* 玻璃瓶碎片：几片亮蓝，0.55 秒内淡出 */
-        float fade = thrown[idx].life / 0.55f;
-        if (fade > 1.0f) fade = 1.0f;
-        for (int k = 0; k < 9; k++) {
-            int px = s.x0 + (k * 7 + 3) % (spanX + 1);
-            int py = s.y1 - 1 - (k * 5) % (spanY > 6 ? 6 : 1);
-            if (px < 0 || px >= renderW || py < 0) continue;
-            if (s.ty >= zBuffer[px]) continue;
-            PutPixelAdd(px, py, 0x00c0e0ffu, 0.85f * fade);
-            if (px + 1 < renderW) PutPixelAdd(px + 1, py, 0x0080a0d0u, 0.5f * fade);
-        }
-        return;
-    }
 
     /* 荧光棒：三层光晕 + 慢速闪烁 */
     float flick = 0.82f + 0.18f * sinf((float)g_timeSec * 9.0f);
@@ -1113,6 +1617,31 @@ static void DrawFlareSprite(int idx) {
             if (d2 < 0.16f) PutPixelAdd(x, y, 0x00fff8e0u, 0.55f * flick);
         }
     }
+}
+
+/* 飞行中的玻璃瓶：一小块冷色高光 + 一点拖影。
+   它必须在画面上可见 —— 玩家要能判断「我这一瓶往哪飞」。 */
+static void DrawShotSprite(int idx) {
+    if (!shot[idx].active) return;
+    SpriteBox s = ProjectSprite(shot[idx].x, shot[idx].y, 0.10f, 0.10f);
+    if (!s.ok) return;
+
+    int cx = (s.x0 + s.x1) / 2;
+    int cy = (s.y0 + s.y1) / 2;
+    float light = (flashlightOn && battery > 0.0f) ? 1.0f : 0.6f;
+
+    /* 瓶身：一个 3x3 的亮色块 */
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            int x = cx + dx, y = cy + dy;
+            if (x < 0 || x >= renderW || y < 0 || y >= renderH) continue;
+            if (s.ty >= zBuffer[x]) continue;
+            PutPixelAdd(x, y, 0x00bfe8ffu, 0.85f * light);
+        }
+    }
+    /* 中心更亮 */
+    if (cx >= 0 && cx < renderW && cy >= 0 && cy < renderH && s.ty < zBuffer[cx])
+        PutPixelAdd(cx, cy, 0x00ffffffu, 0.95f * light);
 }
 
 static void DrawFlowerSprite(void) {
@@ -1221,6 +1750,17 @@ void RenderSprites(void) {
         list[n].idx = i;
         n++;
     }
+    /* 飞行中的玻璃瓶 */
+    for (int i = 0; i < MAX_SHOTS; i++) {
+        if (!shot[i].active) continue;
+        if (n >= MAX_SPRITES) break;
+        list[n].d2 = Dist2(shot[i].x, shot[i].y, posX, posY);
+        list[n].kind = 8;
+        list[n].idx = i;
+        n++;
+    }
+    /* 跳脸虫不在这个表里 —— 它是屏幕空间的 overlay，
+       要盖住整个场景，由 RenderFrame 直接绘制。 */
     if (n < MAX_SPRITES) {
         list[n].d2 = Dist2(exitX, exitY, posX, posY);
         list[n].kind = 3;
@@ -1249,6 +1789,7 @@ void RenderSprites(void) {
             case 2: DrawMonsterSprite(); break;
             case 5: DrawLightBeastSprite(); break;
             case 6: DrawFlareSprite(list[i].idx); break;
+            case 8: DrawShotSprite(list[i].idx); break;
             case 7: DrawFlowerSprite(); break;
             default: DrawExitBeamSprite(); break;
         }
@@ -1790,14 +2331,16 @@ static int MonPath(int sx, int sy, int tx, int ty) { return MonPathFor(&monster,
 void SpawnMonster(void) {
     monster.active = 1;
     monster.state = 0;
-    monster.speed = 1.45f * modSpeedMul;
+    monster.speed = MonsterSpeedFor(currentLevel, MONSTER_SPEED_BASE, modSpeedMul);
     monster.pathLen = 0;
     monster.pathIdx = 0;
     monster.repath = 0.0f;
     monster.stateTimer = 0.0f;
     monster.wanderTimer = 1.5f;
-    monster.hitCooldown = 4.0f;
+    monster.hitCooldown = HitCooldownFor(currentLevel);
     monster.growlTimer = 3.0f;
+    monster.hp = MONSTER_HP;
+    monster.stun = 0.0f;
     for (int t = 0; t < 512; t++) {
         int x = 1 + rand() % (MAP_WIDTH - 2);
         int y = 1 + rand() % (MAP_HEIGHT - 2);
@@ -1844,14 +2387,16 @@ void SpawnLightBeast(void) {
     memset(&lightBeast, 0, sizeof(lightBeast));
     lightBeast.active = 1;
     lightBeast.state = 0;
-    lightBeast.speed = 1.5f * modSpeedMul;   /* HUNTED 词条也加速光敏怪 */
+    lightBeast.speed = MonsterSpeedFor(currentLevel, LIGHTBEAST_SPEED_BASE, modSpeedMul);
     lightBeast.pathLen = 0;
     lightBeast.pathIdx = 0;
     lightBeast.repath = 0.0f;
     lightBeast.stateTimer = 0.0f;
     lightBeast.wanderTimer = 1.5f;
-    lightBeast.hitCooldown = 4.0f;
+    lightBeast.hitCooldown = HitCooldownFor(currentLevel);
     lightBeast.growlTimer = 3.0f;
+    lightBeast.hp = LIGHTBEAST_HP;
+    lightBeast.stun = 0.0f;
     for (int t = 0; t < 512; t++) {
         int x = 1 + rand() % (MAP_WIDTH - 2);
         int y = 1 + rand() % (MAP_HEIGHT - 2);
@@ -1869,6 +2414,13 @@ void SpawnLightBeast(void) {
 
 void UpdateLightBeast(float dt) {
     if (!lightBeast.active) return;
+
+    /* 硬直：被玻璃瓶砸中后短暂不能动 */
+    if (lightBeast.stun > 0.0f) {
+        lightBeast.stun -= dt;
+        if (lightBeast.stun < 0.0f) lightBeast.stun = 0.0f;
+        return;
+    }
 
     /* 目标：看得见的玩家（手电开着）优先，其次是地上的荧光棒 */
     float tx = 0.0f, ty = 0.0f;
@@ -1934,6 +2486,143 @@ void UpdateLightBeast(float dt) {
     if (lightBeast.hitCooldown > 0.0f) lightBeast.hitCooldown -= dt;
 }
 
+/* ------------------------------------------------------------------ */
+/* 跳脸虫（Face Jumper）—— QTE 怪                                      */
+/* ------------------------------------------------------------------ */
+
+/* 失败惩罚：扣理智 + 短时 debuff */
+static void JumperFail(void) {
+    sanity -= JUMPER_FAIL_SANITY;
+    if (sanity < 0.0f) sanity = 0.0f;
+    ApplyFx(FX_BLIND, JUMPER_FAIL_FX_POWER, JUMPER_FAIL_FX_TIME);
+    ApplyFx(FX_SLOW, JUMPER_FAIL_FX_POWER, JUMPER_FAIL_FX_TIME);
+    healFlash = 0.25f;
+    PlaySfx(SFX_SCREAM, 1.0f);
+}
+
+/* 事件结束（无论成功失败）—— 虫子退场，本关不再出现 */
+static void JumperFinish(void) {
+    jumperPhase = JMP_DONE;
+    jumperTimer = 0.0f;
+    jumperResolved = 1;
+    parasite.active = 0;
+}
+
+/* 阶段一成功：躲开 */
+static void JumperDodged(void) {
+    JumperFinish();
+    PlaySfx(SFX_PICKUP, 0.6f);
+}
+
+/* 阶段二成功：按对了键 */
+static void JumperKeyHit(void) {
+    JumperFinish();
+    PlaySfx(SFX_POWER, 0.6f);
+}
+
+/* 生成跳脸虫：放在玩家视野前方一段距离，
+   然后它会「弹」到玩家脸上。 */
+void SpawnParasite(void) {
+    memset(&parasite, 0, sizeof(parasite));
+    parasite.active = 1;
+    parasite.attached = 0;
+    parasite.ramp = 0.0f;
+    parasite.attachTimer = 0.0f;
+    parasite.hp = 1;
+    parasite.stun = 0.0f;
+
+    /* 起点：玩家正前方 4~6 格，随机偏一点 */
+    float d = 4.0f + (float)(rand() % 3);
+    float ang = (float)(rand() % 7 - 3) * 0.12f;
+    float ca = cosf(ang), sa = sinf(ang);
+    parasite.x = posX + (dirX * ca - dirY * sa) * d;
+    parasite.y = posY + (dirY * ca + dirX * sa) * d;
+    if (ShotBlocked(parasite.x, parasite.y)) {
+        parasite.x = posX + dirX * 3.0f;
+        parasite.y = posY + dirY * 3.0f;
+    }
+
+    jumperPhase = JMP_APPROACH;
+    jumperTimer = JUMPER_APPROACH_TIME;
+    jumperResolved = 0;
+    jumperQteKey = rand() % JMP_KEY_COUNT;
+    PlaySfx(SFX_SCREAM, 0.35f);
+}
+
+void UpdateParasite(float dt) {
+    /* 还没到触发时机 */
+    if (jumperTrigger >= 0.0f && jumperPhase == JMP_IDLE) {
+        jumperTrigger -= dt;
+        if (jumperTrigger <= 0.0f) {
+            jumperTrigger = -1.0f;
+            SpawnParasite();
+        }
+    }
+    if (!parasite.active) return;
+
+    switch (jumperPhase) {
+    case JMP_APPROACH: {
+        /* 从远处弹到玩家脸上：位置插值，尺寸也会变大（更吓人） */
+        jumperTimer -= dt;
+        float t = 1.0f - jumperTimer / JUMPER_APPROACH_TIME;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+        /* 起点就是生成时记下的位置；这里直接朝玩家脸逼近 */
+        float tx = posX + dirX * 0.75f;
+        float ty = posY + dirY * 0.75f;
+        parasite.x += (tx - parasite.x) * (dt * 7.0f);
+        parasite.y += (ty - parasite.y) * (dt * 7.0f);
+        parasite.ramp = t;    /* 复用 ramp 记录「逼近程度」，供渲染放大 */
+
+        if (jumperTimer <= 0.0f) {
+            /* 到位了：进入阶段一「躲开」 */
+            jumperPhase = JMP_DODGE;
+            jumperTimer = JUMPER_DODGE_WINDOW;
+            parasite.x = tx;
+            parasite.y = ty;
+            PlaySfx(SFX_SCREAM, 0.8f);
+        }
+        break;
+    }
+
+    case JMP_DODGE: {
+        jumperTimer -= dt;
+        /* 玩家按 SPACE = 躲开 */
+        if (keyPressed[VK_SPACE]) {
+            JumperDodged();
+            return;
+        }
+        if (jumperTimer <= 0.0f) {
+            /* 没躲开：跿上脸，进入阶段二 */
+            jumperPhase = JMP_QTE;
+            jumperTimer = JUMPER_QTE_WINDOW;
+            PlaySfx(SFX_SCREAM, 1.0f);
+        }
+        break;
+    }
+
+    case JMP_QTE: {
+        jumperTimer -= dt;
+        /* 阶段二：按下指定的键 */
+        static const int keyCodes[JMP_KEY_COUNT] = { 'A', 'S', 'D', 'F' };
+        int want = keyCodes[jumperQteKey];
+        if (keyPressed[want]) {
+            JumperKeyHit();
+            return;
+        }
+        if (jumperTimer <= 0.0f) {
+            /* 超时：惩罚 */
+            JumperFail();
+            JumperFinish();
+        }
+        break;
+    }
+
+    default:
+        break;
+    }
+}
+
 static void MonsterWander(void) {
     int cx = (int)monster.x, cy = (int)monster.y;
     for (int t = 0; t < 24; t++) {
@@ -1953,6 +2642,13 @@ void UpdateMonster(float dt) {
     if (!monster.active) return;
     if (monster.hitCooldown > 0.0f) monster.hitCooldown -= dt;
     if (monster.growlTimer > 0.0f) monster.growlTimer -= dt;
+
+    /* 硬直：被玻璃瓶砸中后短暂不能动，也不能抓人 */
+    if (monster.stun > 0.0f) {
+        monster.stun -= dt;
+        if (monster.stun < 0.0f) monster.stun = 0.0f;
+        return;
+    }
 
     if (monster.state == 1) {
         monster.repath -= dt;
@@ -2018,17 +2714,52 @@ void UpdateMonster(float dt) {
 }
 
 
-/* 小地图（在内部渲染分辨率上绘制） */
-void RenderMap(void) {
-    int cellSize = (renderW < renderH ? renderW : renderH) / (MAP_WIDTH + 2);
-    if (cellSize < 3) cellSize = 3;
-    int mapW = MAP_WIDTH * cellSize, mapH = MAP_HEIGHT * cellSize;
-    int mapStartX = (renderW - mapW) / 2, mapStartY = (renderH - mapH) / 2;
+/* 小地图（在内部渲染分辨率上绘制）
+   两种形态：
+     角落小窗（默认）：cellSize 固定 8 -> 24*8 = 192px 见方，
+                       贴在右下角，不挡视野，可以边走边看。
+     全屏：cellSize 按屏幕大小算，铺满中央，用来规划路线。
+   之前只有全屏一种形态 —— 打开就得停下，关掉才看得见游戏，
+   失去了「导航」的意义。 */
+#define MAP_CORNER_CELL 8
 
-    int pad = cellSize;
-    for (int y = mapStartY - pad; y < mapStartY + mapH + pad; y++)
-        for (int x = mapStartX - pad; x < mapStartX + mapW + pad; x++)
-            PutPixelBlend(x, y, 0x00000000, 0.72f);
+void RenderMap(void) {
+    int cellSize, mapW, mapH, mapStartX, mapStartY;
+    if (mapFullScreen) {
+        cellSize = (renderW < renderH ? renderW : renderH) / (MAP_WIDTH + 2);
+        if (cellSize < 3) cellSize = 3;
+        mapW = MAP_WIDTH * cellSize;
+        mapH = MAP_HEIGHT * cellSize;
+        mapStartX = (renderW - mapW) / 2;
+        mapStartY = (renderH - mapH) / 2;
+    } else {
+        cellSize = MAP_CORNER_CELL;
+        mapW = MAP_WIDTH * cellSize;
+        mapH = MAP_HEIGHT * cellSize;
+        /* 贴右下角，留出一点边距 */
+        mapStartX = renderW - mapW - UIS(10);
+        mapStartY = renderH - mapH - UIS(10);
+        if (mapStartX < 0) mapStartX = 0;
+        if (mapStartY < 0) mapStartY = 0;
+    }
+
+    if (mapFullScreen) {
+        /* 全屏：整个画面压暗，突出地图 */
+        int pad = cellSize;
+        for (int y = mapStartY - pad; y < mapStartY + mapH + pad; y++)
+            for (int x = mapStartX - pad; x < mapStartX + mapW + pad; x++)
+                PutPixelBlend(x, y, 0x00000000, 0.72f);
+    } else {
+        /* 小窗：只给地图区域加个边框底板，不压暗整个画面 */
+        int pad = 2;
+        for (int y = mapStartY - pad; y < mapStartY + mapH + pad; y++) {
+            if (y < 0 || y >= renderH) continue;
+            for (int x = mapStartX - pad; x < mapStartX + mapW + pad; x++) {
+                if (x < 0 || x >= renderW) continue;
+                PutPixelBlend(x, y, 0x00000000, 0.82f);
+            }
+        }
+    }
 
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
@@ -2079,6 +2810,25 @@ void RenderMap(void) {
         int ly = mapStartY + (int)((posY + dirY * t) * cellSize);
         PutPixel(lx, ly, 0x00FFFFFF);
     }
+
+    /* 标题：告诉玩家当前是哪种形态，以及再按 M 会变成什么。
+       小窗模式下标题画在地图上方；全屏模式画在地图上方居中。 */
+    {
+        const char* label = mapFullScreen ? "MAP   M: SMALL   M: CLOSE" : "MAP   M: FULL   M: CLOSE";
+        int tw = TextWidthRaw(label);
+        int tx = mapFullScreen ? (renderW - tw) / 2 : mapStartX;
+        int ty = mapFullScreen ? (mapStartY - cellSize * 2 - FONT_H) : (mapStartY - FONT_H - 2);
+        if (ty < 0) ty = 2;
+        /* 底下垫一条深色条，浅色文字才看得清 */
+        for (int y = ty - 2; y < ty + FONT_H + 2; y++) {
+            if (y < 0 || y >= renderH) continue;
+            for (int x = tx - 3; x < tx + tw + 3; x++) {
+                if (x < 0 || x >= renderW) continue;
+                PutPixelBlend(x, y, 0x00000000, 0.7f);
+            }
+        }
+        PutTextRaw(tx, ty, label, 0x00B0C0D0u);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2093,14 +2843,26 @@ static void ThrowItem(int type) {
         px = nx; py = ny;
     }
     if (type == 1) {
-        MakeNoise(px, py, 14.0f);
-        PlaySfx(SFX_GLASS, 0.9f);
-        for (int i = 0; i < MAX_THROWN; i++) {
-            if (thrown[i].active) continue;
-            thrown[i].x = px; thrown[i].y = py;
-            thrown[i].type = 1; thrown[i].life = 0.55f; thrown[i].active = 1;
+        /* 玻璃瓶：现在是一个飞行弹丸，砸中怪会造成伤害。
+           出生点必须用**玩家位置**，不能用上面算出来的 px/py ——
+           那个 px/py 是「扔到墙上的落点」，最多能到 6.6 格外，
+           瓶子一出生就飞过怪了。
+
+           也不能简单地往前挪 0.3 格：贴墙站着时那 0.3 格会进墙格，
+           弹丸一生成就被判定「撞墙」碎掉。
+           所以从**玩家所在的格子**出发，让它自己飞出去。 */
+        float sx = posX, sy = posY;
+        for (int i = 0; i < MAX_SHOTS; i++) {
+            if (shot[i].active) continue;
+            shot[i].x = sx; shot[i].y = sy;
+            shot[i].vx = dirX * SHOT_SPEED;
+            shot[i].vy = dirY * SHOT_SPEED;
+            shot[i].life = 0.9f;
+            shot[i].age = 0.0f;
+            shot[i].active = 1;
             break;
         }
+        PlaySfx(SFX_PICKUP, 0.5f);
         return;
     }
     for (int i = 0; i < MAX_THROWN; i++) {
@@ -2112,15 +2874,118 @@ static void ThrowItem(int type) {
     PlaySfx(SFX_PICKUP, 0.5f);
 }
 
+/* ------------------------------------------------------------------ */
+/* 玻璃瓶命中怪物                                                       */
+/* ------------------------------------------------------------------ */
+
+/* 让被砸中的怪后退（沿「远离玩家」的方向），并进入硬直。
+   后退距离要够明显 —— 玩家需要从反馈里知道「我打中了」。 */
+static void KnockbackMonster(Monster* m) {
+    float dx = m->x - posX, dy = m->y - posY;
+    float d = sqrtf(dx * dx + dy * dy);
+    if (d < 0.001f) { dx = -dirX; dy = -dirY; d = 1.0f; }
+    else { dx /= d; dy /= d; }
+
+    /* 沿反方向找第一个能站住的位置 */
+    for (int step = 3; step >= 1; step--) {
+        float nx = m->x + dx * MONSTER_FLEE_DIST * (float)step / 3.0f;
+        float ny = m->y + dy * MONSTER_FLEE_DIST * (float)step / 3.0f;
+        if (!Blocked(nx, ny)) { m->x = nx; m->y = ny; break; }
+    }
+    m->stun = MONSTER_STUN;
+    m->pathLen = 0;
+    m->pathIdx = 0;
+    m->state = 0;              /* 被打断，重新游荡 */
+    m->wanderTimer = 0.6f;
+}
+
+/* 玻璃瓶命中一只怪。返回 1 表示命中。 */
+static int HitMonster(Monster* m, int dmg) {
+    if (!m->active) return 0;
+    if (m->stun > 0.0f) return 0;    /* 已经在硬直里，不重复结算 */
+
+    /* 跳脸虫不在这条路径上 —— 它是屏幕空间的 QTE 事件，
+       不在世界里，也没有实体可以砸。 */
+
+    m->hp -= dmg;
+    m->hitCooldown = 0.0f;           /* 硬直期间不该抓人 */
+
+    if (m->hp <= 0) {
+        /* 血量耗尽：直接驱离（重新生成到别处），而不是留在原地 */
+        if (m == &monster) SpawnMonster();
+        else SpawnLightBeast();
+    } else {
+        KnockbackMonster(m);
+    }
+    PlaySfx(SFX_GLASS, 0.9f);
+    MakeNoise(m->x, m->y, 9.0f);     /* 砸怪的代价：暴露自己的位置 */
+    return 1;
+}
+
+/* 推进所有飞行中的玻璃瓶，结算命中 */
+static void UpdateShots(float dt) {
+    for (int i = 0; i < MAX_SHOTS; i++) {
+        if (!shot[i].active) continue;
+        shot[i].life -= dt;
+        shot[i].age += dt;
+
+        /* 分段推进，避免高速穿过怪。
+           注意：vx/vy 存的是**速度**（格/秒），每步位移 = 速度 × dt / 段数。
+           早先误把 vx 直接当每步位移用，弹丸一帧就飞出去 9 格 —— 整局都砸不到怪。 */
+        float stepLen = SHOT_SPEED * dt;
+        int steps = (int)(stepLen / 0.12f) + 1;
+        float sdx = shot[i].vx * dt / (float)steps;
+        float sdy = shot[i].vy * dt / (float)steps;
+
+        for (int s = 0; s < steps && shot[i].active; s++) {
+            shot[i].x += sdx;
+            shot[i].y += sdy;
+
+            /* 撞墙：碎掉。
+               第一帧跳过 —— 出生点就在玩家脚下的格子里，
+               贴墙站着时那一格可能已经是墙，判早了瓶子一扔就碎。 */
+            if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
+                PlaySfx(SFX_GLASS, 0.7f);
+                MakeNoise(shot[i].x, shot[i].y, 14.0f);
+                shot[i].active = 0;
+                break;
+            }
+            /* 撞怪 */
+            float r = SHOT_RADIUS + 0.24f;
+            if (monster.active && Dist2(shot[i].x, shot[i].y, monster.x, monster.y) < r * r) {
+                HitMonster(&monster, SHOT_DAMAGE);
+                shot[i].active = 0;
+                break;
+            }
+            if (lightBeast.active && Dist2(shot[i].x, shot[i].y, lightBeast.x, lightBeast.y) < r * r) {
+                HitMonster(&lightBeast, SHOT_DAMAGE);
+                shot[i].active = 0;
+                break;
+            }
+            /* 跳脸虫不在这里判定 —— 它是屏幕空间的 QTE 事件，
+               不在世界里，瓶子砸不到它。 */
+        }
+        if (shot[i].life <= 0.0f) shot[i].active = 0;
+    }
+}
+
 void Update(float dt) {
     if (flashTime > 0.0f) flashTime -= dt;
     if (healFlash > 0.0f) healFlash -= dt;
-    if (currentState != STATE_PLAYING || isMapOpen) return;
+    /* 全屏地图：游戏**暂停**（专心规划路线）。
+       小窗地图：游戏**继续**（边看边玩，鼠标仍能转视角）。 */
+    if (currentState != STATE_PLAYING || (isMapOpen && mapFullScreen)) return;
     if (flashTime > 0.0f) return;
 
     runTime += dt;
     if (levelBanner > 0.0f) levelBanner -= dt;
-    sanity -= SANITY_DRAIN * (1.0f - 0.10f * upgSanity) * modSanityMul * dt;
+
+    /* 状态效果计时。强度变化时重算 FOV（视野收窄要立刻生效） */
+    if (UpdateFx(dt)) ApplyFov();
+
+    /* 理智流失：基础值 + 状态效果的额外流失 */
+    float drainMul = 1.0f + FxStrength(FX_DRAIN) * 1.5f;
+    sanity -= SANITY_DRAIN * (1.0f - 0.10f * upgSanity) * modSanityMul * drainMul * dt;
     if (sanity <= 0.0f) {
         sanity = 0.0f;
         runInProgress = 0;
@@ -2180,10 +3045,17 @@ void Update(float dt) {
 
     /* 带半径的碰撞：不再用「点」判定，避免贴墙时半个身子钻进墙里 */
     /* 安全屋：站在里面回理智 */
-    int inSafe = (safeRoom.active && Dist2(posX, posY, safeRoom.x, safeRoom.y) < 0.60f);
+    int inSafe = (safeRoom.active && Dist2(posX, posY, safeRoom.x, safeRoom.y) < SAFE_ZONE_RADIUS * SAFE_ZONE_RADIUS);
     if (inSafe) {
         sanity += 3.5f * dt;
         if (sanity > 100.0f) sanity = 100.0f;
+        /* 「SAFE ZONE」提示只闪一下：刚进来时给 2 秒，之后不常驻。
+           （玩家在安全屋里本来就知道自己在那，不需要一直盯着这行字。） */
+        if (safeZoneMsg <= 0.0f) safeZoneMsg = 2.0f;
+    }
+    if (safeZoneMsg > 0.0f) {
+        safeZoneMsg -= dt;
+        if (safeZoneMsg < 0.0f) safeZoneMsg = 0.0f;
     }
 
     /* 手摇发电：站着摇，摇满一次回一截电；期间不能移动 */
@@ -2208,7 +3080,9 @@ void Update(float dt) {
         crankClick = 0.0f;
     }
 
-    float sp = MOVE_SPEED * (1.0f + 0.06f * upgSpeed) * dt * (sprinting ? SPRINT_MULT : 1.0f);
+    /* 移速：基础值 + 永久升级 - 状态效果的减速（最多 -45%） */
+    float slowMul = 1.0f - FxStrength(FX_SLOW) * 0.45f;
+    float sp = MOVE_SPEED * (1.0f + 0.06f * upgSpeed) * slowMul * dt * (sprinting ? SPRINT_MULT : 1.0f);
     float perpX = -dirY, perpY = dirX;      /* 单位侧向，与 FOV 无关 */
     float dx = 0.0f, dy = 0.0f;
     if (!holdingNow && !cranking) {          /* 翻找/摇电时不接受移动输入 */
@@ -2294,8 +3168,10 @@ void Update(float dt) {
         heartTimer = 0.0f;
     }
 
+    UpdateShots(dt);
     UpdateMonster(dt);
     UpdateLightBeast(dt);
+    UpdateParasite(dt);
     for (int i = 0; i < MAX_THROWN; i++) {
         if (!thrown[i].active) continue;
         thrown[i].life -= dt;
@@ -2309,6 +3185,8 @@ void Update(float dt) {
         if (currentLevel > bestLevel) bestLevel = currentLevel;
         currentLevel++;
         GenerateLevel();
+        ClearFx();                    /* 换关解除所有状态效果 */
+        for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
         flashTime = 0.15f;
         UpdateExplored();
     }
@@ -2318,9 +3196,8 @@ void Update(float dt) {
 /* UI：字体缓存 / 半透明面板 / 文字                                     */
 /* ------------------------------------------------------------------ */
 
-/* 8x12 点阵字库，ASCII 32..126（由 GDI 位图字体 1:1 采样生成） */
-#define FONT_W 8
-#define FONT_H 12
+/* 8x12 点阵字库，ASCII 32..126（由 GDI 位图字体 1:1 采样生成）
+   FONT_W / FONT_H 定义在文件前部（RenderMap 需要提前用）。 */
 static const unsigned char fontData[95][FONT_H] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},
     {0x00,0x00,0x20,0x20,0x20,0x20,0x20,0x20,0x00,0x20,0x00,0x00}, /* ! */
@@ -2473,6 +3350,30 @@ static void DrawTextCenterWin(int cxWin, int yWin, const char* t, unsigned int c
     DrawTextWin(cxWin - TextWidthWin(t) / 2, yWin, t, color);
 }
 
+/* 在**渲染坐标**上画 1:1 的点阵字（小地图标题用）。
+   与 DrawTextWin 的区别：那个用窗口坐标（会缩放），这个直接落在渲染缓冲上。 */
+static void PutTextRaw(int x, int y, const char* t, unsigned int color) {
+    for (const char* p = t; *p; p++) {
+        int ch = (unsigned char)*p;
+        if (ch < 32 || ch > 126) ch = '?';
+        const unsigned char* g = fontData[ch - 32];
+        for (int r = 0; r < FONT_H; r++) {
+            unsigned char bits = g[r];
+            if (!bits) continue;
+            for (int c = 0; c < FONT_W; c++) {
+                if (!(bits & (1u << (FONT_W - 1 - c)))) continue;
+                PutPixel(x + c, y + r, color);
+            }
+        }
+        x += FONT_W;
+    }
+}
+
+/* 渲染坐标下的文字宽度（1:1 点阵） */
+static int TextWidthRaw(const char* t) {
+    return (int)strlen(t) * FONT_W;
+}
+
 /* 标题加粗：右移一格再画一遍 */
 static void DrawTitleWin(const char* t, int yWin, unsigned int color) {
     DrawTextCenterWin(winW / 2, yWin - 2 * TextScale(), t, color);
@@ -2521,7 +3422,7 @@ static MenuGeo GetMenuGeo(void) {
     switch (currentState) {
         case STATE_MAIN_MENU: return MakeGeo("CANITY", MainMenuCount(), UIS(56), UIS(38), UIS(520), UIS(72));
         case STATE_HUB:       return MakeGeo("THE HUB", HUB_ROWS, UIS(50), UIS(34), UIS(700), UIS(52));
-        case STATE_HELP:      return MakeGeo("CONTROLS", 7, UIS(38), UIS(30), UIS(760), UIS(44));
+        case STATE_HELP:      return MakeGeo("CONTROLS", 15, UIS(29), UIS(22), UIS(1000), UIS(30));
         case STATE_PAUSED:    return MakeGeo("PAUSED", 3, UIS(56), UIS(38), UIS(520), UIS(56));
         case STATE_GAMEOVER:  return MakeGeo("YOU LOST YOUR MIND", 3, UIS(48), UIS(34), UIS(660), UIS(40));
         case STATE_SETTINGS:  return MakeGeo(settingsPage < 1 ? "SETTINGS" : pageNames[settingsPage - 1],
@@ -2623,6 +3524,12 @@ static const char* MenuLabel(int i) {
             return s[i];
         }
         case STATE_HELP: {
+            /* 操作说明 + 玩法提示。
+               游戏画面上的字要尽量少（见 HUD Detail 设置），
+               所以「怎么用玻璃瓶」「跳脸虫怎么回事」这类一次性说明
+               全部放在这一页。
+               行数要控制在 14 行以内：面板高度 = 14×28 + 标题 + 内边距
+               ≈ 500，在 600 高的窗口里才留得下边距。 */
             static const char* helps[] = {
                 "WASD        MOVE",
                 "SHIFT       RUN  (MAKES NOISE)",
@@ -2630,9 +3537,17 @@ static const char* MenuLabel(int i) {
                 "R (HOLD)    CRANK BATTERY",
                 "F           FLASHLIGHT",
                 "G / B       THROW FLARE / BOTTLE",
-                "M MAP   ESC PAUSE"
+                "M MAP   ESC PAUSE",
+                "",
+                "BOTTLE: THROW IT AT A MONSTER TO HIT IT.",
+                "  3 BOTTLES DRIVE IT AWAY, BUT THE SOUND",
+                "  GIVES AWAY YOUR POSITION.",
+                "",
+                "FACE JUMPER: PRESS SPACE TO DODGE IT.",
+                "  IF IT LANDS ON YOUR FACE, PRESS THE KEY.",
+                "  MISS BOTH AND YOU LOSE SANITY."
             };
-            if (i >= 0 && i < 7) return helps[i];
+            if (i >= 0 && i < 15) return helps[i];
             return "";
         }
         case STATE_HUB: {
@@ -2744,6 +3659,14 @@ static void DrawTextInRow(const char* text, RECT row, unsigned int color) {
     DrawTextWin(x, y, text, color);
 }
 
+/* 左对齐的一行：说明文字用。
+   居中对齐遇到长句子会超出面板边缘（CONTROLS 页的说明就踩过这个坑）。 */
+static void DrawTextInRowLeft(const char* text, RECT row, unsigned int color) {
+    int th = TextHeightWin();
+    int y = row.top + ((row.bottom - row.top) - th) / 2;
+    DrawTextWin(row.left + UIS(8), y, text, color);
+}
+
 static void DrawMenuText(void) {
     MenuGeo g = GetMenuGeo();
     int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
@@ -2782,6 +3705,13 @@ static void DrawMenuText(void) {
             if (i == 1) sprintf(line, "LEVEL %d    TIME %d:%02d", currentLevel, mins, secs);
             else sprintf(line, "CRATES %d    BATTERY %d%%", searchedCount, (int)battery);
             DrawTextInRow(line, RowRect(g, i), (i == sel) ? 0x008CFF8Cu : 0x009B9B9Bu);
+            continue;
+        }
+
+        /* CONTROLS 页的说明文字用左对齐 ——
+           居中对齐遇到长句子会超出面板左右边缘。 */
+        if (currentState == STATE_HELP) {
+            DrawTextInRowLeft(MenuLabel(i), RowRect(g, i), c);
             continue;
         }
         DrawTextInRow(MenuLabel(i), RowRect(g, i), c);
@@ -2837,10 +3767,30 @@ static void DrawBar(int x, int y, int w, int h, float frac, unsigned int color) 
 void DrawHUD(void) {
     char buf[96];
 
-
+    /* ------------------------------------------------------------------ */
+    /* HUD 详细度                                                        */
+    /* ------------------------------------------------------------------ */
+    /* 三档（设置里的 HUD Detail）：
+         0 Minimal —— 只留必须实时知道的：数值、电量体力、状态效果
+         1 Normal  —— 加：投掷物数量（有库存时才显示）、SAFE ZONE 短提示
+         2 Full    —— 加：投掷物数量常驻、SAFE ZONE 常驻
+       词条横幅在任何档位都只在进关后 5 秒出现（levelBanner 控制），
+       因为它是「一次性信息」，常驻反而是噪音。 */
 
     sprintf(buf, "LEVEL %d", currentLevel);
     DrawTextWin(UIS(20), UIS(18), buf, 0x0000FF00u);
+
+    /* 当前词条：常驻显示在 LEVEL 那一行的右边 —— **不新增一行**。
+       词条是难度曲线的一部分（HUNTED 怪更快、LEAKY 理智掉更快），
+       玩家看不见就不知道自己在被什么惩罚。
+       用暗橙色区分于绿色的 LEVEL。
+       详细说明（"THE THING MOVES FASTER"）仍然只在进关 5 秒的横幅里出现，
+       常驻的是「提醒」，横幅是「解释」。 */
+    if (levelMod >= 0 && levelMod < MOD_COUNT) {
+        int lx = UIS(20) + TextWidthWin(buf) + UIS(14);
+        sprintf(buf, "%s", modNames[levelMod]);
+        DrawTextWin(lx, UIS(18), buf, 0x00C08040u);
+    }
 
     sprintf(buf, "SANITY: %.0f%%", sanity);
     DrawTextWin(UIS(20), UIS(52), buf, (sanity < 30.0f) ? 0x00FF3C3Cu : 0x0000FFFFu);
@@ -2849,13 +3799,116 @@ void DrawHUD(void) {
     else sprintf(buf, "FUSES %d/%d", fusesHeld, fusesNeeded);
     DrawTextWin(UIS(20), UIS(86), buf, breakerOpen ? 0x0030FF60u : 0x00E8C040u);
 
-    /* 词条横幅单独占一行，放在 SHARDS 下面，避免和常驻信息重叠 */
+    /* 状态效果：常驻显示在 FUSES 下面。
+       玩家必须知道自己被怎么了 —— 否则「视野突然变窄」会被当成 bug。
+       纵向排布（UIS 是设计分辨率，600 高）：
+         86  FUSES
+         116 状态效果 1   142 状态效果 2   168 状态效果 3
+         196 FLARE / BOTTLE */
+    {
+        static const char* fxName[FX_COUNT] = { "BLINDED", "SLOWED", "DRAINING" };
+        int fy = UIS(116);
+        for (int i = 0; i < FX_COUNT; i++) {
+            float s = FxStrength(i);
+            if (s <= 0.0f) continue;
+            sprintf(buf, "%s %d%%", fxName[i], (int)(s * 100.0f + 0.5f));
+            DrawTextWin(UIS(20), fy, buf, 0x00FF6060u);
+            fy += UIS(26);
+        }
+    }
+
+    /* 投掷物数量。
+       Minimal：不显示。
+       Normal：只在身上有货时才显示（平时不占地方）。
+       Full：一直显示。 */
+    if (hudDetail >= 2 || (hudDetail >= 1 && (flares > 0 || bottles > 0))) {
+        sprintf(buf, "FLARE %d   BOTTLE %d", flares, bottles);
+        DrawTextWin(UIS(20), UIS(196), buf, 0x0090A0A0u);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* 跳脸虫 QTE                                                        */
+    /* ------------------------------------------------------------------ */
+    /* 这是整个事件里最关键的一块 UI。玩家只有不到 2 秒的反应时间，
+       所以提示必须：**巨大、居中、带明确的倒计时条**。
+       任何含糊都会让玩家觉得是游戏 bug。 */
+    if (parasite.active && jumperPhase != JMP_IDLE && jumperPhase != JMP_DONE) {
+        float frac = 0.0f;
+        const char* prompt = "";
+        unsigned int col = 0x00FFE060u;
+
+        if (jumperPhase == JMP_DODGE) {
+            frac = jumperTimer / JUMPER_DODGE_WINDOW;
+            prompt = "PRESS SPACE TO DODGE";
+            col = 0x00FF8040u;
+        } else if (jumperPhase == JMP_QTE) {
+            frac = jumperTimer / JUMPER_QTE_WINDOW;
+            static const char* qteKeys[JMP_KEY_COUNT] = { "A", "S", "D", "F" };
+            prompt = qteKeys[jumperQteKey];
+            col = 0x00FF3030u;
+        }
+        if (frac < 0.0f) frac = 0.0f;
+        if (frac > 1.0f) frac = 1.0f;
+
+        /* 阶段二：把要按的键画得非常大，一眼就能看到 */
+        if (jumperPhase == JMP_QTE) {
+            /* 用点阵字放大绘制：把字符画成一个方块阵 */
+            int keyW = TextWidthWin(prompt) * 3;
+            int keyH = TextHeightWin() * 3;
+            int kx = (winW - keyW) / 2;
+            int ky = winH / 2 - keyH / 2;
+            /* 底板 */
+            BlendRectWin(kx - UIS(10), ky - UIS(6), kx + keyW + UIS(10), ky + keyH + UIS(6),
+                         0x00202020, 0.75f);
+            FrameRectWin(kx - UIS(10), ky - UIS(6), kx + keyW + UIS(10), ky + keyH + UIS(6),
+                         col, 0.9f, 2);
+            /* 把字放大 3 倍画 */
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    DrawTextWin(kx + (i) * (keyW / 3), ky + (j) * (keyH / 3), prompt, col);
+                }
+            }
+            /* 英文说明只在 Full 档显示 */
+            if (qteHint >= 1)
+                DrawTextCenterWin(winW / 2, ky - UIS(30), "IT IS ON YOUR FACE", 0x00FF6060u);
+        } else {
+            /* 阶段一：Minimal 档只显示一个空格键图标，
+               Full 档才显示英文说明。 */
+            if (qteHint >= 1) {
+                DrawTextCenterWin(winW / 2, winH / 2 - UIS(40), prompt, col);
+            } else {
+                int keyW = TextWidthWin("SPACE") * 2;
+                int keyH = TextHeightWin() * 2;
+                int kx = (winW - keyW) / 2;
+                int ky = winH / 2 - keyH / 2;
+                BlendRectWin(kx - UIS(10), ky - UIS(6), kx + keyW + UIS(10), ky + keyH + UIS(6),
+                             0x00202020, 0.75f);
+                FrameRectWin(kx - UIS(10), ky - UIS(6), kx + keyW + UIS(10), ky + keyH + UIS(6),
+                             col, 0.9f, 2);
+                for (int i = 0; i < 2; i++)
+                    for (int j = 0; j < 2; j++)
+                        DrawTextWin(kx + i * (keyW / 2), ky + j * (keyH / 2), "SPACE", col);
+            }
+        }
+
+        /* 倒计时条：屏幕中央下方一条，越短越红 */
+        int barW = UIS(240), barH = UIS(10);
+        int bx = (winW - barW) / 2;
+        int by = winH / 2 + UIS(56);
+        BlendRectWin(bx, by, bx + barW, by + barH, 0x00202020, 0.8f);
+        unsigned int barCol = col;
+        if (frac < 0.35f) barCol = 0x00FF2020u;    /* 快没了 -> 变红 */
+        BlendRectWin(bx, by, bx + (int)(barW * frac), by + barH, barCol, 0.95f);
+        FrameRectWin(bx, by, bx + barW, by + barH, 0x00808080, 0.7f, 1);
+    }
+
+    /* 词条横幅：只在进关后 5 秒出现。
+       词条**名**已经常驻在 LEVEL 那一行右边了，所以这里只重复「说明」——
+       玩家刚进关时需要知道这一层的规则具体是什么。 */
     if (levelBanner > 0.0f) {
-        int y = UIS(224);
+        int y = UIS(258);
         if (levelMod >= 0) {
-            DrawTextWin(UIS(20), y, modNames[levelMod], 0x00FFB040u);
-            DrawTextWin(UIS(20) + TextWidthWin(modNames[levelMod]) + UIS(10), y,
-                        modDesc[levelMod], 0x00908070u);
+            DrawTextWin(UIS(20), y, modDesc[levelMod], 0x00C08050u);
         }
         DrawTextWin(UIS(20), y + UIS(30), themeNames[themeId], 0x00B08040u);
     }
@@ -2905,8 +3958,18 @@ void DrawHUD(void) {
         FrameRectWin(bx, by, bx + barW, by + barH, 0x00808080, 0.7f, 1);
     }
 
-    if (safeRoom.active && Dist2(posX, posY, safeRoom.x, safeRoom.y) < 0.60f)
-        DrawTextWin(UIS(20), UIS(190), "SAFE ZONE", 0x0030D0D0u);
+    /* SAFE ZONE：画在**屏幕中央下方**，不占用左侧信息列。
+       之前它画在 (20, 190)，跟 FLARE/BOTTLE（也是 196 附近）重叠，
+       玩家反馈过字叠在一起。
+       Normal 档是「闪一下就消失」：进入安全屋时 safeZoneMsg 置 2 秒，
+       之后不再显示 —— 常驻在安全屋里其实没什么用（你知道自己在哪）。 */
+    if (safeRoom.active && Dist2(posX, posY, safeRoom.x, safeRoom.y) < SAFE_ZONE_RADIUS * SAFE_ZONE_RADIUS) {
+        if (hudDetail >= 2) {
+            DrawTextCenterWin(winW / 2, winH - UIS(196), "SAFE ZONE", 0x0030D0D0u);
+        } else if (hudDetail >= 1 && safeZoneMsg > 0.0f) {
+            DrawTextCenterWin(winW / 2, winH - UIS(196), "SAFE ZONE", 0x0030D0D0u);
+        }
+    }
 
     if (cranking) {
         int barW = UIS(240), barH = UIS(8);
@@ -2920,13 +3983,9 @@ void DrawHUD(void) {
         FrameRectWin(bx, by, bx + barW, by + barH, 0x00808080, 0.7f, 1);
     }
 
-    sprintf(buf, "FLARE %d   BOTTLE %d", flares, bottles);
-    DrawTextWin(UIS(20), UIS(120), buf, 0x0090A0A0u);
-
-    sprintf(buf, "SHARDS %d", shards);
-    DrawTextWin(UIS(20), UIS(154), buf, 0x0060D0FFu);
-
-    if (isMapOpen) DrawTextWin(UIS(20), winH - UIS(40), "M  CLOSE MAP", 0x00808080u);
+    /* 碎片（SHARDS）是大厅货币，游戏过程中用不到 —— 不放进 HUD。
+       「M CLOSE MAP」也删掉了：地图标题上已经写着
+       「M: FULL  M: CLOSE」，再在底部挂一行是重复的。 */
 }
 
 /* ------------------------------------------------------------------ */
@@ -2944,6 +4003,8 @@ void RenderFrame(void) {
     if (showScene) {
         Render3D();
         if (currentState == STATE_PLAYING && isMapOpen) RenderMap();
+        /* 跳脸虫：屏幕空间 overlay，盖在场景之上、HUD 之下 */
+        if (currentState == STATE_PLAYING) DrawParasiteSprite();
         if (flashTime > 0.0f)
             memset(pixels, 0xFF, (size_t)renderW * renderH * sizeof(unsigned int));
     } else {
@@ -2959,6 +4020,9 @@ void RenderFrame(void) {
             DrawPopupPanel();
             DrawPopupText();
         }
+    } else if (isMapOpen && mapFullScreen) {
+        /* 全屏地图：不画 HUD —— 整个屏幕就是地图，别在上面压一堆数值。
+           小窗地图则照常画 HUD（它只是右下角一个叠加层）。 */
     } else {
         DrawHUD();
     }
@@ -2999,6 +4063,8 @@ void StartGame(void) {
     flashTime = 0.0f;
     healFlash = 0.0f;
     isMapOpen = 0;
+    ClearFx();
+    for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
     GenerateLevel();
     UpdateExplored();
     ForceCursor(0);
@@ -3335,7 +4401,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_SETCURSOR:
             if (LOWORD(lParam) == HTCLIENT) {
-                if (currentState == STATE_PLAYING && !isMapOpen) SetCursor(NULL);
+                /* 游戏中（含小窗地图）隐藏光标 —— 鼠标是锁定的。
+                   只有全屏地图才显示箭头光标。 */
+                int mouseFree = (currentState != STATE_PLAYING) || (isMapOpen && mapFullScreen);
+                if (!mouseFree) SetCursor(NULL);
                 else SetCursor(LoadCursor(NULL, IDC_ARROW));
                 return TRUE;
             }
@@ -3356,7 +4425,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 HitTestMenu(mx, my);
                 return 0;
             }
-            if (isMapOpen) return 0;
+            /* 全屏地图：鼠标交给菜单（此时鼠标是释放的，可以点东西）。
+               小窗地图：**不拦截** —— 鼠标仍然锁定在中心，
+               玩家可以边看小地图边转视角、继续玩。 */
+            if (isMapOpen && mapFullScreen) return 0;
 
             POINT center = {winW / 2, winH / 2};
             ClientToScreen(hwnd, &center);
@@ -3404,7 +4476,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_KEYDOWN:
-            if (wParam < 256) keys[wParam] = 1;
+            if (wParam < 256) {
+                keys[wParam] = 1;
+                /* 记下「刚按下」的边沿，供 QTE 消费。
+                   只在游戏进行中记 —— 菜单里按的键不该触发 QTE。 */
+                if (currentState == STATE_PLAYING) keyPressed[wParam] = 1;
+            }
 
             if (currentState == STATE_MAIN_MENU) {
                 if (wParam == 'W' || wParam == VK_UP) { menuSelection = (menuSelection + MainMenuCount() - 1) % MainMenuCount(); uiDirty = 1; }
@@ -3472,10 +4549,28 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             } else if (currentState == STATE_PLAYING) {
                 if (wParam == VK_ESCAPE) PauseGame();
                 if (wParam == 'M' || wParam == 'm') {
-                    isMapOpen = !isMapOpen;
-                    ForceCursor(isMapOpen ? 1 : 0);
-                    if (isMapOpen) SetCursor(LoadCursor(NULL, IDC_ARROW));
+                    /* 三态循环：小窗 -> 全屏 -> 关闭 -> 小窗 ...
+                       第一次按看到角落小窗（能边走边看），
+                       再按一次变全屏（停下来规划路线），再按关闭。
+
+                       鼠标行为跟着形态走：
+                         小窗 —— 鼠标继续锁定，**视角能转、能继续玩**
+                         全屏 —— 释放鼠标，**停下**专心看图 */
+                    if (!isMapOpen) {
+                        isMapOpen = 1;
+                        mapFullScreen = 0;
+                    } else if (!mapFullScreen) {
+                        mapFullScreen = 1;
+                    } else {
+                        isMapOpen = 0;
+                        mapFullScreen = 0;
+                    }
+                    /* 只有全屏才释放鼠标；小窗保持锁定，游戏继续 */
+                    int wantCursor = (isMapOpen && mapFullScreen) ? 1 : 0;
+                    ForceCursor(wantCursor);
+                    if (wantCursor) SetCursor(LoadCursor(NULL, IDC_ARROW));
                     firstMouseMove = 1;
+                    uiDirty = 1;
                 }
                 if (wParam == 'F' || wParam == 'f') {
                     if (battery > 0.0f) flashlightOn = !flashlightOn;
@@ -3755,7 +4850,11 @@ void ShutdownAudio(void) {
 /* ------------------------------------------------------------------ */
 
 #define SAVE_MAGIC 0x43414E32u   /* "CAN2" */
-#define SAVE_VERSION 4          /* v4：补上安全屋 / 投掷物 / 词条 / 主题 / 游戏版本号 */
+/* 存档**格式**版本。v5 在末尾追加了 HUD 详细度 / QTE 提示两个字段。
+   读档时会按文件的**实际长度**判断是老版本还是新版本：
+   老存档照样能读（新增字段取默认值），不用丢玩家进度。
+   —— 参见 LoadSettings 里的迁移逻辑。 */
+#define SAVE_VERSION 5
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
 #define SAVE_FILE "canity.sav"
@@ -3792,6 +4891,12 @@ typedef struct {
     int themeId;                              /* 关卡主题（墙/地贴图） */
     int nThrown;                              /* 场上投掷物个数 */
     Thrown thr[MAX_THROWN];                   /* 场上投掷物状态 */
+
+    /* v5 新增：HUD 详细度与 QTE 提示档位。
+       放在结构**末尾**是刻意的 —— 这样旧存档的字节完全对得上，
+       读档时按文件长度就能判断是不是老版本（见 LoadSettings）。 */
+    int hudDetail;
+    int qteHint;
 } SaveBlob;
 
 static SaveBlob g_save;
@@ -3809,6 +4914,8 @@ static void SaveGame(void) {
     g_save.fov = fovIndex;
     g_save.vignette = vignetteOn;
     g_save.showFps = showFps;
+    g_save.hudDetail = hudDetail;
+    g_save.qteHint = qteHint;
     g_save.gamma = gammaValue;
     g_save.sens = mouseSens;
     g_save.shards = shards;
@@ -3868,12 +4975,36 @@ static int LoadSettings(void) {
     FILE* f = fopen(SAVE_FILE, "rb");
     if (!f) return 0;
     memset(&g_save, 0, sizeof(g_save));
-    size_t got = fread(&g_save, sizeof(g_save), 1, f);
+    /* 按文件的**实际字节数**读，而不是 sizeof(SaveBlob) ——
+       这样老存档（结构更短）也能读进来，新字段留在 0。 */
+    size_t fileSize = 0;
+    fseek(f, 0, SEEK_END);
+    long fs = ftell(f);
+    if (fs > 0) fileSize = (size_t)fs;
+    fseek(f, 0, SEEK_SET);
+    size_t want = (fileSize < sizeof(g_save)) ? fileSize : sizeof(g_save);
+    size_t got = fread(&g_save, 1, want, f);
     fclose(f);
-    if (!got || g_save.magic != SAVE_MAGIC || g_save.version != SAVE_VERSION) return 0;
-    /* 存档**格式**版本必须完全匹配才加载：结构变了就宁可从零开始，
-       也好过把半截旧数据当成新结构解释（越界读 / 错位）。
-       注意这跟 gameVersion 是两回事 ——
+    if (!got || g_save.magic != SAVE_MAGIC) return 0;
+
+    /* 存档**格式**版本：接受 v4（老结构）与 v5（当前结构）。
+       v4 的存档按文件长度就能认出来 —— 因为新增字段在结构末尾，
+       老文件的字节数正好少 sizeof(int) * 2。
+       这里**不**做「版本不符就整份丢弃」：那两个新字段只是显示偏好，
+       丢掉它们没有意义，而丢弃整份存档会让玩家进度全没。 */
+    if (g_save.version != SAVE_VERSION && g_save.version != 4) return 0;
+    int isOldV4 = (fileSize < sizeof(SaveBlob));
+
+    /* 迁移：老存档没有这两个字段，给默认值 */
+    if (isOldV4) {
+        g_save.hudDetail = 1;    /* Normal */
+        g_save.qteHint = 1;      /* Full */
+    }
+    /* 边界检查：存档可能被外部改坏，数值必须夹回合法范围 */
+    if (g_save.hudDetail < 0 || g_save.hudDetail > 2) g_save.hudDetail = 1;
+    if (g_save.qteHint < 0 || g_save.qteHint > 1) g_save.qteHint = 1;
+
+    /* 注意这跟 gameVersion 是两回事 ——
        gameVersion 只是记录「这份存档是哪个应用版本写的」，
        升个补丁版本（比如 1.0.0 -> 1.0.1）不该让玩家丢进度，
        所以这里**不**拿它做加载门槛，只有 SAVE_VERSION 才是。 */
@@ -3885,6 +5016,8 @@ static int LoadSettings(void) {
     fovIndex = g_save.fov;
     vignetteOn = g_save.vignette;
     showFps = g_save.showFps;
+    hudDetail = g_save.hudDetail;
+    qteHint = g_save.qteHint;
     gammaValue = g_save.gamma;
     mouseSens = g_save.sens;
     shards = g_save.shards;
@@ -3956,11 +5089,19 @@ static void ContinueRun(void) {
     GenerateThemeTextures(themeId);   /* 主题变了，墙面/地板贴图要跟着重建 */
     SpawnMonster();
     SpawnLightBeast();
+    /* 读档不重掷跳脸虫：本关不会突然蹦出来。
+       触发器留成 -1，等下一层进关时再掷。 */
+    jumperTrigger = -1.0f;
+    jumperPhase = JMP_IDLE;
+    jumperTimer = 0.0f;
+    parasite.active = 0;
     runInProgress = 1;
     currentState = STATE_PLAYING;
     isMapOpen = 0;
     flashTime = 0.0f;
     healFlash = 0.0f;
+    ClearFx();
+    for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
     ForceCursor(0);
     firstMouseMove = 1;
     uiDirty = 1;
@@ -4062,6 +5203,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             steps++;
         }
         if (steps >= 16) accum = 0.0;
+        /* 一批逻辑更新跑完后再清按键边沿。
+           必须在批处理**之后**清 —— 一帧可能跑多次 Update，
+           在 Update 里清会把按键吞掉。 */
+        ClearKeyEdges();
 
         /* --- 渲染：按绝对时刻排程，帧数上限不会被渲染耗时吃掉 --- */
         int cap = fpsCaps[fpsCapIndex];
