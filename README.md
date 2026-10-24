@@ -59,10 +59,15 @@
 需要 GCC (MinGW-w64 / MSYS2 UCRT64)。
 
 ```bash
-gcc main.c -o canity.exe -O2 -Wall -lgdi32 -luser32 -lwinmm -mwindows
+# Git Bash / MSYS2（通配符由 shell 展开）
+gcc src/*.c -Iinclude -o canity.exe -O2 -Wall -Wextra -lgdi32 -luser32 -lwinmm -mwindows
+
+# cmd.exe（不展开通配符，逐文件列出）
+gcc src/main.c src/game.c src/entity.c src/render.c src/ui.c src/audio.c src/save.c -Iinclude -o canity.exe -O2 -Wall -Wextra -lgdi32 -luser32 -lwinmm -mwindows
 ```
 
-Windows 下也可以把上面这行存成 `build.bat` 双击运行。
+项目结构：`src/` 放 `.c` 源文件，`include/` 放 `.h` 头文件，
+公共常量与类型集中在 `include/common.h`。
 
 - `-O2` 必须保留 —— 没有优化时渲染核心慢 5 倍以上
 - `-lwinmm` 用于 `timeBeginPeriod(1)`，把 `Sleep` 精度从 ~15.6ms 提到 ~1ms
