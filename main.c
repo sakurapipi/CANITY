@@ -23,8 +23,8 @@
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 8          /* 整数版本，进存档做记录 */
-#define CANITY_VERSION_STR "1.5.1"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_NUM 10         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_STR "1.5.4"    /* 显示版本，窗口标题 / 主菜单 */
 
 #define MAP_WIDTH 24
 #define MAP_HEIGHT 24
@@ -33,7 +33,8 @@
 #define MAX_SCREEN 4096       /* renderW/renderH 的安全上限 */
 #define LOGIC_HZ 120.0        /* 逻辑步进频率，与渲染帧率无关 */
 #define LOGIC_STEP (1.0 / LOGIC_HZ)
-#define MOVE_SPEED 2.5f       /* 单位/秒 */
+#define MOVE_SPEED 2.0f       /* 单位/秒（基础走速） */
+#define SPRINT_MULT 1.5f      /* 冲刺倍率 */
 #define SANITY_DRAIN 0.5f     /* 理智/秒（满值约 200 秒） */
 #define MOUSE_BASE_SENS 0.002 /* 弧度/像素（1.0x） */
 
@@ -95,6 +96,7 @@ int settingsSelection = 0;
 int settingsPopupOpen = 0;
 int popupSelection = 0;
 int popupItem = -1;
+int rebindingAct = -1;       /* >=0 = 正在等待按键改绑的动作（ActionId），-1 = 未在改绑 */
 int uiDirty = 1;
 int sliderDragging = 0;
 
@@ -312,7 +314,15 @@ static int jumperResolved = 0;       /* 本次事件是否已结算（防止重�
 static float jumperTrigger = -1.0f;  /* 本关什么时候触发（秒）；<0 = 本关不出现 */
 
 int flares = 0, bottles = 0;
-typedef struct { float x, y; int type; float life; int active; } Thrown;  /* 0=荧光棒 */
+int throwSelected = 0;        /* 0=荧光棒, 1=玻璃瓶, 2=预留 */
+typedef struct { 
+    float x, y; 
+    float z, vz;       /* 抛物线高度和垂直速度 */
+    float vx, vy;      /* 水平速度 */
+    int type;          /* 0=荧光棒(飞行中/落地发光) 1=玻璃碎片 */
+    float life; 
+    int active; 
+} Thrown;  
 Thrown thrown[MAX_THROWN];
 
 /* ------------------------------------------------------------------ */
@@ -323,17 +333,35 @@ Thrown thrown[MAX_THROWN];
      thrown[]  —— 静止物（荧光棒 / 瓶子碎片），只管显示与被光敏怪追踪
      shot[]    —— 飞行物（玻璃瓶），带速度，撞到怪就结算伤害
    之前玻璃瓶是「瞬间在落点碎裂」，没有飞行过程，也就无从「砸中怪」。 */
-#define SHOT_SPEED 9.0f      /* 玻璃瓶飞行速度，单位/秒 */
+#define SHOT_SPEED 9.0f      /* 玻璃瓶基础飞行速度，单位/秒 */
+#define SHOT_MAX_SPEED 14.0f  /* 蓄力最大速度 */
 #define SHOT_RADIUS 0.35f    /* 命中判定半径（怪也是半径 0.24 的量级） */
 #define SHOT_DAMAGE 1        /* 一瓶砸掉几点血 */
+#define GRAVITY 9.8f         /* 重力加速度，格/秒² */
+#define SHOT_HEIGHT 1.6f     /* 手部高度（抛物线初始高度） */
+#define MAX_SHARD_LIFE 2.5f  /* 玻璃碎片存活时间 */
+#define SHARD_COUNT 10       /* 每次破碎产生的碎片数 */
+
 typedef struct {
-    float x, y;
-    float vx, vy;
+    float x, y;          /* 世界坐标（水平面） */
+    float z;             /* 高度（抛物线） */
+    float vx, vy, vz;    /* 速度向量 */
     int active;
-    float life;      /* 最长飞行时间，防止卡在墙里 */
-    float age;       /* 已经飞了多久：第一帧不判墙（出生点可能就贴着墙） */
+    float life;          /* 最长飞行时间 */
+    float age;           /* 已飞行时间 */
+    float charge;        /* 蓄力倍率 0.1~1.0 */
 } Shot;
 static Shot shot[MAX_SHOTS];
+
+/* 玻璃碎片：撞击时生成，带重力、随机扩散、逐渐变暗 */
+typedef struct {
+    float x, y, z;
+    float vx, vy, vz;
+    float life;
+    float age;
+    int active;
+} Shard;
+static Shard shards_debris[MAX_SHOTS * SHARD_COUNT];
 
 /* 安全屋：每关一个，站在里面缓慢回理智 */
 typedef struct { float x, y; int active; } SafeRoom;
@@ -367,10 +395,15 @@ float crankTimer = 0.0f;
 float throwCd = 0.0f;   /* 手摇进度 0..CRANK_TIME */
 float crankClick = 0.0f;
 int cranking = 0;
+int isCharging = 0;          /* 是否正在蓄力投掷 */
+float mouseCharge = 0.0f;    /* 蓄力进度 0..1 */
+int resetInputState = 0;     /* 请求重置输入边缘状态（跨局/菜单切换用） */
 double g_timeSec = 0.0;    /* 主循环时钟，渲染用它做动画 */
 float heartTimer = 0.0f;
 int searchedCount = 0;    /* 搜索过的容器数 */
 int hasSave = 0;          /* 是否有可继续的存档 */
+const char* pickupMsg = NULL;    /* 拾取提示文本 */
+float pickupMsgTimer = 0.0f;     /* 提示显示剩余时间 */
 int bestLevel = 0;
 float volumeF = 0.8f;     /* 0..1，0 = 静音 */
 int runInProgress = 0;    /* 当前是否有一局未结束 */
@@ -396,7 +429,7 @@ float staminaIdle = 0.0f;        /* 停止冲刺后的恢复延迟 */
 #define BATTERY_PICKUP 45.0f     /* 电池补给量 */
 #define STAMINA_DRAIN 26.0f      /* 冲刺每秒消耗 */
 #define STAMINA_REGEN 20.0f      /* 恢复每秒 */
-#define SPRINT_MULT 1.65f        /* 冲刺速度倍率 */
+#define SPRINT_MULT 1.5f      /* 冲刺速度倍率 */
 
 /* Gamma：0.7 ~ 1.6，1.0 为线性 */
 float gammaValue = 1.0f;
@@ -416,6 +449,111 @@ int keyPressed[256] = {0};
    所以边沿由主循环在一批逻辑更新**跑完之后**统一清。 */
 static void ClearKeyEdges(void) {
     for (int i = 0; i < 256; i++) keyPressed[i] = 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* 全局按键绑定系统                                                      */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+    ACT_MOVE_FWD = 0,      /* 前进 */
+    ACT_MOVE_BACK,         /* 后退 */
+    ACT_MOVE_LEFT,         /* 左移 */
+    ACT_MOVE_RIGHT,        /* 右移 */
+    ACT_SPRINT,            /* 冲刺 */
+    ACT_INTERACT,          /* 交互/搜索 */
+    ACT_CRANK,             /* 手摇发电 */
+    ACT_FLASHLIGHT,        /* 手电筒开关 */
+    ACT_MAP,               /* 切换地图 */
+    ACT_THROW,             /* 投掷当前选中 */
+    ACT_CANCEL_CHARGE,     /* 取消蓄力（右键） */
+    ACT_SELECT_1,          /* 选槽位 1 */
+    ACT_SELECT_2,          /* 选槽位 2 */
+    ACT_SELECT_3,          /* 选槽位 3 */
+    ACT_PAUSE,             /* 暂停/菜单 */
+    ACT_MENU_UP,           /* 菜单向上 */
+    ACT_MENU_DOWN,         /* 菜单向下 */
+    ACT_MENU_LEFT,         /* 菜单向左/滑块- */
+    ACT_MENU_RIGHT,        /* 菜单向右/滑块+ */
+    ACT_MENU_CONFIRM,      /* 菜单确认 */
+    ACT_MENU_CANCEL,       /* 菜单取消 */
+    ACT_COUNT
+} ActionId;
+
+/* 每个动作绑定一个虚拟键码，0=无绑定 */
+static int g_bindings[ACT_COUNT] = {
+    [ACT_MOVE_FWD]      = 'W',
+    [ACT_MOVE_BACK]     = 'S',
+    [ACT_MOVE_LEFT]     = 'A',
+    [ACT_MOVE_RIGHT]    = 'D',
+    [ACT_SPRINT]        = VK_SHIFT,
+    [ACT_INTERACT]       = 'E',
+    [ACT_CRANK]          = 'R',
+    [ACT_FLASHLIGHT]     = 'F',
+    [ACT_MAP]            = 'M',
+    [ACT_THROW]          = VK_LBUTTON,
+    [ACT_CANCEL_CHARGE]  = VK_RBUTTON,
+    [ACT_SELECT_1]       = '1',
+    [ACT_SELECT_2]       = '2',
+    [ACT_SELECT_3]       = '3',
+    [ACT_PAUSE]          = VK_ESCAPE,
+    [ACT_MENU_UP]        = VK_UP,
+    [ACT_MENU_DOWN]      = VK_DOWN,
+    [ACT_MENU_LEFT]      = VK_LEFT,
+    [ACT_MENU_RIGHT]     = VK_RIGHT,
+    [ACT_MENU_CONFIRM]   = VK_RETURN,
+    [ACT_MENU_CANCEL]    = VK_ESCAPE,
+};
+
+/* 设置菜单用的按键选项：名称与虚拟键码一一对应 */
+static const char* optKeys[] = {
+    "None", "1","2","3","4","5","6","7","8","9","0",
+    "A","B","C","D","E","F","G","H","I","J","K","L","M",
+    "N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
+    "Space","LShift","RShift","LCtrl","RCtrl","LAlt","RAlt",
+    "Up","Down","Left","Right","Enter","Esc","Tab",
+    "LMB","RMB","MMB"
+};
+/* 对应的虚拟键码，与 optKeys 下标一一对应 */
+static const int optKeyVKs[] = {
+    0, '1','2','3','4','5','6','7','8','9','0',
+    'A','B','C','D','E','F','G','H','I','J','K','L','M',
+    'N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
+    VK_SPACE, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU,
+    VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, VK_TAB,
+    VK_LBUTTON, VK_RBUTTON, VK_MBUTTON
+};
+#define OPT_KEY_COUNT ((int)(sizeof(optKeys)/sizeof(optKeys[0])))
+
+/* 改绑提示框用的动作名（下标 = ActionId） */
+static const char* actionNames[ACT_COUNT] = {
+    "MOVE FORWARD", "MOVE BACKWARD", "MOVE LEFT", "MOVE RIGHT",
+    "SPRINT", "INTERACT", "CRANK BATTERY", "FLASHLIGHT", "TOGGLE MAP",
+    "THROW", "CANCEL CHARGE", "SELECT FLARE", "SELECT BOTTLE", "SELECT SLOT 3",
+    "PAUSE", "MENU UP", "MENU DOWN", "MENU LEFT", "MENU RIGHT",
+    "MENU CONFIRM", "MENU CANCEL"
+};
+/* 编译期守卫：表项数量必须与动作数一致，漏一个改绑框就会画到 NULL */
+typedef char actionNamesSizeCheck[(ACT_COUNT == (int)(sizeof(actionNames) / sizeof(actionNames[0]))) ? 1 : -1];
+
+/* 统一按键查询：键盘走 keys[]/keyPressed[]，鼠标走 GetAsyncKeyState */
+static inline int IsActionDown(ActionId act) {
+    int vk = g_bindings[act];
+    if (vk == 0) return 0;
+    if (vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON) {
+        return (GetAsyncKeyState(vk) & 0x8000) != 0;
+    }
+    return keys[vk];
+}
+
+static inline int IsActionPressed(ActionId act) {
+    int vk = g_bindings[act];
+    if (vk == 0) return 0;
+    if (vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON) {
+        /* 鼠标边缘触发简化：这里只返回按下状态，Update 里用前一帧对比实现边缘 */
+        return (GetAsyncKeyState(vk) & 0x8000) != 0;
+    }
+    return keyPressed[vk];
 }
 
 POINT lastMousePos;
@@ -454,8 +592,21 @@ typedef struct {
     int* value;                   /* SET_LIST */
     float* fvalue;                /* SET_SLIDER */
     float fmin, fmax, fstep;
-    int page;                     /* 1=VIDEO 2=INPUT 3=GAME */
+    int group;                    /* 分类页：1=Display 2=Movement 3=Actions 4=Menu Keys 5=Gameplay */
 } SettingItem;
+
+/* 该设置项是否是键位绑定（value 指向 g_bindings 的某一项）。
+   是的话返回对应 ActionId，否则返回 -1。
+   之前这里是一串 21 项的地址比较链，三处各抄一份，漏一个就出 bug。 */
+static int BindActionOfItem(const SettingItem* it) {
+    for (int a = 0; a < ACT_COUNT; a++)
+        if (it->value == &g_bindings[a]) return a;
+    return -1;
+}
+
+static int IsKeyBindItem(const SettingItem* it) {
+    return it->kind == SET_LIST && BindActionOfItem(it) >= 0;
+}
 
 static const char* optRes[5] = {"800 x 600", "1024 x 768", "1280 x 720", "1600 x 900", "1920 x 1080"};
 static const char* optFps[5] = {"30", "60", "120", "144", "Unlimited"};
@@ -469,36 +620,94 @@ static const char* optHud[3] = {"Minimal", "Normal", "Full"};
 static const char* optQte[2] = {"Minimal", "Full"};
 
 static SettingItem settings[] = {
-    {"Resolution",   SET_LIST,   optRes,   5, &resIndex,         NULL,      0,    0,    0, 1},
-    {"Fullscreen",   SET_LIST,   optOnOff, 2, &isFullscreen,     NULL,      0,    0,    0, 1},
-    {"Frame Limit",  SET_LIST,   optFps,   5, &fpsCapIndex,      NULL,      0,    0,    0, 1},
-    {"Render Scale", SET_LIST,   optScale, 4, &renderScaleIndex, NULL,      0,    0,    0, 1},
-    {"Gamma",        SET_SLIDER, NULL,     0, NULL,              &gammaValue, 0.7f, 1.6f, 0.05f, 1},
-    {"Mouse Sens.",  SET_SLIDER, NULL,     0, NULL,              &mouseSens, 0.2f, 3.0f, 0.1f, 2},
-    {"Field of View", SET_LIST,  optFov,   5, &fovIndex,         NULL,      0,    0,    0, 2},
-    {"Volume",       SET_SLIDER, NULL,     0, NULL,              &volumeF,  0.0f, 1.0f, 0.05f, 3},
-    {"Sanity FX",    SET_LIST,   optOnOff, 2, &vignetteOn,       NULL,      0,    0,    0, 3},
-    {"Show FPS",     SET_LIST,   optOnOff, 2, &showFps,          NULL,      0,    0,    0, 3},
-    {"HUD Detail",   SET_LIST,   optHud,   3, &hudDetail,        NULL,      0,    0,    0, 3},
-    {"QTE Hint",     SET_LIST,   optQte,   2, &qteHint,          NULL,      0,    0,    0, 3},
+    /* ========== 分类 1: DISPLAY ========== */
+    {"Resolution",      SET_LIST,   optRes,      5, &resIndex,          NULL,      0,    0,    0, 1},
+    {"Fullscreen",      SET_LIST,   optOnOff,    2, &isFullscreen,      NULL,      0,    0,    0, 1},
+    {"Frame Limit",     SET_LIST,   optFps,      5, &fpsCapIndex,       NULL,      0,    0,    0, 1},
+    {"Render Scale",    SET_LIST,   optScale,    4, &renderScaleIndex,  NULL,      0,    0,    0, 1},
+    {"Gamma",           SET_SLIDER, NULL,        0, NULL,               &gammaValue, 0.7f, 1.6f, 0.05f, 1},
+    {"Field of View",   SET_LIST,   optFov,      5, &fovIndex,          NULL,      0,    0,    0, 1},
+
+    /* ========== 分类: KEY BINDINGS / MOVEMENT ========== */
+    {"Move Forward",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MOVE_FWD],      NULL, 0, 0, 0, 3},
+    {"Move Backward",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MOVE_BACK],     NULL, 0, 0, 0, 3},
+    {"Move Left",       SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MOVE_LEFT],     NULL, 0, 0, 0, 3},
+    {"Move Right",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MOVE_RIGHT],    NULL, 0, 0, 0, 3},
+    {"Sprint",          SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SPRINT],        NULL, 0, 0, 0, 3},
+
+    /* ========== 分类: KEY BINDINGS / ACTIONS ========== */
+    {"Interact",        SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_INTERACT],      NULL, 0, 0, 0, 4},
+    {"Crank Battery",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_CRANK],         NULL, 0, 0, 0, 4},
+    {"Flashlight",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_FLASHLIGHT],    NULL, 0, 0, 0, 4},
+    {"Toggle Map",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MAP],           NULL, 0, 0, 0, 4},
+    {"Throw",           SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_THROW],         NULL, 0, 0, 0, 4},
+    {"Cancel Charge",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_CANCEL_CHARGE], NULL, 0, 0, 0, 4},
+    {"Select Flare",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_1],      NULL, 0, 0, 0, 4},
+    {"Select Bottle",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_2],      NULL, 0, 0, 0, 4},
+    {"Select Slot 3",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_3],      NULL, 0, 0, 0, 4},
+
+    /* ========== 分类: KEY BINDINGS / MENU KEYS ========== */
+    {"Pause",           SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PAUSE],         NULL, 0, 0, 0, 5},
+    {"Menu Up",         SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_UP],       NULL, 0, 0, 0, 5},
+    {"Menu Down",       SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_DOWN],     NULL, 0, 0, 0, 5},
+    {"Menu Left",       SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_LEFT],     NULL, 0, 0, 0, 5},
+    {"Menu Right",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_RIGHT],    NULL, 0, 0, 0, 5},
+    {"Menu Confirm",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_CONFIRM],  NULL, 0, 0, 0, 5},
+    {"Menu Cancel",     SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_CANCEL],   NULL, 0, 0, 0, 5},
+
+    /* ========== 分类: GAMEPLAY ========== */
+    {"Mouse Sens.",     SET_SLIDER, NULL,        0, NULL, &mouseSens, 0.2f, 3.0f, 0.1f, 6},
+    {"Volume",          SET_SLIDER, NULL,        0, NULL, &volumeF,  0.0f, 1.0f, 0.05f, 6},
+    {"Sanity FX",       SET_LIST,   optOnOff,    2, &vignetteOn,        NULL,      0,    0,    0, 6},
+    {"Show FPS",        SET_LIST,   optOnOff,    2, &showFps,           NULL,      0,    0,    0, 6},
+    {"HUD Detail",      SET_LIST,   optHud,      3, &hudDetail,         NULL,      0,    0,    0, 6},
+    {"QTE Hint",        SET_LIST,   optQte,      2, &qteHint,           NULL,      0,    0,    0, 6},
 };
+
 #define SETTING_COUNT ((int)(sizeof(settings) / sizeof(settings[0])))
 
-/* 设置菜单分页：0=根目录（三个分类 + Back），1..3=分类页 */
+/* 设置菜单分页（树状）：
+      0 = 根目录：Display / Key Bindings / Gameplay / Back
+      1 = Display 页
+      2 = Key Bindings 子目录：Movement / Actions / Menu Keys / Back
+      3..5 = Movement / Actions / Menu Keys 键位页
+      6 = Gameplay 页
+    页 2 是纯目录，没有设置项。 */
+enum { SETPAGE_ROOT = 0, SETPAGE_DISPLAY = 1, SETPAGE_BINDDIR = 2,
+       SETPAGE_MOVE = 3, SETPAGE_ACT = 4, SETPAGE_MENUKEYS = 5, SETPAGE_GAME = 6 };
 static int settingsPage = 0;
-static const char* pageNames[3] = {"Video", "Input", "Game"};
 
-/* 当前页包含的设置项下标，返回个数 */
+/* 每页标题（下标 = settingsPage） */
+static const char* PageTitle(int page) {
+    switch (page) {
+        case SETPAGE_DISPLAY:  return "DISPLAY";
+        case SETPAGE_BINDDIR:  return "KEY BINDINGS";
+        case SETPAGE_MOVE:     return "MOVEMENT";
+        case SETPAGE_ACT:      return "ACTIONS";
+        case SETPAGE_MENUKEYS: return "MENU KEYS";
+        case SETPAGE_GAME:     return "GAMEPLAY";
+        default:               return "SETTINGS";
+    }
+}
+
+/* 根目录 / Key Bindings 子目录的行文字，以及每行对应跳转的页 */
+static const char* rootCategoryNames[3] = {"Display", "Key Bindings", "Gameplay"};
+static const int   rootCategoryPages[3] = {SETPAGE_DISPLAY, SETPAGE_BINDDIR, SETPAGE_GAME};
+static const char* bindCategoryNames[3] = {"Movement", "Actions", "Menu Keys"};
+static const int   bindCategoryPages[3] = {SETPAGE_MOVE, SETPAGE_ACT, SETPAGE_MENUKEYS};
+
+/* 当前页包含的设置项下标，返回个数。页 0/2 是目录，没有设置项。 */
 static int PageItems(int* out) {
-    if (settingsPage < 1 || settingsPage > 3) return 0;
+    if (settingsPage == SETPAGE_ROOT || settingsPage == SETPAGE_BINDDIR) return 0;
+    if (settingsPage < 1 || settingsPage > 6) return 0;
     int n = 0;
     for (int i = 0; i < SETTING_COUNT; i++)
-        if (settings[i].page == settingsPage) out[n++] = i;
+        if (settings[i].group == settingsPage) out[n++] = i;
     return n;
 }
 
 static int SettingsRowCount(void) {
-    if (settingsPage < 1) return 3 + 1;     /* 三个分类 + Back */
+    if (settingsPage == SETPAGE_ROOT || settingsPage == SETPAGE_BINDDIR) return 3 + 1;  /* 三个分类 + Back */
     int tmp[SETTING_COUNT];
     return PageItems(tmp) + 1;              /* 若干项 + Back */
 }
@@ -515,12 +724,13 @@ void UpdateMonster(float dt);
 void UpdateLightBeast(float dt);
 void SpawnLightBeast(void);
 void SpawnParasite(void);
-static void ThrowItem(int type);
+static void ThrowItem(int type, float charge);
+static void SpawnShards(float x, float y, float vx, float vy, float charge);
 int HasLOS(float x0, float y0, float x1, float y1);
 void MakeNoise(float x, float y, float radius);
 
 /* 前置声明：音效 */
-enum { SFX_STEP = 0, SFX_HEART, SFX_PICKUP, SFX_POWER, SFX_GATE, SFX_CRANK, SFX_SCREAM, SFX_GLASS, SFX_COUNT };
+enum { SFX_STEP = 0, SFX_HEART, SFX_PICKUP, SFX_POWER, SFX_GATE, SFX_CRANK, SFX_SCREAM, SFX_GLASS, SFX_SEARCH, SFX_THROW, SFX_COUNT };
 void PlaySfx(int id, float vol);
 void InitAudio(void);
 void ShutdownAudio(void);
@@ -969,7 +1179,12 @@ void GenerateLevel(void) {
     for (int y = 1; y <= 3; y++)
         for (int x = 1; x <= 3; x++) worldMap[y][x] = 0;
 
-    /* 出口与药箱候选：离出生点足够远 */
+    /* 出口门：固定在出生点正前方（右侧），锁死等待配电箱通电 */
+    /* 生成迷宫时保证出生点右侧有通路 */
+    worldMap[1][2] = 0; worldMap[1][3] = 0;  /* 确保右侧有路 */
+    exitX = 3.5f; exitY = 1.5f;  /* 出生点 (1.5,1.5) 正右方 2 格 */
+
+    /* 收集空地用于放置容器/配电箱/安全屋（排除出生区和出口周围） */
     static int cells[MAP_WIDTH * MAP_HEIGHT][2];
     int emptyCount = 0;
     for (int y = 1; y < MAP_HEIGHT - 1; y++) {
@@ -982,12 +1197,8 @@ void GenerateLevel(void) {
         }
     }
 
-    exitX = posX; exitY = posY;
-    if (emptyCount > 0) {
-        int idx = rand() % emptyCount;
-        exitX = cells[idx][0] + 0.5f;
-        exitY = cells[idx][1] + 0.5f;
-    }
+    exitX = 3.5f; exitY = 1.5f;  /* 出口门固定在出生点右侧 2 格 */
+    breakerOpen = 0;  /* 出口门锁死，需通电开启 */
 
     /* 容器 / 保险丝 / 配电箱 */
     for (int i = 0; i < MAX_CONTAINERS; i++) containers[i].active = 0;
@@ -1029,34 +1240,62 @@ void GenerateLevel(void) {
     fusesNeeded = 2 + currentLevel / 3;
     if (fusesNeeded > 4) fusesNeeded = 4;
 
-    if (emptyCount > 10) {
-        int attempts = 0;
-        /* 容器：基准 4~6 个，离出生点和出口都远一点。
-           CRAMPED 减 2，RICH 加 2 —— 词条真正改变容器数量，
-           数组上界 MAX_CONTAINERS 已按 RICH 的最大值留好余量。 */
-        int contCap = ContainerTargetCount(levelMod, CONTAINERS_BASE - 2 + (rand() % 3));
-        while (containerCount < contCap && attempts < 512) {
-            attempts++;
-            int idx = rand() % emptyCount;
-            float cx = cells[idx][0] + 0.5f, cy = cells[idx][1] + 0.5f;
-            if (Dist2(cx, cy, exitX, exitY) < 9.0f) continue;
-            if (!SpotClear(cx, cy, 1.6f, 1, -1)) continue;
+    /* 容器两阶段生成：
+       阶段1：必须先放够 fusesNeeded 个箱子（每个保险丝一个箱子）
+       阶段2：继续填充到 contCap（词条 RICH/CRAMPED 影响这个上限） */
+    int contCap = ContainerTargetCount(levelMod, CONTAINERS_BASE - 2 + (rand() % 3));
+    if (contCap < fusesNeeded) contCap = fusesNeeded;
 
-            int ok = 1;
-            for (int k = 0; k < containerCount; k++)
-                if (Dist2(cx, cy, containers[k].x, containers[k].y) < 2.0f) { ok = 0; break; }
-            if (!ok) continue;
+    int attempts = 0;
+    /* 阶段1：保证 fusesNeeded 个箱子 */
+    while (containerCount < fusesNeeded && attempts < 512) {
+        attempts++;
+        int idx = rand() % emptyCount;
+        float cx = cells[idx][0] + 0.5f, cy = cells[idx][1] + 0.5f;
+        if (Dist2(cx, cy, exitX, exitY) < 9.0f) continue;
+        if (!SpotClear(cx, cy, 1.6f, 1, -1)) continue;
 
-            containers[containerCount].x = cx;
-            containers[containerCount].y = cy;
-            containers[containerCount].searched = 0;
-            containers[containerCount].content = 0;
-            containers[containerCount].active = 1;
-            containerCount++;
-        }
+        int ok = 1;
+        for (int k = 0; k < containerCount; k++)
+            if (Dist2(cx, cy, containers[k].x, containers[k].y) < 2.0f) { ok = 0; break; }
+        if (!ok) continue;
 
-        /* 把保险丝塞进随机的容器里，剩下的给电池或空 */
-        int need = fusesNeeded;
+        containers[containerCount].x = cx;
+        containers[containerCount].y = cy;
+        containers[containerCount].searched = 0;
+        containers[containerCount].content = 0;  /* 先占位，后面再分发内容 */
+        containers[containerCount].active = 1;
+        containerCount++;
+    }
+
+    /* 阶段2：继续填充到 contCap（受词条影响） */
+    attempts = 0;
+    while (containerCount < contCap && attempts < 512) {
+        attempts++;
+        int idx = rand() % emptyCount;
+        float cx = cells[idx][0] + 0.5f, cy = cells[idx][1] + 0.5f;
+        if (Dist2(cx, cy, exitX, exitY) < 9.0f) continue;
+        if (!SpotClear(cx, cy, 1.6f, 1, -1)) continue;
+
+        int ok = 1;
+        for (int k = 0; k < containerCount; k++)
+            if (Dist2(cx, cy, containers[k].x, containers[k].y) < 2.0f) { ok = 0; break; }
+        if (!ok) continue;
+
+        containers[containerCount].x = cx;
+        containers[containerCount].y = cy;
+        containers[containerCount].searched = 0;
+        containers[containerCount].content = 0;
+        containers[containerCount].active = 1;
+        containerCount++;
+    }
+
+        /* 把保险丝塞进随机的容器里，剩下的给电池或空。
+       保证至少留 2 个格子给非保险丝物品，避免全是保险丝。 */
+        int maxFuses = fusesNeeded;
+        if (maxFuses > containerCount - 2) maxFuses = containerCount - 2;  /* 至少留 2 格给其他物品 */
+        if (maxFuses < 0) maxFuses = 0;
+        int need = maxFuses;
         for (int guard = 0; guard < 64 && need > 0 && containerCount > 0; guard++) {
             int k = rand() % containerCount;
             if (containers[k].content == 0) {
@@ -1110,12 +1349,12 @@ void GenerateLevel(void) {
         break;
     }
 
-    /* 配电箱：放在离出口 2~5 格的空位 */
+    /* 配电箱：放在离出生点 15 格以上的远处，迫使玩家深入探索 */
         for (int t = 0; t < 256; t++) {
             int idx = rand() % emptyCount;
             float bx = cells[idx][0] + 0.5f, by = cells[idx][1] + 0.5f;
-            float d = Dist2(bx, by, exitX, exitY);
-            if (d < 4.0f || d > 30.0f) continue;
+            float dFromSpawn = Dist2(bx, by, 1.5f, 1.5f);
+            if (dFromSpawn < 225.0f) continue;  /* 离出生点至少 15 格 (15^2=225) */
             if (!SpotClear(bx, by, 1.6f, 2, -1)) continue;
             breaker.x = bx;
             breaker.y = by;
@@ -1123,7 +1362,6 @@ void GenerateLevel(void) {
             break;
         }
     }
-}
 
 
 /* ------------------------------------------------------------------ */
@@ -1586,12 +1824,12 @@ static void DrawParasiteSprite(void) {
     }
 }
 
-/* 荧光棒：扔在地上持续发光。
-   注意：玻璃瓶曾经也会进这个数组（type==1，画成碎片），
-   现在瓶子改成了飞行弹丸（shot[]），这条路径已经不存在了。 */
+/* 荧光棒：飞行中/落地发光，按 z 投影 */
 static void DrawFlareSprite(int idx) {
     if (!thrown[idx].active) return;
-    SpriteBox s = ProjectSprite(thrown[idx].x, thrown[idx].y, 0.0f, 0.30f);
+    /* 飞行中用 z 投影，落地用地面投影 */
+    float lift = thrown[idx].z > 0.0f ? thrown[idx].z / 10.0f : 0.0f;
+    SpriteBox s = ProjectSprite(thrown[idx].x, thrown[idx].y, lift, 0.30f);
     if (!s.ok) return;
     int spanX = s.x1 - s.x0;
     int spanY = s.y1 - s.y0;
@@ -1617,31 +1855,115 @@ static void DrawFlareSprite(int idx) {
             if (d2 < 0.16f) PutPixelAdd(x, y, 0x00fff8e0u, 0.55f * flick);
         }
     }
+    /* 飞行中在投影下方画个小影子 */
+    if (thrown[idx].z > 0.0f) {
+        int sx = s.x0 + spanX / 2;
+        int sy = s.y1 - 2;
+        for (int dy = -2; dy <= 2; dy++)
+            for (int dx = -2; dx <= 2; dx++)
+                if (dx*dx + dy*dy <= 4)
+                    PutPixelAdd(sx + dx, sy + dy, 0x00101010u, 0.4f);
+    }
 }
 
-/* 飞行中的玻璃瓶：一小块冷色高光 + 一点拖影。
-   它必须在画面上可见 —— 玩家要能判断「我这一瓶往哪飞」。 */
+/* 飞行中的玻璃瓶：抛物线轨迹 + 瓶身 + 拖影 + 发光 */
 static void DrawShotSprite(int idx) {
     if (!shot[idx].active) return;
-    SpriteBox s = ProjectSprite(shot[idx].x, shot[idx].y, 0.10f, 0.10f);
+
+    /* 计算屏幕投影：考虑高度 z */
+    SpriteBox s = ProjectSprite(shot[idx].x, shot[idx].y, shot[idx].z / 10.0f, 0.15f);  /* 稍大投影 */
     if (!s.ok) return;
 
     int cx = (s.x0 + s.x1) / 2;
     int cy = (s.y0 + s.y1) / 2;
-    float light = (flashlightOn && battery > 0.0f) ? 1.0f : 0.6f;
+    float light = (flashlightOn && battery > 0.0f) ? 1.0f : 0.7f;
 
-    /* 瓶身：一个 3x3 的亮色块 */
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
+    /* 拖影：更长、更亮、渐变色 */
+    for (int t = 1; t <= 6; t++) {
+        float alpha = 0.25f / t;
+        int gx = cx - (int)(shot[idx].vx * t * 0.025f * renderW / 800.0f);
+        int gy = cy - (int)(shot[idx].vy * t * 0.025f * renderH / 600.0f);
+        if (gx >= 0 && gx < renderW && gy >= 0 && gy < renderH && s.ty < zBuffer[gx]) {
+            /* 拖影颜色随时间从蓝变青 */
+            unsigned int trailCol = (t <= 2) ? 0x0040e0ffu : 0x0080ffe0u;
+            PutPixelAdd(gx, gy, trailCol, alpha * light);
+        }
+    }
+
+    /* 瓶身：根据高度调整大小，最小也要 3 像素半径 */
+    int size = 3 + (int)(5.0f * (1.0f - shot[idx].z / 4.0f));
+    if (size < 3) size = 3;
+    for (int dy = -size; dy <= size; dy++) {
+        for (int dx = -size; dx <= size; dx++) {
             int x = cx + dx, y = cy + dy;
             if (x < 0 || x >= renderW || y < 0 || y >= renderH) continue;
             if (s.ty >= zBuffer[x]) continue;
-            PutPixelAdd(x, y, 0x00bfe8ffu, 0.85f * light);
+            float dist = sqrtf(dx*dx + dy*dy);
+            if (dist > size) continue;
+            float a = 1.0f - dist / (size + 0.5f);
+            /* 瓶身：玻璃蓝绿，边缘更亮 */
+            unsigned int bottleCol = (dist < size * 0.4f) ? 0x0060ffffu : 0x0040c0d0u;
+            PutPixelAdd(x, y, bottleCol, a * 0.95f * light);
         }
     }
-    /* 中心更亮 */
+    /* 核心高光 */
     if (cx >= 0 && cx < renderW && cy >= 0 && cy < renderH && s.ty < zBuffer[cx])
-        PutPixelAdd(cx, cy, 0x00ffffffu, 0.95f * light);
+        PutPixelAdd(cx, cy, 0x00ffffffu, 1.0f * light);
+    /* 次级高光环 */
+    for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++)
+            if (dx*dx + dy*dy <= 1)
+                PutPixelAdd(cx+dx, cy+dy, 0x00e0ffffu, 0.6f * light);
+
+    /* 抛物线轨迹预览：更亮、更长、实线感 */
+    if (shot[idx].age < 0.8f) {
+        for (int k = 1; k <= 12; k++) {
+            float ft = k * 0.12f;
+            float px = shot[idx].x + shot[idx].vx * ft;
+            float py = shot[idx].y + shot[idx].vy * ft;
+            float pz = shot[idx].z + shot[idx].vz * ft - 0.5f * GRAVITY * ft * ft;
+            if (pz <= 0.0f) break;
+            SpriteBox ps = ProjectSprite(px, py, pz / 10.0f, 0.04f);
+            if (ps.ok) {
+                int gx = (ps.x0 + ps.x1) / 2;
+                int gy = (ps.y0 + ps.y1) / 2;
+                if (gx >= 0 && gx < renderW && gy >= 0 && gy < renderH) {
+                    float trailAlpha = 0.5f * (1.0f - k * 0.07f);
+                    PutPixelAdd(gx, gy, 0x0060c0ffu, trailAlpha);
+                }
+            }
+        }
+    }
+}
+
+/* 绘制玻璃碎片 */
+static void DrawShardSprite(void) {
+    for (int i = 0; i < MAX_SHOTS * SHARD_COUNT; i++) {
+        if (!shards_debris[i].active) continue;
+        SpriteBox s = ProjectSprite(shards_debris[i].x, shards_debris[i].y, shards_debris[i].z / 10.0f, 0.05f);
+        if (!s.ok) continue;
+
+        int cx = (s.x0 + s.x1) / 2;
+        int cy = (s.y0 + s.y1) / 2;
+        float lifeRatio = shards_debris[i].life / MAX_SHARD_LIFE;
+        float alpha = 0.7f * lifeRatio;
+        if (alpha < 0.05f) continue;
+
+        /* 碎片：小菱形闪光 */
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) continue;
+                if (abs(dx) + abs(dy) != 1) continue;  /* 菱形 */
+                int x = cx + dx, y = cy + dy;
+                if (x < 0 || x >= renderW || y < 0 || y >= renderH) continue;
+                if (s.ty >= zBuffer[x]) continue;
+                PutPixelAdd(x, y, 0x00d0e0ffu, alpha);
+            }
+        }
+        /* 中心 */
+        if (cx >= 0 && cx < renderW && cy >= 0 && cy < renderH && s.ty < zBuffer[cx])
+            PutPixelAdd(cx, cy, 0x00ffffffu, alpha * 1.5f);
+    }
 }
 
 static void DrawFlowerSprite(void) {
@@ -1794,6 +2116,8 @@ void RenderSprites(void) {
             default: DrawExitBeamSprite(); break;
         }
     }
+    /* 玻璃碎片：不在深度排序里，直接画在最后（覆盖在所有 billboard 之上） */
+    DrawShardSprite();
 }
 
 
@@ -2835,43 +3159,50 @@ void RenderMap(void) {
 /* 逻辑更新（固定步长，dt = LOGIC_STEP）                                */
 /* ------------------------------------------------------------------ */
 
-static void ThrowItem(int type) {
-    float px = posX, py = posY;
-    for (int i = 0; i < 30; i++) {
-        float nx = px + dirX * 0.22f, ny = py + dirY * 0.22f;
-        if (Blocked(nx, ny)) break;
-        px = nx; py = ny;
-    }
-    if (type == 1) {
-        /* 玻璃瓶：现在是一个飞行弹丸，砸中怪会造成伤害。
-           出生点必须用**玩家位置**，不能用上面算出来的 px/py ——
-           那个 px/py 是「扔到墙上的落点」，最多能到 6.6 格外，
-           瓶子一出生就飞过怪了。
+static void ThrowItem(int type, float charge) {
+    if (charge < 0.1f) charge = 0.1f;
+    if (charge > 1.0f) charge = 1.0f;
 
-           也不能简单地往前挪 0.3 格：贴墙站着时那 0.3 格会进墙格，
-           弹丸一生成就被判定「撞墙」碎掉。
-           所以从**玩家所在的格子**出发，让它自己飞出去。 */
-        float sx = posX, sy = posY;
+    float speed = SHOT_SPEED + (SHOT_MAX_SPEED - SHOT_SPEED) * charge;
+    float angle = 0.35f * charge;  /* 抛物线角度：蓄力越高越平直 */
+
+    if (type == 1) {
+        /* 玻璃瓶：抛物线飞行弹丸 */
         for (int i = 0; i < MAX_SHOTS; i++) {
             if (shot[i].active) continue;
-            shot[i].x = sx; shot[i].y = sy;
-            shot[i].vx = dirX * SHOT_SPEED;
-            shot[i].vy = dirY * SHOT_SPEED;
-            shot[i].life = 0.9f;
+            shot[i].x = posX;
+            shot[i].y = posY;
+            shot[i].z = SHOT_HEIGHT;
+            shot[i].vx = dirX * speed * cosf(angle);
+            shot[i].vy = dirY * speed * cosf(angle);
+            shot[i].vz = speed * sinf(angle);  /* 向上分量 */
+            shot[i].life = 2.0f;
             shot[i].age = 0.0f;
+            shot[i].charge = charge;
             shot[i].active = 1;
             break;
         }
-        PlaySfx(SFX_PICKUP, 0.5f);
+        PlaySfx(SFX_THROW, 0.6f);  /* 投掷专用音效：呼啸+出手闷响 */
         return;
     }
+
+    /* 荧光棒：抛物线飞行，落地后转为静止发光体 */
+    float flareSpeed = 7.0f + charge * 5.0f;  /* 7~12 格/秒 */
+    float flareAngle = 0.4f + charge * 0.3f;  /* 0.4~0.7 rad ≈ 23~40° */
     for (int i = 0; i < MAX_THROWN; i++) {
         if (thrown[i].active) continue;
-        thrown[i].x = px; thrown[i].y = py;
-        thrown[i].type = 0; thrown[i].life = 25.0f; thrown[i].active = 1;
+        thrown[i].x = posX;
+        thrown[i].y = posY;
+        thrown[i].z = SHOT_HEIGHT;
+        thrown[i].vz = flareSpeed * sinf(flareAngle);
+        thrown[i].vx = dirX * flareSpeed * cosf(flareAngle);
+        thrown[i].vy = dirY * flareSpeed * cosf(flareAngle);
+        thrown[i].type = 0;        /* 0=荧光棒 */
+        thrown[i].life = 25.0f;    /* 落地后发光时长 */
+        thrown[i].active = 1;
         break;
     }
-    PlaySfx(SFX_PICKUP, 0.5f);
+    PlaySfx(SFX_THROW, 0.6f);  /* 投掷专用音效：呼啸+出手闷响 */
 }
 
 /* ------------------------------------------------------------------ */
@@ -2922,50 +3253,108 @@ static int HitMonster(Monster* m, int dmg) {
     return 1;
 }
 
-/* 推进所有飞行中的玻璃瓶，结算命中 */
+/* 推进所有飞行中的玻璃瓶，结算命中 + 抛物线 + 碎片 */
 static void UpdateShots(float dt) {
     for (int i = 0; i < MAX_SHOTS; i++) {
         if (!shot[i].active) continue;
         shot[i].life -= dt;
         shot[i].age += dt;
 
-        /* 分段推进，避免高速穿过怪。
-           注意：vx/vy 存的是**速度**（格/秒），每步位移 = 速度 × dt / 段数。
-           早先误把 vx 直接当每步位移用，弹丸一帧就飞出去 9 格 —— 整局都砸不到怪。 */
-        float stepLen = SHOT_SPEED * dt;
+        /* 分段推进，避免高速穿过怪 */
+        float stepLen = sqrtf(shot[i].vx*shot[i].vx + shot[i].vy*shot[i].vy + shot[i].vz*shot[i].vz) * dt;
         int steps = (int)(stepLen / 0.12f) + 1;
         float sdx = shot[i].vx * dt / (float)steps;
         float sdy = shot[i].vy * dt / (float)steps;
+        float sdz = shot[i].vz * dt / (float)steps;
 
         for (int s = 0; s < steps && shot[i].active; s++) {
             shot[i].x += sdx;
             shot[i].y += sdy;
+            shot[i].z += sdz;
+            shot[i].vz -= GRAVITY * dt / (float)steps;  /* 重力 */
 
-            /* 撞墙：碎掉。
-               第一帧跳过 —— 出生点就在玩家脚下的格子里，
-               贴墙站着时那一格可能已经是墙，判早了瓶子一扔就碎。 */
-            if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
+            /* 撞地面：碎裂生成碎片 */
+            if (shot[i].z <= 0.0f) {
+                shot[i].z = 0.0f;
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 PlaySfx(SFX_GLASS, 0.7f);
                 MakeNoise(shot[i].x, shot[i].y, 14.0f);
                 shot[i].active = 0;
                 break;
             }
+
+            /* 撞墙：碎裂生成碎片 */
+            if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+                PlaySfx(SFX_GLASS, 0.7f);
+                MakeNoise(shot[i].x, shot[i].y, 14.0f);
+                shot[i].active = 0;
+                break;
+            }
+
             /* 撞怪 */
             float r = SHOT_RADIUS + 0.24f;
             if (monster.active && Dist2(shot[i].x, shot[i].y, monster.x, monster.y) < r * r) {
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 HitMonster(&monster, SHOT_DAMAGE);
                 shot[i].active = 0;
                 break;
             }
             if (lightBeast.active && Dist2(shot[i].x, shot[i].y, lightBeast.x, lightBeast.y) < r * r) {
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 HitMonster(&lightBeast, SHOT_DAMAGE);
                 shot[i].active = 0;
                 break;
             }
-            /* 跳脸虫不在这里判定 —— 它是屏幕空间的 QTE 事件，
-               不在世界里，瓶子砸不到它。 */
         }
-        if (shot[i].life <= 0.0f) shot[i].active = 0;
+        if (shot[i].life <= 0.0f) {
+            /* 超时落地也生成碎片 */
+            if (shot[i].z > 0.0f) {
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+            }
+            shot[i].active = 0;
+        }
+    }
+
+    /* 更新玻璃碎片 */
+    for (int i = 0; i < MAX_SHOTS * SHARD_COUNT; i++) {
+        if (!shards_debris[i].active) continue;
+        shards_debris[i].age += dt;
+        shards_debris[i].life -= dt;
+        shards_debris[i].x += shards_debris[i].vx * dt;
+        shards_debris[i].y += shards_debris[i].vy * dt;
+        shards_debris[i].z += shards_debris[i].vz * dt;
+        shards_debris[i].vz -= GRAVITY * dt;
+        if (shards_debris[i].z <= 0.0f) {
+            shards_debris[i].z = 0.0f;
+            shards_debris[i].vz *= -0.3f;  /* 反弹衰减 */
+            shards_debris[i].vx *= 0.7f;
+            shards_debris[i].vy *= 0.7f;
+        }
+        if (shards_debris[i].life <= 0.0f) {
+            shards_debris[i].active = 0;
+        }
+    }
+}
+
+/* 生成玻璃碎片：撞击点产生随机扩散的碎片 */
+static void SpawnShards(float x, float y, float vx, float vy, float charge) {
+    int count = 6 + (int)(charge * 6);  /* 6~12 个碎片 */
+    for (int i = 0; i < MAX_SHOTS * SHARD_COUNT && count > 0; i++) {
+        if (shards_debris[i].active) continue;
+        shards_debris[i].x = x;
+        shards_debris[i].y = y;
+        shards_debris[i].z = 0.1f;
+        /* 随机扩散速度 */
+        float ang = (float)rand() * 6.283f / RAND_MAX;
+        float spd = 2.0f + (float)rand() * 4.0f / RAND_MAX;
+        shards_debris[i].vx = cosf(ang) * spd + vx * 0.1f;
+        shards_debris[i].vy = sinf(ang) * spd + vy * 0.1f;
+        shards_debris[i].vz = 3.0f + (float)rand() * 4.0f / RAND_MAX;  /* 向上弹 */
+        shards_debris[i].life = MAX_SHARD_LIFE;
+        shards_debris[i].age = 0.0f;
+        shards_debris[i].active = 1;
+        count--;
     }
 }
 
@@ -3023,12 +3412,12 @@ void Update(float dt) {
     }
 
 
-    holdingNow = (hoverKind != 0 && (keys['E'] || keys['e']));
+    holdingNow = (hoverKind != 0 && IsActionDown(ACT_INTERACT));
 
     /* 冲刺与体力 */
-    int wantSprint = keys[VK_SHIFT] || keys[VK_LSHIFT] || keys[VK_RSHIFT];
-    int inF = (keys['W'] || keys['w']) - (keys['S'] || keys['s']);
-    int inS = (keys['D'] || keys['d']) - (keys['A'] || keys['a']);
+    int wantSprint = IsActionDown(ACT_SPRINT);
+    int inF = IsActionDown(ACT_MOVE_FWD) - IsActionDown(ACT_MOVE_BACK);
+    int inS = IsActionDown(ACT_MOVE_RIGHT) - IsActionDown(ACT_MOVE_LEFT);
     int moving = (inF != 0 || inS != 0);
 
     sprinting = (wantSprint && moving && stamina > 1.0f);
@@ -3060,7 +3449,7 @@ void Update(float dt) {
 
     /* 手摇发电：站着摇，摇满一次回一截电；期间不能移动 */
     cranking = 0;
-    if ((keys['R'] || keys['r']) && battery < 99.9f && !holdingNow) {
+    if (IsActionDown(ACT_CRANK) && battery < 99.9f && !holdingNow) {
         cranking = 1;
         crankTimer += dt;
         crankClick += dt;
@@ -3102,6 +3491,11 @@ void Update(float dt) {
 
     /* ---------------- 交互：长按 E 搜索容器 / 给配电箱上电 ---------------- */
     if (holdingNow) {
+        if (holdTimer == 0.0f && hoverKind == 1) {
+            /* 开始翻箱子：发出声音，吸引怪物（压迫感来源） */
+            PlaySfx(SFX_SEARCH, 0.55f);  /* 专用翻箱声：金属刮擦+木板闷响 */
+            MakeNoise(posX, posY, 10.0f);  /* 比走路大一点，比跑步小 */
+        }
         holdTimer += dt;
         if (holdTimer >= SEARCH_TIME) {
             holdTimer = 0.0f;
@@ -3112,18 +3506,21 @@ void Update(float dt) {
                 shards += 5;
                 PlaySfx(SFX_PICKUP, 0.55f);
                 MakeNoise(posX, posY, 8.0f);
-                if (c->content == 1) fusesHeld++;
-                else if (c->content == 4) flares++;
-                else if (c->content == 5) bottles++;
+                if (c->content == 1) { fusesHeld++; pickupMsg = "+FUSE"; }
+                else if (c->content == 4) { flares++; pickupMsg = "+FLARE"; }
+                else if (c->content == 5) { bottles++; pickupMsg = "+BOTTLE"; }
                 else if (c->content == 2) {
                     battery += BATTERY_PICKUP;
                     if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
                     healFlash = 0.06f;
+                    pickupMsg = "+BATTERY";
                 } else if (c->content == 3) {
                     sanity += 25.0f;
                     if (sanity > 100.0f) sanity = 100.0f;
                     healFlash = 0.15f;
+                    pickupMsg = "+MEDKIT";
                 }
+                if (pickupMsg) pickupMsgTimer = 2.0f;
             } else if (hoverKind == 2) {
                 if (fusesHeld >= fusesNeeded) {
                     breakerOpen = 1;
@@ -3139,12 +3536,69 @@ void Update(float dt) {
         holdTimer = 0.0f;
     }
 
-    /* 投掷：G 荧光棒  B 玻璃瓶 */
+    /* 投掷：数字键选槽位，鼠标左键蓄力投掷 */
     if (throwCd > 0.0f) throwCd -= dt;
-    if (throwCd <= 0.0f && !holdingNow && !cranking) {
-        if ((keys['G'] || keys['g']) && flares > 0) { flares--; ThrowItem(0); throwCd = 0.45f; }
-        else if ((keys['B'] || keys['b']) && bottles > 0) { bottles--; ThrowItem(1); throwCd = 0.45f; }
+
+    /* 数字键 1/2/3 切换投掷物槽位 */
+    if (IsActionPressed(ACT_SELECT_1)) throwSelected = 0;
+    else if (IsActionPressed(ACT_SELECT_2)) throwSelected = 1;
+    else if (IsActionPressed(ACT_SELECT_3)) throwSelected = 2;
+
+    /* 鼠标左键：按住蓄力，松开投掷；右键取消蓄力。
+       严格的「未按下 -> 按下」边缘检测：
+       - prev 保存上一逻辑帧的真实按下状态；
+       - 菜单期间 Update 顶部早退，prev 冻结 —— 菜单里点 Back 的那次
+         左键按下对这里完全不可见；切回游戏时左键还物理按着，
+         若不处理会被误判成新按下，开局就凭空蓄力、松手即投掷。
+       - 所以「回到游戏」的每条路径（Resume / Esc / 失焦自动恢复 / 读档 /
+         新开局）都必须置位 resetInputState：复位时把 prev 同步成当前
+         物理状态 —— 已按着的键不算边沿，必须先松开再按才会蓄力。 */
+    static int mouseLeftPrev = -1;
+    static int mouseRightPrev = -1;
+    if (resetInputState) {
+        resetInputState = 0;
+        mouseLeftPrev = IsActionDown(ACT_THROW);
+        mouseRightPrev = IsActionDown(ACT_CANCEL_CHARGE);
+        isCharging = 0;
+        mouseCharge = 0.0f;
     }
+    int mouseLeftNow = IsActionDown(ACT_THROW);
+    int mouseRightNow = IsActionDown(ACT_CANCEL_CHARGE);
+
+    if (mouseLeftNow && !mouseLeftPrev && throwCd <= 0.0f && !holdingNow && !cranking) {
+        /* 未按下 -> 按下：开始蓄力 */
+        isCharging = 1;
+        mouseCharge = 0.0f;
+    }
+    if (isCharging) {
+        if (mouseRightNow && !mouseRightPrev) {
+            /* 右键取消蓄力 */
+            isCharging = 0;
+            mouseCharge = 0.0f;
+        } else if (mouseLeftNow) {
+            /* 持续按住：累积蓄力（仅当选中道具有库存时） */
+            int hasItem = (throwSelected == 1 && bottles > 0) || (throwSelected == 0 && flares > 0);
+            if (hasItem) {
+                mouseCharge += dt / 0.5f;  /* 0.5 秒满蓄力 */
+                if (mouseCharge > 1.0f) mouseCharge = 1.0f;
+            }
+        } else {
+            /* 松开左键：发射 */
+            isCharging = 0;
+            if (mouseCharge >= 0.1f && throwSelected == 1 && bottles > 0) {
+                bottles--;
+                ThrowItem(1, mouseCharge);  /* 玻璃瓶，传入蓄力倍率 */
+                throwCd = 0.45f;
+            } else if (mouseCharge >= 0.1f && throwSelected == 0 && flares > 0) {
+                flares--;
+                ThrowItem(0, mouseCharge);  /* 荧光棒（平抛） */
+                throwCd = 0.45f;
+            }
+            mouseCharge = 0.0f;
+        }
+    }
+    mouseLeftPrev = mouseLeftNow;
+    mouseRightPrev = mouseRightNow;
 
     /* 脚步：走路是完全静音的，只有冲刺才会响、才会惊动怪 */
     if (moving && sprinting && !holdingNow && !cranking) {
@@ -3172,10 +3626,66 @@ void Update(float dt) {
     UpdateMonster(dt);
     UpdateLightBeast(dt);
     UpdateParasite(dt);
+
+    /* 荧光棒/碎片物理更新：飞行中受重力，落地转静止 */
     for (int i = 0; i < MAX_THROWN; i++) {
         if (!thrown[i].active) continue;
+        if (thrown[i].z > 0.0f) {
+            /* 飞行中：重力积分 */
+            float nx = thrown[i].x + thrown[i].vx * dt;
+            float ny = thrown[i].y + thrown[i].vy * dt;
+            thrown[i].z += thrown[i].vz * dt;
+            thrown[i].vz -= GRAVITY * dt;
+
+            /* 撞墙预判：分离 X/Y 轴检测，允许滑动 */
+            int blockedX = ShotBlocked(nx, thrown[i].y);
+            int blockedY = ShotBlocked(thrown[i].x, ny);
+            
+            if (blockedX && blockedY) {
+                /* 两个方向都被挡，完全停止 */
+                thrown[i].vx = 0.0f;
+                thrown[i].vy = 0.0f;
+                thrown[i].vz = 0.0f;
+                thrown[i].z = 0.0f;
+            } else {
+                if (!blockedX) thrown[i].x = nx;
+                else thrown[i].vx = 0.0f;
+                if (!blockedY) thrown[i].y = ny;
+                else thrown[i].vy = 0.0f;
+            }
+            thrown[i].vz -= GRAVITY * dt;
+
+            /* 落地 */
+            if (thrown[i].z <= 0.0f) {
+                thrown[i].z = 0.0f;
+                thrown[i].vz = 0.0f;
+                thrown[i].vx *= 0.3f;  /* 滑动摩擦 */
+                thrown[i].vy *= 0.3f;
+            }
+        } else {
+            /* 地面滑动衰减 + 滑动碰撞 */
+            float nx = thrown[i].x + thrown[i].vx * dt;
+            float ny = thrown[i].y + thrown[i].vy * dt;
+            
+            int blockedX = ShotBlocked(nx, thrown[i].y);
+            int blockedY = ShotBlocked(thrown[i].x, ny);
+            
+            if (!blockedX) thrown[i].x = nx;
+            else thrown[i].vx = 0.0f;
+            if (!blockedY) thrown[i].y = ny;
+            else thrown[i].vy = 0.0f;
+            
+            thrown[i].vx *= 0.95f;
+            thrown[i].vy *= 0.95f;
+        }
         thrown[i].life -= dt;
         if (thrown[i].life <= 0.0f) thrown[i].active = 0;
+    }
+
+    /* 拾取提示计时 */
+    if (pickupMsgTimer > 0.0f) {
+        pickupMsgTimer -= dt;
+        if (pickupMsgTimer <= 0.0f) pickupMsg = NULL;
     }
 
     /* 出口：通电后才能进下一关 */
@@ -3422,11 +3932,10 @@ static MenuGeo GetMenuGeo(void) {
     switch (currentState) {
         case STATE_MAIN_MENU: return MakeGeo("CANITY", MainMenuCount(), UIS(56), UIS(38), UIS(520), UIS(72));
         case STATE_HUB:       return MakeGeo("THE HUB", HUB_ROWS, UIS(50), UIS(34), UIS(700), UIS(52));
-        case STATE_HELP:      return MakeGeo("CONTROLS", 15, UIS(29), UIS(22), UIS(1000), UIS(30));
+        case STATE_HELP:      return MakeGeo("HELP", 13, UIS(29), UIS(22), UIS(1000), UIS(30));
         case STATE_PAUSED:    return MakeGeo("PAUSED", 3, UIS(56), UIS(38), UIS(520), UIS(56));
         case STATE_GAMEOVER:  return MakeGeo("YOU LOST YOUR MIND", 3, UIS(48), UIS(34), UIS(660), UIS(40));
-        case STATE_SETTINGS:  return MakeGeo(settingsPage < 1 ? "SETTINGS" : pageNames[settingsPage - 1],
-                                          SettingsRowCount(), UIS(44), UIS(30), UIS(680), UIS(44));
+        case STATE_SETTINGS:  return MakeGeo(PageTitle(settingsPage), SettingsRowCount(), UIS(44), UIS(30), UIS(680), UIS(44));
         default: break;
     }
     return MakeGeo("", 0, UIS(44), UIS(30), UIS(400), UIS(44));
@@ -3515,8 +4024,8 @@ static const char* MenuLabel(int i) {
     static char buf[128];
     switch (currentState) {
         case STATE_MAIN_MENU: {
-            static const char* withSave[] = {"Continue", "New Run", "Hub", "Controls", "Settings", "Quit"};
-            static const char* noSave[] = {"New Run", "Hub", "Controls", "Settings", "Quit"};
+            static const char* withSave[] = {"Continue", "New Run", "Hub", "Help", "Settings", "Quit"};
+            static const char* noSave[] = {"New Run", "Hub", "Help", "Settings", "Quit"};
             return hasSave ? withSave[i] : noSave[i];
         }
         case STATE_PAUSED: {
@@ -3524,20 +4033,16 @@ static const char* MenuLabel(int i) {
             return s[i];
         }
         case STATE_HELP: {
-            /* 操作说明 + 玩法提示。
-               游戏画面上的字要尽量少（见 HUD Detail 设置），
-               所以「怎么用玻璃瓶」「跳脸虫怎么回事」这类一次性说明
-               全部放在这一页。
+            /* 只放玩法提示，不再列键位 —— 键位可在 Settings 里改绑，
+               静态表一改绑就过时；真正的键位看 Settings → Movement / Actions / Menu Keys。
                行数要控制在 14 行以内：面板高度 = 14×28 + 标题 + 内边距
                ≈ 500，在 600 高的窗口里才留得下边距。 */
             static const char* helps[] = {
-                "WASD        MOVE",
-                "SHIFT       RUN  (MAKES NOISE)",
-                "E (HOLD)    SEARCH / USE",
-                "R (HOLD)    CRANK BATTERY",
-                "F           FLASHLIGHT",
-                "G / B       THROW FLARE / BOTTLE",
-                "M MAP   ESC PAUSE",
+                "KEYS: SEE SETTINGS > MOVEMENT /",
+                "      ACTIONS / MENU KEYS.",
+                "",
+                "RUNNING AND SEARCHING MAKE NOISE.",
+                "WALKING IS SILENT.",
                 "",
                 "BOTTLE: THROW IT AT A MONSTER TO HIT IT.",
                 "  3 BOTTLES DRIVE IT AWAY, BUT THE SOUND",
@@ -3547,7 +4052,8 @@ static const char* MenuLabel(int i) {
                 "  IF IT LANDS ON YOUR FACE, PRESS THE KEY.",
                 "  MISS BOTH AND YOU LOSE SANITY."
             };
-            if (i >= 0 && i < 15) return helps[i];
+            const int helpRows = (int)(sizeof(helps) / sizeof(helps[0]));
+            if (i >= 0 && i < helpRows) return helps[i];
             return "";
         }
         case STATE_HUB: {
@@ -3560,20 +4066,32 @@ static const char* MenuLabel(int i) {
         }
         case STATE_GAMEOVER: return "Return to Menu";
         case STATE_SETTINGS: {
-            if (settingsPage < 1) {
-                if (i < 3) return pageNames[i];
+            if (settingsPage == SETPAGE_ROOT) {
+                if (i < 3) return rootCategoryNames[i];
+                return "Back";
+            }
+            if (settingsPage == SETPAGE_BINDDIR) {
+                if (i < 3) return bindCategoryNames[i];
                 return "Back";
             }
             int idx[SETTING_COUNT];
             int n = PageItems(idx);
             if (i >= n) return "Back";
             const SettingItem* it = &settings[idx[i]];
+            if (IsKeyBindItem(it)) {
+                return it->name;  /* 键位行：名称左对齐，键名右对齐（DrawMenuText 里画） */
+            }
             if (it->kind == SET_SLIDER) {
                 if (it->fvalue == &gammaValue) sprintf(buf, "%s: %.2f", it->name, *it->fvalue);
                 else if (it->fvalue == &volumeF) sprintf(buf, "%s: %.0f%%", it->name, *it->fvalue * 100.0f);
                 else sprintf(buf, "%s: %.1fx", it->name, *it->fvalue);
             } else {
-                sprintf(buf, "%s: %s", it->name, it->options[*it->value]);
+                int dispVal = *it->value;
+                if (dispVal >= 0 && dispVal < it->count) {
+                    sprintf(buf, "%s: %s", it->name, it->options[dispVal]);
+                } else {
+                    sprintf(buf, "%s: %s", it->name, it->options[0]);
+                }
             }
             return buf;
         }
@@ -3622,6 +4140,7 @@ void DrawMenuPanels(void) {
     /* 弹窗开着时不再高亮背后的列表行 */
     int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
     int sel = MenuItemIndex();
+
     if (!popupOpen && sel >= 0 && sel < g.count) {
         RECT r = RowRect(g, sel);
         BlendRectWin(r.left, r.top, r.right, r.bottom, 0x00205020, 0.55f);
@@ -3686,7 +4205,18 @@ static void DrawMenuText(void) {
     DrawTitleWin(g.title, g.titleY, titleColor);
 
     int sel = MenuItemIndex();
+    int idx[SETTING_COUNT];
+    int pageItemCount = 0;
+    if (currentState == STATE_SETTINGS && settingsPage != SETPAGE_ROOT && settingsPage != SETPAGE_BINDDIR) {
+        pageItemCount = PageItems(idx);
+    }
     for (int i = 0; i < g.count; i++) {
+        const SettingItem* it = NULL;
+        if (currentState == STATE_SETTINGS && settingsPage != SETPAGE_ROOT && settingsPage != SETPAGE_BINDDIR) {
+            if (i < pageItemCount) it = &settings[idx[i]];
+            /* i >= pageItemCount 是 Back 行，it 保持 NULL */
+        }
+
         unsigned int c;
         if (popupOpen) c = 0x00383E3Au;                       /* 弹窗后面的列表压暗 */
         else if (currentState == STATE_HUB && i < 4) {
@@ -3703,7 +4233,7 @@ static void DrawMenuText(void) {
             int mins = (int)(runTime / 60.0f);
             int secs = (int)runTime - mins * 60;
             if (i == 1) sprintf(line, "LEVEL %d    TIME %d:%02d", currentLevel, mins, secs);
-            else sprintf(line, "CRATES %d    BATTERY %d%%", searchedCount, (int)battery);
+            else sprintf(line, "CRATES %d    BATTERY %d%%", searchedCount, (int)(battery / (float)BatteryMax() * 100.0f));
             DrawTextInRow(line, RowRect(g, i), (i == sel) ? 0x008CFF8Cu : 0x009B9B9Bu);
             continue;
         }
@@ -3714,8 +4244,80 @@ static void DrawMenuText(void) {
             DrawTextInRowLeft(MenuLabel(i), RowRect(g, i), c);
             continue;
         }
+
+        /* 键位绑定行：单行「名称 ····· 键名」，值右对齐。
+           之前是两行式（标签一行 + 值一行），但行高 UIS(44) 扣掉边距只剩
+           36px，装不下两行 24px 的文字，标签会压到相邻行 —— 显示不全。 */
+        if (it && IsKeyBindItem(it)) {
+            RECT row = RowRect(g, i);
+            int th = TextHeightWin();
+            int y = row.top + ((row.bottom - row.top) - th) / 2;
+            DrawTextWin(row.left + UIS(8), y, it->name, c);
+            int act = BindActionOfItem(it);
+            const char* valStr;
+            if (act >= 0 && act == rebindingAct) {
+                valStr = "...";          /* 正在改绑这一项 */
+            } else {
+                int vk = *it->value;
+                int dispVal = -1;
+                for (int k = 0; k < OPT_KEY_COUNT; k++) {
+                    if (optKeyVKs[k] == vk) { dispVal = k; break; }
+                }
+                if (dispVal >= 0) valStr = optKeys[dispVal];
+                else valStr = (vk == 0) ? "None" : "?";
+            }
+            int tw = TextWidthWin(valStr);
+            DrawTextWin(row.right - UIS(8) - tw, y, valStr, 0x0070B0D0u);
+            continue;
+        }
+
         DrawTextInRow(MenuLabel(i), RowRect(g, i), c);
     }
+}
+
+/* 改绑提示框：居中，跟设置面板同样的画法。
+   rebindingAct >= 0 时由 RenderFrame 在主面板之后调用。 */
+static void DrawRebindOverlay(void) {
+    if (currentState != STATE_SETTINGS || rebindingAct < 0 || rebindingAct >= ACT_COUNT) return;
+
+    int pad = UIS(26), titlePx = UIS(34);
+    int panelW = UIS(520);
+    if (panelW > winW - 80) panelW = winW - 80;
+    int textW = TextWidthWin(actionNames[rebindingAct]);
+    if (panelW < textW + UIS(60)) panelW = textW + UIS(60);
+    int panelH = pad * 2 + titlePx + UIS(24) + TextHeightWin() * 3 + UIS(24);
+
+    int left = (winW - panelW) / 2;
+    int top = (winH - panelH) / 2;
+    int right = left + panelW;
+    int bottom = top + panelH;
+
+    BlendRectWin(left, top, right, bottom, 0x0004080c, 1.0f);
+    FrameRectWin(left, top, right, bottom, 0x00b02020, 0.95f, UIS(2));
+    DrawTitleWin("REBIND", top + pad, 0x00E65A5Au);
+    DrawTextCenterWin(winW / 2, top + pad + titlePx + UIS(24), actionNames[rebindingAct], 0x00A0FFA0u);
+    DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin() * 2, "PRESS ANY KEY", 0x008C8C8Cu);
+    DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin(), "ESC TO CANCEL", 0x006E6E6Eu);
+}
+
+/* 把一次按键交给改绑流程。返回 1 = 这个键被改绑消费掉了。
+   Esc 保留为「取消改绑」；其它键一律写进 g_bindings。
+   鼠标键也能绑（WM_L/R/MBUTTONDOWN 走这里）。 */
+static int RebindConsumeKey(int vk) {
+    if (rebindingAct < 0 || rebindingAct >= ACT_COUNT) return 0;
+    if (vk == VK_ESCAPE) {
+        rebindingAct = -1;
+        uiDirty = 1;
+        return 1;
+    }
+    /* 防止一个键绑到两个动作上：抢走其它动作里的同名绑定 */
+    for (int a = 0; a < ACT_COUNT; a++) {
+        if (a != rebindingAct && g_bindings[a] == vk) g_bindings[a] = 0;
+    }
+    g_bindings[rebindingAct] = vk;
+    rebindingAct = -1;
+    uiDirty = 1;
+    return 1;
 }
 
 /* 弹窗里的文字：必须在弹窗面板之后画 */
@@ -3822,7 +4424,13 @@ void DrawHUD(void) {
        Normal：只在身上有货时才显示（平时不占地方）。
        Full：一直显示。 */
     if (hudDetail >= 2 || (hudDetail >= 1 && (flares > 0 || bottles > 0))) {
-        sprintf(buf, "FLARE %d   BOTTLE %d", flares, bottles);
+        /* 高亮当前选中的槽位：选中项前加 *，数量为 0 时显示灰色 */
+        char slot1[32], slot2[32];
+        if (flares > 0) sprintf(slot1, "%s[1] FLARE %d", (throwSelected == 0 ? "*" : ""), flares);
+        else sprintf(slot1, "%s[1] FLARE 0", (throwSelected == 0 ? "*" : ""));
+        if (bottles > 0) sprintf(slot2, "%s[2] BOTTLE %d", (throwSelected == 1 ? "*" : ""), bottles);
+        else sprintf(slot2, "%s[2] BOTTLE 0", (throwSelected == 1 ? "*" : ""));
+        sprintf(buf, "%s   %s", slot1, slot2);
         DrawTextWin(UIS(20), UIS(196), buf, 0x0090A0A0u);
     }
 
@@ -3918,6 +4526,16 @@ void DrawHUD(void) {
         DrawTextWin(winW - UIS(20) - TextWidthWin(buf), UIS(18), buf, 0x00C8C8C8u);
     }
 
+    /* 拾取提示：屏幕中央上方，2秒后淡出 */
+    if (pickupMsg && pickupMsgTimer > 0.0f) {
+        int tw = TextWidthWin(pickupMsg);
+        int tx = (winW - tw) / 2;
+        int ty = UIS(80);
+        float alpha = pickupMsgTimer / 2.0f;
+        if (alpha > 1.0f) alpha = 1.0f;
+        DrawTextWin(tx, ty, pickupMsg, 0x00E8E060u);
+    }
+
     /* 手电电量 / 体力：左下两条细条，标签按实际文字宽度排版 */
     int barW = UIS(180), barH = UIS(12);
     int labelX = UIS(20);
@@ -3925,10 +4543,15 @@ void DrawHUD(void) {
     int y1 = winH - UIS(96), y2 = winH - UIS(74);
 
     DrawTextWin(labelX, y1 - UIS(3), "LIGHT", 0x00A0A0A0u);
-    DrawBar(barX, y1, barW, barH, battery / 100.0f,
-            (flashlightOn && battery > 0.0f) ? 0x00E8E060u : 0x00606040u);
+    /* 手电条颜色：开启=黄绿，关闭但有电=暗黄，无电=暗红 */
+    unsigned int lightBarCol;
+    if (!flashlightOn && battery <= 0.0f) lightBarCol = 0x00603030u;  /* 无电暗红 */
+    else if (!flashlightOn) lightBarCol = 0x00806030u;  /* 关闭暗黄 */
+    else lightBarCol = 0x00E8E060u;  /* 开启亮黄绿 */
+    float batMax = (float)BatteryMax();
+    DrawBar(barX, y1, barW, barH, battery / batMax, lightBarCol);
     DrawTextWin(barX + barW + UIS(12), y1 - UIS(3), flashlightOn ? "ON" : "OFF",
-                flashlightOn ? 0x00E8E060u : 0x00808080u);
+                flashlightOn ? 0x00E8E060u : 0x00A08080u);
 
     DrawTextWin(labelX, y2 - UIS(3), "RUN", 0x00A0A0A0u);
     DrawBar(barX, y2, barW, barH, stamina / 100.0f,
@@ -3969,6 +4592,34 @@ void DrawHUD(void) {
         } else if (hudDetail >= 1 && safeZoneMsg > 0.0f) {
             DrawTextCenterWin(winW / 2, winH - UIS(196), "SAFE ZONE", 0x0030D0D0u);
         }
+    }
+
+    /* 蓄力投掷进度条：按住鼠标左键时显示 */
+    int mouseFree = (currentState != STATE_PLAYING) || (isMapOpen && mapFullScreen);
+    /* 只有选中道具有库存时才显示蓄力条 */
+    int hasItem = (throwSelected == 1 && bottles > 0) || (throwSelected == 0 && flares > 0);
+    if (isCharging && mouseCharge > 0.0f && !mouseFree && hasItem) {
+        int barW = UIS(280), barH = UIS(14);
+        int bx = (winW - barW) / 2;
+        int by = winH / 2 + UIS(100);  /* 更靠下，避开 QTE 倒计时条 */
+        /* 背景：深色半透明，带明显边框 */
+        BlendRectWin(bx - 2, by - 2, bx + barW + 2, by + barH + 2, 0x00000000, 0.9f);
+        BlendRectWin(bx, by, bx + barW, by + barH, 0x00101020, 0.95f);
+        /* 填充：蓝→青→红渐变感 */
+        unsigned int chargeCol;
+        if (mouseCharge < 0.33f) chargeCol = 0x0040E0FFu;
+        else if (mouseCharge < 0.66f) chargeCol = 0x0040FF80u;
+        else if (mouseCharge < 1.0f) chargeCol = 0x00E0FF40u;
+        else chargeCol = 0x00FF4040u;  /* 满蓄力红色警告 */
+        BlendRectWin(bx, by, bx + (int)(barW * mouseCharge), by + barH, chargeCol, 1.0f);
+        /* 发光边框 */
+        FrameRectWin(bx, by, bx + barW, by + barH, chargeCol, 1.0f, 2);
+        /* 标签带阴影 */
+        DrawTextCenterWin(winW / 2, by - UIS(24), "CHARGING THROW", chargeCol);
+        /* 百分比数值 */
+        char pct[16];
+        sprintf(pct, "%d%%", (int)(mouseCharge * 100));
+        DrawTextCenterWin(winW / 2, by + barH + UIS(6), pct, 0x00FFFFFFu);
     }
 
     if (cranking) {
@@ -4020,6 +4671,8 @@ void RenderFrame(void) {
             DrawPopupPanel();
             DrawPopupText();
         }
+        /* 改绑提示框：最顶层，盖住所有菜单 */
+        DrawRebindOverlay();
     } else if (isMapOpen && mapFullScreen) {
         /* 全屏地图：不画 HUD —— 整个屏幕就是地图，别在上面压一堆数值。
            小窗地图则照常画 HUD（它只是右下角一个叠加层）。 */
@@ -4060,12 +4713,16 @@ void StartGame(void) {
     stamina = 100.0f;
     sprinting = 0;
     staminaIdle = 0.0f;
-    flashTime = 0.0f;
     healFlash = 0.0f;
     isMapOpen = 0;
+    isCharging = 0;
+    mouseCharge = 0.0f;
+    resetInputState = 1;
     ClearFx();
     for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
     GenerateLevel();
+    /* 生成关卡后清除过关白屏时间，避免新游戏开局 0.15s 逻辑不跑 */
+    flashTime = 0.0f;
     UpdateExplored();
     ForceCursor(0);
     firstMouseMove = 1;
@@ -4117,7 +4774,13 @@ void ApplySetting(int item, int value) {
        以前没做判断，靠调用方保证只传列表项；现在显式拦下来。 */
     if (settings[item].kind != SET_LIST || !settings[item].value) return;
     if (value < 0 || value >= settings[item].count) return;
-    *settings[item].value = value;
+    /* 按键绑定项存的是 VK 码（从 optKeyVKs 映射），其它列表项存下标 */
+    int act = BindActionOfItem(&settings[item]);
+    if (act >= 0) {
+        g_bindings[act] = optKeyVKs[value];
+    } else {
+        *settings[item].value = value;
+    }
     if (settings[item].value == &resIndex || settings[item].value == &isFullscreen) ApplyDisplayMode();
     else if (settings[item].value == &renderScaleIndex) InitPixels();
     else if (settings[item].value == &fovIndex) ApplyFov();
@@ -4148,6 +4811,7 @@ void ActivateMenuItem(void) {
             settingsPage = 0;
             settingsSelection = 0;
             settingsPopupOpen = 0;
+            rebindingAct = -1;
             uiDirty = 1;
         } else {
             SaveGame();
@@ -4156,6 +4820,7 @@ void ActivateMenuItem(void) {
     } else if (currentState == STATE_PAUSED) {
         if (menuSelection == 0) {
             currentState = STATE_PLAYING;
+            resetInputState = 1;   /* 点 Resume 用的还是鼠标左键 —— 不复位会凭空蓄力 */
             ForceCursor(0);
             firstMouseMove = 1;
             uiDirty = 1;
@@ -4165,6 +4830,7 @@ void ActivateMenuItem(void) {
             settingsPage = 0;
             settingsSelection = 0;
             settingsPopupOpen = 0;
+            rebindingAct = -1;
             uiDirty = 1;
         } else if (menuSelection == 2) {
             SaveGame();
@@ -4197,14 +4863,21 @@ void ActivateSettingRow(void) {
     int rows = SettingsRowCount();
     if (settingsSelection < 0 || settingsSelection >= rows) return;
 
-    if (settingsPage < 1) {
-        /* 根目录：分类页 / Back */
+    /* 目录页（根目录 / Key Bindings 子目录）：进分类或返回 */
+    if (settingsPage == SETPAGE_ROOT || settingsPage == SETPAGE_BINDDIR) {
+        const int* pages = (settingsPage == SETPAGE_ROOT) ? rootCategoryPages : bindCategoryPages;
         if (settingsSelection < 3) {
-            settingsPage = settingsSelection + 1;
+            settingsPage = pages[settingsSelection];
             settingsSelection = 0;
             uiDirty = 1;
         } else {
-            currentState = prevState;
+            /* Back：根目录回上一状态，子目录回根目录 */
+            if (settingsPage == SETPAGE_BINDDIR) {
+                settingsPage = SETPAGE_ROOT;
+            } else {
+                currentState = prevState;
+                SaveGame();
+            }
             settingsPopupOpen = 0;
             uiDirty = 1;
         }
@@ -4214,8 +4887,9 @@ void ActivateSettingRow(void) {
     int idx[SETTING_COUNT];
     int n = PageItems(idx);
     if (settingsSelection >= n) {
-        /* 分类页的 Back：回到根目录 */
-        settingsPage = 0;
+        /* 键位页 / Display / Gameplay 的 Back：回到上级目录 */
+        settingsPage = (settingsPage == SETPAGE_GAME || settingsPage == SETPAGE_DISPLAY)
+                       ? SETPAGE_ROOT : SETPAGE_BINDDIR;
         settingsSelection = 0;
         settingsPopupOpen = 0;
         uiDirty = 1;
@@ -4223,6 +4897,13 @@ void ActivateSettingRow(void) {
     }
 
     popupItem = idx[settingsSelection];
+    /* 键位项：进入「按任意键绑定」模式，不再弹 54 项的选项列表
+       （那个列表本身也远超一屏，只能盲选）。 */
+    if (IsKeyBindItem(&settings[popupItem])) {
+        rebindingAct = BindActionOfItem(&settings[popupItem]);
+        uiDirty = 1;
+        return;
+    }
     if (settings[popupItem].kind == SET_SLIDER) {
         popupSelection = 0;
     } else {
@@ -4388,6 +5069,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (LOWORD(wParam) == WA_INACTIVE) {
                 memset(keys, 0, sizeof(keys));
                 if (currentState == STATE_PLAYING) PauseGame();
+            } else {
+                /* 窗口重新获得焦点：若是因失焦自动暂停，则自动恢复 */
+                if (currentState == STATE_PAUSED && prevState == STATE_PLAYING) {
+                    currentState = STATE_PLAYING;
+                    resetInputState = 1;   /* 鼠标在失焦期间的按下对游戏不可见，需重同步边沿 */
+                    ForceCursor(0);
+                    firstMouseMove = 1;
+                    uiDirty = 1;
+                }
             }
             return 0;
 
@@ -4414,6 +5104,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             int mx = (short)LOWORD(lParam), my = (short)HIWORD(lParam);
 
             if (currentState != STATE_PLAYING) {
+                if (currentState == STATE_SETTINGS && rebindingAct >= 0) return 0;
                 if (settingsPopupOpen && sliderDragging && popupItem >= 0 &&
                     settings[popupItem].kind == SET_SLIDER) {
                     const SettingItem* it = &settings[popupItem];
@@ -4462,9 +5153,28 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_LBUTTONDOWN: {
             int mx = (short)LOWORD(lParam), my = (short)HIWORD(lParam);
-            if (currentState != STATE_PLAYING) ClickMenu(mx, my);
+            if (currentState != STATE_PLAYING) {
+                /* 改绑模式：点击也可以绑定为「鼠标左键」 */
+                if (currentState == STATE_SETTINGS && rebindingAct >= 0) {
+                    RebindConsumeKey(VK_LBUTTON);
+                    return 0;
+                }
+                ClickMenu(mx, my);
+            }
             return 0;
         }
+
+        case WM_RBUTTONDOWN:
+            if (currentState == STATE_SETTINGS && rebindingAct >= 0) {
+                RebindConsumeKey(VK_RBUTTON);
+            }
+            return 0;
+
+        case WM_MBUTTONDOWN:
+            if (currentState == STATE_SETTINGS && rebindingAct >= 0) {
+                RebindConsumeKey(VK_MBUTTON);
+            }
+            return 0;
 
         case WM_LBUTTONUP:
             if (sliderDragging) ReleaseCapture();
@@ -4476,6 +5186,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_KEYDOWN:
+            /* 改绑模式：吞掉所有按键（Esc 取消），不进菜单导航 */
+            if (currentState == STATE_SETTINGS && rebindingAct >= 0) {
+                RebindConsumeKey((int)wParam);
+                return 0;
+            }
             if (wParam < 256) {
                 keys[wParam] = 1;
                 /* 记下「刚按下」的边沿，供 QTE 消费。
@@ -4483,16 +5198,25 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (currentState == STATE_PLAYING) keyPressed[wParam] = 1;
             }
 
+            /* 统一菜单导航按键判断 */
+            int menuUp    = (wParam == (WPARAM)g_bindings[ACT_MENU_UP]);
+            int menuDown  = (wParam == (WPARAM)g_bindings[ACT_MENU_DOWN]);
+            int menuLeft  = (wParam == (WPARAM)g_bindings[ACT_MENU_LEFT]);
+            int menuRight = (wParam == (WPARAM)g_bindings[ACT_MENU_RIGHT]);
+            int menuConfirm = (wParam == (WPARAM)g_bindings[ACT_MENU_CONFIRM]);
+            int menuCancel  = (wParam == (WPARAM)g_bindings[ACT_MENU_CANCEL]);
+
             if (currentState == STATE_MAIN_MENU) {
-                if (wParam == 'W' || wParam == VK_UP) { menuSelection = (menuSelection + MainMenuCount() - 1) % MainMenuCount(); uiDirty = 1; }
-                if (wParam == 'S' || wParam == VK_DOWN) { menuSelection = (menuSelection + 1) % MainMenuCount(); uiDirty = 1; }
-                if (wParam == VK_RETURN) ActivateMenuItem();
+                if (menuUp) { menuSelection = (menuSelection + MainMenuCount() - 1) % MainMenuCount(); uiDirty = 1; }
+                if (menuDown) { menuSelection = (menuSelection + 1) % MainMenuCount(); uiDirty = 1; }
+                if (menuConfirm) ActivateMenuItem();
             } else if (currentState == STATE_PAUSED) {
-                if (wParam == 'W' || wParam == VK_UP) { menuSelection = (menuSelection + 2) % 3; uiDirty = 1; }
-                if (wParam == 'S' || wParam == VK_DOWN) { menuSelection = (menuSelection + 1) % 3; uiDirty = 1; }
-                if (wParam == VK_RETURN) ActivateMenuItem();
-                if (wParam == VK_ESCAPE) {
+                if (menuUp) { menuSelection = (menuSelection + 2) % 3; uiDirty = 1; }
+                if (menuDown) { menuSelection = (menuSelection + 1) % 3; uiDirty = 1; }
+                if (menuConfirm) ActivateMenuItem();
+                if (menuCancel) {
                     currentState = STATE_PLAYING;
+                    resetInputState = 1;   /* Esc 回游戏：吞掉回焦路上可能的残留按下 */
                     ForceCursor(0);
                     firstMouseMove = 1;
                     uiDirty = 1;
@@ -4502,44 +5226,54 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     const SettingItem* it = &settings[popupItem];
                     if (it->kind == SET_SLIDER) {
                         float v = *it->fvalue;
-                        if (wParam == 'A' || wParam == VK_LEFT) v -= it->fstep;
-                        if (wParam == 'D' || wParam == VK_RIGHT) v += it->fstep;
+                        if (menuLeft) v -= it->fstep;
+                        if (menuRight) v += it->fstep;
                         if (v < it->fmin) v = it->fmin;
                         if (v > it->fmax) v = it->fmax;
                         if (v != *it->fvalue) { *it->fvalue = v; uiDirty = 1; }
-                        if (wParam == VK_RETURN || wParam == VK_ESCAPE) {
+                        if (menuConfirm || menuCancel) {
                             settingsPopupOpen = 0;
                             sliderDragging = 0;
                             uiDirty = 1;
                         }
                     } else {
                         int n = it->count;
-                        if (wParam == 'W' || wParam == VK_UP) { popupSelection = (popupSelection + n - 1) % n; uiDirty = 1; }
-                        if (wParam == 'S' || wParam == VK_DOWN) { popupSelection = (popupSelection + 1) % n; uiDirty = 1; }
-                        if (wParam == VK_RETURN) { ApplySetting(popupItem, popupSelection); settingsPopupOpen = 0; }
-                        if (wParam == VK_ESCAPE) { settingsPopupOpen = 0; uiDirty = 1; }
+                        if (menuUp) { popupSelection = (popupSelection + n - 1) % n; uiDirty = 1; }
+                        if (menuDown) { popupSelection = (popupSelection + 1) % n; uiDirty = 1; }
+                        if (menuConfirm) { ApplySetting(popupItem, popupSelection); settingsPopupOpen = 0; }
+                        if (menuCancel) { settingsPopupOpen = 0; uiDirty = 1; }
                     }
                 } else {
                     int n = SettingsRowCount();
-                    if (wParam == 'W' || wParam == VK_UP) { settingsSelection = (settingsSelection + n - 1) % n; uiDirty = 1; }
-                    if (wParam == 'S' || wParam == VK_DOWN) { settingsSelection = (settingsSelection + 1) % n; uiDirty = 1; }
-                    if (wParam == VK_RETURN) ActivateSettingRow();
-                    if (wParam == VK_ESCAPE) {
-                        if (settingsPage > 0) { settingsPage = 0; settingsSelection = 0; }
-                        else { currentState = prevState; SaveGame(); }
+                    if (menuUp) { settingsSelection = (settingsSelection + n - 1) % n; uiDirty = 1; }
+                    if (menuDown) { settingsSelection = (settingsSelection + 1) % n; uiDirty = 1; }
+                    if (menuConfirm) ActivateSettingRow();
+                    if (menuCancel) {
+                        /* Esc 逐级上退：键位页 -> 子目录 -> 根目录 -> 退出 */
+                        if (settingsPage == SETPAGE_MOVE || settingsPage == SETPAGE_ACT || settingsPage == SETPAGE_MENUKEYS) {
+                            settingsPage = SETPAGE_BINDDIR;
+                        } else if (settingsPage == SETPAGE_BINDDIR) {
+                            settingsPage = SETPAGE_ROOT;
+                        } else if (settingsPage == SETPAGE_DISPLAY || settingsPage == SETPAGE_GAME) {
+                            settingsPage = SETPAGE_ROOT;
+                        } else {
+                            currentState = prevState;
+                            SaveGame();
+                        }
+                        settingsSelection = 0;
                         uiDirty = 1;
                     }
                 }
             } else if (currentState == STATE_GAMEOVER) {
-                if (wParam == VK_RETURN) ActivateMenuItem();
+                if (menuConfirm) ActivateMenuItem();
             } else if (currentState == STATE_HELP) {
-                if (wParam == VK_ESCAPE || wParam == VK_RETURN) { currentState = STATE_MAIN_MENU; uiDirty = 1; }
+                if (menuCancel || menuConfirm) { currentState = STATE_MAIN_MENU; uiDirty = 1; }
             } else if (currentState == STATE_HUB) {
                 int n = HUB_ROWS;
-                if (wParam == 'W' || wParam == VK_UP) { hubSelection = (hubSelection + n - 1) % n; uiDirty = 1; }
-                if (wParam == 'S' || wParam == VK_DOWN) { hubSelection = (hubSelection + 1) % n; uiDirty = 1; }
-                if (wParam == VK_RETURN) ActivateHubRow();
-                if (wParam == VK_ESCAPE) {
+                if (menuUp) { hubSelection = (hubSelection + n - 1) % n; uiDirty = 1; }
+                if (menuDown) { hubSelection = (hubSelection + 1) % n; uiDirty = 1; }
+                if (menuConfirm) ActivateHubRow();
+                if (menuCancel) {
                     SaveGame();
                     currentState = STATE_MAIN_MENU;
                     menuSelection = 0;
@@ -4547,8 +5281,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     uiDirty = 1;
                 }
             } else if (currentState == STATE_PLAYING) {
-                if (wParam == VK_ESCAPE) PauseGame();
-                if (wParam == 'M' || wParam == 'm') {
+                if (wParam == (WPARAM)g_bindings[ACT_PAUSE]) PauseGame();
+                if (wParam == (WPARAM)g_bindings[ACT_MAP]) {
                     /* 三态循环：小窗 -> 全屏 -> 关闭 -> 小窗 ...
                        第一次按看到角落小窗（能边走边看），
                        再按一次变全屏（停下来规划路线），再按关闭。
@@ -4572,7 +5306,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     firstMouseMove = 1;
                     uiDirty = 1;
                 }
-                if (wParam == 'F' || wParam == 'f') {
+                if (wParam == (WPARAM)g_bindings[ACT_FLASHLIGHT]) {
                     if (battery > 0.0f) flashlightOn = !flashlightOn;
                     uiDirty = 1;
                 }
@@ -4603,6 +5337,8 @@ static short g_sndGate[15435];     /* 0.70s 过关 */
 static short g_sndCrank[2647];     /* 0.12s 手摇 */
 static short g_sndScream[13230];   /* 0.60s 尖叫 */
 static short g_sndGlass[6615];     /* 0.30s 玻璃碎裂 */
+static short g_sndSearch[3307];    /* 0.15s 翻箱子：金属刮擦+闷响 */
+static short g_sndThrow[4410];     /* 0.20s 投掷：呼啸+出手音 */
 
 typedef struct { const short* data; int len, pos; float vol; int active; } Voice;
 
@@ -4670,6 +5406,8 @@ void PlaySfx(int id, float vol) {
         case SFX_CRANK:  data = g_sndCrank; len = (int)(sizeof(g_sndCrank) / sizeof(short)); break;
         case SFX_SCREAM: data = g_sndScream;len = (int)(sizeof(g_sndScream) / sizeof(short)); break;
         case SFX_GLASS:  data = g_sndGlass; len = (int)(sizeof(g_sndGlass) / sizeof(short)); break;
+        case SFX_SEARCH: data = g_sndSearch;len = (int)(sizeof(g_sndSearch) / sizeof(short)); break;
+        case SFX_THROW:  data = g_sndThrow; len = (int)(sizeof(g_sndThrow) / sizeof(short)); break;
         default: return;
     }
     EnterCriticalSection(&g_audioLock);
@@ -4795,6 +5533,46 @@ static void GenSounds(void) {
         lp = lp * (1.0f - k) + n * k;
         float env = sinf(3.1416f * (t / 0.7f));
         g_sndGate[i] = (short)(lp * env * 0.5f * 32000.0f);
+    }
+
+    /* 翻箱子：金属刮擦 + 木板闷响 */
+    {
+        int sl = (int)(sizeof(g_sndSearch) / sizeof(short));
+        float lp2 = 0.0f;
+        for (int i = 0; i < sl; i++) {
+            float t = (float)i / AUDIO_RATE;
+            seed = seed * 1664525u + 1013904223u;
+            float n = ((float)((seed >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+            /* 金属刮擦：高通噪声 */
+            float hp = n - lp2 * 0.3f;
+            lp2 = n;
+            float env = expf(-t * 28.0f);
+            float v = hp * env * 0.35f;
+            /* 木板闷响：低频正弦下扫 */
+            float f = 180.0f - 120.0f * (t / 0.15f);
+            v += sinf(6.2831f * f * t) * expf(-t * 18.0f) * 0.25f;
+            g_sndSearch[i] = (short)(v * 32000.0f);
+        }
+    }
+
+    /* 投掷：呼啸风声 + 出手闷响 */
+    {
+        int tl = (int)(sizeof(g_sndThrow) / sizeof(short));
+        for (int i = 0; i < tl; i++) {
+            float t = (float)i / AUDIO_RATE;
+            seed = seed * 1664525u + 1013904223u;
+            float n = ((float)((seed >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+            /* 呼啸：带颤音的带通噪声 */
+            float bp = n * 0.5f;
+            float env = expf(-t * 12.0f);
+            float v = bp * env * 0.28f;
+            /* 出手：低频脉冲 */
+            if (t < 0.03f) {
+                float p = 1.0f - t / 0.03f;
+                v += sinf(6.2831f * 60.0f * t) * expf(-t * 50.0f) * 0.4f * p;
+            }
+            g_sndThrow[i] = (short)(v * 32000.0f);
+        }
     }
 }
 
@@ -5100,6 +5878,7 @@ static void ContinueRun(void) {
     isMapOpen = 0;
     flashTime = 0.0f;
     healFlash = 0.0f;
+    resetInputState = 1;   /* 读档回游戏：主菜单点击的左键不能带进游戏 */
     ClearFx();
     for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
     ForceCursor(0);

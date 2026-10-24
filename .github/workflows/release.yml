@@ -1,0 +1,51 @@
+name: Build and Release
+
+# 触发条件：只有当推送以 v 开头的标签（比如 v1.6.0）时才运行
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 权限设置：允许 Actions 创建 Release 和上传附件
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    # 使用最新的 Windows 环境
+    runs-on: windows-latest
+    
+    steps:
+      # 步骤 1：拉取你的代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 步骤 2：配置 MSYS2 环境，安装 MinGW (GCC)
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >
+            mingw-w64-ucrt-x86_64-gcc
+
+      # 步骤 3：使用你专属的 GCC 命令进行编译
+      - name: Build with gcc
+        shell: msys2 {0}
+        run: gcc main.c -o canity.exe -O2 -Wall -lgdi32 -luser32 -lwinmm -mwindows
+
+      # 步骤 4：打包产物（把 exe 压缩成 zip）
+      - name: Package files
+        shell: pwsh
+        run: |
+          # 如果以后有额外的资源文件（比如图片、音频），在下面用逗号分隔加上去，例如: "canity.exe", "assets/"
+          Compress-Archive -Path "canity.exe" -DestinationPath canity-windows-x64.zip
+
+      # 步骤 5：创建 Release 并上传 zip 包
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: canity-windows-x64.zip
+          generate_release_notes: true # 自动根据 commit 生成更新日志
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
