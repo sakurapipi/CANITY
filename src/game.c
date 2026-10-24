@@ -1709,6 +1709,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_KEYDOWN:
+            /* 小键盘数字（NumLock 开启时是 VK_NUMPAD0..9）统一折算成主键盘数字，
+               这样 1/2/3 选投掷槽位、以及改绑数字键都不会因为按小键盘而失效。 */
+            if (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9)
+                wParam = (WPARAM)('0' + (wParam - VK_NUMPAD0));
             /* 改绑模式：吞掉所有按键（Esc 取消），不进菜单导航 */
             if (currentState == STATE_SETTINGS && rebindingAct >= 0) {
                 RebindConsumeKey((int)wParam);
@@ -1837,6 +1841,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_KEYUP:
+            /* 与 WM_KEYDOWN 保持同一套折算，否则小键盘数字的 keys[] 会卡在按下状态 */
+            if (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9)
+                wParam = (WPARAM)('0' + (wParam - VK_NUMPAD0));
             if (wParam < 256) keys[wParam] = 0;
             return 0;
     }
