@@ -29,11 +29,10 @@ jobs:
           install: >
             mingw-w64-ucrt-x86_64-gcc
 
-      # 步骤 3：使用你专属的 GCC 命令进行编译
+      # 步骤 3：直接使用 gcc 编译
       - name: Build with gcc
         shell: msys2 {0}
-        run: run: gcc src/*.c -Iinclude -o canity.exe -O2 -Wall -Wextra -lgdi32 -luser32 -lwinmm -mwindows
-
+        run: gcc src/*.c -Iinclude -o canity.exe -O2 -Wall -Wextra -lgdi32 -luser32 -lwinmm -mwindows
       # 步骤 4：打包产物（把 exe 压缩成 zip）
       - name: Package files
         shell: pwsh
