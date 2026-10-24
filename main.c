@@ -23,8 +23,8 @@
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 10         /* 整数版本，进存档做记录 */
-#define CANITY_VERSION_STR "1.5.4"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_NUM 11         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_STR "1.6.0"    /* 显示版本，窗口标题 / 主菜单 */
 
 #define MAP_WIDTH 24
 #define MAP_HEIGHT 24
@@ -91,12 +91,17 @@ typedef enum { STATE_MAIN_MENU, STATE_PLAYING, STATE_PAUSED, STATE_SETTINGS, STA
 GameState currentState = STATE_MAIN_MENU;
 GameState prevState = STATE_MAIN_MENU;
 
+int gameWon = 0;             /* 0=失败结局 1=通关结局（第 10 层逃出生天） */
+#define WIN_LEVEL 10         /* 到达这一层并进出口 = 通关 */
+
 int menuSelection = 0;
 int settingsSelection = 0;
 int settingsPopupOpen = 0;
 int popupSelection = 0;
 int popupItem = -1;
 int rebindingAct = -1;       /* >=0 = 正在等待按键改绑的动作（ActionId），-1 = 未在改绑 */
+int rebindConflict = -1;     /* 改绑确认中：目标键被该动作占用（ActionId），-1 = 无冲突 */
+int resetDefaultsFlag = 0;   /* Reset to Defaults 行的哨兵变量（见 settings 表） */
 int uiDirty = 1;
 int sliderDragging = 0;
 
@@ -235,16 +240,18 @@ static const char* modDesc[MOD_COUNT] = {
     "SANITY DRAINS SLOWER"
 };
 
-/* 大厅：碎片货币 + 四项永久升级 */
+/* 大厅：碎片货币 + 六项永久升级 */
 int shards = 0;
 int upgBattery = 0;      /* 电量上限 +20/级 */
 int upgSpeed = 0;        /* 移速 +6%/级 */
 int upgQuiet = 0;        /* 噪声半径 -15%/级 */
 int upgSanity = 0;       /* 理智流失 -10%/级 */
+int upgEco = 0;          /* 手电耗电 -12%/级 */
+int upgRest = 0;         /* 安全屋回智 +25%/级 */
 #define UPG_MAX 3
 
 int hubSelection = 0;
-#define HUB_ROWS 5       /* 4 项升级 + Back */
+#define HUB_ROWS 7       /* 6 项升级 + Back */
 
 /* 寻声怪：只听声音，走路它听不见，跑步/翻找/摇电会把它引过来 */
 #define MON_MAXPATH 96
@@ -477,33 +484,29 @@ typedef enum {
     ACT_MENU_RIGHT,        /* 菜单向右/滑块+ */
     ACT_MENU_CONFIRM,      /* 菜单确认 */
     ACT_MENU_CANCEL,       /* 菜单取消 */
+    ACT_DODGE,             /* 跳脸虫 QTE：躲开（默认 SPACE，可改绑） */
     ACT_COUNT
 } ActionId;
 
-/* 每个动作绑定一个虚拟键码，0=无绑定 */
-static int g_bindings[ACT_COUNT] = {
-    [ACT_MOVE_FWD]      = 'W',
-    [ACT_MOVE_BACK]     = 'S',
-    [ACT_MOVE_LEFT]     = 'A',
-    [ACT_MOVE_RIGHT]    = 'D',
-    [ACT_SPRINT]        = VK_SHIFT,
-    [ACT_INTERACT]       = 'E',
-    [ACT_CRANK]          = 'R',
-    [ACT_FLASHLIGHT]     = 'F',
-    [ACT_MAP]            = 'M',
-    [ACT_THROW]          = VK_LBUTTON,
-    [ACT_CANCEL_CHARGE]  = VK_RBUTTON,
-    [ACT_SELECT_1]       = '1',
-    [ACT_SELECT_2]       = '2',
-    [ACT_SELECT_3]       = '3',
-    [ACT_PAUSE]          = VK_ESCAPE,
-    [ACT_MENU_UP]        = VK_UP,
-    [ACT_MENU_DOWN]      = VK_DOWN,
-    [ACT_MENU_LEFT]      = VK_LEFT,
-    [ACT_MENU_RIGHT]     = VK_RIGHT,
-    [ACT_MENU_CONFIRM]   = VK_RETURN,
-    [ACT_MENU_CANCEL]    = VK_ESCAPE,
-};
+/* 每个动作绑定一个虚拟键码，0=无绑定。
+   默认值集中在一个宏里 —— Settings 的 Reset to Defaults 和自检都要用它，
+   别在两处各写一份。 */
+#define BINDINGS_DEFAULT { \
+    [ACT_MOVE_FWD] = 'W', [ACT_MOVE_BACK] = 'S', \
+    [ACT_MOVE_LEFT] = 'A', [ACT_MOVE_RIGHT] = 'D', \
+    [ACT_SPRINT] = VK_SHIFT, \
+    [ACT_INTERACT] = 'E', [ACT_CRANK] = 'R', [ACT_FLASHLIGHT] = 'F', \
+    [ACT_MAP] = 'M', \
+    [ACT_THROW] = VK_LBUTTON, [ACT_CANCEL_CHARGE] = VK_RBUTTON, \
+    [ACT_SELECT_1] = '1', [ACT_SELECT_2] = '2', [ACT_SELECT_3] = '3', \
+    [ACT_PAUSE] = VK_ESCAPE, \
+    [ACT_MENU_UP] = VK_UP, [ACT_MENU_DOWN] = VK_DOWN, \
+    [ACT_MENU_LEFT] = VK_LEFT, [ACT_MENU_RIGHT] = VK_RIGHT, \
+    [ACT_MENU_CONFIRM] = VK_RETURN, [ACT_MENU_CANCEL] = VK_ESCAPE, \
+    [ACT_DODGE] = VK_SPACE, \
+}
+
+static int g_bindings[ACT_COUNT] = BINDINGS_DEFAULT;
 
 /* 设置菜单用的按键选项：名称与虚拟键码一一对应 */
 static const char* optKeys[] = {
@@ -531,7 +534,7 @@ static const char* actionNames[ACT_COUNT] = {
     "SPRINT", "INTERACT", "CRANK BATTERY", "FLASHLIGHT", "TOGGLE MAP",
     "THROW", "CANCEL CHARGE", "SELECT FLARE", "SELECT BOTTLE", "SELECT SLOT 3",
     "PAUSE", "MENU UP", "MENU DOWN", "MENU LEFT", "MENU RIGHT",
-    "MENU CONFIRM", "MENU CANCEL"
+    "MENU CONFIRM", "MENU CANCEL", "DODGE (QTE)"
 };
 /* 编译期守卫：表项数量必须与动作数一致，漏一个改绑框就会画到 NULL */
 typedef char actionNamesSizeCheck[(ACT_COUNT == (int)(sizeof(actionNames) / sizeof(actionNames[0]))) ? 1 : -1];
@@ -608,6 +611,14 @@ static int IsKeyBindItem(const SettingItem* it) {
     return it->kind == SET_LIST && BindActionOfItem(it) >= 0;
 }
 
+/* VK 码 -> 显示名（改绑提示、QTE 提示共用）。
+   在 optKeys 里找不到的（比如一些扩展键）返回 NULL，调用方自己兜底。 */
+static const char* VkName(int vk) {
+    for (int k = 0; k < OPT_KEY_COUNT; k++)
+        if (optKeyVKs[k] == vk) return optKeys[k];
+    return NULL;
+}
+
 static const char* optRes[5] = {"800 x 600", "1024 x 768", "1280 x 720", "1600 x 900", "1920 x 1080"};
 static const char* optFps[5] = {"30", "60", "120", "144", "Unlimited"};
 static const char* optScale[4] = {"100%", "75%", "50%", "25%"};
@@ -647,6 +658,7 @@ static SettingItem settings[] = {
     {"Select Slot 3",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_3],      NULL, 0, 0, 0, 4},
 
     /* ========== 分类: KEY BINDINGS / MENU KEYS ========== */
+    {"Dodge (QTE)",     SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DODGE],         NULL, 0, 0, 0, 5},
     {"Pause",           SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PAUSE],         NULL, 0, 0, 0, 5},
     {"Menu Up",         SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_UP],       NULL, 0, 0, 0, 5},
     {"Menu Down",       SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_DOWN],     NULL, 0, 0, 0, 5},
@@ -662,6 +674,9 @@ static SettingItem settings[] = {
     {"Show FPS",        SET_LIST,   optOnOff,    2, &showFps,           NULL,      0,    0,    0, 6},
     {"HUD Detail",      SET_LIST,   optHud,      3, &hudDetail,         NULL,      0,    0,    0, 6},
     {"QTE Hint",        SET_LIST,   optQte,      2, &qteHint,           NULL,      0,    0,    0, 6},
+    /* Reset to Defaults：一次性动作行。value 指向 resetDefaultsFlag（没有真选项），
+       ActivateSettingRow 里单独拦截执行。 */
+    {"Reset to Defaults", SET_LIST, optOnOff,    2, &resetDefaultsFlag, NULL,      0,    0,    0, 6},
 };
 
 #define SETTING_COUNT ((int)(sizeof(settings) / sizeof(settings[0])))
@@ -2553,12 +2568,20 @@ static inline void PutPixelAdd(int x, int y, unsigned int color, float a) {
 
 int BatteryMax(void) { return 100 + upgBattery * 20; }
 
+/* 手电每秒耗电：ECO 升级每级 -12% */
+float BatteryDrainRate(void) { return BATTERY_DRAIN * (1.0f - 0.12f * upgEco); }
+
+/* 安全屋回智速度：REST 升级每级 +25% */
+float SafeHealRate(void) { return 3.5f * (1.0f + 0.25f * upgRest); }
+
 static int UpgradeLevel(int kind) {
     switch (kind) {
         case 0: return upgBattery;
         case 1: return upgSpeed;
         case 2: return upgQuiet;
-        default: return upgSanity;
+        case 3: return upgSanity;
+        case 4: return upgEco;
+        default: return upgRest;
     }
 }
 
@@ -2567,7 +2590,9 @@ static void AddUpgrade(int kind) {
         case 0: upgBattery++; break;
         case 1: upgSpeed++; break;
         case 2: upgQuiet++; break;
-        default: upgSanity++; break;
+        case 3: upgSanity++; break;
+        case 4: upgEco++; break;
+        default: upgRest++; break;
     }
 }
 
@@ -2576,7 +2601,9 @@ static const char* UpgradeName(int kind) {
         case 0: return "BATTERY +20";
         case 1: return "SPEED +6%";
         case 2: return "QUIETER -15%";
-        default: return "CALM -10%";
+        case 3: return "CALM -10%";
+        case 4: return "ECO -12% DRAIN";
+        default: return "REST +25% HEAL";
     }
 }
 
@@ -2911,8 +2938,8 @@ void UpdateParasite(float dt) {
 
     case JMP_DODGE: {
         jumperTimer -= dt;
-        /* 玩家按 SPACE = 躲开 */
-        if (keyPressed[VK_SPACE]) {
+        /* 玩家按「躲开键」（默认 SPACE，可改绑）= 躲开 */
+        if (IsActionPressed(ACT_DODGE)) {
             JumperDodged();
             return;
         }
@@ -2927,12 +2954,26 @@ void UpdateParasite(float dt) {
 
     case JMP_QTE: {
         jumperTimer -= dt;
-        /* 阶段二：按下指定的键 */
-        static const int keyCodes[JMP_KEY_COUNT] = { 'A', 'S', 'D', 'F' };
-        int want = keyCodes[jumperQteKey];
-        if (keyPressed[want]) {
-            JumperKeyHit();
-            return;
+        /* 阶段二：按下指定的键。
+           键池不再是硬编码的 A/S/D/F —— 那样玩家改绑后提示键和实际
+           绑定就对不上了。改成从**已绑定的动作键**里取：QTE 让你按的
+           永远是你自己绑过的键，肌肉记忆直接可用。 */
+        {
+            static int keyCodes[JMP_KEY_COUNT];
+            static int poolBuilt = 0;
+            if (!poolBuilt) {
+                /* 从常用动作里挑 4 个不重复、非 0 的绑定键做池子 */
+                static const ActionId poolSrc[JMP_KEY_COUNT] = {
+                    ACT_MOVE_FWD, ACT_MOVE_BACK, ACT_MOVE_LEFT, ACT_MOVE_RIGHT
+                };
+                for (int i = 0; i < JMP_KEY_COUNT; i++) keyCodes[i] = g_bindings[poolSrc[i]];
+                poolBuilt = 1;
+            }
+            int want = keyCodes[jumperQteKey % JMP_KEY_COUNT];
+            if (want != 0 && keyPressed[want]) {
+                JumperKeyHit();
+                return;
+            }
         }
         if (jumperTimer <= 0.0f) {
             /* 超时：惩罚 */
@@ -3379,6 +3420,7 @@ void Update(float dt) {
         sanity = 0.0f;
         runInProgress = 0;
         if (currentLevel > bestLevel) bestLevel = currentLevel;
+        gameWon = 0;
         currentState = STATE_GAMEOVER;
         menuSelection = 0;
         ForceCursor(1);
@@ -3387,9 +3429,9 @@ void Update(float dt) {
         return;
     }
 
-    /* 手电筒耗电：电量耗尽自动熄灭 */
+    /* 手电筒耗电：电量耗尽自动熄灭（ECO 升级降低耗电） */
     if (flashlightOn) {
-        battery -= BATTERY_DRAIN * dt;
+        battery -= BatteryDrainRate() * dt;
         if (battery <= 0.0f) { battery = 0.0f; flashlightOn = 0; }
     }
 
@@ -3436,7 +3478,7 @@ void Update(float dt) {
     /* 安全屋：站在里面回理智 */
     int inSafe = (safeRoom.active && Dist2(posX, posY, safeRoom.x, safeRoom.y) < SAFE_ZONE_RADIUS * SAFE_ZONE_RADIUS);
     if (inSafe) {
-        sanity += 3.5f * dt;
+        sanity += SafeHealRate() * dt;   /* REST 升级提高回智速度 */
         if (sanity > 100.0f) sanity = 100.0f;
         /* 「SAFE ZONE」提示只闪一下：刚进来时给 2 秒，之后不常驻。
            （玩家在安全屋里本来就知道自己在那，不需要一直盯着这行字。） */
@@ -3688,11 +3730,22 @@ void Update(float dt) {
         if (pickupMsgTimer <= 0.0f) pickupMsg = NULL;
     }
 
-    /* 出口：通电后才能进下一关 */
+    /* 出口：通电后才能进下一关；第 WIN_LEVEL 层的出口 = 逃出生天 */
     if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f) {
         PlaySfx(SFX_GATE, 0.65f);
         shards += 30;
         if (currentLevel > bestLevel) bestLevel = currentLevel;
+        if (currentLevel >= WIN_LEVEL) {
+            /* 通关：走进第 10 层的出口就是结局，不再生成下一层 */
+            gameWon = 1;
+            runInProgress = 0;
+            currentState = STATE_GAMEOVER;
+            menuSelection = 0;
+            ForceCursor(1);
+            SetCursor(LoadCursor(NULL, IDC_ARROW));
+            uiDirty = 1;
+            return;
+        }
         currentLevel++;
         GenerateLevel();
         ClearFx();                    /* 换关解除所有状态效果 */
@@ -3934,7 +3987,7 @@ static MenuGeo GetMenuGeo(void) {
         case STATE_HUB:       return MakeGeo("THE HUB", HUB_ROWS, UIS(50), UIS(34), UIS(700), UIS(52));
         case STATE_HELP:      return MakeGeo("HELP", 13, UIS(29), UIS(22), UIS(1000), UIS(30));
         case STATE_PAUSED:    return MakeGeo("PAUSED", 3, UIS(56), UIS(38), UIS(520), UIS(56));
-        case STATE_GAMEOVER:  return MakeGeo("YOU LOST YOUR MIND", 3, UIS(48), UIS(34), UIS(660), UIS(40));
+        case STATE_GAMEOVER:  return MakeGeo(gameWon ? "YOU ESCAPED" : "YOU LOST YOUR MIND", 3, UIS(48), UIS(34), UIS(660), UIS(40));
         case STATE_SETTINGS:  return MakeGeo(PageTitle(settingsPage), SettingsRowCount(), UIS(44), UIS(30), UIS(680), UIS(44));
         default: break;
     }
@@ -4191,6 +4244,8 @@ static void DrawMenuText(void) {
     int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
 
     unsigned int titleColor = (currentState == STATE_MAIN_MENU) ? 0x00BE1414u : 0x00D23C3Cu;
+    /* 通关结局的标题用绿色 —— 和「理智耗尽」的暗红区分开 */
+    if (currentState == STATE_GAMEOVER && gameWon) titleColor = 0x0060E070u;
     if (currentState == STATE_MAIN_MENU) {
         char sb[48];
         sprintf(sb, "SHARDS %d", shards);
@@ -4228,7 +4283,7 @@ static void DrawMenuText(void) {
         else c = (i == sel) ? 0x008CFF8Cu : 0x009B9B9Bu;
 
         if (currentState == STATE_GAMEOVER && i > 0) {
-            /* 死亡复盘：第 2、3 行放统计 */
+            /* 复盘：第 2、3 行放统计（通关与失败共用这一页，标题区分） */
             char line[96];
             int mins = (int)(runTime / 60.0f);
             int secs = (int)runTime - mins * 60;
@@ -4296,24 +4351,44 @@ static void DrawRebindOverlay(void) {
     FrameRectWin(left, top, right, bottom, 0x00b02020, 0.95f, UIS(2));
     DrawTitleWin("REBIND", top + pad, 0x00E65A5Au);
     DrawTextCenterWin(winW / 2, top + pad + titlePx + UIS(24), actionNames[rebindingAct], 0x00A0FFA0u);
-    DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin() * 2, "PRESS ANY KEY", 0x008C8C8Cu);
-    DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin(), "ESC TO CANCEL", 0x006E6E6Eu);
+    if (rebindConflict >= 0 && rebindConflict < ACT_COUNT) {
+        /* 冲突确认：告诉玩家会顶掉哪个动作的绑定，再按一次才生效 */
+        char cbuf[96];
+        sprintf(cbuf, "%s USES THIS KEY", actionNames[rebindConflict]);
+        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin() * 2, cbuf, 0x00FFC040u);
+        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin(), "PRESS AGAIN TO REPLACE", 0x008C8C8Cu);
+    } else {
+        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin() * 2, "PRESS ANY KEY", 0x008C8C8Cu);
+        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin(), "ESC TO CANCEL", 0x006E6E6Eu);
+    }
 }
 
 /* 把一次按键交给改绑流程。返回 1 = 这个键被改绑消费掉了。
-   Esc 保留为「取消改绑」；其它键一律写进 g_bindings。
+   Esc = 取消；冲突时第一次按键只显示确认提示（不静默抢键），
+   同一个键再按一次才执行替换。
    鼠标键也能绑（WM_L/R/MBUTTONDOWN 走这里）。 */
 static int RebindConsumeKey(int vk) {
     if (rebindingAct < 0 || rebindingAct >= ACT_COUNT) return 0;
     if (vk == VK_ESCAPE) {
         rebindingAct = -1;
+        rebindConflict = -1;
         uiDirty = 1;
         return 1;
     }
-    /* 防止一个键绑到两个动作上：抢走其它动作里的同名绑定 */
+    /* 冲突检测：这个键已经绑在别的动作上了吗？ */
+    int conflict = -1;
     for (int a = 0; a < ACT_COUNT; a++) {
-        if (a != rebindingAct && g_bindings[a] == vk) g_bindings[a] = 0;
+        if (a != rebindingAct && g_bindings[a] == vk) { conflict = a; break; }
     }
+    if (conflict >= 0 && rebindConflict != conflict) {
+        /* 第一次按：只确认，不抢键。同一个键再按一次才执行替换。 */
+        rebindConflict = conflict;
+        uiDirty = 1;
+        return 1;
+    }
+    /* 无冲突，或者玩家已经确认替换：清掉旧动作上的这个键 */
+    if (conflict >= 0) g_bindings[conflict] = 0;
+    rebindConflict = -1;
     g_bindings[rebindingAct] = vk;
     rebindingAct = -1;
     uiDirty = 1;
@@ -4442,17 +4517,25 @@ void DrawHUD(void) {
        任何含糊都会让玩家觉得是游戏 bug。 */
     if (parasite.active && jumperPhase != JMP_IDLE && jumperPhase != JMP_DONE) {
         float frac = 0.0f;
-        const char* prompt = "";
+        char prompt[48];
         unsigned int col = 0x00FFE060u;
 
         if (jumperPhase == JMP_DODGE) {
             frac = jumperTimer / JUMPER_DODGE_WINDOW;
-            prompt = "PRESS SPACE TO DODGE";
+            /* 提示跟随绑定：改绑后提示和实际按键保持一致 */
+            const char* dodgeName = VkName(g_bindings[ACT_DODGE]);
+            if (!dodgeName) dodgeName = "???";
+            sprintf(prompt, "PRESS %s TO DODGE", dodgeName);
             col = 0x00FF8040u;
-        } else if (jumperPhase == JMP_QTE) {
+        } else {
             frac = jumperTimer / JUMPER_QTE_WINDOW;
-            static const char* qteKeys[JMP_KEY_COUNT] = { "A", "S", "D", "F" };
-            prompt = qteKeys[jumperQteKey];
+            /* 阶段二的候选键池与 UpdateParasite 同源：取移动四键的绑定 */
+            static const ActionId poolSrc[JMP_KEY_COUNT] = {
+                ACT_MOVE_FWD, ACT_MOVE_BACK, ACT_MOVE_LEFT, ACT_MOVE_RIGHT
+            };
+            int vk = g_bindings[poolSrc[jumperQteKey % JMP_KEY_COUNT]];
+            const char* nm = VkName(vk);
+            sprintf(prompt, "%s", nm ? nm : "???");
             col = 0x00FF3030u;
         }
         if (frac < 0.0f) frac = 0.0f;
@@ -4480,12 +4563,14 @@ void DrawHUD(void) {
             if (qteHint >= 1)
                 DrawTextCenterWin(winW / 2, ky - UIS(30), "IT IS ON YOUR FACE", 0x00FF6060u);
         } else {
-            /* 阶段一：Minimal 档只显示一个空格键图标，
+            /* 阶段一：Minimal 档只显示一个躲开键图标（跟随绑定），
                Full 档才显示英文说明。 */
             if (qteHint >= 1) {
                 DrawTextCenterWin(winW / 2, winH / 2 - UIS(40), prompt, col);
             } else {
-                int keyW = TextWidthWin("SPACE") * 2;
+                const char* dodgeName = VkName(g_bindings[ACT_DODGE]);
+                if (!dodgeName) dodgeName = "???";
+                int keyW = TextWidthWin(dodgeName) * 2;
                 int keyH = TextHeightWin() * 2;
                 int kx = (winW - keyW) / 2;
                 int ky = winH / 2 - keyH / 2;
@@ -4495,7 +4580,7 @@ void DrawHUD(void) {
                              col, 0.9f, 2);
                 for (int i = 0; i < 2; i++)
                     for (int j = 0; j < 2; j++)
-                        DrawTextWin(kx + i * (keyW / 2), ky + j * (keyH / 2), "SPACE", col);
+                        DrawTextWin(kx + i * (keyW / 2), ky + j * (keyH / 2), dodgeName, col);
             }
         }
 
@@ -4702,6 +4787,7 @@ void RenderFrame(void) {
 void StartGame(void) {
     currentState = STATE_PLAYING;
     currentLevel = 1;
+    gameWon = 0;
     flares = 1;
     bottles = 1;
     runInProgress = 1;
@@ -4812,6 +4898,7 @@ void ActivateMenuItem(void) {
             settingsSelection = 0;
             settingsPopupOpen = 0;
             rebindingAct = -1;
+            rebindConflict = -1;
             uiDirty = 1;
         } else {
             SaveGame();
@@ -4831,6 +4918,7 @@ void ActivateMenuItem(void) {
             settingsSelection = 0;
             settingsPopupOpen = 0;
             rebindingAct = -1;
+            rebindConflict = -1;
             uiDirty = 1;
         } else if (menuSelection == 2) {
             SaveGame();
@@ -4897,10 +4985,26 @@ void ActivateSettingRow(void) {
     }
 
     popupItem = idx[settingsSelection];
+    /* Reset to Defaults：一键恢复出厂（键位 + 全部设置项）。
+       用哨兵地址识别，不走弹窗。 */
+    if (settings[popupItem].value == &resetDefaultsFlag) {
+        static const int defBindings[ACT_COUNT] = BINDINGS_DEFAULT;
+        for (int a = 0; a < ACT_COUNT; a++) g_bindings[a] = defBindings[a];
+        resIndex = 0; isFullscreen = 0; fpsCapIndex = 1; renderScaleIndex = 0;
+        fovIndex = 2; vignetteOn = 1; showFps = 0; hudDetail = 1; qteHint = 1;
+        gammaValue = 1.0f; mouseSens = 1.0f; volumeF = 0.8f;
+        ApplyDisplayMode();
+        ApplyFov();
+        PlaySfx(SFX_POWER, 0.5f);
+        SaveGame();
+        uiDirty = 1;
+        return;
+    }
     /* 键位项：进入「按任意键绑定」模式，不再弹 54 项的选项列表
        （那个列表本身也远超一屏，只能盲选）。 */
     if (IsKeyBindItem(&settings[popupItem])) {
         rebindingAct = BindActionOfItem(&settings[popupItem]);
+        rebindConflict = -1;   /* 新的一次改绑，清掉上一次的冲突确认 */
         uiDirty = 1;
         return;
     }
@@ -5629,10 +5733,11 @@ void ShutdownAudio(void) {
 
 #define SAVE_MAGIC 0x43414E32u   /* "CAN2" */
 /* 存档**格式**版本。v5 在末尾追加了 HUD 详细度 / QTE 提示两个字段。
+   v6 又在末尾追加：键位绑定表（ACT_COUNT 个 int）+ ECO/REST 两个新升级。
    读档时会按文件的**实际长度**判断是老版本还是新版本：
    老存档照样能读（新增字段取默认值），不用丢玩家进度。
    —— 参见 LoadSettings 里的迁移逻辑。 */
-#define SAVE_VERSION 5
+#define SAVE_VERSION 6
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
 #define SAVE_FILE "canity.sav"
@@ -5651,7 +5756,6 @@ typedef struct {
     int shards, upgBattery, upgSpeed, upgQuiet, upgSanity;
     int bestLevel;
     float volume;
-
     /* 进度 */
     int hasRun, level, fusesHeld, fusesNeeded, breakerOpen, breakerActive, searchedCount, nContainers;
     int flashlightOn;
@@ -5675,6 +5779,11 @@ typedef struct {
        读档时按文件长度就能判断是不是老版本（见 LoadSettings）。 */
     int hudDetail;
     int qteHint;
+
+    /* v6 新增：键位绑定表 + 两个新升级（ECO/REST）。同样放末尾，
+       v5 存档按文件长度识别后取默认键位与 0 级升级。 */
+    int bindings[ACT_COUNT];
+    int upgEco, upgRest;
 } SaveBlob;
 
 static SaveBlob g_save;
@@ -5701,8 +5810,11 @@ static void SaveGame(void) {
     g_save.upgSpeed = upgSpeed;
     g_save.upgQuiet = upgQuiet;
     g_save.upgSanity = upgSanity;
+    g_save.upgEco = upgEco;
+    g_save.upgRest = upgRest;
     g_save.bestLevel = bestLevel;
     g_save.volume = volumeF;
+    for (int a = 0; a < ACT_COUNT; a++) g_save.bindings[a] = g_bindings[a];
 
     g_save.hasRun = runInProgress;
     g_save.level = currentLevel;
@@ -5765,18 +5877,33 @@ static int LoadSettings(void) {
     fclose(f);
     if (!got || g_save.magic != SAVE_MAGIC) return 0;
 
-    /* 存档**格式**版本：接受 v4（老结构）与 v5（当前结构）。
-       v4 的存档按文件长度就能认出来 —— 因为新增字段在结构末尾，
-       老文件的字节数正好少 sizeof(int) * 2。
-       这里**不**做「版本不符就整份丢弃」：那两个新字段只是显示偏好，
-       丢掉它们没有意义，而丢弃整份存档会让玩家进度全没。 */
-    if (g_save.version != SAVE_VERSION && g_save.version != 4) return 0;
-    int isOldV4 = (fileSize < sizeof(SaveBlob));
+    /* 存档**格式**版本：接受 v4 / v5（老结构）与 v6（当前结构）。
+       老存档按文件长度就能认出来 —— 新增字段永远追加在结构末尾，
+       老文件的字节数正好少一块。这里**不**做「版本不符就整份丢弃」：
+       键位与显示偏好丢了没有意义，而丢弃整份存档会让玩家进度全没。 */
+    if (g_save.version != SAVE_VERSION && g_save.version != 4 && g_save.version != 5) return 0;
+    int isOldSave = (fileSize < sizeof(SaveBlob));
 
-    /* 迁移：老存档没有这两个字段，给默认值 */
-    if (isOldV4) {
-        g_save.hudDetail = 1;    /* Normal */
-        g_save.qteHint = 1;      /* Full */
+    /* 迁移：老存档缺的字段给默认值。
+       v5 及更早没有键位表和 ECO/REST 升级 —— 键位取出厂默认（比
+       全 0 好得多：全 0 意味着「没有绑定」，游戏直接没法玩），
+       新升级从 0 级开始。 */
+    if (isOldSave) {
+        /* v6 之前没有 bindings/upgEco/upgRest 字段。
+           判据：文件没包含**完整的** bindings 数组（老 v5 文件的长度
+           正好等于 bindings 的偏移量，不能用严格小于偏移量来判断）。 */
+        size_t bindOff  = (size_t)((char*)&g_save.bindings[0] - (char*)&g_save);
+        size_t bindNeed = bindOff + sizeof(g_save.bindings);
+        if (fileSize < bindNeed) {
+            static const int defBindings[ACT_COUNT] = BINDINGS_DEFAULT;
+            for (int a = 0; a < ACT_COUNT; a++) g_save.bindings[a] = defBindings[a];
+            g_save.upgEco = 0;
+            g_save.upgRest = 0;
+        }
+        if (g_save.version < 5) {
+            g_save.hudDetail = 1;    /* Normal */
+            g_save.qteHint = 1;      /* Full */
+        }
     }
     /* 边界检查：存档可能被外部改坏，数值必须夹回合法范围 */
     if (g_save.hudDetail < 0 || g_save.hudDetail > 2) g_save.hudDetail = 1;
@@ -5803,6 +5930,8 @@ static int LoadSettings(void) {
     upgSpeed = g_save.upgSpeed;
     upgQuiet = g_save.upgQuiet;
     upgSanity = g_save.upgSanity;
+    upgEco = g_save.upgEco;
+    upgRest = g_save.upgRest;
     bestLevel = g_save.bestLevel;
     volumeF = g_save.volume;
     if (volumeF < 0.0f || volumeF > 1.0f) volumeF = 0.8f;
@@ -5811,6 +5940,22 @@ static int LoadSettings(void) {
     if (upgSpeed < 0 || upgSpeed > UPG_MAX) upgSpeed = 0;
     if (upgQuiet < 0 || upgQuiet > UPG_MAX) upgQuiet = 0;
     if (upgSanity < 0 || upgSanity > UPG_MAX) upgSanity = 0;
+    if (upgEco < 0 || upgEco > UPG_MAX) upgEco = 0;
+    if (upgRest < 0 || upgRest > UPG_MAX) upgRest = 0;
+
+    /* 键位：逐项夹取。非 0 的值必须能在 optKeyVKs 里找到，否则还原成默认 ——
+       防止损坏的存档把「移动」绑成一个不存在的键，玩家被锁死。 */
+    {
+        static const int defBindings[ACT_COUNT] = BINDINGS_DEFAULT;
+        for (int a = 0; a < ACT_COUNT; a++) {
+            int vk = g_save.bindings[a];
+            if (vk == 0) { g_bindings[a] = 0; continue; }   /* 允许显式无绑定 */
+            int known = 0;
+            for (int k = 0; k < OPT_KEY_COUNT; k++)
+                if (optKeyVKs[k] == vk) { known = 1; break; }
+            g_bindings[a] = known ? vk : defBindings[a];
+        }
+    }
 
     if (resIndex < 0 || resIndex > 4) resIndex = 0;
     if (fpsCapIndex < 0 || fpsCapIndex > 4) fpsCapIndex = 1;

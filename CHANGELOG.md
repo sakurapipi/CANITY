@@ -7,6 +7,11 @@
 
 ---
 
+## [1.6.0] — 2026-10-24
+- 键位绑定持久化（存档 v6，v5 及更早自动迁移）、Reset Defaults 一键恢复出厂、改绑冲突需再按一次确认
+- QTE 跟随绑定：新增 Dodge 键（默认 SPACE），阶段二候选键改取移动键的绑定
+- 大厅新增 ECO（手电省电）/REST（安全屋回智）升级；第 10 层通电进出口 = 通关结局
+
 ## [1.5.4] — 2026-10-24
 - 设置菜单重构：根目录收敛为 Display/Key Bindings/Gameplay，键位归入 Key Bindings 子目录（Movement/Actions/Menu Keys），改绑改为「点击后按任意键」，Help 页不再重复键位表
 - 修复键位行两行式绘制溢出行高、绑定弹窗 54 项超屏、根目录硬编码 3 项导致 Menu Keys/Gameplay 打不开、Back 行读到垃圾指针
