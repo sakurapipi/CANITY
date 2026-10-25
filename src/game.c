@@ -15,6 +15,10 @@
    （原来集中在 main.c 中部的前置声明块，拆分后只保留模块内部需要的）。 */
 static void ThrowItem(int type, float charge);
 static void SpawnShards(float x, float y, float vx, float vy, float charge);
+static void InitAchievements(void);
+static void UnlockAchievement(int idx);
+static void AddAchievementProgress(int idx, int amount);
+static void CheckAchievements(void);
 
 
 int winW = 800, winH = 600;          /* 窗口客户区尺寸（逻辑/显示分辨率） */
@@ -97,6 +101,16 @@ double g_timeSec = 0.0;    /* 主循环时钟，渲染用它做动画 */
 float heartTimer = 0.0f;
 int searchedCount = 0;    /* 搜索过的容器数 */
 int hasSave = 0;          /* 是否有可继续的存档 */
+
+int totalShardsEarned = 0;  /* 累计获得碎片（用于成就） */
+int bottlesKilled = 0;      /* 用瓶子击杀怪物数 */
+int faceDodged = 0;         /* 躲开跳脸虫次数 */
+int crankTimeTotal = 0;     /* 累计发电秒数 */
+int fusesCollectedRun = 0;  /* 本局收集保险丝数 */
+int mapsFullyExplored = 0;  /* 全探索地图数 */
+int tookDamage = 0;         /* 本局是否受过伤 */
+int flashlightOffLevel = 0; /* 关灯过关标记 */
+int sprintedThisLevel = 0;  /* 本局是否冲刺过 */
 const char* pickupMsg = NULL;    /* 拾取提示文本 */
 float pickupMsgTimer = 0.0f;     /* 提示显示剩余时间 */
 int bestLevel = 0;
@@ -126,6 +140,12 @@ int keyPressed[256] = {0};
 void ClearKeyEdges(void) {
     for (int i = 0; i < 256; i++) keyPressed[i] = 0;
 }
+
+int achSelection = 0;
+Achievement g_achievements[ACH_COUNT] = {0};
+
+/* 每个菜单状态的滚动偏移，持久化避免 GetMenuGeo 重新计算 */
+int menuScrollOffsets[8] = {0};  /* 下标 = GameState，包含 STATE_ACHIEVEMENTS=7 */
 
 int g_bindings[ACT_COUNT] = BINDINGS_DEFAULT;
 
@@ -160,6 +180,10 @@ const char* actionNames[ACT_COUNT] = {
 typedef char actionNamesSizeCheck[(ACT_COUNT == (int)(sizeof(actionNames) / sizeof(actionNames[0]))) ? 1 : -1];
 
 /* 统一按键查询：键盘走 keys[]/keyPressed[]，鼠标走 GetAsyncKeyState */
+static inline int IsMouseButton(int vk) {
+    return vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON;
+}
+
 static inline int IsActionDown(ActionId act) {
     int vk = g_bindings[act];
     if (vk == 0) return 0;
@@ -856,6 +880,9 @@ void Update(float dt) {
     runTime += dt;
     if (levelBanner > 0.0f) levelBanner -= dt;
 
+    /* 成就检查 */
+    CheckAchievements();
+
     /* 状态效果计时。强度变化时重算 FOV（视野收窄要立刻生效） */
     if (UpdateFx(dt)) ApplyFov();
 
@@ -910,6 +937,7 @@ void Update(float dt) {
 
     sprinting = (wantSprint && moving && stamina > 1.0f);
     if (sprinting) {
+        sprintedThisLevel = 1;  /* 标记本局冲刺过 */
         stamina -= STAMINA_DRAIN * dt;
         if (stamina < 0.0f) stamina = 0.0f;
         staminaIdle = 0.5f;
@@ -949,6 +977,7 @@ void Update(float dt) {
         if (crankTimer >= 2.4f) {
             crankTimer = 0.0f;
             battery += 32.0f;
+            crankTimeTotal += 3;  /* 2.4 秒算 3 秒，累计用于成就 */
             if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
             PlaySfx(SFX_POWER, 0.45f);
         }
@@ -991,10 +1020,12 @@ void Update(float dt) {
                 Container* c = &containers[hoverIndex];
                 c->searched = 1;
                 searchedCount++;
-                shards += 5;
+                shards += 3;
+                totalShardsEarned += 3;
+                AddAchievementProgress(3, 3);  /* SHARD HUNTER */
                 PlaySfx(SFX_PICKUP, 0.55f);
                 MakeNoise(posX, posY, 8.0f);
-                if (c->content == 1) { fusesHeld++; pickupMsg = "+FUSE"; }
+                if (c->content == 1) { fusesHeld++; fusesCollectedRun++; pickupMsg = "+FUSE"; }
                 else if (c->content == 4) { flares++; pickupMsg = "+FLARE"; }
                 else if (c->content == 5) { bottles++; pickupMsg = "+BOTTLE"; }
                 else if (c->content == 2) {
@@ -1013,7 +1044,9 @@ void Update(float dt) {
                 if (fusesHeld >= fusesNeeded) {
                     breakerOpen = 1;
                     fusesHeld -= fusesNeeded;
-                    shards += 15;
+                    shards += 8;
+                    totalShardsEarned += 8;
+                    AddAchievementProgress(3, 8);  /* SHARD HUNTER */
                     PlaySfx(SFX_POWER, 0.75f);
                 }
             }
@@ -1027,10 +1060,14 @@ void Update(float dt) {
     /* 投掷：数字键选槽位，鼠标左键蓄力投掷 */
     if (throwCd > 0.0f) throwCd -= dt;
 
-    /* 数字键 1/2/3 切换投掷物槽位 */
-    if (IsActionPressed(ACT_SELECT_1)) throwSelected = 0;
-    else if (IsActionPressed(ACT_SELECT_2)) throwSelected = 1;
-    else if (IsActionPressed(ACT_SELECT_3)) throwSelected = 2;
+    /* 数字键 1/2/3 切换投掷物槽位。
+       键盘的情况已经在 WM_KEYDOWN 里即时处理（见 WindowProc）——
+       原来在这里用 if/else 轮询 keyPressed，同一帧先按 1 再按 2 只认 1，
+       按住不放时系统的自动重复还会一直压住另一个键，表现就是「按了没反应」。
+       这里只保留「把槽位改绑到鼠标键」的兜底：鼠标键不产生 WM_KEYDOWN。 */
+    if (IsMouseButton(g_bindings[ACT_SELECT_1]) && IsActionPressed(ACT_SELECT_1)) throwSelected = 0;
+    else if (IsMouseButton(g_bindings[ACT_SELECT_2]) && IsActionPressed(ACT_SELECT_2)) throwSelected = 1;
+    else if (IsMouseButton(g_bindings[ACT_SELECT_3]) && IsActionPressed(ACT_SELECT_3)) throwSelected = 2;
 
     /* 鼠标左键：按住蓄力，松开投掷；右键取消蓄力。
        严格的「未按下 -> 按下」边缘检测：
@@ -1179,8 +1216,11 @@ void Update(float dt) {
     /* 出口：通电后才能进下一关；第 WIN_LEVEL 层的出口 = 逃出生天 */
     if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f) {
         PlaySfx(SFX_GATE, 0.65f);
-        shards += 30;
+        shards += 15;
+        totalShardsEarned += 15;
+        AddAchievementProgress(3, 15);  /* SHARD HUNTER */
         if (currentLevel > bestLevel) bestLevel = currentLevel;
+        if (currentLevel == 1) UnlockAchievement(0);  /* FIRST STEPS */
         if (currentLevel >= WIN_LEVEL) {
             /* 通关：走进第 10 层的出口就是结局，不再生成下一层 */
             gameWon = 1;
@@ -1189,11 +1229,23 @@ void Update(float dt) {
             menuSelection = 0;
             ForceCursor(1);
             SetCursor(LoadCursor(NULL, IDC_ARROW));
+            /* 通关时检查成就 */
+            UnlockAchievement(2);  /* ESCAPE ARTIST */
+            if (!tookDamage) UnlockAchievement(14);  /* PERFECT ESCAPE */
+            if (upgBattery >= UPG_MAX && upgSpeed >= UPG_MAX && upgQuiet >= UPG_MAX &&
+                upgSanity >= UPG_MAX && upgEco >= UPG_MAX && upgRest >= UPG_MAX) {
+                UnlockAchievement(15);  /* TRUE SURVIVOR */
+            }
             uiDirty = 1;
             return;
         }
         currentLevel++;
         GenerateLevel();
+        /* 重置本层/本局的成就追踪变量 */
+        sprintedThisLevel = 0;
+        fusesCollectedRun = 0;
+        flashlightOffLevel = 0;
+        mapsFullyExplored = 0;
         ClearFx();                    /* 换关解除所有状态效果 */
         for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
         flashTime = 0.15f;
@@ -1224,6 +1276,17 @@ void StartGame(void) {
     isCharging = 0;
     mouseCharge = 0.0f;
     resetInputState = 1;
+    /* 重置成就追踪变量 */
+    totalShardsEarned = 0;
+    bottlesKilled = 0;
+    faceDodged = 0;
+    crankTimeTotal = 0;
+    fusesCollectedRun = 0;
+    mapsFullyExplored = 0;
+    tookDamage = 0;
+    flashlightOffLevel = 0;
+    sprintedThisLevel = 0;
+    InitAchievements();  /* 初始化成就定义（仅首次） */
     ClearFx();
     for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
     GenerateLevel();
@@ -1233,6 +1296,96 @@ void StartGame(void) {
     ForceCursor(0);
     firstMouseMove = 1;
     uiDirty = 1;
+}
+
+static void InitAchievements(void) {
+    /* 总是初始化静态字段（name/desc/target/id），存档只保存动态字段(unlocked/progress) */
+    const char* names[ACH_COUNT] = {
+        "FIRST STEPS", "SURVIVOR", "ESCAPE ARTIST", "SHARD HUNTER",
+        "SILENT SHADOW", "BOTTLE MASTER", "FACE DODGER", "NOCTURNAL",
+        "SPEED RUNNER", "DEEP DIVER", "FUSE FINDER", "GENERATOR GURU",
+        "UPGRADE JUNKIE", "MAP MASTER", "PERFECT ESCAPE", "TRUE SURVIVOR"
+    };
+    const char* descs[ACH_COUNT] = {
+        "Complete level 1",
+        "Reach level 5",
+        "Beat the game (reach level 10 exit)",
+        "Collect 500 shards total",
+        "Reach level 5 without sprinting",
+        "Kill 10 monsters with bottles",
+        "Dodge 5 face jumpers successfully",
+        "Complete a level with flashlight off",
+        "Complete level 1 in under 2 minutes",
+        "Reach level 10",
+        "Collect 5 fuses in a single run",
+        "Crank generator for 60 seconds total",
+        "Max out all 6 upgrades",
+        "Fully explore 3 maps in one run",
+        "Beat the game without taking damage",
+        "Beat the game on level 10 with all upgrades maxed"
+    };
+    int targets[ACH_COUNT] = {
+        1, 5, 10, 500, 5, 10, 5, 1, 120, 10, 5, 60, 18, 3, 1, 1
+    };
+    for (int i = 0; i < ACH_COUNT; i++) {
+        g_achievements[i].id = i + 1;
+        strncpy(g_achievements[i].name, names[i], ACH_NAME_MAX - 1);
+        g_achievements[i].name[ACH_NAME_MAX - 1] = '\0';
+        strncpy(g_achievements[i].desc, descs[i], ACH_DESC_MAX - 1);
+        g_achievements[i].desc[ACH_DESC_MAX - 1] = '\0';
+        g_achievements[i].target = targets[i];
+        /* unlocked 和 progress 由 LoadSettings 恢复，这里不覆盖 */
+    }
+}
+
+/* 成就辅助：解锁并保存 */
+static void UnlockAchievement(int idx) {
+    if (idx < 0 || idx >= ACH_COUNT) return;
+    if (g_achievements[idx].unlocked) return;
+    g_achievements[idx].unlocked = 1;
+    g_achievements[idx].progress = g_achievements[idx].target;
+    SaveGame();  /* 立即持久化 */
+}
+
+static void AddAchievementProgress(int idx, int amount) {
+    if (idx < 0 || idx >= ACH_COUNT) return;
+    if (g_achievements[idx].unlocked) return;
+    g_achievements[idx].progress += amount;
+    if (g_achievements[idx].progress >= g_achievements[idx].target) {
+        UnlockAchievement(idx);
+    }
+}
+
+/* 每帧/事件时检查的成就 */
+static void CheckAchievements(void) {
+    /* 1: FIRST STEPS - 完成第 1 层（在过关时检查） */
+    /* 2: SURVIVOR - 到达第 5 层 */
+    if (currentLevel >= 5) UnlockAchievement(1);
+    /* 3: ESCAPE ARTIST - 通关（在 gameWon 时检查） */
+    /* 4: SHARD HUNTER - 累计 500 碎片（在获得碎片时累加，需要总计数） */
+    if (totalShardsEarned >= 500) UnlockAchievement(3);
+    /* 5: SILENT SHADOW - 第 5 层不冲刺（需额外标记） */
+    /* 6: BOTTLE MASTER - 用瓶子击杀 10 只怪 */
+    if (bottlesKilled >= 10) UnlockAchievement(5);
+    /* 7: FACE DODGER - 躲开 5 次跳脸虫 */
+    if (faceDodged >= 5) UnlockAchievement(6);
+    /* 8: NOCTURNAL - 手电关着过关（需标记） */
+    /* 9: SPEED RUNNER - 第 1 关 2 分钟内过关 */
+    if (currentLevel == 1 && runTime < 120.0f && breakerOpen) UnlockAchievement(8);
+    /* 10: DEEP DIVER - 到达第 10 层 */
+    if (currentLevel >= 10) UnlockAchievement(9);
+    /* 11: FUSE FINDER - 单局集 5 保险丝（需计数） */
+    if (fusesCollectedRun >= 5) UnlockAchievement(10);
+    /* 12: GENERATOR GURU - 发电累计 60 秒（需累计） */
+    if (crankTimeTotal >= 60) UnlockAchievement(11);
+    /* 13: UPGRADE JUNKIE - 6 项升级全满级 */
+    if (upgBattery >= UPG_MAX && upgSpeed >= UPG_MAX && upgQuiet >= UPG_MAX &&
+        upgSanity >= UPG_MAX && upgEco >= UPG_MAX && upgRest >= UPG_MAX) {
+        UnlockAchievement(12);
+    }
+    /* 14: MAP MASTER - 单局全探索 3 张图（需计数） */
+    /* 15: PERFECT ESCAPE - 通关无伤（需标记） */
+    /* 16: TRUE SURVIVOR - 通关且全满级（在 gameWon 时检查） */
 }
 
 void PauseGame(void) {
@@ -1308,10 +1461,16 @@ void ActivateMenuItem(void) {
             hubSelection = 0;
             uiDirty = 1;
         } else if (sel == base + 2) {
+            currentState = STATE_ACHIEVEMENTS;
+            achSelection = 0;
+            menuScrollOffsets[STATE_ACHIEVEMENTS] = 0;  /* 进入页面时回到列表顶部 */
+            InitAchievements();  /* 确保成就静态数据已初始化 */
+            uiDirty = 1;
+        } else if (sel == base + 3) {
             prevState = STATE_MAIN_MENU;
             currentState = STATE_HELP;
             uiDirty = 1;
-        } else if (sel == base + 3) {
+        } else if (sel == base + 4) {
             prevState = currentState;
             currentState = STATE_SETTINGS;
             settingsPage = 0;
@@ -1472,7 +1631,7 @@ static void HitTestMenu(int mx, int my) {
             return;
         }
         MenuGeo g = GetMenuGeo();
-        for (int i = 0; i < g.count; i++) {
+        for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
             RECT r = RowRect(g, i);
             if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
                 if (settingsSelection != i) { settingsSelection = i; uiDirty = 1; }
@@ -1482,8 +1641,21 @@ static void HitTestMenu(int mx, int my) {
         return;
     }
 
+    if (currentState == STATE_ACHIEVEMENTS) {
+        MenuGeo g = GetMenuGeo();
+        int scrollOff = menuScrollOffsets[STATE_ACHIEVEMENTS];
+        for (int i = scrollOff; i < g.count && i < scrollOff + g.maxVisibleRows; i++) {
+            RECT r = RowRect(g, i);
+            if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
+                if (achSelection != i) { achSelection = i; uiDirty = 1; }
+                return;
+            }
+        }
+        return;
+    }
+
     MenuGeo g = GetMenuGeo();
-    for (int i = 0; i < g.count; i++) {
+    for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
         RECT r = RowRect(g, i);
         if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
             if (menuSelection != i) { menuSelection = i; uiDirty = 1; }
@@ -1530,7 +1702,7 @@ static void ClickMenu(int mx, int my) {
                 return;
             }
 
-            for (int i = 0; i < p.count; i++) {
+            for (int i = p.scrollOffset; i < p.count && i < p.scrollOffset + p.maxVisibleRows; i++) {
                 RECT r = RowRect(p, i);
                 if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
                     ApplySetting(popupItem, i);
@@ -1547,7 +1719,7 @@ static void ClickMenu(int mx, int my) {
             return;
         }
         MenuGeo g = GetMenuGeo();
-        for (int i = 0; i < g.count; i++) {
+        for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
             RECT r = RowRect(g, i);
             if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
                 settingsSelection = i;
@@ -1558,10 +1730,28 @@ static void ClickMenu(int mx, int my) {
         return;
     }
 
+    if (currentState == STATE_ACHIEVEMENTS) {
+        MenuGeo g = GetMenuGeo();
+        for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
+            RECT r = RowRect(g, i);
+            if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
+                achSelection = i;
+                if (i >= ACH_COUNT) {
+                    /* 点 Back 直接退出，不是只把光标移过去 */
+                    currentState = STATE_MAIN_MENU;
+                    menuSelection = 0;
+                    uiDirty = 1;
+                }
+                return;
+            }
+        }
+        return;
+    }
+
     if (currentState == STATE_GAMEOVER) { ActivateMenuItem(); return; }
 
     MenuGeo g = GetMenuGeo();
-    for (int i = 0; i < g.count; i++) {
+    for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
         RECT r = RowRect(g, i);
         if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
             menuSelection = i;
@@ -1674,6 +1864,28 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
         }
 
+        case WM_MOUSEWHEEL: {
+            /* 鼠标滚轮滚动菜单 */
+            if (currentState != STATE_PLAYING && !settingsPopupOpen) {
+                int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+                MenuGeo g = GetMenuGeo();
+                if (g.count > g.maxVisibleRows) {
+                    int maxOffset = g.count - g.maxVisibleRows;
+                    if (maxOffset < 0) maxOffset = 0;
+                    if (delta > 0) {
+                        /* 向上滚动 */
+                        menuScrollOffsets[currentState] = (menuScrollOffsets[currentState] > 0) ? menuScrollOffsets[currentState] - 1 : 0;
+                    } else if (delta < 0) {
+                        /* 向下滚动 */
+                        menuScrollOffsets[currentState] = (menuScrollOffsets[currentState] < maxOffset) ? menuScrollOffsets[currentState] + 1 : maxOffset;
+                    }
+                    uiDirty = 1;
+                    InvalidateRect(g_hwnd, NULL, FALSE);  /* 强制重绘 */
+                }
+            }
+            return 0;
+        }
+
         case WM_LBUTTONDOWN: {
             int mx = (short)LOWORD(lParam), my = (short)HIWORD(lParam);
             if (currentState != STATE_PLAYING) {
@@ -1725,6 +1937,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (currentState == STATE_PLAYING) keyPressed[wParam] = 1;
             }
 
+            /* 切投掷槽位：在消息里即时处理，后按的键立即生效。
+               bit30 = 系统自动重复；按住不放时不重复覆盖，否则会压住另一个键。
+               （绑到鼠标键的情况在 Update 里轮询兜底。） */
+            if (currentState == STATE_PLAYING && !(lParam & 0x40000000)) {
+                if (!IsMouseButton(g_bindings[ACT_SELECT_1]) &&
+                    wParam == (WPARAM)g_bindings[ACT_SELECT_1]) throwSelected = 0;
+                else if (!IsMouseButton(g_bindings[ACT_SELECT_2]) &&
+                    wParam == (WPARAM)g_bindings[ACT_SELECT_2]) throwSelected = 1;
+                else if (!IsMouseButton(g_bindings[ACT_SELECT_3]) &&
+                    wParam == (WPARAM)g_bindings[ACT_SELECT_3]) throwSelected = 2;
+            }
+
             /* 统一菜单导航按键判断 */
             int menuUp    = (wParam == (WPARAM)g_bindings[ACT_MENU_UP]);
             int menuDown  = (wParam == (WPARAM)g_bindings[ACT_MENU_DOWN]);
@@ -1736,6 +1960,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (currentState == STATE_MAIN_MENU) {
                 if (menuUp) { menuSelection = (menuSelection + MainMenuCount() - 1) % MainMenuCount(); uiDirty = 1; }
                 if (menuDown) { menuSelection = (menuSelection + 1) % MainMenuCount(); uiDirty = 1; }
+                MenuGeo g = GetMenuGeo();
+                if (menuSelection < g.scrollOffset) menuScrollOffsets[STATE_MAIN_MENU] = menuSelection;
+                else if (menuSelection >= g.scrollOffset + g.maxVisibleRows) menuScrollOffsets[STATE_MAIN_MENU] = menuSelection - g.maxVisibleRows + 1;
                 if (menuConfirm) ActivateMenuItem();
             } else if (currentState == STATE_PAUSED) {
                 if (menuUp) { menuSelection = (menuSelection + 2) % 3; uiDirty = 1; }
@@ -1772,8 +1999,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                 } else {
                     int n = SettingsRowCount();
-                    if (menuUp) { settingsSelection = (settingsSelection + n - 1) % n; uiDirty = 1; }
-                    if (menuDown) { settingsSelection = (settingsSelection + 1) % n; uiDirty = 1; }
+                    MenuGeo g = GetMenuGeo();
+                    if (menuUp) {
+                        settingsSelection = (settingsSelection + n - 1) % n;
+                        if (settingsSelection < g.scrollOffset) menuScrollOffsets[STATE_SETTINGS] = settingsSelection;
+                        uiDirty = 1;
+                    }
+                    if (menuDown) {
+                        settingsSelection = (settingsSelection + 1) % n;
+                        if (settingsSelection >= g.scrollOffset + g.maxVisibleRows) menuScrollOffsets[STATE_SETTINGS] = settingsSelection - g.maxVisibleRows + 1;
+                        uiDirty = 1;
+                    }
                     if (menuConfirm) ActivateSettingRow();
                     if (menuCancel) {
                         /* Esc 逐级上退：键位页 -> 子目录 -> 根目录 -> 退出 */
@@ -1794,17 +2030,38 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             } else if (currentState == STATE_GAMEOVER) {
                 if (menuConfirm) ActivateMenuItem();
             } else if (currentState == STATE_HELP) {
+                if (menuUp) { menuSelection = (menuSelection + 13 - 1) % 13; uiDirty = 1; }
+                if (menuDown) { menuSelection = (menuSelection + 1) % 13; uiDirty = 1; }
+                MenuGeo hg = GetMenuGeo();
+                if (menuSelection < hg.scrollOffset) menuScrollOffsets[STATE_HELP] = menuSelection;
+                else if (menuSelection >= hg.scrollOffset + hg.maxVisibleRows) menuScrollOffsets[STATE_HELP] = menuSelection - hg.maxVisibleRows + 1;
                 if (menuCancel || menuConfirm) { currentState = STATE_MAIN_MENU; uiDirty = 1; }
             } else if (currentState == STATE_HUB) {
                 int n = HUB_ROWS;
                 if (menuUp) { hubSelection = (hubSelection + n - 1) % n; uiDirty = 1; }
                 if (menuDown) { hubSelection = (hubSelection + 1) % n; uiDirty = 1; }
+                MenuGeo hg = GetMenuGeo();
+                if (hubSelection < hg.scrollOffset) menuScrollOffsets[STATE_HUB] = hubSelection;
+                else if (hubSelection >= hg.scrollOffset + hg.maxVisibleRows) menuScrollOffsets[STATE_HUB] = hubSelection - hg.maxVisibleRows + 1;
                 if (menuConfirm) ActivateHubRow();
                 if (menuCancel) {
                     SaveGame();
                     currentState = STATE_MAIN_MENU;
                     menuSelection = 0;
                     ForceCursor(1);
+                    uiDirty = 1;
+                }
+            } else if (currentState == STATE_ACHIEVEMENTS) {
+                int n = ACH_COUNT + 1;
+                if (menuUp) { achSelection = (achSelection + n - 1) % n; uiDirty = 1; }
+                if (menuDown) { achSelection = (achSelection + 1) % n; uiDirty = 1; }
+                MenuGeo ag = GetMenuGeo();
+                if (achSelection < ag.scrollOffset) menuScrollOffsets[STATE_ACHIEVEMENTS] = achSelection;
+                else if (achSelection >= ag.scrollOffset + ag.maxVisibleRows) menuScrollOffsets[STATE_ACHIEVEMENTS] = achSelection - ag.maxVisibleRows + 1;
+                /* 只有 Back 行（或者 Esc）才退出；成就条目本身按回车不做事 */
+                if (menuCancel || (menuConfirm && achSelection >= ACH_COUNT)) {
+                    currentState = STATE_MAIN_MENU;
+                    menuSelection = 0;
                     uiDirty = 1;
                 }
             } else if (currentState == STATE_PLAYING) {

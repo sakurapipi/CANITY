@@ -9,6 +9,14 @@
 #include "entity.h"
 #include "render.h"
 
+/* 前置声明 */
+static void DrawAchievementsWindow(MenuGeo g);
+
+/* 成就页固定显示 10 行；面板/行高/列表起点都走 UIS，按窗口高度等比缩放 */
+#define ACH_VISIBLE_ROWS 10
+#define ACH_PANEL_W      UIS(600)
+#define ACH_PANEL_H      UIS(400)
+
 
 static const char* modNames[MOD_COUNT] = {"DARK", "HUNTED", "CRAMPED", "LEAKY", "RICH", "CALM"};
 static const char* modDesc[MOD_COUNT] = {
@@ -215,7 +223,7 @@ int UIS(int v) {
     int s = (int)(v * (winH / 600.0) + 0.5);
     return s < 10 ? 10 : s;
 }
-static MenuGeo MakeGeo(const char* title, int count, int rowH, int pad, int width, int titlePx) {
+static MenuGeo MakeGeo(const char* title, int count, int rowH, int pad, int width, int titlePx, int stateIndex) {
     MenuGeo g;
     memset(&g, 0, sizeof(g));
     g.title = title;
@@ -235,20 +243,71 @@ static MenuGeo MakeGeo(const char* title, int count, int rowH, int pad, int widt
     g.panel.bottom = g.panel.top + panelH;
     g.titleY = g.panel.top + pad;
     g.firstY = g.titleY + titleH + UIS(24);
+
+    /* 计算面板内容区高度，决定最多显示多少行 */
+    int contentH = g.panel.bottom - g.firstY;
+    g.maxVisibleRows = contentH / rowH;
+    if (g.maxVisibleRows < 1) g.maxVisibleRows = 1;
+
+    /* 使用持久化的滚动偏移 */
+    g.scrollOffset = menuScrollOffsets[stateIndex];
+    /* 修正偏移：不能超过最大值 */
+    int maxOffset = g.count - g.maxVisibleRows;
+    if (maxOffset < 0) maxOffset = 0;
+    if (g.scrollOffset > maxOffset) g.scrollOffset = maxOffset;
+
     return g;
 }
 
 MenuGeo GetMenuGeo(void) {
     switch (currentState) {
-        case STATE_MAIN_MENU: return MakeGeo("CANITY", MainMenuCount(), UIS(56), UIS(38), UIS(520), UIS(72));
-        case STATE_HUB:       return MakeGeo("THE HUB", HUB_ROWS, UIS(50), UIS(34), UIS(700), UIS(52));
-        case STATE_HELP:      return MakeGeo("HELP", 13, UIS(29), UIS(22), UIS(1000), UIS(30));
-        case STATE_PAUSED:    return MakeGeo("PAUSED", 3, UIS(56), UIS(38), UIS(520), UIS(56));
-        case STATE_GAMEOVER:  return MakeGeo(gameWon ? "YOU ESCAPED" : "YOU LOST YOUR MIND", 3, UIS(48), UIS(34), UIS(660), UIS(40));
-        case STATE_SETTINGS:  return MakeGeo(PageTitle(settingsPage), SettingsRowCount(), UIS(44), UIS(30), UIS(680), UIS(44));
+        case STATE_MAIN_MENU: return MakeGeo("CANITY", MainMenuCount(), UIS(56), UIS(38), UIS(520), UIS(72), STATE_MAIN_MENU);
+        case STATE_HUB:       return MakeGeo("THE HUB", HUB_ROWS, UIS(50), UIS(34), UIS(700), UIS(52), STATE_HUB);
+        case STATE_HELP:      return MakeGeo("HELP", 13, UIS(29), UIS(22), UIS(1000), UIS(30), STATE_HELP);
+        case STATE_PAUSED:    return MakeGeo("PAUSED", 3, UIS(56), UIS(38), UIS(520), UIS(56), STATE_PAUSED);
+        case STATE_GAMEOVER:  return MakeGeo(gameWon ? "YOU ESCAPED" : "YOU LOST YOUR MIND", 3, UIS(48), UIS(34), UIS(660), UIS(40), STATE_GAMEOVER);
+        case STATE_SETTINGS:  return MakeGeo(PageTitle(settingsPage), SettingsRowCount(), UIS(44), UIS(30), UIS(680), UIS(44), STATE_SETTINGS);
+        case STATE_ACHIEVEMENTS: {
+            /* 成就页使用自己的 600x400 面板（见 DrawAchievementsWindow）。
+               不能用 MakeGeo：那个会把面板高度算成 count*rowH（17 行约 800px），
+               导致 maxVisibleRows == count，滚动偏移永远被夹成 0，滚动条就成了死的。
+               这里让几何和实际绘制的列表完全一致：10 行、行高 UIS(30)。 */
+            MenuGeo g;
+            memset(&g, 0, sizeof(g));
+            g.title = "ACHIEVEMENTS";
+            g.count = ACH_COUNT + 1;          /* 16 条成就 + Back */
+            g.rowH = UIS(30);
+
+            int panelW = ACH_PANEL_W;
+            int panelH = ACH_PANEL_H;
+            if (panelW > winW - UIS(40)) panelW = winW - UIS(40);
+            if (panelH > winH - UIS(40)) panelH = winH - UIS(40);
+            if (panelW < 200) panelW = 200;
+            if (panelH < 160) panelH = 160;
+
+            g.panel.left = (winW - panelW) / 2;
+            g.panel.right = g.panel.left + panelW;
+            g.panel.top = (winH - panelH) / 2;
+            g.panel.bottom = g.panel.top + panelH;
+            g.titleY = g.panel.top + UIS(20);
+            g.firstY = g.panel.top + UIS(60);
+
+            g.maxVisibleRows = ACH_VISIBLE_ROWS;
+            int contentH = g.panel.bottom - g.firstY - UIS(10);
+            if (g.maxVisibleRows * g.rowH > contentH)
+                g.maxVisibleRows = contentH / g.rowH;
+            if (g.maxVisibleRows < 1) g.maxVisibleRows = 1;
+
+            g.scrollOffset = menuScrollOffsets[STATE_ACHIEVEMENTS];
+            int maxOffset = g.count - g.maxVisibleRows;
+            if (maxOffset < 0) maxOffset = 0;
+            if (g.scrollOffset < 0) g.scrollOffset = 0;
+            if (g.scrollOffset > maxOffset) g.scrollOffset = maxOffset;
+            return g;
+        }
         default: break;
     }
-    return MakeGeo("", 0, UIS(44), UIS(30), UIS(400), UIS(44));
+    return MakeGeo("", 0, UIS(44), UIS(30), UIS(400), UIS(44), -1);
 }
 
 MenuGeo GetPopupGeo(void) {
@@ -274,7 +333,7 @@ MenuGeo GetPopupGeo(void) {
         g.rowH = contentH;
         return g;
     }
-    return MakeGeo(it->name, it->count, UIS(42), UIS(26), UIS(460), UIS(34));
+    return MakeGeo(it->name, it->count, UIS(42), UIS(26), UIS(460), UIS(34), -1);
 }
 
 /* 滑块轨道（窗口坐标） */
@@ -315,18 +374,21 @@ RECT RowRect(MenuGeo g, int i) {
     RECT r;
     r.left = g.panel.left + UIS(18);
     r.right = g.panel.right - UIS(18);
-    r.top = g.firstY + i * g.rowH;
+    /* 应用滚动偏移：只绘制可见范围内的行 */
+    int visibleIndex = i - g.scrollOffset;
+    r.top = g.firstY + visibleIndex * g.rowH;
     r.bottom = r.top + g.rowH - UIS(8);
     return r;
 }
 
 int MainMenuCount(void) {
-    return hasSave ? 6 : 5;
+    return hasSave ? 7 : 6;
 }
 
 static int MenuItemIndex(void) {
     if (currentState == STATE_SETTINGS) return settingsSelection;
     if (currentState == STATE_HUB) return hubSelection;
+    if (currentState == STATE_ACHIEVEMENTS) return achSelection;
     return menuSelection;
 }
 
@@ -334,8 +396,8 @@ static const char* MenuLabel(int i) {
     static char buf[128];
     switch (currentState) {
         case STATE_MAIN_MENU: {
-            static const char* withSave[] = {"Continue", "New Run", "Hub", "Help", "Settings", "Quit"};
-            static const char* noSave[] = {"New Run", "Hub", "Help", "Settings", "Quit"};
+            static const char* withSave[] = {"Continue", "New Run", "Hub", "Achievements", "Help", "Settings", "Quit"};
+            static const char* noSave[] = {"New Run", "Hub", "Achievements", "Help", "Settings", "Quit"};
             return hasSave ? withSave[i] : noSave[i];
         }
         case STATE_PAUSED: {
@@ -375,6 +437,19 @@ static const char* MenuLabel(int i) {
             return hb;
         }
         case STATE_GAMEOVER: return "Return to Menu";
+        case STATE_ACHIEVEMENTS: {
+            if (i >= ACH_COUNT) return "Back";
+            static char ab[256];
+            if (g_achievements[i].unlocked) {
+                sprintf(ab, "[*] %s  (%d/%d)", g_achievements[i].name,
+                        g_achievements[i].progress, g_achievements[i].target);
+            } else {
+                /* 简短显示：只显示名字和进度，描述放在右侧列（通过 DrawMenuText 处理） */
+                sprintf(ab, "[ ] %s  %d/%d", g_achievements[i].name,
+                        g_achievements[i].progress, g_achievements[i].target);
+            }
+            return ab;
+        }
         case STATE_SETTINGS: {
             if (settingsPage == SETPAGE_ROOT) {
                 if (i < 3) return rootCategoryNames[i];
@@ -451,7 +526,7 @@ void DrawMenuPanels(void) {
     int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
     int sel = MenuItemIndex();
 
-    if (!popupOpen && sel >= 0 && sel < g.count) {
+    if (!popupOpen && sel >= g.scrollOffset && sel < g.scrollOffset + g.maxVisibleRows) {
         RECT r = RowRect(g, sel);
         BlendRectWin(r.left, r.top, r.right, r.bottom, 0x00205020, 0.55f);
     }
@@ -500,6 +575,12 @@ static void DrawMenuText(void) {
     MenuGeo g = GetMenuGeo();
     int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
 
+    /* 成就页面：使用专用现代化渲染 */
+    if (currentState == STATE_ACHIEVEMENTS) {
+        DrawAchievementsWindow(g);
+        return;
+    }
+
     unsigned int titleColor = (currentState == STATE_MAIN_MENU) ? 0x00BE1414u : 0x00D23C3Cu;
     /* 通关结局的标题用绿色 —— 和「理智耗尽」的暗红区分开 */
     if (currentState == STATE_GAMEOVER && gameWon) titleColor = 0x0060E070u;
@@ -522,7 +603,26 @@ static void DrawMenuText(void) {
     if (currentState == STATE_SETTINGS && settingsPage != SETPAGE_ROOT && settingsPage != SETPAGE_BINDDIR) {
         pageItemCount = PageItems(idx);
     }
-    for (int i = 0; i < g.count; i++) {
+
+    /* 确保选中的项在可见范围内 */
+    if (sel >= 0 && sel < g.count) {
+        if (sel < g.scrollOffset) {
+            g.scrollOffset = sel;
+        } else if (sel >= g.scrollOffset + g.maxVisibleRows) {
+            g.scrollOffset = sel - g.maxVisibleRows + 1;
+        }
+    }
+
+    /* 将调整后的滚动偏移保存回全局数组，持久化到下次调用 */
+    if (currentState >= 0 && currentState < 8) {
+        menuScrollOffsets[currentState] = g.scrollOffset;
+    }
+
+    int startRow = g.scrollOffset;
+    int endRow = g.scrollOffset + g.maxVisibleRows;
+    if (endRow > g.count) endRow = g.count;
+
+    for (int i = startRow; i < endRow; i++) {
         const SettingItem* it = NULL;
         if (currentState == STATE_SETTINGS && settingsPage != SETPAGE_ROOT && settingsPage != SETPAGE_BINDDIR) {
             if (i < pageItemCount) it = &settings[idx[i]];
@@ -584,6 +684,134 @@ static void DrawMenuText(void) {
         }
 
         DrawTextInRow(MenuLabel(i), RowRect(g, i), c);
+    }
+
+    /* 绘制滚动指示器 */
+    if (g.count > g.maxVisibleRows) {
+        int barH = g.panel.bottom - g.firstY;
+        int thumbH = (int)((float)g.maxVisibleRows / g.count * barH);
+        if (thumbH < 20) thumbH = 20;
+        int thumbY = g.firstY + (int)((float)g.scrollOffset / (g.count - g.maxVisibleRows) * (barH - thumbH));
+        int barX = g.panel.right - UIS(12);
+        BlendRectWin(barX, g.firstY, barX + UIS(8), g.panel.bottom, 0x00202020, 0.5f);
+        BlendRectWin(barX, thumbY, barX + UIS(8), thumbY + thumbH, 0x008CFF8C, 0.8f);
+
+        /* 顶部/底部箭头提示 */
+        if (g.scrollOffset > 0) {
+            DrawTextCenterWin(g.panel.left + (g.panel.right - g.panel.left) / 2, g.firstY - UIS(20), "^", 0x008CFF8C);
+        }
+        if (g.scrollOffset + g.maxVisibleRows < g.count) {
+            DrawTextCenterWin(g.panel.left + (g.panel.right - g.panel.left) / 2, g.panel.bottom + UIS(4), "v", 0x008CFF8C);
+        }
+    }
+}
+
+/* ============================================================
+ * 成就页面专用渲染：精确布局
+ * ============================================================ */
+static void DrawAchievementsWindow(MenuGeo g) {
+    int panelX = g.panel.left;
+    int panelY = g.panel.top;
+    int panelW = g.panel.right - g.panel.left;
+    int panelH = g.panel.bottom - g.panel.top;
+
+    unsigned int panelBg = 0x001E1E1Eu;      /* RGB(30,30,30) */
+    unsigned int panelBorder = 0x00646464u;  /* RGB(100,100,100) */
+    BlendRectWin(panelX, panelY, panelX + panelW, panelY + panelH, panelBg, 1.0f);
+    FrameRectWin(panelX, panelY, panelX + panelW, panelY + panelH, panelBorder, 1.0f, 2);
+
+    /* === 标题：panelY + UIS(20)，Gold RGB(200,150,50) === */
+    unsigned int titleColor = 0x00C89632u;  /* RGB(200,150,50) */
+    DrawTextCenterWin(panelX + panelW / 2, panelY + UIS(20), "ACHIEVEMENTS", titleColor);
+
+    /* === 列表区域：起始 Y = panelY + UIS(60)，行高 UIS(30) ===
+       全部尺寸走 UIS 等比缩放，避免高分辨率下文字撑破固定 600x400 面板而被截断。 */
+    int listStartY = panelY + UIS(60);   /* 列表起始Y */
+    int rowHeight = g.rowH;              /* 行高 UIS(30) */
+    int maxVisibleRows = g.maxVisibleRows;
+    int listX = panelX + UIS(10);
+    int listW = panelW - UIS(40);        /* 右侧给滚动条留出空隙 */
+    if (listW < UIS(80)) listW = UIS(80);
+    int trackHeight = maxVisibleRows * rowHeight;
+    int contentBottom = panelY + panelH - UIS(10);
+    if (listStartY + trackHeight > contentBottom)
+        trackHeight = contentBottom - listStartY;
+    if (trackHeight < rowHeight) trackHeight = rowHeight;
+
+    int sel = MenuItemIndex();  /* achSelection */
+
+    /* 循环：i 是屏幕行索引，actualIndex 是数据索引 */
+    for (int i = 0; i < maxVisibleRows; i++) {
+        int actualIndex = g.scrollOffset + i;   /* 数据索引 */
+        if (actualIndex >= g.count) break;
+
+        int drawY = listStartY + (i * rowHeight);   /* 屏幕上的Y */
+        if (drawY + rowHeight > contentBottom) break;
+
+        /* 行背景高亮：严格限制在面板内 */
+        if (actualIndex == sel) {
+            unsigned int highlight = 0x00325032u;   /* RGB(50,80,50) */
+            BlendRectWin(listX, drawY, listX + listW, drawY + rowHeight, highlight, 1.0f);
+        }
+
+        /* 成就文本（先判 ACH_COUNT，Back 行不能再解引用 g_achievements） */
+        char line[128];
+        unsigned int textColor;
+        int unlocked = 0;
+        if (actualIndex >= ACH_COUNT) {
+            strcpy(line, "Back");
+            textColor = 0x00808080u;
+        } else {
+            const Achievement* ach = &g_achievements[actualIndex];
+            unlocked = ach->unlocked;
+            textColor = unlocked ? 0x00E8E8E8u : 0x00A0A0A0u;
+            if (unlocked) {
+                sprintf(line, "[*] %s  (%d/%d)", ach->name, ach->progress, ach->target);
+            } else {
+                sprintf(line, "[ ] %s  %d/%d", ach->name, ach->progress, ach->target);
+            }
+        }
+
+        int th = TextHeightWin();
+        int ty = drawY + (rowHeight - th) / 2;
+        DrawTextWin(listX + UIS(6), ty, line, textColor);
+
+        /* 解锁标记：只有右侧确实放得下才画，别压到成就文字上 */
+        if (unlocked) {
+            const char* done = "DONE";
+            int dw = TextWidthWin(done);
+            int dx = listX + listW - UIS(8) - dw;
+            if (dx > listX + UIS(6) + TextWidthWin(line) + UIS(12)) {
+                DrawTextWin(dx, ty, done, 0x0040C040u);
+            }
+        }
+    }
+
+    /* === 滚动条滑块：轨道高度 = 可见行总高 === */
+    if (g.count > maxVisibleRows) {
+        int trackX = panelX + panelW - UIS(18);
+        int trackW = UIS(10);
+        int trackY = listStartY;
+
+        unsigned int trackColor = 0x00323232u;   /* RGB(50,50,50) */
+        unsigned int thumbColor = 0x00969696u;   /* RGB(150,150,150) */
+
+        /* 轨道背景 */
+        BlendRectWin(trackX, trackY, trackX + trackW, trackY + trackHeight, trackColor, 1.0f);
+
+        int thumbHeight = (maxVisibleRows * trackHeight) / g.count;
+        if (thumbHeight < UIS(20)) thumbHeight = UIS(20);
+        if (thumbHeight > trackHeight) thumbHeight = trackHeight;
+
+        int maxScroll = g.count - maxVisibleRows;
+        if (maxScroll <= 0) maxScroll = 1;
+        int thumbY = trackY + (g.scrollOffset * (trackHeight - thumbHeight) / maxScroll);
+        if (thumbY < trackY) thumbY = trackY;
+        if (thumbY + thumbHeight > trackY + trackHeight)
+            thumbY = trackY + trackHeight - thumbHeight;
+
+        /* 绘制拇指（留 2px 间隙模拟圆角） */
+        BlendRectWin(trackX + 2, thumbY + 2, trackX + trackW - 2, thumbY + thumbHeight - 2, thumbColor, 1.0f);
     }
 }
 

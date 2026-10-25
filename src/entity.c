@@ -311,6 +311,8 @@ void UpdateLightBeast(float dt) {
     if (lightBeast.hitCooldown <= 0.0f && pd2 < 0.55f) {
         sanity -= 14.0f;
         if (sanity < 0.0f) sanity = 0.0f;
+        extern int tookDamage;
+        tookDamage = 1;
         healFlash = 0.16f;
         PlaySfx(SFX_SCREAM, 1.0f);
         SpawnLightBeast();
@@ -326,6 +328,8 @@ void UpdateLightBeast(float dt) {
 static void JumperFail(void) {
     sanity -= JUMPER_FAIL_SANITY;
     if (sanity < 0.0f) sanity = 0.0f;
+    extern int tookDamage;
+    tookDamage = 1;
     ApplyFx(FX_BLIND, JUMPER_FAIL_FX_POWER, JUMPER_FAIL_FX_TIME);
     ApplyFx(FX_SLOW, JUMPER_FAIL_FX_POWER, JUMPER_FAIL_FX_TIME);
     healFlash = 0.25f;
@@ -342,12 +346,16 @@ static void JumperFinish(void) {
 
 /* 阶段一成功：躲开 */
 static void JumperDodged(void) {
+    extern int faceDodged;
+    faceDodged++;
     JumperFinish();
     PlaySfx(SFX_PICKUP, 0.6f);
 }
 
 /* 阶段二成功：按对了键 */
 static void JumperKeyHit(void) {
+    extern int faceDodged;
+    faceDodged++;
     JumperFinish();
     PlaySfx(SFX_POWER, 0.6f);
 }
@@ -553,6 +561,8 @@ void UpdateMonster(float dt) {
     if (monster.hitCooldown <= 0.0f && pd2 < 0.55f) {
         sanity -= 18.0f;
         if (sanity < 0.0f) sanity = 0.0f;
+        extern int tookDamage;
+        tookDamage = 1;
         healFlash = 0.18f;
         PlaySfx(SFX_SCREAM, 1.0f);
         SpawnMonster();
@@ -600,6 +610,9 @@ int HitMonster(Monster* m, int dmg) {
         /* 血量耗尽：直接驱离（重新生成到别处），而不是留在原地 */
         if (m == &monster) SpawnMonster();
         else SpawnLightBeast();
+        /* 成就：用瓶子击杀怪物 */
+        extern int bottlesKilled;
+        bottlesKilled++;
     } else {
         KnockbackMonster(m);
     }

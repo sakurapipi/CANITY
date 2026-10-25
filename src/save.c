@@ -62,7 +62,7 @@ void SaveGame(void) {
     memcpy(g_save.worldMap, worldMap, sizeof(worldMap));
     memcpy(g_save.explored, explored, sizeof(explored));
 
-    /* v4 新增字段 */
+    /* v6 新增字段 */
     g_save.flares = flares;
     g_save.bottles = bottles;
     g_save.safeActive = safeRoom.active;
@@ -76,6 +76,12 @@ void SaveGame(void) {
     for (int i = 0; i < MAX_THROWN; i++) {
         g_save.thr[i] = thrown[i];
         if (thrown[i].active) g_save.nThrown++;
+    }
+
+    /* v7 新增：成就系统 */
+    for (int i = 0; i < ACH_COUNT; i++) {
+        g_save.achUnlocked[i] = g_achievements[i].unlocked;
+        g_save.achProgress[i] = g_achievements[i].progress;
     }
 
     FILE* f = fopen(SAVE_FILE, "wb");
@@ -187,6 +193,21 @@ int LoadSettings(void) {
     if (fovIndex < 0 || fovIndex > 4) fovIndex = 2;
     if (gammaValue < 0.7f || gammaValue > 1.6f) gammaValue = 1.0f;
     if (mouseSens < 0.2f || mouseSens > 3.0f) mouseSens = 1.0f;
+
+    /* v7 新增：恢复成就数据（如果存档里有） */
+    if (fileSize >= sizeof(SaveBlob)) {
+        for (int i = 0; i < ACH_COUNT; i++) {
+            g_achievements[i].unlocked = g_save.achUnlocked[i];
+            g_achievements[i].progress = g_save.achProgress[i];
+        }
+    } else {
+        /* 老存档没有成就数据，全置 0 */
+        for (int i = 0; i < ACH_COUNT; i++) {
+            g_achievements[i].unlocked = 0;
+            g_achievements[i].progress = 0;
+        }
+    }
+
     return g_save.hasRun;
 }
 
@@ -253,6 +274,16 @@ void ContinueRun(void) {
     ForceCursor(0);
     firstMouseMove = 1;
     uiDirty = 1;
+
+    /* 恢复成就追踪变量 */
+    bottlesKilled = 0;
+    faceDodged = 0;
+    crankTimeTotal = 0;
+    fusesCollectedRun = 0;
+    mapsFullyExplored = 0;
+    tookDamage = 0;
+    flashlightOffLevel = 0;
+    sprintedThisLevel = 0;
 }
 
 void DeleteSave(void) {
