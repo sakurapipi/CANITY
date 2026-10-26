@@ -117,6 +117,7 @@ extern int keys[256];
 extern int keyPressed[256];
 extern POINT lastMousePos;
 extern int firstMouseMove;
+extern POINT g_mousePos;       /* 窗口客户区坐标下的鼠标位置，用于 tooltip 等 */
 extern int isMapOpen;
 extern int mapFullScreen;
 extern int g_bindings[ACT_COUNT];

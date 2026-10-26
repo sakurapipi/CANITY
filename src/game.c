@@ -142,6 +142,7 @@ void ClearKeyEdges(void) {
 }
 
 int achSelection = 0;
+int achHovered = -1;     /* 鼠标悬停的成就索引，-1 = 无；用于显示 tooltip */
 Achievement g_achievements[ACH_COUNT] = {0};
 
 /* 每个菜单状态的滚动偏移，持久化避免 GetMenuGeo 重新计算 */
@@ -205,6 +206,7 @@ int IsActionPressed(ActionId act) {
 POINT lastMousePos;
 int firstMouseMove = 1;
 int isMapOpen = 0;
+POINT g_mousePos = {0, 0};
 /* 小地图有两种形态：
      0 = 角落小窗（默认）—— 一边走一边看，不挡视野
      1 = 全屏 —— 停下来仔细规划路线
@@ -658,6 +660,29 @@ void UpdateExplored(void) {
             if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT &&
                 (x - posX) * (x - posX) + (y - posY) * (y - posY) <= radius * radius)
                 explored[y][x] = 1;
+        }
+    }
+
+    /* MAP MASTER：检测本层是否全图探索完（仅走廊格子，墙不算） */
+    static int lastCheckedLevel = 0;   /* 上一次检测的层数 */
+    static int levelFullyExplored = 0; /* 本层已达成全探索标记，防重复计数 */
+    if (currentLevel != lastCheckedLevel) {
+        lastCheckedLevel = currentLevel;
+        levelFullyExplored = 0;
+    }
+    if (!levelFullyExplored) {
+        int allExplored = 1;
+        for (int y = 1; y < MAP_HEIGHT - 1 && allExplored; y++) {
+            for (int x = 1; x < MAP_WIDTH - 1; x++) {
+                if (worldMap[y][x] == 0 && explored[y][x] == 0) {
+                    allExplored = 0;
+                    break;
+                }
+            }
+        }
+        if (allExplored) {
+            mapsFullyExplored++;
+            levelFullyExplored = 1;
         }
     }
 }
@@ -1215,6 +1240,9 @@ void Update(float dt) {
 
     /* 出口：通电后才能进下一关；第 WIN_LEVEL 层的出口 = 逃出生天 */
     if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f) {
+        /* NOCTURNAL：本层全程手电关着过关 */
+        if (!flashlightOn) flashlightOffLevel = 1;
+
         PlaySfx(SFX_GATE, 0.65f);
         shards += 15;
         totalShardsEarned += 15;
@@ -1364,12 +1392,14 @@ static void CheckAchievements(void) {
     /* 3: ESCAPE ARTIST - 通关（在 gameWon 时检查） */
     /* 4: SHARD HUNTER - 累计 500 碎片（在获得碎片时累加，需要总计数） */
     if (totalShardsEarned >= 500) UnlockAchievement(3);
-    /* 5: SILENT SHADOW - 第 5 层不冲刺（需额外标记） */
+    /* 5: SILENT SHADOW - 第 5 层不冲刺 */
+    if (currentLevel >= 5 && sprintedThisLevel == 0) UnlockAchievement(4);
     /* 6: BOTTLE MASTER - 用瓶子击杀 10 只怪 */
     if (bottlesKilled >= 10) UnlockAchievement(5);
     /* 7: FACE DODGER - 躲开 5 次跳脸虫 */
     if (faceDodged >= 5) UnlockAchievement(6);
-    /* 8: NOCTURNAL - 手电关着过关（需标记） */
+    /* 8: NOCTURNAL - 手电关着过关 */
+    if (flashlightOffLevel) UnlockAchievement(7);
     /* 9: SPEED RUNNER - 第 1 关 2 分钟内过关 */
     if (currentLevel == 1 && runTime < 120.0f && breakerOpen) UnlockAchievement(8);
     /* 10: DEEP DIVER - 到达第 10 层 */
@@ -1383,7 +1413,8 @@ static void CheckAchievements(void) {
         upgSanity >= UPG_MAX && upgEco >= UPG_MAX && upgRest >= UPG_MAX) {
         UnlockAchievement(12);
     }
-    /* 14: MAP MASTER - 单局全探索 3 张图（需计数） */
+    /* 14: MAP MASTER - 单局全探索 3 张图 */
+    if (mapsFullyExplored >= 3) UnlockAchievement(13);
     /* 15: PERFECT ESCAPE - 通关无伤（需标记） */
     /* 16: TRUE SURVIVOR - 通关且全满级（在 gameWon 时检查） */
 }
@@ -1644,12 +1675,18 @@ static void HitTestMenu(int mx, int my) {
     if (currentState == STATE_ACHIEVEMENTS) {
         MenuGeo g = GetMenuGeo();
         int scrollOff = menuScrollOffsets[STATE_ACHIEVEMENTS];
+        int newHovered = -1;
         for (int i = scrollOff; i < g.count && i < scrollOff + g.maxVisibleRows; i++) {
             RECT r = RowRect(g, i);
             if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
                 if (achSelection != i) { achSelection = i; uiDirty = 1; }
-                return;
+                newHovered = i;
+                break;
             }
+        }
+        if (achHovered != newHovered) {
+            achHovered = newHovered;
+            uiDirty = 1;
         }
         return;
     }
@@ -1826,6 +1863,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     if (v != *it->fvalue) { *it->fvalue = v; uiDirty = 1; }
                     return 0;
                 }
+                g_mousePos.x = mx;
+                g_mousePos.y = my;
                 HitTestMenu(mx, my);
                 return 0;
             }

@@ -11,6 +11,7 @@
 
 /* 前置声明 */
 static void DrawAchievementsWindow(MenuGeo g);
+static void DrawAchievementTooltip(int mx, int my, int hoveredIndex, MenuGeo g);
 
 /* 成就页固定显示 10 行；面板/行高/列表起点都走 UIS，按窗口高度等比缩放 */
 #define ACH_VISIBLE_ROWS 10
@@ -813,6 +814,44 @@ static void DrawAchievementsWindow(MenuGeo g) {
         /* 绘制拇指（留 2px 间隙模拟圆角） */
         BlendRectWin(trackX + 2, thumbY + 2, trackX + trackW - 2, thumbY + thumbHeight - 2, thumbColor, 1.0f);
     }
+
+    /* === Tooltip：鼠标悬停在成就上时显示详细说明 === */
+    if (achHovered >= 0 && achHovered < ACH_COUNT) {
+        DrawAchievementTooltip(0, 0, achHovered, g);  /* mx/my 不用，函数内部用全局鼠标位置 */
+    }
+}
+
+static void DrawAchievementTooltip(int mx, int my, int hoveredIndex, MenuGeo g) {
+    (void)mx; (void)my; (void)g;
+    if (hoveredIndex < 0 || hoveredIndex >= ACH_COUNT) return;
+    if (currentState != STATE_ACHIEVEMENTS) return;
+
+    const Achievement* ach = &g_achievements[hoveredIndex];
+    if (!ach->desc[0]) return;  /* 没有描述则不显示 */
+
+    /* 使用全局鼠标位置 g_mousePos */
+    int tipX = g_mousePos.x + UIS(16);
+    int tipY = g_mousePos.y + UIS(8);
+
+    /* 计算文本宽度，确保不超出屏幕 */
+    int textW = TextWidthWin(ach->desc);
+    int textH = TextHeightWin();
+    int pad = UIS(8);
+    int tipW = textW + pad * 2;
+    int tipH = textH + pad * 2;
+
+    /* 边界修正 */
+    if (tipX + tipW > winW - UIS(10)) tipX = winW - UIS(10) - tipW;
+    if (tipY + tipH > winH - UIS(10)) tipY = winH - UIS(10) - tipH;
+    if (tipX < UIS(10)) tipX = UIS(10);
+    if (tipY < UIS(10)) tipY = UIS(10);
+
+    /* 背景 */
+    BlendRectWin(tipX, tipY, tipX + tipW, tipY + tipH, 0x00181818u, 0.95f);
+    FrameRectWin(tipX, tipY, tipX + tipW, tipY + tipH, 0x00606060u, 0.9f, 1);
+
+    /* 文字 */
+    DrawTextWin(tipX + pad, tipY + pad, ach->desc, 0x00E0E0E0u);
 }
 
 /* 改绑提示框：居中，跟设置面板同样的画法。
