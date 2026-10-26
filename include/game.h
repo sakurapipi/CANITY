@@ -124,6 +124,7 @@ extern int g_bindings[ACT_COUNT];
 /* ---- 设置模型 ---- */
 extern int settingsPage;
 extern int g_forceMod;
+extern int menuScrollOffsets[8];   /* 每个菜单状态的滚动偏移 */
 extern SettingItem settings[SETTING_COUNT];
 extern const char* optKeys[OPT_KEY_COUNT];
 extern const int optKeyVKs[OPT_KEY_COUNT];
@@ -166,6 +167,17 @@ void ApplySetting(int item, int value);
 void ActivateMenuItem(void);
 void ActivateHubRow(void);
 void ActivateSettingRow(void);
+
+/* ---- 成就追踪 ---- */
+extern int totalShardsEarned;
+extern int bottlesKilled;
+extern int faceDodged;
+extern int crankTimeTotal;
+extern int fusesCollectedRun;
+extern int mapsFullyExplored;
+extern int tookDamage;
+extern int flashlightOffLevel;
+extern int sprintedThisLevel;
 
 /* ---- 窗口过程 ---- */
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);

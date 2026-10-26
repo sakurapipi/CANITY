@@ -14,7 +14,7 @@
    读档时会按文件的**实际长度**判断是老版本还是新版本：
    老存档照样能读（新增字段取默认值），不用丢玩家进度。
    —— 参见 LoadSettings 里的迁移逻辑。 */
-#define SAVE_VERSION 6
+#define SAVE_VERSION 7
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
 #define SAVE_FILE "canity.sav"
@@ -61,6 +61,10 @@ typedef struct {
        v5 存档按文件长度识别后取默认键位与 0 级升级。 */
     int bindings[ACT_COUNT];
     int upgEco, upgRest;
+
+    /* v7 新增：成就系统。放在结构末尾以保持兼容性。 */
+    int achUnlocked[ACH_COUNT];
+    int achProgress[ACH_COUNT];
 } SaveBlob;
 
 /* 写当前进度（游戏中 / 退出时） */

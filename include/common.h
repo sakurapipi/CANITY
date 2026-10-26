@@ -28,8 +28,8 @@
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 14         /* 整数版本，进存档做记录 */
-#define CANITY_VERSION_STR "1.6.2"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_NUM 15         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_STR "1.6.4"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -39,7 +39,8 @@ typedef enum {
     STATE_SETTINGS,
     STATE_GAMEOVER,
     STATE_HUB,
-    STATE_HELP
+    STATE_HELP,
+    STATE_ACHIEVEMENTS
 } GameState;
 
 /* ------------------------------------------------------------------ */
@@ -281,6 +282,25 @@ typedef struct { float x, y; int active; } Breaker;
 #define HUB_ROWS (UPGRADE_COUNT + 1)
 
 /* ------------------------------------------------------------------ */
+/* 成就系统                                                              */
+/* ------------------------------------------------------------------ */
+#define ACH_COUNT 16
+#define ACH_NAME_MAX 32
+#define ACH_DESC_MAX 64
+
+typedef struct {
+    int id;
+    char name[ACH_NAME_MAX];
+    char desc[ACH_DESC_MAX];
+    int unlocked;      /* 0 = 未解锁，1 = 已解锁 */
+    int progress;      /* 进度（用于部分成就） */
+    int target;        /* 目标值 */
+} Achievement;
+
+extern Achievement g_achievements[ACH_COUNT];
+extern int achSelection;
+
+/* ------------------------------------------------------------------ */
 /* 全局按键绑定系统                                                      */
 /* ------------------------------------------------------------------ */
 typedef enum {
@@ -359,6 +379,8 @@ typedef struct {
     int rowH;
     int count;
     const char* title;
+    int scrollOffset;      /* 当前滚动偏移（行号） */
+    int maxVisibleRows;    /* 面板内最多显示多少行 */
 } MenuGeo;
 
 /* ------------------------------------------------------------------ */
