@@ -707,6 +707,7 @@ void GenerateLevel(void) {
             }
         }
     }
+}
 /* ShowCursor 是引用计数的，跨状态切换很容易把引用数弄歪；
    这里用 GetCursorInfo 把光标状态直接拧到目标值 */
 void ForceCursor(int visible) {
