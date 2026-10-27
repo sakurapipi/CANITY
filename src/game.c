@@ -639,18 +639,72 @@ void GenerateLevel(void) {
         safeRoom.active = 1;
         break;
     }
+    /* 强制兜底：如果随机找不到，遍历全图强行放一个 */
+    if (!safeRoom.active) {
+        float bestD2 = -1.0f;
+        for (int y = 1; y < MAP_HEIGHT - 1; y++) {
+            for (int x = 1; x < MAP_WIDTH - 1; x++) {
+                if (worldMap[y][x]) continue;
+                float sx = x + 0.5f, sy = y + 0.5f;
+                if (Dist2(sx, sy, 1.5f, 1.5f) < 25.0f) continue;
+                if (Dist2(sx, sy, exitX, exitY) < 9.0f) continue;
+                if (!SpotClear(sx, sy, 1.2f, 3, -1)) continue;  /* 放宽到 1.2f */
+                float d2 = Dist2(sx, sy, 1.5f, 1.5f);
+                if (d2 > bestD2) {
+                    bestD2 = d2;
+                    safeRoom.x = sx;
+                    safeRoom.y = sy;
+                }
+            }
+        }
+        if (bestD2 > 0.0f) safeRoom.active = 1;
+    }
 
     /* 配电箱：放在离出生点 15 格以上的远处，迫使玩家深入探索 */
-        for (int t = 0; t < 256; t++) {
-            int idx = rand() % emptyCount;
-            float bx = cells[idx][0] + 0.5f, by = cells[idx][1] + 0.5f;
-            float dFromSpawn = Dist2(bx, by, 1.5f, 1.5f);
-            if (dFromSpawn < 225.0f) continue;  /* 离出生点至少 15 格 (15^2=225) */
-            if (!SpotClear(bx, by, 1.6f, 2, -1)) continue;
-            breaker.x = bx;
-            breaker.y = by;
-            breaker.active = 1;
-            break;
+    breaker.active = 0;
+    for (int t = 0; t < 256; t++) {
+        int idx = rand() % emptyCount;
+        float bx = cells[idx][0] + 0.5f, by = cells[idx][1] + 0.5f;
+        float dFromSpawn = Dist2(bx, by, 1.5f, 1.5f);
+        if (dFromSpawn < 225.0f) continue;  /* 离出生点至少 15 格 (15^2=225) */
+        if (!SpotClear(bx, by, 1.6f, 2, -1)) continue;
+        breaker.x = bx;
+        breaker.y = by;
+        breaker.active = 1;
+        break;
+    }
+    /* 强制兜底：如果随机找不到，遍历全图强行放一个 */
+    if (!breaker.active) {
+        float bestD2 = -1.0f;
+        for (int y = 1; y < MAP_HEIGHT - 1; y++) {
+            for (int x = 1; x < MAP_WIDTH - 1; x++) {
+                if (worldMap[y][x]) continue;
+                float bx = x + 0.5f, by = y + 0.5f;
+                float dFromSpawn = Dist2(bx, by, 1.5f, 1.5f);
+                if (dFromSpawn < 225.0f) continue;
+                if (!SpotClear(bx, by, 1.2f, 2, -1)) continue;  /* 放宽到 1.2f */
+                if (dFromSpawn > bestD2) {
+                    bestD2 = dFromSpawn;
+                    breaker.x = bx;
+                    breaker.y = by;
+                }
+            }
+        }
+        if (bestD2 > 0.0f) breaker.active = 1;
+    }
+    /* 最终兜底：如果还失败（极端情况），直接找任意空地 */
+    if (!safeRoom.active || !breaker.active) {
+        for (int y = 1; y < MAP_HEIGHT - 1 && (!safeRoom.active || !breaker.active); y++) {
+            for (int x = 1; x < MAP_WIDTH - 1 && (!safeRoom.active || !breaker.active); x++) {
+                if (worldMap[y][x]) continue;
+                float cx = x + 0.5f, cy = y + 0.5f;
+                if (!safeRoom.active && Dist2(cx, cy, 1.5f, 1.5f) >= 25.0f && Dist2(cx, cy, exitX, exitY) >= 9.0f) {
+                    safeRoom.x = cx; safeRoom.y = cy; safeRoom.active = 1;
+                }
+                if (!breaker.active && Dist2(cx, cy, 1.5f, 1.5f) >= 225.0f) {
+                    breaker.x = cx; breaker.y = cy; breaker.active = 1;
+                }
+            }
         }
     }
 /* ShowCursor 是引用计数的，跨状态切换很容易把引用数弄歪；
