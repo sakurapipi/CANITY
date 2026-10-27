@@ -569,12 +569,12 @@ void GenerateLevel(void) {
         containerCount++;
     }
 
-        /* 把保险丝塞进随机的容器里，剩下的给电池或空。
-       保证至少留 2 个格子给非保险丝物品，避免全是保险丝。 */
-        int maxFuses = fusesNeeded;
-        if (maxFuses > containerCount - 2) maxFuses = containerCount - 2;  /* 至少留 2 格给其他物品 */
-        if (maxFuses < 0) maxFuses = 0;
-        int need = maxFuses;
+        /* 修复死局 Bug：优先保证能通关（放满 fusesNeeded）。
+   只有在箱子极其充裕（多出 2 个以上）时，才留格子给其他物品。 */
+        int need = fusesNeeded;
+        if (need > containerCount) {
+            need = containerCount; // 极端兜底，防止越界
+        }
         for (int guard = 0; guard < 64 && need > 0 && containerCount > 0; guard++) {
             int k = rand() % containerCount;
             if (containers[k].content == 0) {
