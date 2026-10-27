@@ -114,6 +114,9 @@ int sprintedThisLevel = 0;  /* 本局是否冲刺过 */
 const char* pickupMsg = NULL;    /* 拾取提示文本 */
 float pickupMsgTimer = 0.0f;     /* 提示显示剩余时间 */
 int bestLevel = 0;
+int bestEndlessLevel = 0;   /* 无尽模式最高层数 */
+int bestEndlessScore = 0;   /* 无尽模式最高分 */
+int isEndlessRun = 0;       /* 当前是否为无尽模式 */
 float volumeF = 0.8f;     /* 0..1，0 = 静音 */
 int runInProgress = 0;    /* 当前是否有一局未结束 */
 int fusesNeeded = 2;      /* 本关需要几根 */
@@ -515,14 +518,23 @@ void GenerateLevel(void) {
        否则用的是上一层的 levelMod，词条会延迟一层生效。 */
     if (levelMod == 0) battery = (float)BatteryMax() * 0.55f;
 
-    /* 本关需要的保险丝：2 根起，每 3 关 +1，最多 4 */
-    fusesNeeded = 2 + currentLevel / 3;
-    if (fusesNeeded > 4) fusesNeeded = 4;
+    /* 本关需要的保险丝：2 根起，每 3 关 +1，最多 4（主线）；无尽模式不封顶 */
+    if (isEndlessRun) {
+        fusesNeeded = 2 + currentLevel / 3;  /* 11层=5, 14层=6, 17层=7... */
+    } else {
+        fusesNeeded = 2 + currentLevel / 3;
+        if (fusesNeeded > 4) fusesNeeded = 4;
+    }
 
     /* 容器两阶段生成：
        阶段1：必须先放够 fusesNeeded 个箱子（每个保险丝一个箱子）
        阶段2：继续填充到 contCap（词条 RICH/CRAMPED 影响这个上限） */
-    int contCap = ContainerTargetCount(levelMod, CONTAINERS_BASE - 2 + (rand() % 3));
+    int baseContainers = CONTAINERS_BASE - 2 + (rand() % 3);
+    /* 无尽模式：保底容器数随层数增长，确保始终有足够箱子放保险丝 */
+    if (isEndlessRun) {
+        baseContainers += currentLevel / 5;  /* 每 5 层 +1 保底 */
+    }
+    int contCap = ContainerTargetCount(levelMod, baseContainers);
     if (contCap < fusesNeeded) contCap = fusesNeeded;
 
     int attempts = 0;
@@ -912,8 +924,9 @@ void Update(float dt) {
     if (UpdateFx(dt)) ApplyFov();
 
     /* 理智流失：基础值 + 状态效果的额外流失 */
+    float baseDrain = isEndlessRun ? ENDLESS_SANITY_DRAIN : SANITY_DRAIN;
     float drainMul = 1.0f + FxStrength(FX_DRAIN) * 1.5f;
-    sanity -= SANITY_DRAIN * (1.0f - 0.10f * upgSanity) * modSanityMul * drainMul * dt;
+    sanity -= baseDrain * (1.0f - 0.10f * upgSanity) * modSanityMul * drainMul * dt;
     if (sanity <= 0.0f) {
         sanity = 0.0f;
         runInProgress = 0;
@@ -1249,8 +1262,8 @@ void Update(float dt) {
         AddAchievementProgress(3, 15);  /* SHARD HUNTER */
         if (currentLevel > bestLevel) bestLevel = currentLevel;
         if (currentLevel == 1) UnlockAchievement(0);  /* FIRST STEPS */
-        if (currentLevel >= WIN_LEVEL) {
-            /* 通关：走进第 10 层的出口就是结局，不再生成下一层 */
+        if (currentLevel >= WIN_LEVEL && !isEndlessRun) {
+            /* 主线通关：走进第 10 层的出口就是结局，不再生成下一层 */
             gameWon = 1;
             runInProgress = 0;
             currentState = STATE_GAMEOVER;
@@ -1267,8 +1280,20 @@ void Update(float dt) {
             uiDirty = 1;
             return;
         }
-        currentLevel++;
-        GenerateLevel();
+        /* 无尽模式：过关回智 +30，继续下一层；主线模式：正常换关 */
+        if (isEndlessRun) {
+            sanity += 30.0f;
+            if (sanity > 100.0f) sanity = 100.0f;
+            /* 记录无尽模式最高层数与分数 */
+            int score = currentLevel * 1000 + (int)(shards * 10) - (int)runTime;
+            if (currentLevel > bestEndlessLevel) bestEndlessLevel = currentLevel;
+            if (score > bestEndlessScore) bestEndlessScore = score;
+            currentLevel++;
+            GenerateLevel();
+        } else {
+            currentLevel++;
+            GenerateLevel();
+        }
         /* 重置本层/本局的成就追踪变量 */
         sprintedThisLevel = 0;
         fusesCollectedRun = 0;
@@ -1480,6 +1505,7 @@ void ApplySetting(int item, int value) {
 void ActivateMenuItem(void) {
     if (currentState == STATE_MAIN_MENU) {
         int base = hasSave ? 1 : 0;
+        int endlessUnlocked = (bestLevel >= 10) || gameWon;
         int sel = menuSelection;
 
         if (sel == 0 && hasSave) {
@@ -1487,21 +1513,26 @@ void ActivateMenuItem(void) {
         } else if (sel == base) {
             DeleteSave();
             StartGame();
-        } else if (sel == base + 1) {
+        } else if (endlessUnlocked && sel == base + 1) {
+            /* Endless 模式 */
+            isEndlessRun = 1;
+            DeleteSave();
+            StartGame();
+        } else if ((endlessUnlocked && sel == base + 2) || (!endlessUnlocked && sel == base + 1)) {
             currentState = STATE_HUB;
             hubSelection = 0;
             uiDirty = 1;
-        } else if (sel == base + 2) {
+        } else if ((endlessUnlocked && sel == base + 3) || (!endlessUnlocked && sel == base + 2)) {
             currentState = STATE_ACHIEVEMENTS;
             achSelection = 0;
-            menuScrollOffsets[STATE_ACHIEVEMENTS] = 0;  /* 进入页面时回到列表顶部 */
-            InitAchievements();  /* 确保成就静态数据已初始化 */
+            menuScrollOffsets[STATE_ACHIEVEMENTS] = 0;
+            InitAchievements();
             uiDirty = 1;
-        } else if (sel == base + 3) {
+        } else if ((endlessUnlocked && sel == base + 4) || (!endlessUnlocked && sel == base + 3)) {
             prevState = STATE_MAIN_MENU;
             currentState = STATE_HELP;
             uiDirty = 1;
-        } else if (sel == base + 4) {
+        } else if ((endlessUnlocked && sel == base + 5) || (!endlessUnlocked && sel == base + 4)) {
             prevState = currentState;
             currentState = STATE_SETTINGS;
             settingsPage = 0;

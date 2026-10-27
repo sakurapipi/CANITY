@@ -65,6 +65,11 @@ typedef struct {
     /* v7 新增：成就系统。放在结构末尾以保持兼容性。 */
     int achUnlocked[ACH_COUNT];
     int achProgress[ACH_COUNT];
+
+    /* v8 新增：无尽模式进度。放在结构末尾以保持兼容性。 */
+    int bestEndlessLevel;
+    int bestEndlessScore;
+    int isEndlessRunSaved;
 } SaveBlob;
 
 /* 写当前进度（游戏中 / 退出时） */

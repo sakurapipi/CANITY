@@ -383,6 +383,10 @@ RECT RowRect(MenuGeo g, int i) {
 }
 
 int MainMenuCount(void) {
+    int endlessUnlocked = (bestLevel >= 10) || gameWon;
+    if (endlessUnlocked) {
+        return hasSave ? 8 : 7;
+    }
     return hasSave ? 7 : 6;
 }
 
@@ -399,6 +403,13 @@ static const char* MenuLabel(int i) {
         case STATE_MAIN_MENU: {
             static const char* withSave[] = {"Continue", "New Run", "Hub", "Achievements", "Help", "Settings", "Quit"};
             static const char* noSave[] = {"New Run", "Hub", "Achievements", "Help", "Settings", "Quit"};
+            static const char* withEndless[] = {"Continue", "New Run", "Endless", "Hub", "Achievements", "Help", "Settings", "Quit"};
+            static const char* noSaveEndless[] = {"New Run", "Endless", "Hub", "Achievements", "Help", "Settings", "Quit"};
+            /* Endless 解锁条件：通关过第 10 层 */
+            int endlessUnlocked = (bestLevel >= 10) || gameWon;
+            if (endlessUnlocked) {
+                return hasSave ? withEndless[i] : noSaveEndless[i];
+            }
             return hasSave ? withSave[i] : noSave[i];
         }
         case STATE_PAUSED: {

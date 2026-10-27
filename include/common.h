@@ -28,8 +28,8 @@
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 17         /* 整数版本，进存档做记录 */
-#define CANITY_VERSION_STR "1.6.6"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_NUM 18         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_STR "1.6.7"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -56,7 +56,13 @@ typedef enum {
 #define MOVE_SPEED 2.0f       /* 单位/秒（基础走速） */
 #define SPRINT_MULT 1.5f      /* 冲刺倍率 */
 #define SANITY_DRAIN 0.5f     /* 理智/秒（满值约 200 秒） */
+#define ENDLESS_SANITY_DRAIN 0.35f  /* 无尽模式：理智流失更慢 */
 #define MOUSE_BASE_SENS 0.002 /* 弧度/像素（1.0x） */
+
+/* 无尽模式：首通后解锁，独立存档、独立难度曲线 */
+extern int isEndlessRun;
+extern int bestEndlessLevel;
+extern int bestEndlessScore;
 
 /* 一层里最多能同时存在多少个可搜索容器。
    RICH 词条会额外 +2，所以数组本身要留出余量，
@@ -67,6 +73,9 @@ typedef enum {
 #define MAX_THROWN 4
 /* 场上最多同时存在几枚飞行中的玻璃瓶 */
 #define MAX_SHOTS 4
+
+/* 无尽模式：每层最多怪物数（寻声怪+光敏怪+第3只怪） */
+#define ENDLESS_MAX_MONSTERS 4
 
 /* ------------------------------------------------------------------ */
 /* 难度曲线                                                            */

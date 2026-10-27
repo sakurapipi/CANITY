@@ -103,8 +103,11 @@ extern int hasSave;
 extern const char* pickupMsg;
 extern float pickupMsgTimer;
 extern int bestLevel;
+extern int bestEndlessLevel;      /* 无尽模式最高层数 */
+extern int bestEndlessScore;      /* 无尽模式最高分 */
 extern float volumeF;               /* 0..1，0 = 静音 */
 extern int runInProgress;
+extern int isEndlessRun;            /* 当前是否为无尽模式 */
 
 /* ---- 交互 ---- */
 extern int hoverKind;               /* 0=无 1=容器 2=配电箱 */

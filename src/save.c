@@ -84,6 +84,11 @@ void SaveGame(void) {
         g_save.achProgress[i] = g_achievements[i].progress;
     }
 
+    /* v8 新增：无尽模式进度 */
+    g_save.bestEndlessLevel = bestEndlessLevel;
+    g_save.bestEndlessScore = bestEndlessScore;
+    g_save.isEndlessRunSaved = isEndlessRun;
+
     FILE* f = fopen(SAVE_FILE, "wb");
     if (!f) return;
     fwrite(&g_save, sizeof(g_save), 1, f);
@@ -200,12 +205,19 @@ int LoadSettings(void) {
             g_achievements[i].unlocked = g_save.achUnlocked[i];
             g_achievements[i].progress = g_save.achProgress[i];
         }
+        /* v8 新增：恢复无尽模式进度 */
+        bestEndlessLevel = g_save.bestEndlessLevel;
+        bestEndlessScore = g_save.bestEndlessScore;
+        isEndlessRun = g_save.isEndlessRunSaved;
     } else {
         /* 老存档没有成就数据，全置 0 */
         for (int i = 0; i < ACH_COUNT; i++) {
             g_achievements[i].unlocked = 0;
             g_achievements[i].progress = 0;
         }
+        bestEndlessLevel = 0;
+        bestEndlessScore = 0;
+        isEndlessRun = 0;
     }
 
     return g_save.hasRun;
@@ -257,6 +269,7 @@ void ContinueRun(void) {
     GenerateThemeTextures(themeId);   /* 主题变了，墙面/地板贴图要跟着重建 */
     SpawnMonster();
     SpawnLightBeast();
+    isEndlessRun = g_save.isEndlessRunSaved;  /* 恢复无尽模式标记 */
     /* 读档不重掷跳脸虫：本关不会突然蹦出来。
        触发器留成 -1，等下一层进关时再掷。 */
     jumperTrigger = -1.0f;
