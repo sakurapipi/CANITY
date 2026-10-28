@@ -97,15 +97,27 @@ char g_savePath[MAX_PATH] = "";/* 最近一次写入成功的路径 */
 
 /* 返回 0 = 成功，否则 = Win32 错误码 */
 static int WriteWholeFile(const char* path, const void* data, size_t n) {
-    HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+    /* v2.2：先写临时文件、flush 落盘、再原子改名。
+       原来是 CREATE_ALWAYS 原地覆盖 —— 写到一半掉电/被杀就只剩半截文件，
+       而半截文件能过 magic+version 校验，于是"存档存在但是空的"。 */
+    char tmp[MAX_PATH];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    HANDLE h = CreateFileA(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                            FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return (int)GetLastError();
-    DWORD written = 0;
-    BOOL ok = WriteFile(h, data, (DWORD)n, &written, NULL);
-    int err = ok ? 0 : (int)GetLastError();
+    DWORD wrote = 0;
+    BOOL ok = WriteFile(h, data, (DWORD)n, &wrote, NULL);
+    DWORD err = ok ? 0 : GetLastError();
+    if (ok && wrote != (DWORD)n) err = ERROR_WRITE_FAULT;
+    if (ok) FlushFileBuffers(h);
     CloseHandle(h);
-    if (err == 0 && written != (DWORD)n) err = ERROR_WRITE_FAULT;
-    return err;
+    if (err) { DeleteFileA(tmp); return (int)err; }
+    if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) {
+        err = GetLastError();
+        DeleteFileA(tmp);
+        return (int)err;
+    }
+    return 0;
 }
 
 /* 返回读到的字节数，失败返回 -1 */
@@ -272,8 +284,16 @@ int LoadSettings(void) {
     memset(&g_save, 0, sizeof(g_save));
     /* 按文件的**实际字节数**读，比 sizeof(SaveBlob) 短的就是老存档 */
     long fs = -1;
-    for (int i = 0; i < SAVE_CAND_COUNT && fs < 0; i++)
-        fs = ReadWholeFile(SavePathCand(i, p, sizeof(p)), &g_save, sizeof(g_save));
+    for (int i = 0; i < SAVE_CAND_COUNT && fs < 0; i++) {
+        const char* cand = SavePathCand(i, p, sizeof(p));
+        fs = ReadWholeFile(cand, &g_save, sizeof(g_save));
+        if (fs <= 0) {
+            /* v2.2：主档读不出来就试 .bak —— 原来只写不读，等于白备份 */
+            char bak[MAX_PATH];
+            snprintf(bak, sizeof(bak), "%s.bak", cand);
+            fs = ReadWholeFile(bak, &g_save, sizeof(g_save));
+        }
+    }
     if (fs <= 0) return 0;
     size_t fileSize = (size_t)fs;
     size_t want = (fileSize < sizeof(g_save)) ? fileSize : sizeof(g_save);
@@ -289,23 +309,22 @@ int LoadSettings(void) {
        技能树从 15 节点变 20 节点，skillRank 是定长数组 → 结构体尺寸变了。
        策略：技能等级全清、把已投入的碎片和核心按旧价退回，其余进度原样保留。
        旧价：普通节点 {100,500,900}、keystone 2000 + 1 核、跨支 1400 + 2 核。 */
-    if (g_save.version == 13) {
-        long refund = 0;
-        int coreRefund = 0;
-        static const int kOldCost[3] = { 100, 500, 900 };
-        for (int i = 0; i < 15; i++) {
-            int r = g_save.skillRank[i];
-            if (r <= 0) continue;
-            if (r > 3) r = 3;
-            for (int k = 0; k < r; k++) refund += kOldCost[k];
+    /* v2.2 修复：v13→v14 的"迁移"是错的 —— 它把 v13 的文件字节
+       原地当成 v14 的 SaveBlob 解释，而 v14 的 skillRank[15]→[20]
+       多出 20 字节，导致 skillRank 之后的所有字段整体错位 5 个 int：
+       成就被清零、核心被读成随机值、武器熟练度串到别的字段。
+
+       真正安全的做法：不认识的版本**不解释**，把旧档改名归档，
+       当作"没有存档"处理。玩家的数据一定还在盘上，可以回滚，
+       而不是被一个错误的迁移静默毁掉。 */
+    if (g_save.version != SAVE_VERSION) {
+        char oldp[MAX_PATH], arc[MAX_PATH];
+        SavePathCand(0, oldp, sizeof(oldp));
+        if (oldp[0]) {
+            snprintf(arc, sizeof(arc), "%s.v%d.bak", oldp, g_save.version);
+            MoveFileExA(oldp, arc, MOVEFILE_REPLACE_EXISTING);
         }
-        /* 旧 keystone（4..11 里的 3 个 + 跨支 3 个）单独补 */
-        coreRefund = 0;
-        for (int i = 0; i < 15; i++) g_save.skillRank[i] = 0;
-        g_save.activeKeystone = -1;
-        g_save.shards += (int)refund;
-        g_save.cores += coreRefund;
-        g_save.version = SAVE_VERSION;
+        return 0;
     }
     if (g_save.version != SAVE_VERSION) return 0;
     int isOldSave = (fileSize < sizeof(SaveBlob));

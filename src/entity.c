@@ -192,6 +192,12 @@ void SpawnMonster(void) {
         else if (lv <= 12)  { monster.hp *= 10; monster.speed *= 0.62f; }   /* 厚甲 */
         else                { monster.hp *= 9;  monster.speed *= 0.95f; }   /* 全能 */
         bossMaxHp = monster.hp;
+        /* v2.2：Boss 原来三抗全同 → 符印（理智）和信号枪（电量）
+           在 12/18 层算术上打不死（要 216/264 点，上限 100）。
+           给法术和碎片各 -30% 抗性（弱点），让三把武器都能通。 */
+        monster.resist[DT_SLASH] = -30;
+        monster.resist[DT_SHARD] = -30;
+        monster.resist[DT_BLUNT] = 10;
     } else {
         bossMaxHp = monster.hp;
     }

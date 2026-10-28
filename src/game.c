@@ -229,7 +229,8 @@ int bossLevel = 0;     /* v2.1：本层是否 Boss 层 */
 int bossMaxHp = 1;
 int bossDefeated = 0;
 int totalKills = 0;      /* v2.0：累计击杀，成就用 */
-int shortcutUsed = 0;    /* v2.0 SHORTCUT：本局是否已用过跳层 */
+int shortcutUsed = 0;
+int lastResortUsed = 0;   /* v2.2 LAST RESORT：本局是否已用掉免死 */    /* v2.0 SHORTCUT：本局是否已用过跳层 */
 int dailyMode = 0;
 int dailySeed = 0;
 int campaignMode = 0;
@@ -1815,6 +1816,16 @@ void Update(float dt) {
         float siphonSan = 1.0f;
         if (SkillPwrSiphonActive() && battery < (float)BatteryMax() * 0.25f)
             siphonSan = SkillPwrSiphonSanityMul();
+        /* v2.2：LAST RESORT —— 理智归零时免死一次，回 15 点并给 4 秒。
+           这个 keystone 之前是纯空函数（1200 碎片 + 2 核心买了个寂寞）。 */
+        if (!lastResortUsed && SkillLastResortOneshot()) {
+            lastResortUsed = 1;
+            sanity = 15.0f;
+            pickupMsg = "LAST RESORT";
+            pickupMsgTimer = 2.0f;
+            uiDirty = 1;
+            return;
+        }
         sanity -= drain * siphonSan * dt;
     }
     if (sanity <= 0.0f) {
@@ -2668,6 +2679,8 @@ void StartGame(void) {
     WeaponResetRun();               /* v2.0：武器冷却/蓄力 */
     RelicResetRun();                /* v2.0：遗物只在本局有效 */
     SafeLevelReset();               /* v2.2：每局重置安全屋的休息/充电标记 */
+    lastResortUsed = 0;
+    shortcutUsed = 0;
     modSanityMul = modSpeedMul = modBatteryMul = modShardMul = 1.0f;   /* v2.0 修复 */
     modNoiseMul = 1.0f;
     ExtrasReset();                  /* v2.0 */
