@@ -453,6 +453,19 @@ void ApplyFov(void) {
 
 /* 把世界坐标投影成屏幕矩形（billboard） */
 typedef struct { int ok; float ty; int x0, x1, y0, y1; } SpriteBox;
+
+/* v2.2：精灵亮度统一公式。
+   审计发现同一件事有 4 份拷贝（箱子 / 怪 / 偷电怪 / 光敏怪），
+   衰减曲线和下限（0.10 / 0.12 / 0.14）都不一样 —— 调一处另三处不动。
+   现在全部走这一个函数。 */
+static float SpriteShade(float ty, float minK) {
+    float k = 1.0f - ty / 16.0f;
+    if (k < minK) k = minK;
+    if (k > 1.0f) k = 1.0f;
+    return k;
+}
+
+
 static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK);   /* v2.1 */
 
 static SpriteBox ProjectSprite(float wx, float wy, float lift, float halfH) {
@@ -607,8 +620,7 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
     int x = (s.x0 + s.x1) / 2 - size / 2;
     int y = s.y1 - size;
 
-    float light = 1.0f - s.ty / 16.0f;
-    if (light < 0.12f) light = 0.12f;
+    float light = SpriteShade(s.ty, 0.12f);
     light *= lightK;
 
     /* 脚下阴影：画在精灵之前（否则会被自己的 z 裁掉） */
@@ -695,8 +707,7 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
         if (hh > size) size = hh;
         int x = (s.x0 + s.x1) / 2 - size / 2;
         int y = s.y1 - size;
-        float light = 1.0f - s.ty / 16.0f;
-        if (light < 0.12f) light = 0.12f;
+        float light = SpriteShade(s.ty, 0.12f);
         DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
         DrawSpriteTint(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty, tint, tintMix);
     }

@@ -240,6 +240,7 @@ float floorStartTime = 0.0f;
 int lastResortUsed = 0;   /* v2.2 LAST RESORT：本局是否已用掉免死 */    /* v2.0 SHORTCUT：本局是否已用过跳层 */
 int dailyMode = 0;
 int dailySeed = 0;
+int dailyClearedToday = 0;   /* v2.2：今天是否已通 */
 int campaignMode = 0;
 int campaignStage = 0;
 
@@ -2476,18 +2477,33 @@ void Update(float dt) {
         if (currentLevel == 1) UnlockAchievement(0);  /* FIRST STEPS */
         /* v2.0：战役模式 —— 过关直接进下一关，5 关打完算通关 */
         if (campaignMode) {
+            cores += 1;   /* v2.2：每通过一段给 1 核心（原来战役 0 收益） */
             if (campaignStage < 4) {
                 StartCampaign(campaignStage + 1);
                 return;
             }
             gameWon = 1;
             runInProgress = 0;
+            /* v2.2：战役通关原来**没有 ComputeScore**，结算页显示上一局残留，
+               也不给核心。现在补上。 */
+            {
+                ScoreInput si = { currentLevel, 1, 0, runSearched, bottlesKilled,
+                                  runTime, modsSeenCount };
+                ComputeScore(&si, &lastScore);
+                lastScore.score += 5000;      /* 战役通关固定加成 */
+                cores += 1;
+            }
             campaignMode = 0;
             currentState = STATE_GAMEOVER;
             menuSelection = 0;
             ForceCursor(1);
             uiDirty = 1;
             return;
+        }
+        /* v2.2：每日挑战通关 —— 今天第一次给 1 核心 */
+        if (dailyMode && !dailyClearedToday) {
+            dailyClearedToday = 1;
+            cores += 1;
         }
         if (currentLevel >= WIN_LEVEL && !isEndlessRun) {
             /* 主线通关：走进第 10 层的出口就是结局，不再生成下一层 */
