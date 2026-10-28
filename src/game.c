@@ -1063,7 +1063,7 @@ void Update(float dt) {
 
     /* 手摇发电：站着摇，摇满一次回一截电；期间不能移动 */
     cranking = 0;
-    if (IsActionDown(ACT_CRANK) && battery < 99.9f && !holdingNow) {
+    if (IsActionDown(ACT_CRANK) && battery < (float)BatteryMax() - 0.1f && !holdingNow) {
         cranking = 1;
         crankTimer += dt;
         crankClick += dt;
