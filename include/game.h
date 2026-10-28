@@ -272,3 +272,9 @@ extern int sprintedThisLevel;
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 #endif /* CANITY_GAME_H */
+
+/* v2.2：从函数内 extern 提到这里（类型改动不再静默错位） */
+extern int totalKills, killsWrench, killsBottle, floorKills;
+
+/* v2.2：从函数内 extern 提到这里（类型改动不再静默错位） */
+extern int weaponAttach[3][2];

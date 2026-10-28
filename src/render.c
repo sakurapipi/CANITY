@@ -561,8 +561,7 @@ static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK
     int size = (w > h) ? w : h;
     int x = (s.x0 + s.x1) / 2 - size / 2;
     int y = s.y1 - size;
-    float light = 1.0f - s.ty / 16.0f;
-    if (light < 0.14f) light = 0.14f;
+    float light = SpriteShade(s.ty, 0.12f);
     DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
     DrawSprite(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty);
 }

@@ -677,7 +677,6 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
 
     /* v2.0：VAMP 配件 —— 命中回智（每击 +1，上限 100） */
     {
-        extern int weaponAttach[3][2];
         for (int a = 0; a < 3; a++)
             for (int sl = 0; sl < 2; sl++)
                 if (weaponAttach[a][sl] == 9) {   /* ATT_VAMP */
@@ -753,8 +752,6 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
     if (m->hp <= 0) {
         /* v2.1：死亡要有尸体消失的交代 —— 撒一把血 */
         SpawnParticles(m->x, m->y, 1);
-        extern int bossLevel, bossDefeated;
-        extern int pendingShards;
         if (bossLevel && m == &monster) {
             /* Boss 不会重生：给一笔碎片，标记本层已清 */
             bossDefeated = 1;
@@ -766,11 +763,10 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
         }
         /* v2.0：击杀给碎片（审计指出原来击杀 0 收益，最优解是不打） */
         {
-            extern int pendingShards;
-            /* v2.0：原来 4/6 —— 搜一个箱子 7 碎片只用 1.1 秒，
+                /* v2.0：原来 4/6 —— 搜一个箱子 7 碎片只用 1.1 秒，
                打一只怪要 20 秒才 4 碎片，最优解是永远不打。 */
             pendingShards += (m == &monster) ? 25 : 40;
-            { extern int totalKills; totalKills++; }
+            totalKills++;
             /* v2.2：分武器计数（KNIFE ONLY / BOTTLE RAIN 成就） */
             {
                 extern int totalKills, killsWrench, killsBottle, floorKills;
