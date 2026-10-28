@@ -194,6 +194,7 @@ typedef struct {
     /* ---- v1.15 伤害系统 ---- */
     int armor;                     /* 固定减伤 */
     signed char resist[DT_COUNT];  /* 百分比抗性；负数 = 弱点 */
+    int glued;                     /* v2.2：被胶水定身，受伤 +50% */
     float stun;                /* 硬直剩余秒数，期间不能移动 */
     /* 寄生怪专用（其它两只怪不用这几个字段） */
     int attached;              /* 1 = 已附着在玩家身上 */

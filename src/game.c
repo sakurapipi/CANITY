@@ -1552,6 +1552,7 @@ static void UpdateShots(float dt) {
                         break;
                     } else if (shot[i].kind == 8) {    /* v2.0 胶水瓶：定身 2 秒，无伤害 */
                         m->stun = 2.0f;
+                        m->glued = 1;   /* v2.2：胶水期间受伤 +50% */
                         shot[i].active = 0;
                         SpawnShards(shot[i].x, shot[i].y, 0, 0, 0.3f);
                         PlaySfx(SFX_GLASS, 0.6f);
@@ -2390,6 +2391,21 @@ void Update(float dt) {
     /* v2.1：0.10 等于把画面关掉。要的是「看不清」不是「看不见」。 */
     smokeDim = PlayerInSmoke() ? 0.45f : 1.0f;
 
+    /* v2.2：烟幕原来**只压暗玩家自己**（怪完全不看烟），等于自伤道具。
+       现在：烟里的怪丢失目标 —— 这才是"遮蔽视线"该有的效果。 */
+    for (int si = 0; si < MAX_SMOKE; si++) {
+        extern SmokeCloud smokes[MAX_SMOKE];
+        if (!smokes[si].active) continue;
+        if (monster.active && Dist2(monster.x, monster.y, smokes[si].x, smokes[si].y) < 2.6f) {
+            monster.state = 0;
+            monster.pathLen = 0;
+        }
+        if (lightBeast.active && Dist2(lightBeast.x, lightBeast.y, smokes[si].x, smokes[si].y) < 2.6f) {
+            lightBeast.state = 0;
+            lightBeast.pathLen = 0;
+        }
+    }
+
     EnsureThrowSelectedValid();   /* v1.14：手里不能是空的 */
     if (lastHitTimer > 0.0f) lastHitTimer -= dt;   /* v1.15：命中数字淡出 */
     UpdateMonster(dt);
@@ -2840,6 +2856,11 @@ static void UnlockAchievement(int idx) {
        现在成就只给碎片；核心只由「Boss 击杀 / 通关 / 里程碑楼层」产出。 */
     shards += 400;
     totalShardsEarned += 400;
+    /* v2.2：解锁要有反馈 —— 原来只是静默加碎片 */
+    pickupMsg = g_achievements[idx].name;
+    pickupMsgTimer = 2.2f;
+    PlaySfx(SFX_POWER, 0.9f);
+    uiDirty = 1;
     AddAchievementProgress(3, 0);   /* 不递归，仅占位说明奖励已发 */
     SaveGame();  /* 立即持久化 */
 }

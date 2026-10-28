@@ -706,6 +706,7 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
     /* ④ 减法段：护甲 */
     int finalDmg = g_dmgIgnoreArmor ? afterRes : (afterRes - m->armor);
     finalDmg = (int)((float)finalDmg * RelicDamageMul() + 0.5f);   /* v2.0 遗物 */
+    if (m->glued) finalDmg = (int)((float)finalDmg * 1.5f + 0.5f);   /* v2.2 胶水 */
     /* v2.0 EXECUTIONER：目标 <25% 血时 +80% */
     {
         extern int bossMaxHp, bossLevel;
