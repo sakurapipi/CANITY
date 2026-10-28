@@ -16,7 +16,7 @@ typedef struct {
     const char* counter; /* 怎么对付 */
 } BestiaryEntry;
 
-#define BESTIARY_COUNT 4
+#define BESTIARY_COUNT 8   /* v2.2：4 -> 8（影子/盲螨/回响/Boss） */
 
 extern const BestiaryEntry bestiary[BESTIARY_COUNT];
 extern int bestiarySel;

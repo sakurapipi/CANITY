@@ -33,6 +33,20 @@ int AttachPrice(int id) {
 
 /* 商店报价：3 个不重复的配件 */
 void ShopOpen(int level) {
+    /* v2.2 修复：原来每次按 E 进来都重新 rand() 三个报价 ——
+       面板开着时游戏逻辑整段暂停（理智不流失、怪不动），
+       于是"反复进出商店"等于免费无限重掷，直到刷出想要的配件。
+       现在同一层只掷一次。 */
+    static int shopRollLevel = -1;
+    if (level == shopRollLevel) {
+        shopRow = 0;
+        prevState = currentState;
+        currentState = STATE_SAFEHOUSE;
+        ForceCursor(1);
+        uiDirty = 1;
+        return;
+    }
+    shopRollLevel = level;
     (void)level;
     shopPage = SHP_SHOP;
     shopRow = 0;

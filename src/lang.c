@@ -199,6 +199,22 @@ static const TrEntry kTr[] = {
     { "LIGHT", "光" },
     { "DRAIN", "抽取" },
     { "QTE", "快速反应" },
+    { "SHADE", "影子" },
+    { "SPIDER", "盲螨" },
+    { "ECHO", "回响" },
+    { "BOSS", "首领" },
+    { "DARK", "黑暗" },
+    { "SPEED", "速度" },
+    { "TELEPORT", "闪现" },
+    { "ALL", "全部" },
+    { "ONLY EXISTS WHILE YOUR LIGHT IS OFF. SLOW, BUT IT NEVER STOPS.", "只在你关灯时存在。很慢，但永不停下。" },
+    { "TURN THE LIGHT ON AND IT VANISHES. THEY CAN BE KILLED NOW.", "开灯它就消失。现在它也能被打死了。" },
+    { "BLIND AND FAST. DASHES TOWARD THE LAST SOUND, THEN WAITS.", "又瞎又快。朝最后的声音冲刺，然后等待。" },
+    { "LOW HP. ONE GOOD HIT ENDS IT. LISTEN FOR THE SKITTER.", "血很少，一击就死。听那阵窸窣。" },
+    { "IT DOES NOT WALK. IT BLINKS TO A SPOT NEAR YOU EVERY FEW SECONDS.", "它不走。每隔几秒闪到你附近。" },
+    { "STAY MOVING. ITS CONTACT HURTS MORE THAN THE OTHERS.", "保持移动。它碰到你比其它怪更疼。" },
+    { "THE ONE THAT WAS WAITING. EIGHT TIMES THE BODY, NO MERCY.", "一直在等的那个。八倍的身躯，不留情面。" },
+    { "KILL IT TO POWER THE BREAKER. THERE IS NO WAY AROUND IT.", "杀了它才能通电。没有绕过去的办法。" },
 };
 
 #define KTR_N ((int)(sizeof(kTr) / sizeof(kTr[0])))
