@@ -1070,11 +1070,13 @@ void GenerateLevel(void) {
         float cap = (float)BatteryMax() * 0.5f;
         if (battery > cap) battery = cap;     /* 本层电量上限砍半 */
     } else if (levelEvent == EV_SUPPLY) {
-        if (flares < 3) flares++;
-        if (bottles < 3 && bottles < BottleCap()) bottles++;           /* 白给补给 */
+        /* v2.2：补给空投给足量（原来最多 +1 荧光棒 +1 瓶，等于没有） */
+        flares += 2;
+        if (bottles < BottleCap()) bottles += 2;
+        firePots++;
     } else if (levelEvent == EV_SILENCE) {
-        /* v2.0 修复：死寂原来只有 +800 分，**没有任何效果分支** */
-        modNoiseMul = 0.5f;
+        /* v2.2：死寂从 0.5 加强到 0.3（0.5 在走路噪声 4.5 格上几乎感知不到） */
+        modNoiseMul = 0.30f;
     } else if (levelEvent == EV_FLOOD) {
         /* v2.0 涨水：手电耗电翻倍，本层更逼你省电 */
         modBatteryMul = 2.0f;
@@ -1083,9 +1085,16 @@ void GenerateLevel(void) {
         modSanityMul *= 1.5f;
         modShardMul *= 1.5f;
     } else if (levelEvent == EV_MIRROR) {
-        /* v2.0 镜像：本层两只寻声怪（用速度乘子近似"更多压迫"） */
+        /* v2.2 修复：描述写"怪物成倍出现"，实际只 +10% 速度和理智 ——
+           玩家完全感知不到。现在真的多放 3 只游荡怪（它们已经可杀）。 */
         modSpeedMul *= 1.10f;
         modSanityMul *= 1.10f;
+        for (int i = 0; i < EXTRA_MAX; i++) {
+            if (extras[i].active) continue;
+            extern void extras_spawnOne(int);
+            extras_spawnOne(i);
+            if (++i >= 3) break;
+        }
     }
 
     /* v1.8：图鉴解锁 —— 本层出现的怪记一笔 */

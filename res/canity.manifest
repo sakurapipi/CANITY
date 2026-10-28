@@ -14,7 +14,7 @@
     · longPathAware —— 安装到深目录时路径超过 260 字符也不会失败。
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="Canity.Raycaster" version="1.8.0.0"
+  <assemblyIdentity type="win32" name="Canity.Raycaster" version="2.0.0.0"
                     processorArchitecture="amd64"/>
   <description>Canity - a pure C raycasting horror game</description>
 

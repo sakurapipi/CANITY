@@ -33,6 +33,20 @@ static int findSpot(float* ox, float* oy, float minD, float maxD) {
     return 0;
 }
 
+/* v2.2：补一只游荡怪到指定槽位（EV_MIRROR 用） */
+void extras_spawnOne(int idx) {
+    if (idx < 0 || idx >= EXTRA_MAX) return;
+    float x, y;
+    if (!findSpot(&x, &y, 4.0f, 9.0f)) return;
+    extras[idx].x = x;
+    extras[idx].y = y;
+    extras[idx].active = 1;
+    extras[idx].kind = rand() % 3;
+    extras[idx].hp = (extras[idx].kind == 0) ? 20 : (extras[idx].kind == 1 ? 15 : 10);
+    extras[idx].timer = 1.0f;
+    extras[idx].cool = 0;
+}
+
 int DamageExtrasAt(float x, float y, float radius, int dmg) {
     int hits = 0;
     float r2 = radius * radius;
