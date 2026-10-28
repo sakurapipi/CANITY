@@ -843,9 +843,9 @@ RECT RowRect(MenuGeo g, int i) {
 int MainMenuCount(void) {
     int endlessUnlocked = (bestLevel >= 10) || gameWon;
     if (endlessUnlocked) {
-        return hasSave ? 10 : 9;
+        return hasSave ? 12 : 11;   /* v2.2：+战役 +每日 */
     }
-    return hasSave ? 9 : 8;
+    return hasSave ? 11 : 10;
 }
 
 static int MenuItemIndex(void) {
@@ -863,15 +863,15 @@ static const char* MenuLabel(int i) {
     static char buf[128];
     switch (currentState) {
         case STATE_MAIN_MENU: {
-            static const char* withSave[] = {"Continue", "New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Training", "Quit"};
+            static const char* withSave[] = {"Continue", "New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
             /* v2.0 中文菜单 */
-            static const char* withSaveZh[] = {"继续", "新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "训练营", "退出"};
-            static const char* noSaveZh[]   = {"新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "训练营", "退出"};
-            static const char* withEndlessZh[]   = {"继续", "新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "训练营", "退出"};
-            static const char* noSaveEndlessZh[] = {"新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "训练营", "退出"};
-            static const char* noSave[] = {"New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Training", "Quit"};
-            static const char* withEndless[] = {"Continue", "New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Training", "Quit"};
-            static const char* noSaveEndless[] = {"New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Training", "Quit"};
+            static const char* withSaveZh[] = {"继续", "新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
+            static const char* noSaveZh[]   = {"新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
+            static const char* withEndlessZh[]   = {"继续", "新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
+            static const char* noSaveEndlessZh[] = {"新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
+            static const char* noSave[] = {"New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
+            static const char* withEndless[] = {"Continue", "New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
+            static const char* noSaveEndless[] = {"New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
             /* Endless 解锁条件：通关过第 10 层 */
             int endlessUnlocked = (bestLevel >= 10) || gameWon;
             int zh = (g_lang == LANG_ZH);

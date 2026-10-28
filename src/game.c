@@ -2709,7 +2709,20 @@ void SyncWindowSize(void) {
     }
 }
 
+
+/* v2.2：四种模式互斥。原来只有 New Run 清标记，无尽/训练不清，
+   于是"先玩每日再进无尽"会把 +25% 带进无尽，
+   "先玩战役死在半路再进无尽"会让无尽在第 1 层出口变成战役第 2 关。 */
+static void ResetModeFlags(void) {
+    isEndlessRun = 0;
+    trainingMode = 0;
+    dailyMode = 0;
+    campaignMode = 0;
+    campaignStage = 0;
+}
+
 void StartGame(void) {
+    ResetModeFlags();   /* v2.2：先清模式标志 */
     currentState = STATE_PLAYING;
     currentLevel = 1;
     gameWon = 0;
@@ -3100,6 +3113,14 @@ void ActivateMenuItem(void) {
             rebindingAct = -1;
             rebindConflict = -1;
             uiDirty = 1;
+        } else if (sel == MainMenuCount() - 4) {
+            /* v2.2：战役模式（原来只有藏在 C 键里的入口，按错还会删档） */
+            SaveGame();
+            StartCampaign(0);
+        } else if (sel == MainMenuCount() - 3) {
+            /* v2.2：每日挑战 */
+            SaveGame();
+            StartDailyRun();
         } else if (sel == MainMenuCount() - 2) {
             /* v1.17：训练营 —— 无限道具 + 标本 + 右侧伤害屏 */
             trainingMode = 1;
@@ -3977,16 +3998,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
             /* 统一菜单导航按键判断 */
             /* v1.8：W/S 也能上下选菜单（很多玩家习惯 WASD，不想切手去按方向键） */
-            /* v2.0：主菜单按 C 开始战役 */
-    if (currentState == STATE_MAIN_MENU && (wParam == 'C' || wParam == 'c')) {
-        StartCampaign(0);
-        return 0;
-    }
-    /* v2.0：主菜单按 D 开始每日挑战 */
-    if (currentState == STATE_MAIN_MENU && (wParam == 'D' || wParam == 'd')) {
-        StartDailyRun();
-        return 0;
-    }
+            /* v2.2：删掉 C 键开战役 —— 它会 DeleteSave()，按错就删档。
+       战役/每日已进主菜单（第 7/8 行），那里先 SaveGame。 */
+    /* v2.2：同上，删掉 D 键开每日。 */
     /* v2.0：安全屋是模态的，原来只能按 ESC / 选 LEAVE 出去，
        玩家一进去就像卡住。现在按任意移动键直接关门。 */
     /* v2.2 修复：上一版加了「W/A/S/D 直接关门」，但它放在菜单导航**之前**，

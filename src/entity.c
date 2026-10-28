@@ -188,9 +188,9 @@ void SpawnMonster(void) {
         /* v2.0：3 个 Boss 各走一条路线 —— 第 6 层「快」、12 层「厚」、18 层「全能」。
            原来三个 Boss 都是同一只怪 ×8 血 ×0.72 速，玩家完全分不出来。 */
         int lv = currentLevel;
-        if (lv <= 6)        { monster.hp *= 6;  monster.speed *= 1.10f; }   /* 快攻 */
-        else if (lv <= 12)  { monster.hp *= 10; monster.speed *= 0.62f; }   /* 厚甲 */
-        else                { monster.hp *= 9;  monster.speed *= 0.95f; }   /* 全能 */
+        if (lv <= 6)        { monster.hp *= 6;    monster.speed *= 1.10f; }   /* 快攻 */
+        else if (lv <= 12)  { monster.hp *= 6;    monster.speed *= 0.62f; }   /* v2.2：10→6（符印原来打不完） */   /* 厚甲 */
+        else                { monster.hp *= 5.5f; monster.speed *= 0.95f; }  /* v2.2：9→5.5 */   /* 全能 */
         bossMaxHp = monster.hp;
         /* v2.2：Boss 原来三抗全同 → 符印（理智）和信号枪（电量）
            在 12/18 层算术上打不死（要 216/264 点，上限 100）。

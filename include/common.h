@@ -65,7 +65,7 @@ typedef enum {
 /* ---- v1.8 理智经济（docs/终极方案_v2.md 第 1 节） ----
    原版每层净 +31（安全屋 +28 / 通关 +30 / 流失 -33），玩家不可能死。
    改成按层加成流失 + 削减回血，让深层真正吃紧。 */
-#define SANITY_DRAIN_STEP 0.02f    /* v2.1：0.03→0.02，第 10 层 0.68 而非 0.77 */
+#define SANITY_DRAIN_STEP 0.012f  /* v2.2：0.02→0.012（裸装原来第 11 层必死） */    /* v2.1：0.03→0.02，第 10 层 0.68 而非 0.77 */
 #define SANITY_DRAIN_CAP  1.2f     /* 流失上限 */
 #define SAFE_HEAL_RATE    1.2f     /* v2.0：3.0→1.2。审计实测三资源线里只有体力会卡，
                                       理智靠 8 个安全屋白送反而净 +187，恐怖感被抹平 */
@@ -215,7 +215,7 @@ extern SmokeCloud smokes[MAX_SMOKE];
 /* v2.1：血量搬到伤害量纲。原来恒 3 点，武器伤害 30-55 全部溢出，
    「伤害 / 熟练度 / 配件」整条成长链在数学上不存在。 */
 #define MONSTER_HP      70      /* v2.0：基础 70（开局 2 击） */
-#define MONSTER_HP_STEP 12      /* v2.0：30→12。原来第 24 层 780 血，
+#define MONSTER_HP_STEP 8       /* v2.2：12→8（第 24 层 346→254） */      /* v2.0：30→12。原来第 24 层 780 血，
                                    满蓄力 46 要打 17 下 = 20 秒，手枪一整条电都杀不死一只 */
 #define LIGHTBEAST_HP_MUL 0.6f            /* 寻声怪：3 瓶 */
 #define MONSTER_STUN 1.2f       /* 被砸中后的硬直秒数 */
@@ -337,9 +337,9 @@ typedef struct { float x, y; int active; } Breaker;
    地图本来是"无解"的信息优势（一眼看到整层结构），现在标了价：
    开得越久，手电可用的时间越短。 */
 #define MAP_BATTERY_DRAIN 10.0f
-#define BATTERY_PICKUP 45.0f     /* 电池补给量 */
+#define BATTERY_PICKUP 60.0f    /* v2.2：45→60（原来第 8 层就开始发黑） */     /* 电池补给量 */
 #define STAMINA_DRAIN 26.0f      /* 冲刺每秒消耗 */
-#define STAMINA_REGEN 20.0f      /* 恢复每秒 */
+#define STAMINA_REGEN 24.0f     /* v2.2：20→24（扳手是伤害预算） */      /* 恢复每秒 */
 
 /* 每关随机词条：给每层一点变化 */
 #define MOD_COUNT 6
