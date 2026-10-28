@@ -1276,7 +1276,12 @@ void UpdateExplored(void) {
         }
     }
 }
-int BatteryMax(void) { return 100 + SkillBatteryAdd(); }   /* SIPHON 每级 +20 */
+int BatteryMax(void) {
+    /* v2.2：SAVER 的 "cap -5" 代价现在真的生效 */
+    int m = 100 + SkillBatteryAdd() + RunBatteryCapDelta();
+    if (m < 30) m = 30;
+    return m;
+}
 
 /* 手电每秒耗电：ECO 升级每级 -12% */
 float BatteryDrainRate(void) { return BATTERY_DRAIN * SkillEcoMul() * RelicBatteryMul() * modBatteryMul; }
@@ -1564,7 +1569,7 @@ static void UpdateShots(float dt) {
                         base = shot[i].dmg > 0 ? shot[i].dmg : 8;
                         type = WeaponDamageType(curWeapon);
                     } else {                            /* 玻璃瓶 */
-                        base = SHOT_DAMAGE + chargeBonus(shot[i].charge);
+                        base = (int)(SHOT_DAMAGE * RunThrowDmgMul() + 0.5f) + chargeBonus(shot[i].charge);   /* v2.2 SILENT BOTTLE */
                     }
                     SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                     ApplyDamage(m, base, type, shot[i].x, shot[i].y);
@@ -2066,7 +2071,7 @@ void Update(float dt) {
         if (crankClick >= 0.30f) {
             crankClick = 0.0f;
             PlaySfx(SFX_CRANK, 0.45f);
-            MakeNoise(posX, posY, 12.0f);
+            MakeNoise(posX, posY, 12.0f * RunCrankNoiseMul());   /* v2.2：FAST CRANK 的 +15% 噪声 */
         }
         if (crankTimer >= 2.4f * RunCrankTimeMul()) {
             crankTimer = 0.0f;
@@ -2110,7 +2115,7 @@ void Update(float dt) {
         if (holdTimer == 0.0f && hoverKind == 1) {
             /* 开始翻箱子：发出声音，吸引怪物（压迫感来源） */
             PlaySfx(SFX_SEARCH, 0.55f);  /* 专用翻箱声：金属刮擦+木板闷响 */
-            MakeNoise(posX, posY, 10.0f * SkillSearchNoiseMul());  /* 比走路大一点，比跑步小 */
+            MakeNoise(posX, posY, 10.0f * SkillSearchNoiseMul() * RunSearchNoiseMul2());   /* v2.2：FAST SEARCH 的 +10% */  /* 比走路大一点，比跑步小 */
         }
         holdTimer += dt;
         if (holdTimer >= SEARCH_TIME * RunSearchTimeMul()) {

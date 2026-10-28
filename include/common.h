@@ -71,7 +71,6 @@ typedef enum {
                                       理智靠 8 个安全屋白送反而净 +187，恐怖感被抹平 */
 #define SAFE_HEAL_CAP     60.0f    /* v2.0：安全屋回智封顶（不再是满血点） */
 #define SAFE_REST_COST    25       /* v2.0：主动休息要花碎片 */
-#define SAFE_REST_MUL     0.25f    /* REST 每级 +25% */
 #define LEVEL_CLEAR_SANITY 12.0f   /* 过关回智（原 30） */
 #define CATCH_SANITY_BASE 18.0f    /* 被抓扣智基础值 */
 #define CATCH_SANITY_STEP 0.015f   /* 每层额外 +1.5% */
@@ -93,7 +92,6 @@ extern int bestEndlessScore;
 #define MAX_SHOTS 4
 
 /* 无尽模式：每层最多怪物数（寻声怪+光敏怪+第3只怪） */
-#define ENDLESS_MAX_MONSTERS 4
 
 /* ------------------------------------------------------------------ */
 /* 难度曲线                                                            */
@@ -219,7 +217,6 @@ extern SmokeCloud smokes[MAX_SMOKE];
 #define MONSTER_HP_STEP 12      /* v2.0：30→12。原来第 24 层 780 血，
                                    满蓄力 46 要打 17 下 = 20 秒，手枪一整条电都杀不死一只 */
 #define LIGHTBEAST_HP_MUL 0.6f            /* 寻声怪：3 瓶 */
-#define LIGHTBEAST_HP 2         /* 光敏怪：2 瓶（它更难缠，脆一点更合理） */
 #define MONSTER_STUN 1.2f       /* 被砸中后的硬直秒数 */
 #define MONSTER_FLEE_DIST 3.0f  /* 被驱离时后退的距离 */
 
@@ -415,11 +412,8 @@ enum {
 #define META_STARVE_MUL 4.0f    /* 断电时理智流失倍率 */
 
 #define KNIFE_CD      60.0f     /* 绣刀冷却 */
-#define KNIFE_RANGE   2.0f      /* 正前方 2 格 */
-#define KNIFE_DAMAGE  999       /* 秒杀 */
 #define KNIFE_NOISE   8.0f      /* 挥砍发声半径 */
 #define SLASH_SPEED      18.0f  /* 剑气飞行速度（格/秒） */
-#define SLASH_MAXDIST    14.0f  /* 剑气最大射程（格） */
 /* v2.6：走路不再是完全无声。连续走超过 WALK_NOISE_DELAY 秒之后，
    每隔 WALK_NOISE_INTERVAL 秒发出一次 WALK_NOISE_RADIUS 的小噪声 ——
    比冲刺（9.0）明显小，但足够把寻声鬼引过来。停下就立刻恢复安静。 */
@@ -461,7 +455,6 @@ enum {
 #define LEECH_DRAIN_BASE 3.0f
 #define LEECH_DRAIN_STEP 0.15f   /* 每层 +0.15/秒 */
 #define LEECH_DRAIN_CAP  9.0f
-#define LEECH_REPEL_TIME 2.0f    /* 被手电直射后逃逸 */
 #define LEECH_HINT_BATTERY 50.0f /* 电量低于这个值给"滋滋"声 */
 
 typedef struct {

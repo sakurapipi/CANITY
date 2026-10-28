@@ -120,6 +120,11 @@ void RunSkillTake(int id);
 /* 局内技能的效果倍率（没拿就是 1.0 / 0） */
 float RunNoiseMul(void);
 float RunDamageMul(void);      /* v2.0 STEADY HAND */
+float RunSpeedMul(void);       /* v2.2 技能的移速代价 */
+float RunCrankNoiseMul(void);
+float RunSearchNoiseMul2(void);
+int   RunBatteryCapDelta(void);
+float RunThrowDmgMul(void);
 float RunCooldownMul(void);   /* v2.0 SWIFT RELOAD */
 float RunCrankTimeMul(void);
 float RunSearchTimeMul(void);

@@ -918,8 +918,8 @@ static const char* MenuLabel(int i) {
                 case 7: sprintf(kb, "SLOT: %s %s %s  (WHEEL: ALL)",
                                 VkName(g_bindings[ACT_SELECT_1]), VkName(g_bindings[ACT_SELECT_2]),
                                 VkName(g_bindings[ACT_SELECT_3])); break;
-                case 8: sprintf(kb, "ATTACK  (MOUSE LEFT, HOLD TO CHARGE)",
-                                VkName(g_bindings[ACT_SWING]), VkName(g_bindings[ACT_DECOY])); break;
+                case 8: sprintf(kb, "ATTACK: HOLD %s  (CHARGE)",
+                                VkName(g_bindings[ACT_CANCEL_CHARGE])); break;
                 default: sprintf(kb, "PAUSE: %s  DODGE: %s",
                                 VkName(g_bindings[ACT_PAUSE]), VkName(g_bindings[ACT_DODGE])); break;
                 }

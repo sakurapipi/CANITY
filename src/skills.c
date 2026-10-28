@@ -363,6 +363,29 @@ float RunBatteryDrainMul(void) {
     return m;
 }
 /* v2.0：新被动 */
+
+/* v2.2：局内技能的**代价**（描述里写了但从来没实现）。
+   原来 LIGHT FOOT / IRON SKIN / FAST CRANK / FAST SEARCH / SAVER /
+   SILENT BOTTLE 的负面效果全是废纸，等于纯白给。 */
+float RunSpeedMul(void) {
+    float m = 1.0f;
+    if (RunSkillOwned(IR_LIGHTFOOT)) m *= 0.97f;   /* "speed -3%" */
+    if (RunSkillOwned(IR_ARMOR))     m *= 0.96f;   /* "speed -4%" */
+    return m;
+}
+float RunCrankNoiseMul(void) {
+    return RunSkillOwned(IR_FASTCRANK) ? 1.15f : 1.0f;   /* "noise +15%" */
+}
+float RunSearchNoiseMul2(void) {
+    return RunSkillOwned(IR_FASTSEARCH) ? 1.10f : 1.0f;  /* "noise +10%" */
+}
+int RunBatteryCapDelta(void) {
+    return RunSkillOwned(IR_SAVER) ? -5 : 0;             /* "cap -5" */
+}
+float RunThrowDmgMul(void) {
+    return RunSkillOwned(IR_SILENTBOTTLE) ? 0.90f : 1.0f; /* "dmg -10%" */
+}
+
 float RunDamageMul(void) {
     return RunSkillOwned(IR_STEADYHAND) ? 1.20f : 1.0f;
 }
