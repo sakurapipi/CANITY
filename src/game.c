@@ -230,6 +230,7 @@ int bossMaxHp = 1;
 int bossDefeated = 0;
 int totalKills = 0;      /* v2.0：累计击杀，成就用 */
 int shortcutUsed = 0;
+int helpPage = 0;   /* v2.2：帮助页分页 */
 /* v2.2：成就计数器（原来 15 个成就没有任何触发点） */
 int killsWrench = 0, killsBottle = 0;
 float crankSecondsTotal = 0.0f;
@@ -4061,6 +4062,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             } else if (currentState == STATE_GAMEOVER) {
                 if (menuConfirm) ActivateMenuItem();
             } else if (currentState == STATE_HELP) {
+                if (wParam == VK_TAB) { helpPage = 1 - helpPage; uiDirty = 1; }
                 if (menuUp) { menuSelection = (menuSelection + HELP_ROWS - 1) % HELP_ROWS; uiDirty = 1; }
                 if (menuDown) { menuSelection = (menuSelection + 1) % HELP_ROWS; uiDirty = 1; }
                 MenuGeo hg = GetMenuGeo();

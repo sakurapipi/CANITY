@@ -737,7 +737,8 @@ MenuGeo GetMenuGeo(void) {
         case STATE_WEAPON_PICK: return MakeGeo(Tr("CHOOSE WEAPON", "选择初始武器"), WPN_COUNT, UIS(52), UIS(32), UIS(760), UIS(60), STATE_WEAPON_PICK);
         case STATE_SAFEHOUSE: return MakeGeo(ShopPageTitle(), ShopRowCount(), UIS(50), UIS(32), UIS(720), UIS(58), STATE_SAFEHOUSE);
         case STATE_BESTIARY:  return MakeGeo("BESTIARY", BESTIARY_COUNT + 1, UIS(38), UIS(26), UIS(900), UIS(46), STATE_BESTIARY);
-        case STATE_HELP:      return MakeGeo("HELP", HELP_ROWS, UIS(29), UIS(22), UIS(1000), UIS(30), STATE_HELP);
+        case STATE_HELP:      return MakeGeo(helpPage == 1 ? Tr("HELP  -  RULES", "帮助  -  规则") : Tr("HELP  -  CONTROLS", "帮助  -  按键"),
+                                            HELP_PAGE_ROWS, UIS(29), UIS(22), UIS(1000), UIS(30), STATE_HELP);
         case STATE_PAUSED:    return MakeGeo("PAUSED", 3, UIS(56), UIS(38), UIS(520), UIS(56), STATE_PAUSED);
         case STATE_GAMEOVER:  return MakeGeo(gameWon ? "YOU ESCAPED" : "YOU LOST YOUR MIND", 3, UIS(48), UIS(34), UIS(660), UIS(40), STATE_GAMEOVER);
         case STATE_SETTINGS:  return MakeGeo(PageTitle(settingsPage), SettingsRowCount(), UIS(44), UIS(30), UIS(680), UIS(44), STATE_SETTINGS);
@@ -904,8 +905,9 @@ static const char* MenuLabel(int i) {
             /* v1.8：前 10 行是按键说明书，直接读当前绑定 ——
                新玩家最需要的就是"我该按哪个键"，而且改键之后这里会跟着变。 */
             static char kb[128];
-            if (i >= 0 && i < HELP_KEY_ROWS) {
-                switch (i) {
+            int ridx = i + (helpPage == 1 ? HELP_PAGE_ROWS : 0);   /* v2.2：分页 */
+            if (ridx >= 0 && ridx < HELP_KEY_ROWS) {
+                switch (ridx) {
                 case 0: sprintf(kb, "MOVE:  %s %s %s %s",
                                 VkName(g_bindings[ACT_MOVE_FWD]), VkName(g_bindings[ACT_MOVE_LEFT]),
                                 VkName(g_bindings[ACT_MOVE_BACK]), VkName(g_bindings[ACT_MOVE_RIGHT])); break;

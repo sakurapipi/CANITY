@@ -278,3 +278,4 @@ extern int totalKills, killsWrench, killsBottle, floorKills;
 
 /* v2.2：从函数内 extern 提到这里（类型改动不再静默错位） */
 extern int weaponAttach[3][2];
+extern int helpPage;   /* v2.2：帮助页分页 */

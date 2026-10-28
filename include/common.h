@@ -500,6 +500,8 @@ extern Leech leeches[LEECH_MAX];
 #define HELP_KEY_ROWS 10
 #define HELP_TEXT_ROWS 13
 #define HELP_ROWS (HELP_KEY_ROWS + HELP_TEXT_ROWS)
+#define HELP_PAGE_ROWS 8    /* v2.2：每页放 8 行；两页 = 16 行，800x600 正好装下 */
+#define HELP_PAGES 2        /* 按键页 / 规则页 */
 
 /* ------------------------------------------------------------------ */
 /* 成就系统                                                              */
