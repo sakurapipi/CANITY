@@ -242,7 +242,11 @@ void ContinueRun(void) {
     searchedCount = g_save.searchedCount;
     runTime = g_save.runTime;
     containerCount = g_save.nContainers;
-    if (containerCount < 0 || containerCount > MAX_CONTAINERS) containerCount = 0;
+    /* 防呆：被改坏的存档可能写出越界的容器数。
+       负数 = 完全无效，清零；超出上限 = 截断到 MAX_CONTAINERS（保住已有进度），
+       不要直接清零 —— 清零会让整层的箱子全没。 */
+    if (containerCount < 0) containerCount = 0;
+    if (containerCount > MAX_CONTAINERS) containerCount = MAX_CONTAINERS;
     for (int i = 0; i < MAX_CONTAINERS; i++) containers[i] = g_save.cont[i];
     memcpy(worldMap, g_save.worldMap, sizeof(worldMap));
     memcpy(explored, g_save.explored, sizeof(explored));

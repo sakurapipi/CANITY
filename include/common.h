@@ -28,8 +28,8 @@
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 19         /* 整数版本，进存档做记录 */
-#define CANITY_VERSION_STR "1.6.8"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_NUM 20         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_STR "1.6.9"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {

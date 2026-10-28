@@ -518,9 +518,10 @@ void GenerateLevel(void) {
        否则用的是上一层的 levelMod，词条会延迟一层生效。 */
     if (levelMod == 0) battery = (float)BatteryMax() * 0.55f;
 
-    /* 本关需要的保险丝：2 根起，每 3 关 +1，最多 4（主线）；无尽模式不封顶 */
+    /* 本关需要的保险丝：2 根起，每 3 关 +1，最多 4（主线）；无尽模式封顶到 MAX_CONTAINERS */
     if (isEndlessRun) {
-        fusesNeeded = 2 + currentLevel / 3;  /* 11层=5, 14层=6, 17层=7... */
+        fusesNeeded = 2 + currentLevel / 3;
+        if (fusesNeeded > MAX_CONTAINERS) fusesNeeded = MAX_CONTAINERS; /* 新增限制 */
     } else {
         fusesNeeded = 2 + currentLevel / 3;
         if (fusesNeeded > 4) fusesNeeded = 4;
@@ -539,7 +540,7 @@ void GenerateLevel(void) {
 
     int attempts = 0;
     /* 阶段1：保证 fusesNeeded 个箱子 */
-    while (containerCount < fusesNeeded && attempts < 512) {
+    while (containerCount < fusesNeeded && containerCount < MAX_CONTAINERS && attempts < 512) {
         attempts++;
         int idx = rand() % emptyCount;
         float cx = cells[idx][0] + 0.5f, cy = cells[idx][1] + 0.5f;
@@ -561,7 +562,7 @@ void GenerateLevel(void) {
 
     /* 阶段2：继续填充到 contCap（受词条影响） */
     attempts = 0;
-    while (containerCount < contCap && attempts < 512) {
+    while (containerCount < contCap && containerCount < MAX_CONTAINERS && attempts < 512) {
         attempts++;
         int idx = rand() % emptyCount;
         float cx = cells[idx][0] + 0.5f, cy = cells[idx][1] + 0.5f;
@@ -698,16 +699,20 @@ void GenerateLevel(void) {
             for (int x = 1; x < MAP_WIDTH - 1 && (!safeRoom.active || !breaker.active); x++) {
                 if (worldMap[y][x]) continue;
                 float cx = x + 0.5f, cy = y + 0.5f;
-                if (!safeRoom.active && Dist2(cx, cy, 1.5f, 1.5f) >= 25.0f && Dist2(cx, cy, exitX, exitY) >= 9.0f) {
+                int placedSafe = 0;  /* 标志位：本格刚给了安全屋，配电箱必须跳过这一格 */
+                if (!safeRoom.active && Dist2(cx, cy, 1.5f, 1.5f) >= 25.0f && Dist2(cx, cy, exitX, exitY) >= 9.0f &&
+                    !(breaker.active && cx == breaker.x && cy == breaker.y)) {
                     safeRoom.x = cx; safeRoom.y = cy; safeRoom.active = 1;
+                    placedSafe = 1;
                 }
-                if (!breaker.active && Dist2(cx, cy, 1.5f, 1.5f) >= 225.0f) {
+                if (!placedSafe && !breaker.active && Dist2(cx, cy, 1.5f, 1.5f) >= 225.0f &&
+                    !(safeRoom.active && cx == safeRoom.x && cy == safeRoom.y)) {
                     breaker.x = cx; breaker.y = cy; breaker.active = 1;
                 }
             }
         }
     }
-}
+    }
 /* ShowCursor 是引用计数的，跨状态切换很容易把引用数弄歪；
    这里用 GetCursorInfo 把光标状态直接拧到目标值 */
 void ForceCursor(int visible) {
