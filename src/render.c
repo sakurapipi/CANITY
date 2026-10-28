@@ -5,6 +5,9 @@
  */
 #include "common.h"
 #include "render.h"
+#include "weapons.h"
+#include "extras.h"
+#include "sprites.h"
 #include "game.h"
 #include "entity.h"
 #include "ui.h"
@@ -24,9 +27,11 @@ float zBuffer[MAX_SCREEN];
 float flashTab[MAX_SCREEN];
 int ceilTab[MAX_SCREEN];
 float floorGain[MAX_SCREEN];   /* 0.52 + cone*1.30，按列预计算 */
+static int floorGainI[MAX_SCREEN];   /* v1.9：同一增益的定点版（×256），地板内层免掉浮点 */
 void GenerateVignette(void) {
     free(vignetteMask);
     vignetteMask = (unsigned char*)malloc((size_t)renderW * renderH);
+    if (!vignetteMask) return;      /* 分配失败就别画渐晕，不能拿 NULL 去写 */
     int cx = renderW / 2, cy = renderH / 2;
     float maxDist = sqrtf((float)(cx * cx + cy * cy));
     if (maxDist < 1.0f) maxDist = 1.0f;
@@ -47,13 +52,31 @@ void GenerateVignette(void) {
 HDC g_memDC = NULL;
 HBITMAP g_dib = NULL;
 void* g_dibBits = NULL;
+/* v2.7：pixels 是 malloc 出来的（1）还是 GDI DIB 的 bits（0）。
+   只有 1 的时候才能 free —— 对 DIB bits 调 free 会把 GDI 内存交给 CRT。 */
+static int g_pixelsOwned = 0;
 int g_useDIB = 0;
 
 /* 按当前设置重新分配内部渲染缓冲 */
 void InitPixels(void) {
     float s = renderScales[renderScaleIndex] / 100.0f;
-    renderW = (int)(winW * s);
-    renderH = (int)(winH * s);
+
+    /* v1.9：渲染缓冲的**宽高比必须等于客户端宽高比**。
+       原来固定按 winW:winH（800:600）算 → 缓冲永远是 4:3，
+       拉满 16:9 窗口时横向被拉宽，所以墙面/地板看起来"太扁"。
+       现在按客户区比例算，并用固定的垂直分辨率（winH*s）反推宽度。 */
+    float aspect = (winH > 0) ? (float)winW / (float)winH : 4.0f / 3.0f;
+    if (g_hwnd) {
+        RECT cr;
+        if (GetClientRect(g_hwnd, &cr) && cr.right > 0 && cr.bottom > 0)
+            aspect = (float)cr.right / (float)cr.bottom;
+    }
+    if (aspect < 0.6f) aspect = 0.6f;
+    if (aspect > 3.2f) aspect = 3.2f;
+
+    float baseH = (float)winH * s;
+    renderH = (int)baseH;
+    renderW = (int)(baseH * aspect);
     if (renderW < 160) renderW = 160;
     if (renderH < 120) renderH = 120;
     if (renderW > MAX_SCREEN) renderW = MAX_SCREEN;
@@ -63,7 +86,7 @@ void InitPixels(void) {
        原来 90 万，1080p 全屏实测「渲染 29ms + 呈现 11ms」只有 25fps，
        这就是全屏卡顿的根因。28 万（约 640x360）实测 14ms，60fps 稳。 */
     {
-        const long budget = PIXEL_BUDGET;
+        const long budget = pixelBudget;
         long area = (long)renderW * (long)renderH;
         if (area > budget) {
             float f = sqrtf((float)budget / (float)area);
@@ -85,6 +108,12 @@ void InitPixels(void) {
     if (g_memDC) { DeleteDC(g_memDC); g_memDC = NULL; }
     if (g_dib) { DeleteObject(g_dib); g_dib = NULL; }
     g_dibBits = NULL;
+    /* v2.7：pixels 的来源必须记清楚。上一轮如果是 GDI 的 DIB bits，
+       它已经被 DeleteObject 一起释放了，**不能再 free()** —— 那是把 GDI 内存
+       交给 CRT 分配器，堆直接坏掉。InitPixels 会被 WM_SIZE / 改渲染比例 /
+       动态分辨率反复调用，只要哪次 CreateDIBSection 失败就踩中。 */
+    if (g_pixelsOwned) { free(pixels); g_pixelsOwned = 0; }
+    pixels = NULL;
 
     g_memDC = CreateCompatibleDC(NULL);
     if (g_memDC) g_dib = CreateDIBSection(g_memDC, &bmi, DIB_RGB_COLORS, &g_dibBits, NULL, 0);
@@ -92,12 +121,13 @@ void InitPixels(void) {
         SelectObject(g_memDC, g_dib);
         pixels = (unsigned int*)g_dibBits;
         g_useDIB = 1;
+        g_pixelsOwned = 0;          /* 归 GDI 管，不能 free */
     } else {
         if (g_memDC) { DeleteDC(g_memDC); g_memDC = NULL; }
         if (g_dib) { DeleteObject(g_dib); g_dib = NULL; }
         g_useDIB = 0;
-        free(pixels);
         pixels = (unsigned int*)malloc((size_t)renderW * renderH * sizeof(unsigned int));
+        g_pixelsOwned = (pixels != NULL);
     }
     if (pixels) memset(pixels, 0, (size_t)renderW * renderH * sizeof(unsigned int));
 
@@ -113,6 +143,23 @@ static int noiseReady = 0;
 
 unsigned int floorBaseA = 0x00151515u, floorBaseB = 0x00202020u;
 int themeId = 0;
+/* v1.12：视角上下 = 地平线偏移（y-shear，Doom 的做法）。
+   范围 ±35% 屏高，单位是渲染像素。 */
+float pitchRatio = 0.0f;   /* -1..1，映射到 ±0.45 rad ≈ ±26° */
+int horizon = 0;           /* 兼容旧代码：真俯仰不再用它平移 */
+static float camPitch = 0.0f;
+static float pitchCos = 1.0f, pitchSin = 0.0f;
+static int   focal = 600;  /* 焦距 = 渲染高度（与原 lineHeight 一致） */
+
+/* v1.13 真俯仰：把相机在竖直方向真的转过去，
+   墙的上下沿、精灵、地板/天花板都按旋转后的视锥重新投影。 */
+void UpdatePitch(void) {
+    camPitch = pitchRatio * 0.45f;
+    pitchCos = cosf(camPitch);
+    pitchSin = sinf(camPitch);
+    focal = renderH;
+    horizon = 0;
+}
 /* ---- 地板/天花板预乘表 ----
    地板是全屏最贵的部分（占 Render3D 的一半以上），每像素原本要做
    3 次「贴图通道 × 亮度」的乘法 + 3 次截断比较。
@@ -140,14 +187,30 @@ int themeId = 0;
 
 static unsigned int premulFloor[PREMUL_MAXCOL][PREMUL_LEVELS];
 static unsigned int premulCeil[PREMUL_MAXCOL][PREMUL_LEVELS];
+/* v2.0：墙面凹凸光照 —— 由贴图亮度算梯度，墙上不再是纯平面。
+   每像素只多一次 byte load + 一次加法。 */
+static signed char bump[TEX_HEIGHT][TEX_WIDTH];
+
+/* v2.0：mipmap。墙/地在远处一个像素吃掉多个 texel，单点采样就是摩尔纹
+   （128 贴图的细节反而变成噪点）。这里预生成 5 级，按每像素 texel 数选级。 */
+#define MIP_LEVELS 5
+static unsigned int mipChain[MIP_LEVELS][TEX_WIDTH * TEX_HEIGHT];
 static unsigned char floorColorIdx[TEX_HEIGHT][TEX_WIDTH];  /* 贴图 -> 颜色索引 */
 static unsigned char ceilColorIdx[TEX_HEIGHT][TEX_WIDTH];
 static int nFloorColors = 0, nCeilColors = 0;
 
 /* 把贴图重新索引成「颜色索引」，并建好预乘表。
    贴图本身保持不变（墙体、精灵等还在用），只是额外存一份索引。 */
+/* v1.8：配色数硬上限。
+   地板/天花板预乘表按颜色数分配列（PREMUL_MAXCOL），
+   贴图颜色一旦超过这个数就会写越界 —— 加纹理细节时踩过（直接崩溃）。
+   统计阶段就夹住，宁可少几种颜色也绝不越界。 */
+
+
 static void BuildPremulTables(void) {
     unsigned int fcols[PREMUL_MAXCOL], ccols[PREMUL_MAXCOL];
+    /* v2.7：从 0 起算。原来从 1 开始，导致下面第一轮 fcols[0]/ccols[0]
+       读到的是未初始化的栈内容（今天恰好第一个真颜色拿索引 1 才没显现）。 */
     nFloorColors = 0;
     nCeilColors = 0;
 
@@ -200,39 +263,85 @@ static void BuildPremulTables(void) {
     }
 }
 
+/* v1.8：7 种关卡主题，纹理全部在**进层时**生成一次（运行时零成本）。
+   0 砖墙 / 1 监狱 / 2 地狱 / 3 病房 / 4 冰窖 / 5 锈工厂 / 6 血肉洞窟
+   统一规范：
+     · 所有贴图按 2x2 像素块生成（复古观感）
+     · 颜色量化到 5 位（每通道 8 档），供 premul 查表使用
+     · 墙面/地板/天花板各有一套花纹，细节靠 hash（px*py 之类）而非随机，
+       省 rand() 调用，也保证同一主题每次生成结果一致 */
+static void SetThemeLight(int id);   /* v2.1 主题光色（雾/手电），定义在下面 */
+static void DrawGroundShadow(int cx, int cyFloor, int halfW, float ty);   /* v2.1 落地阴影 */
+
 void GenerateThemeTextures(int id) {
+    SetThemeLight(id);      /* v2.1：连雾色和手电色一起换 */
+    if (id < 0 || id >= THEME_COUNT) id = 0;
     themeId = id;
-    if (id == 1) { floorBaseA = 0x0014161au; floorBaseB = 0x001c1f24u; }
-    else if (id == 2) { floorBaseA = 0x001a0c0cu; floorBaseB = 0x00241010u; }
-    else if (id == 3) { floorBaseA = 0x00181c18u; floorBaseB = 0x0020261fu; }
-    else { floorBaseA = 0x00151515u; floorBaseB = 0x00202020u; }
+
+    switch (id) {
+    case 1:  floorBaseA = 0x0014161au; floorBaseB = 0x001c1f24u; break;  /* 监狱 */
+    case 2:  floorBaseA = 0x001a0c0cu; floorBaseB = 0x00241010u; break;  /* 地狱 */
+    case 3:  floorBaseA = 0x00181c18u; floorBaseB = 0x0020261fu; break;  /* 病房 */
+    case 4:  floorBaseA = 0x00141c22u; floorBaseB = 0x00243038u; break;  /* 冰窖 */
+    case 5:  floorBaseA = 0x00201610u; floorBaseB = 0x002c2014u; break;  /* 锈工厂 */
+    case 6:  floorBaseA = 0x00180e14u; floorBaseB = 0x00241620u; break;  /* 血肉洞窟 */
+    default: floorBaseA = 0x00151515u; floorBaseB = 0x00202020u; break;  /* 砖墙 */
+    }
 
     for (int y = 0; y < TEX_HEIGHT; y++) {
         for (int x = 0; x < TEX_WIDTH; x++) {
-            /* 复古：2x2 像素块 + 8 级色阶 */
-            int px = x & ~1, py = y & ~1;
+            int px = x & ~1, py = y & ~1;      /* 2x2 复古块 */
             int r, g, b;
+
+            /* ---------------- 墙面 ---------------- */
             switch (id) {
-                case 1:   /* 监狱：冷灰蓝 + 铁栏 */
-                    r = 34 + (px * py) % 12; g = 38 + (x * y) % 12; b = 44 + (px * py) % 14;
-                    if (py % 12 == 0 || px % 24 == 0) { r = 22; g = 26; b = 32; }
-                    if (px % 8 == 0) { r -= 10; g -= 10; b -= 10; }
-                    break;
-                case 2:   /* 地狱：暗红 + 裂纹 */
-                    r = 52 + (px * py) % 24; g = 8 + (px * py) % 6; b = 6;
-                    if (rand() % 22 == 0) { r = 8; g = 3; b = 3; }
-                    if (rand() % 60 == 0) { r = 150; g = 40; b = 10; }
-                    break;
-                case 3:   /* 病房：浅瓷砖 + 污渍 */
-                    r = 66 + (px * py) % 10; g = 70 + (x * y) % 10; b = 64 + (px * py) % 8;
-                    if (py % 16 == 0 || px % 16 == 0) { r = 38; g = 42; b = 38; }
-                    if (rand() % 45 == 0) { r = 30; g = 40; b = 30; }
-                    break;
-                default:  /* 砖墙 */
-                    r = 40 + (px * py) % 20; g = 10 + (x * y) % 10; b = 10;
-                    if (rand() % 50 == 0) { r = 150; g = 0; b = 0; }
-                    if (py % 16 == 0 || (px + ((py / 16) % 2) * 16) % 32 == 0) { r = 10; g = 10; b = 10; }
-                    break;
+            case 1: {   /* 监狱：横铁栏 + 立柱 + 铆点 + 锈迹 */
+                r = 34 + (px * py) % 12; g = 38 + (x * y) % 12; b = 44 + (px * py) % 14;
+                if (py % 12 == 0) { r = 20; g = 24; b = 30; }
+                if (px % 24 == 0) { r = 26; g = 30; b = 36; }
+                if (py % 12 == 1) { r += 14; g += 14; b += 16; }
+                if (((px % 24) == 12) && ((py % 12) == 6)) { r = 78; g = 82; b = 88; }
+                if (rand() % 110 == 0) { r = 62; g = 44; b = 30; }
+                break; }
+            case 2: {   /* 地狱：裂纹 + 余烬 */
+                r = 52 + (px * py) % 24; g = 8 + (px * py) % 6; b = 6;
+                if (((x + y * 3) % 37) == 0) { r = 12; g = 4; b = 4; }
+                if (rand() % 70 == 0) { r = 120; g = 30; b = 8; }
+                if (rand() % 150 == 0) { r = 200; g = 96; b = 24; }
+                break; }
+            case 3: {   /* 病房：小瓷砖 + 霉斑 + 碎瓷 */
+                r = 66 + (px * py) % 10; g = 70 + (x * y) % 10; b = 64 + (px * py) % 8;
+                if (py % 16 == 0 || px % 16 == 0) { r = 38; g = 42; b = 38; }
+                if (rand() % 55 == 0) { r = 34; g = 46; b = 34; }
+                if (rand() % 210 == 0) { r = 96; g = 98; b = 92; }
+                break; }
+            case 4: {   /* 冰窖：冰缝 + 霜点 + 反光 */
+                r = 28 + (px * py) % 14; g = 40 + (x * y) % 16; b = 52 + (px * py) % 18;
+                if (px % 32 == 0) { r = 18; g = 26; b = 36; }
+                if ((x % 7) == 0 && (y % 13) == 0) { r = 96; g = 132; b = 162; }
+                if (rand() % 130 == 0) { r = 150; g = 190; b = 210; }
+                break; }
+            case 5: {   /* 锈工厂：板缝 + 铆钉 + 锈斑 */
+                r = 46 + (px * py) % 16; g = 30 + (x * y) % 12; b = 18 + (px * py) % 8;
+                if (py % 10 == 0) { r = 30; g = 20; b = 12; }
+                if ((px % 16 == 0) && (py % 10) != 0) { r += 14; g += 10; b += 8; }
+                if ((px % 16 == 8) && (py % 10 == 5)) { r = 92; g = 72; b = 50; }
+                if (rand() % 80 == 0) { r = 84; g = 48; b = 22; }
+                break; }
+            case 6: {   /* 血肉洞窟：筋络 + 亮筋 + 暗孔 */
+                r = 44 + (px * py) % 18; g = 14 + (x * y) % 10; b = 26 + (px * py) % 12;
+                if (((x * x + y * y * 2) % 53) == 0) { r = 92; g = 24; b = 42; }
+                if (rand() % 110 == 0) { r = 128; g = 42; b = 64; }
+                if (rand() % 160 == 0) { r = 16; g = 6; b = 10; }
+                break; }
+            default: {  /* 砖墙：错缝砖 + 深色砖 + 红斑 */
+                r = 40 + (px * py) % 20; g = 10 + (x * y) % 10; b = 10;
+                int off = ((py / 16) % 2) * 16;
+                if (py % 16 == 0) { r = 10; g = 10; b = 10; }
+                else if ((px + off) % 32 == 0) { r = 10; g = 10; b = 10; }
+                else if (rand() % 60 == 0) { r = 96; g = 24; b = 20; }
+                if (rand() % 140 == 0) { r = 150; g = 30; b = 20; }
+                break; }
             }
             r = (r >> 5) << 5; g = (g >> 5) << 5; b = (b >> 5) << 5;
             if (r > 248) r = 248;
@@ -240,11 +349,13 @@ void GenerateThemeTextures(int id) {
             if (b > 248) b = 248;
             texture[y][x] = (unsigned int)((r << 16) | (g << 8) | b);
 
-            /* 地砖：32px 砖块 + 勾缝 + 污渍 */
+            /* 地砖：32px 砖块 + 勾缝 + 污渍（只产生 4 种颜色，premul 表安全） */
             {
-                int fr = (int)((floorBaseA >> 16) & 0xFF), fg = (int)((floorBaseA >> 8) & 0xFF), fb = (int)(floorBaseA & 0xFF);
+                int fr = (int)((floorBaseA >> 16) & 0xFF);
+                int fg = (int)((floorBaseA >> 8) & 0xFF);
+                int fb = (int)(floorBaseA & 0xFF);
                 int dark = ((px / 32 + py / 32) % 2) ? 0 : -8;
-                if ((px % 32) < 2 || (py % 32) < 2) { fr = 12; fg = 12; fb = 12; }   /* 勾缝 */
+                if ((px % 32) < 2 || (py % 32) < 2) { fr = 12; fg = 12; fb = 12; }
                 else if (rand() % 70 == 0) { fr = fr * 6 / 10; fg = fg * 6 / 10; fb = fb * 6 / 10; }
                 else { fr += dark; fg += dark; fb += dark; }
                 if (fr < 0) fr = 0;
@@ -261,11 +372,48 @@ void GenerateThemeTextures(int id) {
             }
         }
     }
+
     if (!noiseReady) {
         for (int i = 0; i < 256; i++) noiseTab[i] = (unsigned char)(rand() % 40);
         noiseReady = 1;
     }
     BuildPremulTables();   /* 地板/天花板预乘表（贴图变了就要重建） */
+    /* v2.0：生成 mip 链（只在换主题时跑一次） */
+    for (int y = 0; y < TEX_HEIGHT; y++)
+        for (int x = 0; x < TEX_WIDTH; x++)
+            mipChain[0][y * TEX_WIDTH + x] = texture[y][x];
+    for (int L = 1; L < MIP_LEVELS; L++) {
+        int dw = TEX_WIDTH >> L, dh = TEX_HEIGHT >> L;
+        int sw = dw << 1;
+        for (int y = 0; y < dh; y++) {
+            for (int x = 0; x < dw; x++) {
+                int r = 0, g = 0, b = 0;
+                for (int dy = 0; dy < 2; dy++) {
+                    for (int dx = 0; dx < 2; dx++) {
+                        unsigned int t = mipChain[L - 1][(y * 2 + dy) * sw + (x * 2 + dx)];
+                        r += (t >> 16) & 0xFF; g += (t >> 8) & 0xFF; b += t & 0xFF;
+                    }
+                }
+                mipChain[L][y * dw + x] = (unsigned int)(((r / 4) << 16) | ((g / 4) << 8) | (b / 4));
+            }
+        }
+    }
+
+    /* v2.0：由贴图亮度算一遍凹凸梯度（只在换主题时跑一次） */
+    for (int y = 0; y < TEX_HEIGHT; y++) {
+        for (int x = 0; x < TEX_WIDTH; x++) {
+            int xm = (x - 1) & (TEX_WIDTH - 1), xp = (x + 1) & (TEX_WIDTH - 1);
+            int ym = (y - 1) & (TEX_HEIGHT - 1), yp = (y + 1) & (TEX_HEIGHT - 1);
+            unsigned int a = texture[ym][xm], b = texture[yp][xp];
+            int la = (int)(((a >> 16) & 0xFF) + ((a >> 8) & 0xFF) + (a & 0xFF)) / 3;
+            int lb = (int)(((b >> 16) & 0xFF) + ((b >> 8) & 0xFF) + (b & 0xFF)) / 3;
+            int d = (lb - la) / 4;
+            if (d > 26) d = 26;
+            if (d < -26) d = -26;
+            bump[y][x] = (signed char)d;
+        }
+    }
+
     BuildShadeTables();
 }
 
@@ -285,6 +433,15 @@ void ApplyFov(void) {
         float narrow = fovPlaneLen[0];
         L = narrow + (L - narrow) * (1.0f - blind);
     }
+    /* v1.9：像素必须是方的。
+       射线投射里 屏幕像素宽/高的比例 = (renderW/2)/L : renderH ，
+       要保持 1:1 就得 L = (renderW/renderH)/2。
+       原来的 L 是按 4:3 调好的，所以这里乘上「实际宽高比 / 4:3」即可 ——
+       效果是宽屏上**水平视野变宽**（Hor+），而不是把画面拉扁。 */
+    {
+        float aspect = (renderH > 0) ? (float)renderW / (float)renderH : 4.0f / 3.0f;
+        L *= aspect / (4.0f / 3.0f);
+    }
     planeX = -dirY * L;
     planeY = dirX * L;
 }
@@ -296,6 +453,7 @@ void ApplyFov(void) {
 
 /* 把世界坐标投影成屏幕矩形（billboard） */
 typedef struct { int ok; float ty; int x0, x1, y0, y1; } SpriteBox;
+static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK);   /* v2.1 */
 
 static SpriteBox ProjectSprite(float wx, float wy, float lift, float halfH) {
     SpriteBox s;
@@ -304,12 +462,16 @@ static SpriteBox ProjectSprite(float wx, float wy, float lift, float halfH) {
     float invDet = 1.0f / (planeX * dirY - dirX * planeY);
     float tx = invDet * (dirY * dx - dirX * dy);
     float ty = invDet * (-planeY * dx + planeX * dy);
-    if (ty <= 0.08f) return s;
+    if (ty <= 0.02f) return s;   /* v1.10：太近就丢弃的阈值放宽，避免出手瞬间消失 */
 
-    float unit = renderH / ty;                  /* 一个世界单位多少像素 */
+    /* v1.13 真俯仰：地面点的竖直偏移旋转后再投影 */
+    float v2 = (-0.5f) * pitchCos - ty * pitchSin;
+    float d2 = (-0.5f) * pitchSin + ty * pitchCos;
+    if (d2 < 0.05f) return s;
+    float unit = (float)focal / d2;
     int cx = (int)((renderW / 2.0f) * (1.0f + tx / ty));
     int half = (int)(unit * 0.28f);
-    int cyFloor = renderH / 2 + (int)(unit * 0.5f);   /* 地面所在的屏幕 y */
+    int cyFloor = renderH / 2 - (int)(v2 * unit);
     int hgt = (int)(unit * halfH);
     int yTop = cyFloor - hgt;
 
@@ -323,114 +485,264 @@ static SpriteBox ProjectSprite(float wx, float wy, float lift, float halfH) {
 }
 /* ---------------- 精灵：统一的投影 + 排序绘制 ---------------- */
 
-static void DrawCrateSprite(int i) {
-    Container* c = &containers[i];
-    SpriteBox s = ProjectSprite(c->x, c->y, 0.0f, 0.40f);
-    if (!s.ok) return;
+/* v1.9：精灵也吃光照。
+   原来箱子 / 安全区 / 配电箱 / 光球都是 PutPixelAdd 平涂，
+   不看距离也不看手电 —— 远处的箱子和贴脸一样亮，很出戏。
+   每个精灵绘制前用它的距离算系数写进 spriteLight，PutPixelAdd 内部统一乘。 */
+float spriteLight = 1.0f;
 
-    float lightFactor = (flashlightOn && battery > 0.0f) ? 1.0f : 0.35f;
-    int spanX = s.x1 - s.x0, spanY = s.y1 - s.y0;
-    int searched = c->searched;
-    float dyRel = 32.0f / (float)spanY;
+/* v2.1：每个主题自己的雾色 / 手电色。
+   原来 7 个主题只换贴图颜色，雾和光是一套死常量，
+   所以"冰窖"和"血肉洞窟"只差墙纸 —— 切换时玩家感觉不到换了地方。 */
+static int themeFogR = 20, themeFogG = 25, themeFogB = 33;   /* 距离雾 */
+static int themeLitR = 96, themeLitG = 98, themeLitB = 96;   /* 手电加色 */
+static int themeAmbR = 22, themeAmbG = 27, themeAmbB = 36;   /* 墙体环境雾 */
 
-    for (int x = s.x0; x < s.x1; x++) {
-        if (s.ty >= zBuffer[x]) continue;
-        int relX = (x - s.x0) * 32 / spanX;
-        float fy = 0.0f;
-        unsigned int* col = pixels + (size_t)s.y0 * renderW + x;
-        int wrote = 0;
-        for (int y = s.y0; y < s.y1; y++, fy += dyRel, col += renderW) {
-            int relY = (int)fy;
-            unsigned int color = 0;
-            if (relX > 3 && relX < 29 && relY > 3 && relY < 31) {
-                color = ((relX / 6) % 2) ? 0x00462f13 : 0x003d2910;
-                if (relX == 6 || relX == 13 || relX == 20 || relX == 27) color = 0x00221607;
-                if (relY == 6 || relY == 18 || relY == 30) color = 0x00221607;
-                if ((relX < 8 || relX > 24) && (relY < 10 || relY > 25)) color = 0x005e5e5e;
-                if ((relX < 8 || relX > 24) && (relY < 10 || relY > 25) && (relX == 4 || relX == 28 || relY == 4)) color = 0x00343434;
-                {
-                    int d1 = relX - relY, d2 = (31 - relX) - relY;
-                    if (d1 > -2 && d1 < 2) color = 0x00301f0d;
-                    if (d2 > -2 && d2 < 2) color = 0x00301f0d;
-                }
-                if (relY < 10) {
-                    if (!searched) color = (relY < 6) ? 0x00543a1a : 0x004a3416;
-                    else color = (relY < 8) ? 0x002a1a0a : 0x000c0803;
-                }
-                if (searched && relX > 8 && relX < 24 && relY > 9 && relY < 20) {
-                    color = 0x000c0803;
-                    if (relX > 13 && relX < 19 && relY > 11 && relY < 17) {
-                        if (c->content == 1) color = 0x00e8c040;
-                        else if (c->content == 2) color = 0x0040c060;
-                        else if (c->content == 3) color = 0x00d04040;
-                        else if (c->content == 4) color = 0x00ffb050;
-                        else if (c->content == 5) color = 0x00a0d0ff;
-                    }
-                }
-            } else if (relX > 1 && relX < 31 && relY > 1 && relY < 32) {
-                color = 0x00180f06;
-            }
-            if (!color) continue;
-            float sh = (1.0f - s.ty / 15.0f) * lightFactor;
-            if (sh < 0.15f) sh = 0.15f;
-            int r = (int)(((color >> 16) & 0xFF) * sh);
-            int g = (int)(((color >> 8) & 0xFF) * sh);
-            int b = (int)((color & 0xFF) * sh);
-            *col = (unsigned int)((r << 16) | (g << 8) | b);
-            wrote = 1;
-        }
-        if (wrote && s.ty < zBuffer[x]) zBuffer[x] = s.ty;   /* 让后面的精灵被它遮挡 */
+static void SetThemeLight(int id) {
+    switch (id) {
+    case 0: themeFogR=22; themeFogG=24; themeFogB=28; themeLitR=104; themeLitG=100; themeLitB=92;  break; /* BRICK    暖灰 */
+    case 1: themeFogR=18; themeFogG=22; themeFogB=30; themeLitR=86;  themeLitG=92;  themeLitB=104; break; /* PRISON   冷灰 */
+    case 2: themeFogR=40; themeFogG=14; themeFogB=8;  themeLitR=130; themeLitG=80;  themeLitB=60;  break; /* HELL     暖红 */
+    case 3: themeFogR=20; themeFogG=28; themeFogB=36; themeLitR=96;  themeLitG=108; themeLitB=112; break; /* WARD     青白 */
+    case 4: themeFogR=16; themeFogG=30; themeFogB=44; themeLitR=80;  themeLitG=120; themeLitB=140; break; /* ICE      冰蓝 */
+    case 5: themeFogR=28; themeFogG=22; themeFogB=16; themeLitR=120; themeLitG=96;  themeLitB=70;  break; /* RUST     锈黄 */
+    default:themeFogR=26; themeFogG=8;  themeFogB=16; themeLitR=124; themeLitG=72;  themeLitB=84;  break; /* FLESH    暗紫 */
     }
 }
 
+static float SpriteAtten(float dist) {
+    int lightOn = (flashlightOn && battery > 0.0f);
+    float d = lightOn ? 1.0f / (1.0f + dist * 0.20f)
+                      : 1.0f / (1.0f + dist * 0.45f);
+    if (d < 0.10f) d = 0.10f;      /* 贴脸的东西别全黑 */
+    if (d > 1.00f) d = 1.00f;
+    return d;
+}
+
+static void DrawCrateSprite(int i) {
+    if (i < 0 || i >= containerCount) return;
+    Container* c = &containers[i];
+    if (c->searched) {
+        DrawBakedProp(SPR_PROP_CRATE, c->x, c->y, 0.34f, 0.55f);
+    } else {
+        DrawBakedProp(SPR_PROP_CRATE, c->x, c->y, 0.42f, 1.0f);
+    }
+}
+
+
 static void DrawBreakerSprite(void) {
     if (!breaker.active) return;
-    SpriteBox s = ProjectSprite(breaker.x, breaker.y, 0.24f, 0.34f);
+    float k = breakerOpen ? 1.15f : 0.95f;
+    DrawBakedProp(SPR_PROP_BREAKER, breaker.x, breaker.y, 0.52f, k);
+}
+
+
+/* ------------------------------------------------------------------ */
+
+/* v2.1：场景道具统一走烘焙精灵（原来是 relX/relY 硬编码的字符画） */
+static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK) {
+    SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
     if (!s.ok) return;
+    int w = s.x1 - s.x0, h = s.y1 - s.y0;
+    if (w < 2 || h < 2) return;
+    int size = (w > h) ? w : h;
+    int x = (s.x0 + s.x1) / 2 - size / 2;
+    int y = s.y1 - size;
+    float light = 1.0f - s.ty / 16.0f;
+    if (light < 0.14f) light = 0.14f;
+    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
+    DrawSprite(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty);
+}
 
-    float lightFactor = (flashlightOn && battery > 0.0f) ? 1.0f : 0.35f;
-    int spanX = s.x1 - s.x0, spanY = s.y1 - s.y0;
-    float dyRel = 32.0f / (float)spanY;
+/* v2.1：怪物改用烘焙精灵                                              */
+/*   旧版是一个函数服务两种怪、共享一张剪影，只换眼睛颜色 —— 7 只怪长得   */
+/*   一样。新版每只怪一张 128×128 烘焙图（见 sprites.c 的 BakeMonster）。  */
+/* ------------------------------------------------------------------ */
+/* v2.2：朝向选择（Doom 的 R_ProjectSprite 同款思路）
+   算「玩家 → 怪」的角度与怪朝向的差，落到 4 个扇区；
+   侧面用水平镜像覆盖另一侧 —— 只烘 2 个朝向就能覆盖 4 个视角。 */
+static int a_back_light = 0;   /* v2.2：本次绘制是否背向镜头 */
+static void MonsterSpriteSelect(int base, float wx, float wy,
+                                int* outSpr, int* outFlip, int* outFrame) {
+    float dx = wx - posX, dy = wy - posY;
+    float ang = atan2f(dy, dx);
+    /* 相对玩家视线的角度：正前方 0，左右各 90°，背后 180° */
+    float viewAng = atan2f(dirY, dirX);
+    float rel = ang - viewAng;
+    while (rel > 3.14159265f) rel -= 6.2831853f;
+    while (rel < -3.14159265f) rel += 6.2831853f;
+    float a = fabsf(rel);
 
-    for (int x = s.x0; x < s.x1; x++) {
-        if (s.ty >= zBuffer[x]) continue;
-        int relX = (x - s.x0) * 32 / spanX;
-        float fy = 0.0f;
-        unsigned int* col2 = pixels + (size_t)s.y0 * renderW + x;
-        int wrote = 0;
-        for (int y = s.y0; y < s.y1; y++, fy += dyRel, col2 += renderW) {
-            int relY = (int)fy;
-            unsigned int color = 0;
-            if (relX > 5 && relX < 27 && relY > 2 && relY < 30) {
-                color = 0x00606668;
-                if (relX > 8 && relX < 24 && relY > 5 && relY < 20) color = 0x00404a4e;
-                if (relX > 12 && relX < 20 && relY > 8 && relY < 14)
-                    color = breakerOpen ? 0x0030ff60 : 0xff2828;
-            } else if (relX > 3 && relX < 29 && relY > 1 && relY < 31) {
-                color = 0x00202426;
-            }
-            if (!color) continue;
-            float sh = (1.0f - s.ty / 15.0f) * lightFactor;
-            if (sh < 0.2f) sh = 0.2f;
-            if (color == 0x0030ff60 || color == 0xff2828) sh = 1.0f;
-            int r = (int)(((color >> 16) & 0xFF) * sh);
-            int g = (int)(((color >> 8) & 0xFF) * sh);
-            int b = (int)((color & 0xFF) * sh);
-            *col2 = (unsigned int)((r << 16) | (g << 8) | b);
-            wrote = 1;
-        }
-        if (wrote && s.ty < zBuffer[x]) zBuffer[x] = s.ty;
+    int dir;      /* 0 正面 / 1 侧面 */
+    int flip = 0;
+    if (a < 1.047f) {            /* ±60°：正面 */
+        dir = 0;
+    } else if (a < 2.094f) {     /* 60~120°：侧面 */
+        dir = 1;
+        flip = (rel < 0.0f) ? 1 : 0;
+    } else {                     /* 背后：用侧面剪影（看不到脸），再压暗一档 */
+        dir = 1;
+        flip = (rel < 0.0f) ? 1 : 0;
+        a_back_light = 1;
+    }
+
+    /* 走路相位：用全局时间，四帧循环（站/走） */
+    int frame = ((int)(g_timeSec * 3.0f)) & 1;
+
+    if (dir == 0 && a < 1.047f) a_back_light = 0;
+    *outSpr = base + dir * 2 + frame;
+    *outFlip = flip;
+    *outFrame = frame;
+}
+
+static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
+                             float lightK, int zTest) {
+    SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
+    if (!s.ok) return;
+    int w = s.x1 - s.x0;
+    int h = s.y1 - s.y0;
+    if (w < 2 || h < 2) return;
+    /* 投影框通常是 1:1；保持长宽比但让精灵按高度对齐地面 */
+    int size = (w > h) ? w : h;
+    int x = (s.x0 + s.x1) / 2 - size / 2;
+    int y = s.y1 - size;
+
+    float light = 1.0f - s.ty / 16.0f;
+    if (light < 0.12f) light = 0.12f;
+    light *= lightK;
+
+    /* 脚下阴影：画在精灵之前（否则会被自己的 z 裁掉） */
+    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
+
+    /* v2.2：只有三只主怪有 4 帧，其余单帧 */
+    int isMain = (spr == SPR_MON_HUNTER || spr == SPR_MON_LIGHT || spr == SPR_MON_LEECH);
+    if (isMain) {
+        int useSpr, flip, frame;
+        MonsterSpriteSelect(spr, wx, wy, &useSpr, &flip, &frame);
+        float dim = (a_back_light ? 0.72f : 1.0f);   /* 背向镜头时压暗 */
+        if (flip) DrawSpriteFlip(useSpr, x, y, size, size, light * dim, 1.0f, zTest, s.ty);
+        else      DrawSprite(useSpr, x, y, size, size, light * dim, 1.0f, zTest, s.ty);
+        spr = useSpr;     /* 眼睛按实际帧的颜色走 */
+    } else {
+        DrawSprite(spr, x, y, size, size, light, 1.0f, zTest, s.ty);
+    }
+
+    /* v2.1：眼睛自发光。烘焙图里留了黑眼窝，这里加两个加法光点 ——
+       黑暗里身体全黑，但眼睛一直亮着。 */
+    {
+        int ec = 0x00FF4020u;
+        int base = (spr >= SPR_MON_HUNTER && spr < SPR_MON_HUNTER + 4) ? SPR_MON_HUNTER :
+                   (spr >= SPR_MON_LIGHT  && spr < SPR_MON_LIGHT  + 4) ? SPR_MON_LIGHT :
+                   (spr >= SPR_MON_LEECH  && spr < SPR_MON_LEECH  + 4) ? SPR_MON_LEECH : spr;
+        spr = base;
+        if (spr == SPR_MON_LIGHT)  ec = 0x00C8F0FFu;
+        else if (spr == SPR_MON_SHADE)  ec = 0x007040A0u;
+        else if (spr == SPR_MON_SPIDER) ec = 0x00FFD040u;
+        else if (spr == SPR_MON_ECHO)   ec = 0x00A0FFC0u;
+        else if (spr == SPR_MON_LEECH)  ec = 0x0040FF80u;
+
+        /* v2.2：完全删除渲染端的眼睛叠加 —— 审计指出烘焙图里的眼睛
+           在 17.8%/42%/27% 三个不同高度，叠加层统一按 30% 画，
+           等于每只怪都有两套位置不对的眼睛。眼睛只由烘焙图负责。 */
     }
 }
 
 static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
     if (!m->active) return;
-    SpriteBox s = ProjectSprite(m->x, m->y, 0.0f, 0.86f);
-    if (!s.ok) return;
+    if (!SpritesReady()) {
+        /* 烘焙失败时退回旧路径：至少不黑屏 */
+        SpriteBox s = ProjectSprite(m->x, m->y, 0.0f, 0.86f);
+        if (!s.ok) return;
+        for (int x = s.x0; x < s.x1; x++) {
+            if (x < 0 || x >= renderW) continue;
+            if (s.ty >= zBuffer[x]) continue;
+            for (int y = s.y0; y < s.y1; y++) {
+                if (y < 0 || y >= renderH) continue;
+                pixels[(size_t)y * renderW + x] = 0x00141418u;
+            }
+        }
+        (void)eyeColor;
+        return;
+    }
 
+    extern int bossLevel;
+    int spr = (eyeColor == 0x00c8f0ffu) ? SPR_MON_LIGHT : SPR_MON_HUNTER;
+    float halfH = 0.86f;
+    float lightK = 1.0f;
+    unsigned int tint = 0;
+    float tintMix = 0.0f;
+
+    if (bossLevel && m == &monster) {
+        halfH = 1.45f;
+        tint = 0x00FF2010u;      /* Boss 泛红 */
+        tintMix = 0.35f;
+    }
+    /* 硬直时闪白 */
+    if (m->stun > 0.0f) {
+        float k = m->stun / MONSTER_STUN;
+        if (k > 1.0f) k = 1.0f;
+        tint = 0x00FFFFFFu;
+        tintMix = k * 0.75f;
+    }
+
+    if (!tintMix) {
+        DrawBakedMonster(spr, m->x, m->y, halfH, lightK, 1);
+    } else {
+        SpriteBox s = ProjectSprite(m->x, m->y, 0.0f, halfH);
+        if (!s.ok) return;
+        int size = (s.x1 - s.x0);
+        int hh = s.y1 - s.y0;
+        if (hh > size) size = hh;
+        int x = (s.x0 + s.x1) / 2 - size / 2;
+        int y = s.y1 - size;
+        float light = 1.0f - s.ty / 16.0f;
+        if (light < 0.12f) light = 0.12f;
+        DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
+        DrawSpriteTint(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty, tint, tintMix);
+    }
+}
+
+static void DrawMonsterSprite(void) { DrawBeastSprite(&monster, 0x00ff4020u); }
+
+/* v1.8 偷电怪：体型 55%，暗色，只有被手电光锥照到才可见。
+   "看不见但电量在掉" 就是它的压迫感来源，所以这里宁可画得几乎融进黑里。 */
+static void DrawLeechSprite(int idx) {
+    if (idx < 0 || idx >= LEECH_MAX) return;
+    Leech* L = &leeches[idx];
+    if (!L->active) return;
+
+    /* 可见性：
+       · 平时只有被手电照到才看得见；
+       · 但它正在抽你电的时候，会漏出蓝色电光 —— 这是唯一的"它在了"提示。 */
+    int lit = 0;
+    {
+        float adx = L->x - posX, ady = L->y - posY;
+        float d2a = adx * adx + ady * ady;
+        if (flashlightOn && battery > 0.0f && d2a <= 64.0f) {
+            float a1 = atan2f(ady, adx), a2 = atan2f(dirY, dirX);
+            float df = a1 - a2;
+            while (df > 3.14159f) df -= 6.28318f;
+            while (df < -3.14159f) df += 6.28318f;
+            if (fabsf(df) <= 0.55f && HasLOS(posX, posY, L->x, L->y)) lit = 1;
+        }
+    }
+    if (!lit && !L->draining) return;
+    float dx = L->x - posX, dy = L->y - posY;
+    float d2 = dx * dx + dy * dy;
+    if (d2 > 64.0f) return;
+    float ang = atan2f(dy, dx), face = atan2f(dirY, dirX);
+    float diff = ang - face;
+    while (diff > 3.14159f) diff -= 6.28318f;
+    while (diff < -3.14159f) diff += 6.28318f;
+    if (fabsf(diff) > 0.55f) return;
+    if (!HasLOS(posX, posY, L->x, L->y)) return;
+
+    SpriteBox s = ProjectSprite(L->x, L->y, 0.0f, 0.47f);
+    if (!s.ok) return;
+    spriteLight = SpriteAtten(s.ty);
     int spanX = s.x1 - s.x0, spanY = s.y1 - s.y0;
+    if (spanX <= 0 || spanY <= 0) return;
     float dyRel = 32.0f / (float)spanY;
-    float light = (flashlightOn && battery > 0.0f) ? 1.0f : 0.55f;
 
     for (int x = s.x0; x < s.x1; x++) {
         if (s.ty >= zBuffer[x]) continue;
@@ -440,50 +752,21 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
         int wrote = 0;
         for (int y = s.y0; y < s.y1; y++, fy += dyRel, col += renderW) {
             int relY = (int)fy;
-            unsigned int color = 0;
-            int eye = 0;
-            int headW = 4, bodyW;
-            if (relY < 11) bodyW = headW + (relY / 4);
-            else if (relY < 18) bodyW = 8;
-            else bodyW = 6;
             int cx = 16;
-            if (relY > 1 && relY < 31 && relX > cx - bodyW && relX < cx + bodyW) {
-                color = 0x00141418;
-                if (relX <= cx - bodyW + 1 || relX >= cx + bodyW - 1) color = 0x000a0a0c;
-                if (relY > 4 && relY < 8) {
-                    if ((relX > cx - 4 && relX < cx - 1) || (relX > cx + 1 && relX < cx + 4)) {
-                        color = 0x00ff3020;
-                        eye = 1;
-                    }
-                }
-            }
-            if (!color) continue;
-            if (eye) {
-                PutPixelAdd(x, y, eyeColor, 0.85f);
-            } else {
-                float sh = (1.0f - s.ty / 16.0f) * light;
-                if (sh < 0.12f) sh = 0.12f;
-                int r = (int)(((color >> 16) & 0xFF) * sh);
-                int g = (int)(((color >> 8) & 0xFF) * sh);
-                int b = (int)((color & 0xFF) * sh);
-                /* 硬直期间身体发白 —— 玩家一眼看出「我砸中了它」。
-                   这是砸中唯一可靠的视觉反馈（音效只是一瞬间）。 */
-                if (m->stun > 0.0f) {
-                    float k = m->stun / MONSTER_STUN;
-                    if (k > 1.0f) k = 1.0f;
-                    r = r + (int)((235 - r) * k);
-                    g = g + (int)((245 - g) * k);
-                    b = b + (int)((255 - b) * k);
-                }
+            int w = (relY < 10) ? 5 : 7;
+            if (relY > 3 && relY < 28 && relX > cx - w && relX < cx + w) {
+                float sh = (1.0f - s.ty / 16.0f) * 0.55f;
+                if (sh < 0.10f) sh = 0.10f;
+                int r = (int)(26 * sh), g = (int)(34 * sh), b = (int)(40 * sh);
+                /* 电光裂纹：偶尔亮一下，提示"它在偷电" */
+                if (((relY * 7 + relX * 3) % 23) == 0) { r = 40; g = 150; b = 220; }
                 *col = (unsigned int)((r << 16) | (g << 8) | b);
+                wrote = 1;
             }
-            wrote = 1;
         }
         if (wrote && s.ty < zBuffer[x]) zBuffer[x] = s.ty;
     }
 }
-
-static void DrawMonsterSprite(void) { DrawBeastSprite(&monster, 0x00ff4020u); }
 static void DrawLightBeastSprite(void) { DrawBeastSprite(&lightBeast, 0x00c8f0ffu); }
 
 /* 跳脸虫的脸：预渲染成一张 128x128 的纹理，每帧只做采样 + 缩放。
@@ -699,119 +982,330 @@ void DrawParasiteSprite(void) {
 }
 
 /* 荧光棒：飞行中/落地发光，按 z 投影 */
-static void DrawFlareSprite(int idx) {
-    if (!thrown[idx].active) return;
-    /* 飞行中用 z 投影，落地用地面投影 */
-    float lift = thrown[idx].z > 0.0f ? thrown[idx].z / 10.0f : 0.0f;
-    SpriteBox s = ProjectSprite(thrown[idx].x, thrown[idx].y, lift, 0.30f);
-    if (!s.ok) return;
-    int spanX = s.x1 - s.x0;
-    int spanY = s.y1 - s.y0;
+/* ---------------- v1.11：统一弹道精灵（荧光棒 / 玻璃瓶） ----------------
+   重写原因：老实现是逐列比 zBuffer，投射物贴墙飞时列与列互相打架，
+   看上去就是"时不时消失一下"。这里把规则收敛成三条：
 
-    /* 荧光棒：三层光晕 + 慢速闪烁 */
-    float flick = 0.82f + 0.18f * sinf((float)g_timeSec * 9.0f);
-    float cx = spanX * 0.5f, cy = spanY * 0.55f;
-    float rad = spanX * 0.95f;
-    if (rad < 4.0f) rad = 4.0f;
-    int R = (int)rad;
-    for (int dy = -R; dy <= R; dy++) {
-        int y = (int)(s.y0 + cy) + dy;
-        if (y < 0 || y >= renderH) continue;
-        for (int dx = -R; dx <= R; dx++) {
-            int x = (int)(s.x0 + cx) + dx;
-            if (x < 0 || x >= renderW) continue;
-            if (s.ty >= zBuffer[x]) continue;
-            float d2 = (float)(dx * dx + dy * dy) / (rad * rad);
-            if (d2 >= 1.0f) continue;
-            float a = 1.0f - d2;
-            /* 核心最亮，外圈是暖橙色雾 */
-            PutPixelAdd(x, y, 0x00ffd070u, a * a * a * 1.15f * flick);
-            if (d2 < 0.16f) PutPixelAdd(x, y, 0x00fff8e0u, 0.55f * flick);
+     ① 遮挡**只判中心一列**（带 0.85 深度偏移）→ 要么整颗可见，要么整颗被挡
+     ② 球体内部不再做深度测试 → 没有逐像素打架
+     ③ 半径下限 3px、上限 90px → 贴脸不会缩成点，远处不会糊满屏
+*/
+/* v1.11：光球是真实光源。
+   墙面按列的命中点算「离光球多远」，越近越亮并带暖色 ——
+   这样扔出去的荧光棒会把周围照亮，而不是自己亮、环境不动。 */
+extern Thrown thrown[MAX_THROWN];
+
+static float FlareLightAt(float wx, float wy) {
+    float best = 0.0f;
+    for (int i = 0; i < MAX_THROWN; i++) {
+        if (!thrown[i].active) continue;
+        float dx = thrown[i].x - wx, dy = thrown[i].y - wy;
+        float d2 = dx * dx + dy * dy;
+        const float R = 4.6f;
+        if (d2 > R * R) continue;
+        float f = 1.0f - sqrtf(d2) / R;
+        f = f * f * 0.95f;
+        if (f > best) best = f;
+    }
+    return best;
+}
+
+static void DrawOrbSprite(float wx, float wy, float z, float worldR,
+                          unsigned int coreCol, unsigned int haloCol,
+                          float alphaMul) {
+    /* v2.1：光球是自发光体，不能继承上一张精灵的距离衰减。
+       spriteLight 原来只在出口光柱那里被显式置 1，其余自发光精灵
+       会沿用"上一个画完的精灵"的衰减 —— 荧光棒的亮度取决于旁边的箱子有多近。 */
+    spriteLight = 1.0f;
+    float dx = wx - posX, dy = wy - posY;
+    float det = planeX * dirY - dirX * planeY;
+    if (det == 0.0f) return;
+    float invDet = 1.0f / det;
+    float tx = invDet * (dirY * dx - dirX * dy);
+    float ty = invDet * (-planeY * dx + planeX * dy);
+    if (ty <= 0.05f) return;                 /* 背后或贴脸 */
+
+    float unit = renderH / ty;
+    int cx = (int)((renderW / 2.0f) * (1.0f + tx / ty));
+    int cyFloor = renderH / 2 + (int)(unit * 0.5f);
+    int cy = cyFloor - (int)(unit * z);
+
+    int r = (int)(unit * worldR);
+    if (r < 3) r = 3;
+    if (r > 90) r = 90;
+    if (cx + r < 0 || cx - r >= renderW || cy + r < 0 || cy - r >= renderH) return;
+
+    /* ① 遮挡只判一次 */
+    int ocx = cx < 0 ? 0 : (cx >= renderW ? renderW - 1 : cx);
+    /* v2.0：去掉 0.85 偏置 —— 它让墙后 18% 距离内的光源仍然可见 */
+    if (ty >= zBuffer[ocx]) return;
+
+    /* ② 地面阴影：飞得越高越小越淡 */
+    if (z > 0.02f) {
+        float k = 1.0f / (1.0f + z * 1.6f);
+        int sr = (int)(r * 0.75f * k);
+        if (sr < 2) sr = 2;
+        for (int sy = -sr; sy <= sr; sy++) {
+            for (int sx = -sr; sx <= sr; sx++) {
+                if (sx * sx + (sy * 2) * (sy * 2) > sr * sr) continue;
+                int px = cx + sx, py = cyFloor + sy;
+                if (px < 0 || px >= renderW || py < 0 || py >= renderH) continue;
+                if (ty >= zBuffer[px]) continue;    /* v2.0：阴影不再画到墙后 */
+                PutPixelBlend(px, py, 0x00000000u, 0.32f);
+            }
         }
     }
-    /* 飞行中在投影下方画个小影子 */
-    if (thrown[idx].z > 0.0f) {
-        int sx = s.x0 + spanX / 2;
-        int sy = s.y1 - 2;
-        for (int dy = -2; dy <= 2; dy++)
-            for (int dx = -2; dx <= 2; dx++)
-                if (dx*dx + dy*dy <= 4)
-                    PutPixelAdd(sx + dx, sy + dy, 0x00101010u, 0.4f);
+
+    /* ③ 大范围柔光晕：让地面/墙面看起来被照亮 */
+    {
+        int gr = r * 3;
+        if (gr > 120) gr = 120;
+        float flick0 = 0.88f + 0.12f * sinf((float)g_timeSec * 21.0f);
+        for (int yy = -gr; yy <= gr; yy++) {
+            int py = cy + yy;
+            if (py < 0 || py >= renderH) continue;
+            for (int xx = -gr; xx <= gr; xx++) {
+                int px = cx + xx;
+                if (px < 0 || px >= renderW) continue;
+                float d2 = (float)(xx * xx + yy * yy) / (float)(gr * gr);
+                if (d2 >= 1.0f) continue;
+                /* v2.0：光晕逐像素查深度 —— 半径最大 120px，原来整团能穿进隔壁房间 */
+                if (ty >= zBuffer[px]) continue;
+                float a = 1.0f - d2;
+                PutPixelAdd(px, py, haloCol, a * a * 0.10f * flick0);
+            }
+        }
+    }
+
+    /* ② 球体：核心白 + 外圈色，加色混合 */
+    float flick = 0.88f + 0.12f * sinf((float)g_timeSec * 21.0f);
+    for (int yy = -r; yy <= r; yy++) {
+        int py = cy + yy;
+        if (py < 0 || py >= renderH) continue;
+        for (int xx = -r; xx <= r; xx++) {
+            int px = cx + xx;
+            if (px < 0 || px >= renderW) continue;
+            float d2 = (float)(xx * xx + yy * yy) / (float)(r * r);
+            if (d2 >= 1.0f) continue;
+            if (ty >= zBuffer[px]) continue;    /* v2.0：球体本身也要挡 */
+            float a = 1.0f - d2;
+            PutPixelAdd(px, py, haloCol, a * a * alphaMul * flick);
+            if (d2 < 0.30f) PutPixelAdd(px, py, coreCol, (0.30f - d2) * 2.6f * alphaMul * flick);
+        }
     }
 }
 
-/* 飞行中的玻璃瓶：抛物线轨迹 + 瓶身 + 拖影 + 发光 */
-static void DrawShotSprite(int idx) {
-    if (!shot[idx].active) return;
+/* 荧光棒（落地发光体也用同一套，只是 z=0、半径略大） */
+static void DrawFlareSprite(int idx) {
+    if (!thrown[idx].active) return;
+    DrawOrbSprite(thrown[idx].x, thrown[idx].y, thrown[idx].z,
+                  0.17f, 0x00fff8e0u, 0x00ff9050u, 1.00f);
+}
 
-    /* 计算屏幕投影：考虑高度 z */
-    SpriteBox s = ProjectSprite(shot[idx].x, shot[idx].y, shot[idx].z / 10.0f, 0.15f);  /* 稍大投影 */
+/* ---------------- v1.19 投掷物建模 ----------------
+   砖头 = 横放的矩形块；酸瓶 = 细长瓶身 + 瓶颈；烟雾弹 = 罐体；
+   玻璃瓶沿用小球（它本来就是飞行的碎玻璃反光）。 */
+static void DrawShotModel(int idx) {
+    float wx = shot[idx].x, wy = shot[idx].y, z = shot[idx].z;
+    float dx = wx - posX, dy = wy - posY;
+    float det = planeX * dirY - dirX * planeY;
+    if (det == 0.0f) return;
+    float invDet = 1.0f / det;
+    float tx = invDet * (dirY * dx - dirX * dy);
+    float ty = invDet * (-planeY * dx + planeX * dy);
+    if (ty <= 0.05f) return;
+
+    float unit = (float)renderH / ty;
+    int cx = (int)((renderW / 2.0f) * (1.0f + tx / ty));
+    int cyFloor = renderH / 2 + (int)(unit * 0.5f);
+    int cy = cyFloor - (int)(unit * z);
+    int occ = cx < 0 ? 0 : (cx >= renderW ? renderW - 1 : cx);
+    if (ty * 0.85f >= zBuffer[occ]) return;
+
+    int kind = shot[idx].kind;
+    if (kind == 6) {
+        /* v2.0 信号枪弹：一小团明黄的光点 + 外晕 */
+        int r = (int)(unit * 0.05f); if (r < 2) r = 2;
+        for (int dy = -r * 2; dy <= r * 2; dy++) {
+            for (int dx = -r * 2; dx <= r * 2; dx++) {
+                int px = cx + dx, py = cy + dy;
+                if (px < 0 || px >= renderW || py < 0 || py >= renderH) continue;
+                float d = sqrtf((float)(dx * dx + dy * dy)) / (float)(r * 2);
+                if (d > 1.0f) continue;
+                unsigned int col = (d < 0.45f) ? 0x00FFF8D0u
+                                 : (d < 0.75f ? 0x00FFD040u : 0x00C06020u);
+                PutPixelBlend(px, py, col, 0.95f - 0.5f * d);
+            }
+        }
+        return;
+    }
+    if (kind == 2) {
+        /* 砖头：0.34 格宽 × 0.16 格高的矩形 */
+        int w = (int)(unit * 0.17f); if (w < 3) w = 3;
+        int h = (int)(unit * 0.08f); if (h < 2) h = 2;
+        for (int yy = -h; yy <= h; yy++) {
+            int py = cy + yy;
+            if (py < 0 || py >= renderH) continue;
+            for (int xx = -w; xx <= w; xx++) {
+                int px = cx + xx;
+                if (px < 0 || px >= renderW) continue;
+                int shade = (yy < 0) ? 1 : 0;               /* 上亮下暗 */
+                unsigned int c = shade ? 0x00C8A888u : 0x00886848u;
+                PutPixelBlend(px, py, c, 0.95f);
+            }
+        }
+    } else if (kind == 3) {
+        /* 酸瓶：瓶身 + 瓶颈 */
+        int w = (int)(unit * 0.09f); if (w < 2) w = 2;
+        int h = (int)(unit * 0.14f); if (h < 4) h = 4;
+        for (int yy = -h; yy <= h; yy++) {
+            int py = cy + yy;
+            if (py < 0 || py >= renderH) continue;
+            int halfW = (yy < -h * 2 / 3) ? w / 2 : w;      /* 上半段收成瓶颈 */
+            for (int xx = -halfW; xx <= halfW; xx++) {
+                int px = cx + xx;
+                if (px < 0 || px >= renderW) continue;
+                unsigned int c = (yy > h / 3) ? 0x0080FF60u : 0x00C0FF90u;
+                PutPixelBlend(px, py, c, 0.95f);
+            }
+        }
+    } else if (kind == 4) {
+        /* 烟雾弹：圆柱罐 */
+        int w = (int)(unit * 0.10f); if (w < 3) w = 3;
+        int h = (int)(unit * 0.15f); if (h < 4) h = 4;
+        for (int yy = -h; yy <= h; yy++) {
+            int py = cy + yy;
+            if (py < 0 || py >= renderH) continue;
+            for (int xx = -w; xx <= w; xx++) {
+                int px = cx + xx;
+                if (px < 0 || px >= renderW) continue;
+                unsigned int c = 0x00909090u;
+                if (xx > w - 2) c = 0x00C8C8C8u;            /* 右侧高光 */
+                if (yy < -h + 2) c = 0x00B0B0B0u;           /* 顶部盖 */
+                PutPixelBlend(px, py, c, 0.95f);
+            }
+        }
+    } else {
+        DrawOrbSprite(wx, wy, z, 0.12f, 0x00ffffffu, 0x0060c0ffu, 0.95f);
+    }
+}
+
+/* v2.9 剑气：竖着的一道月牙刀光。
+   - 刀身中间厚、两头尖（不是椭圆，椭圆看着像光球）
+   - 中间亮、边缘青
+   - 身后拖两层半透明的残影，做出"劈出去"的速度感
+   渲染层只能用 PutPixelBlend（BlendRectWin 在 ui.c）。 */
+/* v2.0 额外威胁：用一张剪影 + 按种类换眼睛颜色/体型 */
+static void DrawExtraSprite(int idx) {
+    const Extra* e = ExtraAt(idx);
+    if (!e || !e->active) return;
+    if (!SpritesReady()) return;
+    int spr = SPR_MON_ECHO;
+    if (e->kind == 0) spr = SPR_MON_SHADE;
+    else if (e->kind == 1) spr = SPR_MON_SPIDER;
+    float halfH = (e->kind == 0) ? 1.05f : (e->kind == 1 ? 0.42f : 0.95f);
+    DrawBakedMonster(spr, e->x, e->y, halfH, 0.85f, 1);
+}
+
+static void DrawSlashBlade(float wx, float wy, float scale, float alpha) {
+    if (alpha <= 0.02f) return;
+    SpriteBox s = ProjectSprite(wx, wy, 0.0f, 0.62f);
     if (!s.ok) return;
 
     int cx = (s.x0 + s.x1) / 2;
-    int cy = (s.y0 + s.y1) / 2;
-    float light = (flashlightOn && battery > 0.0f) ? 1.0f : 0.7f;
+    int occ = cx < 0 ? 0 : (cx >= renderW ? renderW - 1 : cx);
+    if (s.ty * 0.90f >= zBuffer[occ]) return;
 
-    /* 拖影：更长、更亮、渐变色 */
-    for (int t = 1; t <= 6; t++) {
-        float alpha = 0.25f / t;
-        int gx = cx - (int)(shot[idx].vx * t * 0.025f * renderW / 800.0f);
-        int gy = cy - (int)(shot[idx].vy * t * 0.025f * renderH / 600.0f);
-        if (gx >= 0 && gx < renderW && gy >= 0 && gy < renderH && s.ty < zBuffer[gx]) {
-            /* 拖影颜色随时间从蓝变青 */
-            unsigned int trailCol = (t <= 2) ? 0x0040e0ffu : 0x0080ffe0u;
-            PutPixelAdd(gx, gy, trailCol, alpha * light);
+    int hh = (s.y1 - s.y0) / 2;
+    if (hh < 3) hh = 3;
+    hh = (int)(hh * scale);
+    int bw = hh / 5;
+    if (bw < 2) bw = 2;
+    int ycen = (s.y0 + s.y1) / 2;
+
+    for (int y = -hh; y <= hh; y++) {
+        float u = (float)y / (float)hh;
+        int w = (int)(bw * (1.0f - u * u));      /* 中间厚两头尖 */
+        if (w < 1) continue;
+        int py = ycen + y;
+        if (py < 0 || py >= renderH) continue;
+        for (int dx = -w; dx <= w; dx++) {
+            int px = cx + dx;
+            if (px < 0 || px >= renderW) continue;
+            float k = 1.0f - (float)(dx < 0 ? -dx : dx) / (float)(w + 1);
+            unsigned int col = (k > 0.66f) ? 0x00F0FFFFu
+                             : (k > 0.33f) ? 0x0098E8FFu : 0x0040A8FFu;
+            PutPixelBlend(px, py, col, alpha * (0.45f + 0.55f * k));
         }
     }
-
-    /* 瓶身：根据高度调整大小，最小也要 3 像素半径 */
-    int size = 3 + (int)(5.0f * (1.0f - shot[idx].z / 4.0f));
-    if (size < 3) size = 3;
-    for (int dy = -size; dy <= size; dy++) {
-        for (int dx = -size; dx <= size; dx++) {
-            int x = cx + dx, y = cy + dy;
-            if (x < 0 || x >= renderW || y < 0 || y >= renderH) continue;
-            if (s.ty >= zBuffer[x]) continue;
-            float dist = sqrtf(dx*dx + dy*dy);
-            if (dist > size) continue;
-            float a = 1.0f - dist / (size + 0.5f);
-            /* 瓶身：玻璃蓝绿，边缘更亮 */
-            unsigned int bottleCol = (dist < size * 0.4f) ? 0x0060ffffu : 0x0040c0d0u;
-            PutPixelAdd(x, y, bottleCol, a * 0.95f * light);
+    /* 刃口：朝前的一侧加一条白线 */
+    if (alpha > 0.5f) {
+        for (int y = -hh; y <= hh; y++) {
+            float u = (float)y / (float)hh;
+            int w = (int)(bw * (1.0f - u * u));
+            int px = cx + w, py = ycen + y;
+            if (px >= 0 && px < renderW && py >= 0 && py < renderH)
+                PutPixelBlend(px, py, 0x00FFFFFFu, 0.55f * alpha);
         }
     }
-    /* 核心高光 */
-    if (cx >= 0 && cx < renderW && cy >= 0 && cy < renderH && s.ty < zBuffer[cx])
-        PutPixelAdd(cx, cy, 0x00ffffffu, 1.0f * light);
-    /* 次级高光环 */
-    for (int dy = -1; dy <= 1; dy++)
-        for (int dx = -1; dx <= 1; dx++)
-            if (dx*dx + dy*dy <= 1)
-                PutPixelAdd(cx+dx, cy+dy, 0x00e0ffffu, 0.6f * light);
+}
 
-    /* 抛物线轨迹预览：更亮、更长、实线感 */
-    if (shot[idx].age < 0.8f) {
-        for (int k = 1; k <= 12; k++) {
-            float ft = k * 0.12f;
-            float px = shot[idx].x + shot[idx].vx * ft;
-            float py = shot[idx].y + shot[idx].vy * ft;
-            float pz = shot[idx].z + shot[idx].vz * ft - 0.5f * GRAVITY * ft * ft;
-            if (pz <= 0.0f) break;
-            SpriteBox ps = ProjectSprite(px, py, pz / 10.0f, 0.04f);
-            if (ps.ok) {
-                int gx = (ps.x0 + ps.x1) / 2;
-                int gy = (ps.y0 + ps.y1) / 2;
-                if (gx >= 0 && gx < renderW && gy >= 0 && gy < renderH) {
-                    float trailAlpha = 0.5f * (1.0f - k * 0.07f);
-                    PutPixelAdd(gx, gy, 0x0060c0ffu, trailAlpha);
+static void DrawSlashSprite(void) {
+    if (!slashActive) return;
+    /* 残影：沿飞行方向往回拖两层 */
+    DrawSlashBlade(slashX - slashDX * 0.55f, slashY - slashDY * 0.55f, 0.80f, 0.35f);
+    DrawSlashBlade(slashX - slashDX * 1.10f, slashY - slashDY * 1.10f, 0.62f, 0.18f);
+    DrawSlashBlade(slashX, slashY, 1.0f, 1.0f);
+}
+
+static void DrawShotSprite(int idx) {
+    if (!shot[idx].active) return;
+    DrawShotModel(idx);
+}
+
+/* v1.18：烟幕团 —— 地面上一团不断翻涌的灰烟 */
+static void DrawSmokeCloud(void) {
+    spriteLight = 1.0f;      /* v2.1：烟团不从精灵衰减继承 */
+
+    extern SmokeCloud smokes[MAX_SMOKE];
+    for (int i = 0; i < MAX_SMOKE; i++) {
+        if (!smokes[i].active) continue;
+        float t = smokes[i].life / SMOKE_LIFE;      /* 1 → 0 */
+        float grow = 1.0f;                          /* v1.18：落地直接满尺寸，不再慢慢长大 */
+        /* v2.0：烟必须"减光"而不是"发光"。
+           原来用 DrawOrbSprite 是加法混合 —— 暗走廊里烟团亮得像三盏灯，
+           和"遮蔽视线"的机制完全矛盾。这里改成直接压暗画面。 */
+        {
+            SpriteBox sb = ProjectSprite(smokes[i].x, smokes[i].y, 0.0f, 1.15f * grow);
+            if (sb.ok) {
+                int cx = (sb.x0 + sb.x1) / 2, cyy = (sb.y0 + sb.y1) / 2;
+                int rx = (sb.x1 - sb.x0) / 2, ry = (sb.y1 - sb.y0) / 2;
+                float amt = 0.55f * t + 0.12f;
+                if (rx > 0 && ry > 0) {
+                    for (int y = -ry; y <= ry; y++) {
+                        int py = cyy + y;
+                        if (py < 0 || py >= renderH) continue;
+                        for (int x = -rx; x <= rx; x++) {
+                            int px = cx + x;
+                            if (px < 0 || px >= renderW) continue;
+                            /* v2.0 修复：烟原来完全不查深度，暗房里像墙上糊了一块灰 */
+                            if (sb.ty >= zBuffer[px]) continue;
+                            float u = (float)(x * x) / (float)(rx * rx) +
+                                      (float)(y * y) / (float)(ry * ry);
+                            if (u > 1.0f) continue;
+                            float a = amt * (1.0f - u * 0.7f);
+                            PutPixelBlend(px, py, 0x00303034u, a);
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-/* 绘制玻璃碎片 */
 static void DrawShardSprite(void) {
+    spriteLight = 1.0f;      /* v2.1：碎片是自发光的 */
+
     for (int i = 0; i < MAX_SHOTS * SHARD_COUNT; i++) {
         if (!shards_debris[i].active) continue;
         SpriteBox s = ProjectSprite(shards_debris[i].x, shards_debris[i].y, shards_debris[i].z / 10.0f, 0.05f);
@@ -823,15 +1317,21 @@ static void DrawShardSprite(void) {
         float alpha = 0.7f * lifeRatio;
         if (alpha < 0.05f) continue;
 
-        /* 碎片：小菱形闪光 */
-        for (int dy = -1; dy <= 1; dy++) {
-            for (int dx = -1; dx <= 1; dx++) {
+        /* v2.1：碎片按 tint 分色（玻璃 / 血 / 尘），尺寸随距离缩放 */
+        unsigned int scol = 0x00d0e0ffu;
+        if (shards_debris[i].tint == 1)      scol = 0x00c02818u;   /* 血 */
+        else if (shards_debris[i].tint == 2) scol = 0x00c0a070u;   /* 尘 */
+        int rad = (s.x1 - s.x0) >> 1;
+        if (rad < 1) rad = 1;
+        if (rad > 4) rad = 4;
+        for (int dy = -rad; dy <= rad; dy++) {
+            for (int dx = -rad; dx <= rad; dx++) {
                 if (dx == 0 && dy == 0) continue;
-                if (abs(dx) + abs(dy) != 1) continue;  /* 菱形 */
+                if (abs(dx) + abs(dy) > rad) continue;     /* 菱形 */
                 int x = cx + dx, y = cy + dy;
                 if (x < 0 || x >= renderW || y < 0 || y >= renderH) continue;
                 if (s.ty >= zBuffer[x]) continue;
-                PutPixelAdd(x, y, 0x00d0e0ffu, alpha);
+                PutPixelAdd(x, y, scol, alpha);
             }
         }
         /* 中心 */
@@ -840,56 +1340,32 @@ static void DrawShardSprite(void) {
     }
 }
 
+/* v2.1：安全屋。原来画的是一朵粉色花 + 地上紫斑 —— 在一个恐怖游戏里
+   像误入了别的游戏。改成"一根矮的暖色光柱 + 地面光斑"，和出口那根
+   冷色光柱形成对照（暖 = 安全，冷 = 出口）。 */
 static void DrawFlowerSprite(void) {
     if (!safeRoom.active) return;
-    SpriteBox s = ProjectSprite(safeRoom.x, safeRoom.y, 0.0f, 0.42f);
-    if (!s.ok) return;
-    int spanX = s.x1 - s.x0, spanY = s.y1 - s.y0;
-    float dyRel = 32.0f / (float)spanY;
-    float pulse = 0.75f + 0.25f * sinf((float)g_timeSec * 2.0f);
-    for (int x = s.x0; x < s.x1; x++) {
-        if (s.ty >= zBuffer[x]) continue;
-        int relX = (x - s.x0) * 32 / spanX;
-        float fy = 0.0f;
-        unsigned int* col = pixels + (size_t)s.y0 * renderW + x;
-        int wrote = 0;
-        for (int y = s.y0; y < s.y1; y++, fy += dyRel, col += renderW) {
-            int relY = (int)fy;
-            /* 茎 */
-            if (relX > 15 && relX < 18 && relY > 14) { *col = 0x00305020; wrote = 1; continue; }
-            /* 花瓣 */
-            int dx = relX - 16, dy = relY - 11;
-            int d2 = dx * dx + dy * dy;
-            if (d2 < 30) {
-                if (d2 < 8) PutPixelAdd(x, y, 0x00fff0a0u, 0.9f * pulse);
-                else PutPixelAdd(x, y, 0x00e060a0u, 0.55f * pulse);
-                wrote = 1;
-            }
-        }
-        if (wrote && s.ty < zBuffer[x]) zBuffer[x] = s.ty;
+    /* v2.2 修复（用户实测：站到安全区里，灯糊满视野）：
+       ① 这盏灯只有半米高，halfH 从 0.50 降到 0.30
+       ② 玩家已经在安全屋里（距离 < 1.3 格）就干脆不画 ——
+          你已经站在里面了，不该被自己的营地挡住视线 */
+    {
+        float dx = posX - safeRoom.x, dy = posY - safeRoom.y;
+        if (dx * dx + dy * dy < 1.69f) return;
     }
+    DrawBakedProp(SPR_PROP_SAFE, safeRoom.x, safeRoom.y, 0.30f, 1.0f);
 }
+
 
 static void DrawExitBeamSprite(void) {
-    SpriteBox s = ProjectSprite(exitX, exitY, 0.0f, 1.05f);
-    if (!s.ok) return;
-    int spanX = s.x1 - s.x0;
-    int spanY = s.y1 - s.y0;
-    if (spanX <= 0 || spanY <= 0) return;
-
-    for (int x = s.x0; x < s.x1; x++) {
-        if (s.ty >= zBuffer[x]) continue;
-        float fx = (float)(x - s.x0) / (float)spanX;
-        float edge = 1.0f - fabsf(fx - 0.5f) * 2.0f;
-        if (edge <= 0.0f) continue;
-        for (int y = s.y0; y < s.y1; y++) {
-            float fy = (float)(y - s.y0) / (float)spanY;
-            float a = edge * edge * (0.30f + 0.70f * fy);
-            if (breakerOpen) PutPixelAdd(x, y, 0x0040FF70u, a * 0.50f);
-            else if (edge > 0.80f) PutPixelAdd(x, y, 0x00C03030u, a * 0.28f);
-        }
+    if (!breakerOpen) {
+        /* 没通电：门只画个暗框 */
+        DrawBakedProp(SPR_PROP_EXIT, exitX, exitY, 0.62f, 0.22f);
+        return;
     }
+    DrawBakedProp(SPR_PROP_EXIT, exitX, exitY, 1.05f, 1.0f);
 }
+
 
 /* 所有 billboard 按距离从远到近画，近的盖住远的（画家算法）
    数组上界 MAX_SPRITES = 容器 + 投掷物 + 配电箱 + 两只怪 + 安全屋 + 出口光柱，
@@ -938,6 +1414,15 @@ void RenderSprites(void) {
             n++;
         }
     }
+    /* v1.8 偷电怪 */
+    for (int i = 0; i < LEECH_MAX; i++) {
+        if (!leeches[i].active) continue;
+        if (n >= MAX_SPRITES) break;
+        list[n].d2 = Dist2(leeches[i].x, leeches[i].y, posX, posY);
+        list[n].kind = 9;
+        list[n].idx = i;
+        n++;
+    }
     for (int i = 0; i < MAX_THROWN; i++) {
         if (!thrown[i].active) continue;
         if (n >= MAX_SPRITES) break;
@@ -954,6 +1439,28 @@ void RenderSprites(void) {
         list[n].kind = 8;
         list[n].idx = i;
         n++;
+    }
+    /* v2.0 额外威胁（影子/盲螨/回响） */
+    for (int i = 0; i < ExtrasCount(); i++) {
+        const Extra* e = ExtraAt(i);
+        if (!e || !e->active) continue;
+        /* 影子在开灯时不渲染 */
+        if (e->kind == 0 && flashlightOn && battery > 0.0f) continue;
+        if (n >= MAX_SPRITES) break;
+        list[n].d2 = Dist2(e->x, e->y, posX, posY);
+        list[n].kind = 11;
+        list[n].idx = i;
+        n++;
+    }
+
+    /* v2.9 剑气 */
+    if (slashActive) {
+        if (n < MAX_SPRITES) {
+            list[n].d2 = Dist2(slashX, slashY, posX, posY);
+            list[n].kind = 10;
+            list[n].idx = 0;
+            n++;
+        }
     }
     /* 跳脸虫不在这个表里 —— 它是屏幕空间的 overlay，
        要盖住整个场景，由 RenderFrame 直接绘制。 */
@@ -983,13 +1490,19 @@ void RenderSprites(void) {
             case 0: DrawCrateSprite(list[i].idx); break;
             case 1: DrawBreakerSprite(); break;
             case 2: DrawMonsterSprite(); break;
+        case 9: DrawLeechSprite(list[i].idx); break;
             case 5: DrawLightBeastSprite(); break;
             case 6: DrawFlareSprite(list[i].idx); break;
             case 8: DrawShotSprite(list[i].idx); break;
+            case 10: DrawSlashSprite(); break;
+            case 11: DrawExtraSprite(list[i].idx); break;
             case 7: DrawFlowerSprite(); break;
             default: DrawExitBeamSprite(); break;
         }
     }
+    /* v1.18：烟幕团（不参与深度排序，直接在最后叠加） */
+    DrawSmokeCloud();
+
     /* 玻璃碎片：不在深度排序里，直接画在最后（覆盖在所有 billboard 之上） */
     DrawShardSprite();
 }
@@ -1079,10 +1592,22 @@ static void SplitRange(int lo, int hi, int part, int parts, int* outLo, int* out
 }
 
 /* 派活并等所有分片画完；worker 数可以是 0（单线程退化） */
+/* 一旦某次等 worker 超时，就永久降级成单线程渲染 */
+static int g_workersBroken = 0;
+
 void RunPhase(int phase) {
     int y0, y1;
+    if (g_workersBroken) {          /* 不用线程了：整帧主线程画，宁可掉帧不崩 */
+        if (phase == 1) { RenderFloorBand(0, renderH); return; }
+        if (phase == 2) { RenderWallBand(0, renderW); return; }
+        RenderPostBand(0, renderH);
+        return;
+    }
     for (int i = 0; i < g_workerCount; i++) {
-        if (phase == 1) { SplitRange(renderH / 2 + 1, renderH, i, g_parts, &g_workers[i].y0, &g_workers[i].y1); }
+        /* v2.0：三个相位统一按 (workerCount+1) 等分，主线程吃最后一份。
+           原来 phase 1 让主线程独画上半屏、8 个 worker 只分下半屏 ——
+           实际加速比只有 ~2× 而不是 9×。 */
+        if (phase == 1) { SplitRange(0, renderH, i, g_parts, &g_workers[i].y0, &g_workers[i].y1); }
         else if (phase == 2) { SplitRange(0, renderW, i, g_parts, &g_workers[i].x0, &g_workers[i].x1); }
         else { SplitRange(0, renderH, i, g_parts, &g_workers[i].y0, &g_workers[i].y1); }
         g_workers[i].phase = phase;
@@ -1090,13 +1615,28 @@ void RunPhase(int phase) {
     }
 
     int p = g_workerCount;
-    if (phase == 1) { SplitRange(renderH / 2 + 1, renderH, p, g_parts, &y0, &y1); RenderFloorBand(y0, y1); }
+    if (phase == 1) {
+        /* 主线程吃第 g_workerCount 份（最后一段），和 worker 不重叠 */
+        int a0, a1;
+        SplitRange(0, renderH, g_workerCount, g_parts, &a0, &a1);
+        RenderFloorBand(a0, a1);
+    }
     else if (phase == 2) { int x0, x1; SplitRange(0, renderW, p, g_parts, &x0, &x1); RenderWallBand(x0, x1); }
     else { SplitRange(0, renderH, p, g_parts, &y0, &y1); RenderPostBand(y0, y1); }
 
     for (int i = 0; i < g_workerCount; i++) {
-        /* 超时也要继续，宁可掉一帧也不能卡死 */
-        WaitForSingleObject(g_workers[i].hDone, 300);
+        /* v2.7：超时绝不能再往下走 —— worker 还在往 pixels/zBuffer 写，
+           下一相位（甚至 InitPixels 重建 DIB）会跟它并发写同一块缓冲。 */
+        if (WaitForSingleObject(g_workers[i].hDone, 2000) != WAIT_OBJECT_0) {
+            g_workersBroken = 1;
+            break;
+        }
+    }
+    if (g_workersBroken) {
+        /* 兜底：这一帧剩下的部分全部在主线程补完 */
+        if (phase == 1) RenderFloorBand(0, renderH);
+        else if (phase == 2) RenderWallBand(0, renderW);
+        else RenderPostBand(0, renderH);
     }
 }
 
@@ -1134,87 +1674,131 @@ void BuildShadeTables(void) {
 /* 地板：棋盘只有两种底色，亮度查表；出口发光只在出口所在格判断 */
 static void RenderFloorBand(int y0, int y1) {
     int halfH = renderH / 2;
-    float rayDirX0 = dirX - planeX, rayDirY0 = dirY - planeY;
-    float rayDirX1 = dirX + planeX, rayDirY1 = dirY + planeY;
+    int centery = halfH + horizon;
+    /* v1.13：真俯仰后不再需要这两个端点射线（逐行按角度求交） */
+    (void)0;
     int exitBX = (int)(exitX * 4.0f), exitBY = (int)(exitY * 4.0f);
     int safeBX = (int)(safeRoom.x * 4.0f), safeBY = (int)(safeRoom.y * 4.0f);
+    int lightOnF = (flashlightOn && battery > 0.0f);
 
+    /* v1.12：y-shear 之后地板与天花板**不再是镜像关系**（镜像只在 horizon==0 时成立），
+       所以这里改成单次全屏通道：每一行按 y 相对地平线判上下，分别采样地板/天花板。
+       之前那套"地板行 + 镜像天花板"在抬头时会留下一条黑带，低头时上下颠倒。 */
     for (int y = y0; y < y1; y++) {
-        float rowDistance = (0.5f * renderH) / (float)(y - halfH);
-        float stepX = rowDistance * (rayDirX1 - rayDirX0) / renderW;
-        float stepY = rowDistance * (rayDirY1 - rayDirY0) / renderW;
-        float fx = posX + rowDistance * rayDirX0;
-        float fy = posY + rowDistance * rayDirY0;
-        float shadow = 1.0f - rowDistance / 10.0f;
-        if (shadow < 0.0f) shadow = 0.0f;
         unsigned int* row = pixels + (size_t)y * renderW;
+        /* v1.13 真俯仰：该行的视线竖直分量（旋转后） */
+        float cyv = (float)(centery - y) / (float)focal;
+        float ry = pitchSin + pitchCos * cyv;
+        float kk = pitchCos - cyv * pitchSin;
+        int isCeil = (ry > 0.0f);
+        float t;
+        if (isCeil) {
+            float den = ry;
+            if (den < 0.004f) den = 0.004f;
+            t = 0.5f / den;
+        } else {
+            float den = -ry;
+            if (den < 0.004f) den = 0.004f;
+            t = 0.5f / den;
+        }
+        if (t > 60.0f) t = 60.0f;
+        /* v1.13b 修正：射线 = F + R·cameraX + U·cameraY，
+           其中 R（平面向量）的系数**恒为 1**，不该乘 (cos - cy·sin)。
+           上一版把整个水平方向都乘了 kk，pitch 越大横向拉伸越狠 → 鱼眼扭曲。 */
+        float stepX = t * planeX * 2.0f / renderW;
+        float stepY = t * planeY * 2.0f / renderW;
+        float fx = posX + t * kk * dirX - t * planeX;
+        float fy = posY + t * kk * dirY - t * planeY;
+        float rowDistance = t;
+
+        /* 亮度：环境光 + 手电的平方衰减 */
+        float ambF = 1.0f / (1.0f + rowDistance * (lightOnF ? 0.75f : 0.55f));
+        float reachF = 1.0f - rowDistance / 5.5f;
+        if (reachF < 0.0f) reachF = 0.0f;
+        reachF *= reachF;
+        extern float smokeDim;
+        float shadow = (ambF * 0.28f + (lightOnF ? reachF * 0.95f : 0.0f)) * smokeDim;
+        int shadowI = (int)(shadow * 256.0f);
+        if (shadowI < 0) shadowI = 0;
+        if (shadowI > 1023) shadowI = 1023;
+
+        /* 距离雾（天花板减半：天花板本来就不该被照亮太多） */
+        float fogAmt = rowDistance * 0.075f;
+        if (fogAmt > 0.8f) fogAmt = 0.8f;
+        if (!lightOnF) fogAmt *= 0.22f;
+        if (isCeil) fogAmt *= 0.5f;
+        unsigned int fogR = (unsigned int)(fogAmt * (float)themeFogR);
+        unsigned int fogG = (unsigned int)(fogAmt * (float)themeFogG);
+        unsigned int fogB = (unsigned int)(fogAmt * (float)themeFogB);
 
         for (int x = 0; x < renderW; x++) {
-            /* 地板与天花板都采样真纹理；亮度按列/行预乘 */
             int cX = (int)fx, cY = (int)fy;
             int tx2 = ((int)((fx - cX) * (float)TEX_WIDTH)) & (TEX_WIDTH - 1);
             int ty2 = ((int)((fy - cY) * (float)TEX_HEIGHT)) & (TEX_HEIGHT - 1);
             tx2 &= ~1; ty2 &= ~1;
 
-            /* 亮度：shadow（行常量）× floorGain（列常量）→ k8 → gamma → 等级 */
-            float bright = shadow * floorGain[x];
-            int k8 = (int)(bright * 256.0f);
-            if (k8 < 0) k8 = 0; else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;
-            k8 = shadeLut[k8];      /* gamma 校正：地板也走查表 */
-            int lvl = k8 >> PREMUL_K8_SHIFT;   /* 0..255 */
+            unsigned int color;
+            if (!isCeil) {
+                int k8 = (shadowI * floorGainI[x]) >> 8;
+                if (k8 < 0) k8 = 0;
+                else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;
+                k8 = shadeLut[k8];
+                int lvl = k8 >> PREMUL_K8_SHIFT;
+                color = premulFloor[floorColorIdx[ty2][tx2]][lvl];
 
-            /* 查预乘表：省掉 3 次乘法 + 3 次截断 */
-            unsigned int color = premulFloor[floorColorIdx[ty2][tx2]][lvl];
-
-            /* 天花板：镜像行
-               原版是 (通道 * ck) >> 8，ck 是 0..255 的乘数；
-               表里用 k8 量纲（等级 l 对应乘数 l*4），所以等级 = ck >> 2。 */
-            {
-                int my2 = renderH - y - 1;
-                if (my2 >= 0 && my2 < renderH) {
-                    int cl = ceilTab[x] >> PREMUL_K8_SHIFT;
-                    if (cl > PREMUL_LEVELS - 1) cl = PREMUL_LEVELS - 1;
-                    pixels[(size_t)my2 * renderW + x] = premulCeil[ceilColorIdx[ty2][tx2]][cl];
-                }
-            }
-
-            /* 安全屋：暖色花圃（只有附近才需要格子坐标） */
-            if (safeRoom.active) {
-                int bx = (int)(fx * 4.0f), by = (int)(fy * 4.0f);
-                int sbx = bx - safeBX, sby = by - safeBY;
-                if (sbx >= -2 && sbx <= 2 && sby >= -2 && sby <= 2) {
-                    float d2s = (float)(sbx * sbx + sby * sby) / 8.0f;
-                    float gs = 1.0f - d2s;
-                    if (gs > 0.0f) {
-                        int r = (int)(70 * gs), g = (int)(48 * gs), b = (int)(58 * gs);
-                        color = (unsigned int)((r << 16) | (g << 8) | b);
-                    }
-                }
-            }
-
-            /* 出口：一个 1.5 格见方的光池，通电才是绿色 */
-            {
-                int bx = (int)(fx * 4.0f), by = (int)(fy * 4.0f);
-                int dbx = bx - exitBX, dby = by - exitBY;
-                if (dbx >= -3 && dbx <= 3 && dby >= -3 && dby <= 3) {
-                    float d2 = (float)(dbx * dbx + dby * dby) / 9.0f;
-                    float glow = 1.0f - d2;
-                    if (glow > 0.0f) {
-                        float k = (shadow * 0.45f + 0.60f) * glow;
-                        if (breakerOpen) {
-                            int r = (int)(40 * k), g = (int)(235 * k), b = (int)(105 * k);
-                            if (r > 255) r = 255;
-                            if (g > 255) g = 255;
-                            if (b > 255) b = 255;
-                            color = (unsigned int)((r << 16) | (g << 8) | b);
-                        } else {
-                            int r = (int)(120 * k), g = (int)(24 * k);
-                            if (r > 255) r = 255;
-                            color = (unsigned int)((r << 16) | (g << 8));
+                /* 安全屋花圃 */
+                if (safeRoom.active) {
+                    int bx = (int)(fx * 4.0f), by = (int)(fy * 4.0f);
+                    int sbx = bx - safeBX, sby = by - safeBY;
+                    if (sbx >= -2 && sbx <= 2 && sby >= -2 && sby <= 2) {
+                        float d2s = (float)(sbx * sbx + sby * sby) / 8.0f;
+                        float gs = 1.0f - d2s;
+                        if (gs > 0.0f) {
+                            int r2 = (int)(70 * gs), g2 = (int)(48 * gs), b2 = (int)(58 * gs);
+                            color = (unsigned int)((r2 << 16) | (g2 << 8) | b2);
                         }
                     }
                 }
+
+                /* 出口光池 */
+                {
+                    int bx = (int)(fx * 4.0f), by = (int)(fy * 4.0f);
+                    int dbx = bx - exitBX, dby = by - exitBY;
+                    if (dbx >= -3 && dbx <= 3 && dby >= -3 && dby <= 3) {
+                        float d2 = (float)(dbx * dbx + dby * dby) / 9.0f;
+                        float glow = 1.0f - d2;
+                        if (glow > 0.0f) {
+                            float k = (shadow * 0.45f + 0.60f) * glow;
+                            if (breakerOpen) {
+                                int r2 = (int)(40 * k), g2 = (int)(235 * k), b2 = (int)(105 * k);
+                                if (r2 > 255) r2 = 255;
+                                if (g2 > 255) g2 = 255;
+                                if (b2 > 255) b2 = 255;
+                                color = (unsigned int)((r2 << 16) | (g2 << 8) | b2);
+                            } else {
+                                int r2 = (int)(120 * k), g2 = (int)(24 * k);
+                                if (r2 > 255) r2 = 255;
+                                color = (unsigned int)((r2 << 16) | (g2 << 8));
+                            }
+                        }
+                    }
+                }
+
+                /* 雾 + 光球的暖光（简化：只按距离加暖色） */
+                if (fogR | fogG | fogB) {
+                    unsigned int cr = (color >> 16) & 0xFF, cg = (color >> 8) & 0xFF, cb = color & 0xFF;
+                    cr += fogR; if (cr > 255) cr = 255;
+                    cg += fogG; if (cg > 255) cg = 255;
+                    cb += fogB; if (cb > 255) cb = 255;
+                    color = (cr << 16) | (cg << 8) | cb;
+                }
+            } else {
+                int cl = ceilTab[x] >> PREMUL_K8_SHIFT;
+                if (cl < 0) cl = 0;
+                else if (cl > PREMUL_LEVELS - 1) cl = PREMUL_LEVELS - 1;
+                color = premulCeil[ceilColorIdx[ty2][tx2]][cl];
             }
+
             row[x] = color;
             fx += stepX;
             fy += stepY;
@@ -1252,11 +1836,23 @@ static void RenderWallBand(int x0, int x1) {
         if (perpWallDist < 0.1f) perpWallDist = 0.1f;
         zBuffer[x] = perpWallDist;
 
+        /* v1.13 真俯仰：墙的下沿(v=-眼高)与上沿(v=1-眼高)各自旋转后投影。
+           同一列 z 不变 → 屏幕上仍是线性，贴图线性采样依然正确。 */
         int lineHeight = (int)(renderH / perpWallDist);
-        int drawStart = -lineHeight / 2 + halfH;
-        if (drawStart < 0) drawStart = 0;
-        int drawEnd = lineHeight / 2 + halfH;
-        if (drawEnd > renderH) drawEnd = renderH;
+        (void)lineHeight;
+        const float eyeH = 0.5f;
+        float vb2 = (-eyeH) * pitchCos - perpWallDist * pitchSin;
+        float db2 = (-eyeH) * pitchSin + perpWallDist * pitchCos;
+        float vt2 = (1.0f - eyeH) * pitchCos - perpWallDist * pitchSin;
+        float dt2 = (1.0f - eyeH) * pitchSin + perpWallDist * pitchCos;
+        if (db2 < 0.05f) db2 = 0.05f;
+        if (dt2 < 0.05f) dt2 = 0.05f;
+        int yBottom = (int)((float)halfH - vb2 * (float)focal / db2);
+        int yTop    = (int)((float)halfH - vt2 * (float)focal / dt2);
+        if (yBottom <= yTop) continue;
+        int startF = yTop;
+        int drawStart = yTop < 0 ? 0 : yTop;
+        int drawEnd = yBottom > renderH ? renderH : yBottom;
         if (drawEnd <= drawStart) continue;
 
         float wallX = (side == 0) ? (posY + perpWallDist * rayDirY) : (posX + perpWallDist * rayDirX);
@@ -1266,19 +1862,69 @@ static void RenderWallBand(int x0, int x1) {
         if (texX > TEX_WIDTH - 1) texX = TEX_WIDTH - 1;
         if ((side == 0 && rayDirX > 0) || (side == 1 && rayDirY < 0)) texX = TEX_WIDTH - texX - 1;
 
-        float step = (float)TEX_HEIGHT / lineHeight;
-        float texPos = (drawStart - halfH + lineHeight / 2.0f) * step;
+        float span = (float)(yBottom - yTop);
+        if (span < 1.0f) span = 1.0f;
+        float step = (float)TEX_HEIGHT / span;
+        /* v2.0：每像素吃掉的 texel 数 → mip 级。step>1.5 说明在缩小，退到低一级 */
+        int mipLod = 0;
+        {
+            float st = step;
+            while (st > 1.5f && mipLod < MIP_LEVELS - 1) { st *= 0.5f; mipLod++; }
+        }
+        const unsigned int* mipSrc = mipChain[mipLod];
+        int mipW = TEX_WIDTH >> mipLod;
+        int mipMaskY = (TEX_HEIGHT >> mipLod) - 1;
+        int mipShift = mipLod;
+        float texPos = (float)(drawStart - startF) * step;
 
-        /* 亮度 = 距离衰减 × 手电；手电中心再补一层白，墙才「亮得起来」 */
-        float shadow = 1.0f - perpWallDist / 12.0f;
-        if (shadow < 0.0f) shadow = 0.0f;
-        if (side == 1) shadow *= 0.62f;
-        float lit = shadow * flashTab[x];
+        /* v1.9 光照：
+           ① 距离衰减改成 1/(1+d*k) 曲线 —— 近处亮、远处平滑收黑，没有硬断崖
+           ② 距离雾：远处叠加一点冷色（青蓝），空间感立刻出来
+           ③ 手电光斑用 smoothstep 软边，不再是硬切一刀 */
+        /* v1.10：手电削弱。
+           原来开灯只有 1/(1+d*0.22) 的衰减 —— 10 格外还亮着，等于整张地图都看得见。
+           现在拆成两部分：
+             环境光 amb：永远很暗（开灯 0.42 倍，关灯更暗）
+             手电项   ：有效距离 8 格，按 (1-d/8)² 衰减，超出即 0
+           所以光照范围由"手电照到哪"决定，不再是"整条走廊"。 */
+        int lightOnW = (flashlightOn && battery > 0.0f);
+        float amb = 1.0f / (1.0f + perpWallDist * (lightOnW ? 0.70f : 0.50f));
+        /* v1.12：手电换成和荧光棒同一套光效 ——
+           锥形（横向 flashTab）× 平方距离衰减，再叠一层暖色加色。
+           原来只有"乘法提亮"，画面偏冷、也不像有个灯泡在照。 */
+        float reach = 1.0f - perpWallDist / 9.0f;
+        if (reach < 0.0f) reach = 0.0f;
+        reach *= reach;
         float flash = flashTab[x];
-        float cone = flash > 0.45f ? (flash - 0.45f) : 0.0f;
-        int addR = (int)(cone * shadow * 150.0f);
-        int addG = (int)(cone * shadow * 128.0f);
-        int addB = (int)(cone * shadow * 106.0f);
+        float torch = lightOnW ? (flash * reach * 0.62f) : 0.0f;
+        extern float smokeDim;
+        float lit = (amb * 0.26f + torch) * smokeDim;
+        if (side == 1) lit *= 0.62f;
+
+        float cone = flash - 0.35f;
+        if (cone < 0.0f) cone = 0.0f;
+        cone = cone * cone * (3.0f - 2.0f * cone > 1.0f ? 1.0f : 3.0f - 2.0f * cone);   /* smoothstep */
+
+        /* 距离雾（冷色，加法叠加，零额外采样） */
+        float fog = perpWallDist * 0.085f;
+        if (fog > 0.85f) fog = 0.85f;
+        if (!lightOnW) fog *= 0.25f;    /* 留一点，纯粹压黑会没有纵深 */
+
+        /* 光斑也受有效距离约束：远处不许再加亮 */
+        /* 光球照明：命中点离任一荧光棒越近越亮（暖色） */
+        float hx = posX + rayDirX * perpWallDist;
+        float hy = posY + rayDirY * perpWallDist;
+        float fl = FlareLightAt(hx, hy);
+        lit += fl;
+        if (lit > 1.35f) lit = 1.35f;
+
+        /* v1.12：手电改**白光**（略偏冷），和荧光棒的暖橙拉开差别 */
+        int addR = (int)((cone * reach * (float)(themeLitR + 24) * 0.42f + fog * (float)themeAmbR
+                          + fl * 210.0f + torch * (float)themeLitR) * smokeDim);
+        int addG = (int)((cone * reach * (float)(themeLitG + 24) * 0.42f + fog * (float)themeAmbG
+                          + fl * 150.0f + torch * (float)themeLitG) * smokeDim);
+        int addB = (int)((cone * reach * (float)(themeLitB + 24) * 0.42f + fog * (float)themeAmbB
+                          + fl * 78.0f  + torch * (float)themeLitB) * smokeDim);
         int k8 = (int)(lit * 256.0f);
         if (k8 < 0) k8 = 0;
         else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;
@@ -1286,19 +1932,76 @@ static void RenderWallBand(int x0, int x1) {
 
         const unsigned int* src = &texture[0][texX];
         unsigned int* dst = pixels + (size_t)drawStart * renderW + x;
+
+        /* v1.9：墙脚 / 墙顶 AO —— 沿墙面上下各压暗 16 像素，
+           墙角有了"厚度"，不再是均匀一片贴图 */
+        int aoBot = drawEnd - 16;
+        int aoTop = drawStart + 16;
+
+        /* v2.1：竖直方向的光斑。
+           原来亮度只按 x 算（flashTab[x]），同一列从上到下完全一样，
+           整面墙就是一块均匀灰板 —— 贴纸感的真正来源。
+           这里预生成 64 项竖直权重（中间亮、上下收），每像素多一次查表。 */
+        int vLut[64];
+        {
+            for (int i = 0; i < 64; i++) {
+                float v = ((float)i + 0.5f) / 64.0f;
+                float dv = v - 0.46f;                    /* 略偏上：视线落点在下半 */
+                float fall = 1.0f - dv * dv * 3.2f;      /* 中间 1，两端 <0 */
+                if (fall < 0.18f) fall = 0.18f;
+                vLut[i] = (int)(fall * 256.0f);
+            }
+        }
+
         for (int y = drawStart; y < drawEnd; y++) {
             int texY = ((int)texPos) & (TEX_HEIGHT - 1);
             texPos += step;
-            unsigned int t = src[(texY << 6)];
-            int r = (int)(((t >> 16) & 0xFF) * k8) >> 8;
-            int g = (int)(((t >> 8) & 0xFF) * k8) >> 8;
-            int b = (int)((t & 0xFF) * k8) >> 8;
+            /* v2.0：走了 mip 就按低位采样（lod 0 时与原路径完全等价） */
+            unsigned int t = mipSrc[((texY >> mipShift) & mipMaskY) * mipW + (texX >> mipShift)];
+            int vy = (int)(((float)(y - drawStart) * 64.0f) / (float)(drawEnd - drawStart + 1));
+            if (vy < 0) vy = 0;
+            if (vy > 63) vy = 63;
+            int k8v = (k8 * vLut[vy]) >> 8;              /* 竖直光斑 */
+            k8v += bump[texY][texX];                     /* v2.0：凹凸 */
+            if (k8v < 0) k8v = 0;
+            if (k8v > 1023) k8v = 1023;
+            int r = (int)(((t >> 16) & 0xFF) * k8v) >> 8;
+            int g = (int)(((t >> 8) & 0xFF) * k8v) >> 8;
+            int b = (int)((t & 0xFF) * k8v) >> 8;
+
             r += addR; g += addG; b += addB;
             if (r > 255) r = 255;
             if (g > 255) g = 255;
             if (b > 255) b = 255;
             *dst = (unsigned int)((r << 16) | (g << 8) | b);
             dst += renderW;
+        }
+
+        /* v1.9：AO 从逐像素判断里挪出来，改成两段小循环。
+           热点循环里少两次比较 + 三次乘法，而这两段只有 32 行。 */
+        {
+            int yb0 = aoBot > drawStart ? aoBot : drawStart;
+            unsigned int* p = pixels + (size_t)yb0 * renderW + x;
+            for (int y = yb0; y < drawEnd; y++, p += renderW) {
+                int f = 256 - (y - aoBot) * 13;
+                if (f < 116) f = 116;
+                unsigned int c = *p;
+                int rr = (int)((c >> 16) & 0xFF) * f >> 8;
+                int gg = (int)((c >> 8) & 0xFF) * f >> 8;
+                int bb = (int)(c & 0xFF) * f >> 8;
+                *p = (unsigned int)((rr << 16) | (gg << 8) | bb);
+            }
+            int yet = aoTop < drawEnd ? aoTop : drawEnd;
+            p = pixels + (size_t)drawStart * renderW + x;
+            for (int y = drawStart; y < yet; y++, p += renderW) {
+                int f = 256 - (aoTop - y) * 11;
+                if (f < 140) f = 140;
+                unsigned int c = *p;
+                int rr = (int)((c >> 16) & 0xFF) * f >> 8;
+                int gg = (int)((c >> 8) & 0xFF) * f >> 8;
+                int bb = (int)(c & 0xFF) * f >> 8;
+                *p = (unsigned int)((rr << 16) | (gg << 8) | bb);
+            }
         }
     }
 }
@@ -1369,6 +2072,110 @@ static void RenderPostBand(int y0, int y1) {
     }
 }
 
+
+/* v2.1：落地阴影。全项目只有抛出的光球有假阴影，怪物/箱子全都没有，
+   于是所有东西都像"浮在地面上"。这里在精灵脚下压一个扁椭圆。 */
+static void DrawGroundShadow(int cx, int cyFloor, int halfW, float ty) {
+    if (halfW < 2) return;
+    int rx = halfW;
+    int ry = halfW / 3;
+    if (ry < 1) ry = 1;
+    int top = cyFloor - ry;
+    for (int y = -ry; y <= ry; y++) {
+        int py = top + y + ry;
+        if (py < 0 || py >= renderH) continue;
+        int occ = cx < 0 ? 0 : (cx >= renderW ? renderW - 1 : cx);
+        if ((float)py < 0.0f) continue;
+        for (int x = -rx; x <= rx; x++) {
+            int px = cx + x;
+            if (px < 0 || px >= renderW) continue;
+            float u = (float)(x * x) / (float)(rx * rx) + (float)(y * y) / (float)(ry * ry);
+            if (u > 1.0f) continue;
+            /* v2.0 修复：阴影原来不查深度，墙后的精灵阴影会透出来
+               （用户实测「能隔墙看到影子」）。 */
+            if (ty >= zBuffer[px]) continue;
+            float a = 0.42f * (1.0f - u * 0.55f);
+            PutPixelBlend(px, py, 0x00000000u, a);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* v2.1 第一人称手持模型                                                */
+/*   原来玩家手上什么都没有：准星指向哪里、手上拿的是什么全靠想象。      */
+/*   这里是纯手工绘制的：前臂 + 拳头 + 手持物，带走路摆动和开火后坐。     */
+/* ------------------------------------------------------------------ */
+
+
+
+
+/* ------------------------------------------------------------------ */
+/* v2.1 第一人称手持模型（烘焙版）                                       */
+/*                                                                     */
+/* 旧版是每帧用 5~10 个 VMRect 现拼矩形 —— 没有抗锯齿、没有细节、没有     */
+/* 动画帧。新版走 Doom/Build 的正统做法：启动时把武器烘成 128×128 位图，   */
+/* 运行时只做「双线性 blit + 亮度查表」。                                */
+/* ------------------------------------------------------------------ */
+static void DrawViewModel(void) {
+    if (!pixels || !SpritesReady()) return;
+
+    /* 走路摆动 + 开火后坐 */
+    float sway = sinf(bobPhase) * (float)renderW * 0.006f;
+    float lift = fabsf(sinf(bobPhase * 0.5f)) * (float)renderH * 0.007f;
+    float kick = weaponAtkCharge * (float)renderH * 0.010f
+               + muzzleFlash * (float)renderH * 0.016f;
+
+    int size = (int)((float)renderH * 0.54f);
+    if (size < 64) size = 64;
+
+    int sid = SPR_WRENCH;
+    float light = 0.85f;
+    if (curWeapon == WPN_RANGED)      { sid = SPR_PISTOL; light = 0.90f; }
+    else if (curWeapon == WPN_SPELL)  { sid = SPR_SIGIL;  light = 1.00f; }
+
+    int cx = (int)((float)renderW * 0.72f + sway);
+    int cy = (int)((float)renderH * 1.04f + lift - kick);
+    int px = cx - size / 2;
+    int py = cy - size;
+    DrawSprite(sid, px, py, size, size, light, 1.0f, 0, 0.0f);
+
+    /* 开火瞬间在武器前端补一团光 */
+    if (muzzleFlash > 0.02f && curWeapon != WPN_MELEE) {
+        int gx = cx;
+        int gy = py + (int)((float)size * 0.18f);
+        int gr = (int)((float)size * 0.10f * (0.5f + muzzleFlash * 0.5f));
+        if (gr < 2) gr = 2;
+        for (int y = -gr; y <= gr; y++) {
+            int yy = gy + y;
+            if (yy < 0 || yy >= renderH) continue;
+            for (int x = -gr; x <= gr; x++) {
+                int xx = gx + x;
+                if (xx < 0 || xx >= renderW) continue;
+                float d2 = (float)(x * x + y * y) / (float)(gr * gr);
+                if (d2 >= 1.0f) continue;
+                PutPixelAdd(xx, yy, 0x00FFB060u, (1.0f - d2) * muzzleFlash * 0.8f);
+            }
+        }
+    }
+
+    /* 左手：托着当前选中的投掷物 */
+    {
+        extern int flares, bottles, bricks, acids, smokeBombs;
+        extern int firePots, gluePots, mirrors;
+        int counts[ITEM_SLOT_COUNT] = { flares, bottles, bricks, acids, smokeBombs,
+                                        firePots, gluePots, mirrors };
+        int sel = throwSelected;
+        if (sel >= 0 && sel < ITEM_SLOT_COUNT && counts[sel] > 0) {
+            int isize = (int)((float)renderH * 0.26f);
+            if (isize < 24) isize = 24;
+            int ix = (int)((float)renderW * 0.10f - sway * 0.6f);
+            int iy = (int)((float)renderH * 1.00f + lift * 0.7f);
+            DrawSprite(SPR_ITEM_FLARE + sel, ix, iy - isize, isize, isize,
+                       0.55f, 0.85f, 0, 0.0f);
+        }
+    }
+}
+
 void Render3D(void) {
     int halfH = renderH / 2;
 
@@ -1394,17 +2201,29 @@ void Render3D(void) {
             f = 0.40f + core * 0.75f;      /* 0.40 .. 1.15 */
             f *= flick;
         } else {
-            f = 0.32f;   /* 手电熄灭时的环境光 */
+            /* v1.9：手电熄了就该「几乎看不见」。
+               原来 0.32 太亮 —— 关灯还能看清走廊，手电就没意义了。 */
+            f = 0.13f;   /* 0.09 太黑，抬一点：贴脸能看清，远处仍黑 */
         }
         flashTab[x] = f;
         float cone = f > 0.40f ? (f - 0.40f) / 0.75f : 0.0f;
-        floorGain[x] = 0.52f + cone * 1.30f;
-        ceilTab[x] = (int)((0.30f + cone * 0.75f) * 110.0f);
+        /* 基础值交给逐行的 shadow 决定（含有效距离），这里只加手电中心光斑 */
+        floorGain[x] = 1.0f + cone * 1.10f;
+        {
+            int gi = (int)(floorGain[x] * 256.0f);
+            if (gi < 0) gi = 0;
+            if (gi > 1023) gi = 1023;
+            floorGainI[x] = gi;
+        }
+        /* v2.1：天花板原来最亮只有 7/255（乘完贴图），上半屏是死黑。
+           抬到 0.55 基数 + 150 上限，再乘上限乘的距离雾。 */
+        ceilTab[x] = (int)((0.55f + cone * 0.75f) * 150.0f);
     }
 
     RunPhase(1);
     RunPhase(2);
     RenderSprites();
+    DrawViewModel();                 /* v2.1 第一人称手持模型 */
     if ((vignetteOn && sanity < 50.0f) || healFlash > 0.0f) RunPhase(3);
 }
 /* 小地图（在内部渲染分辨率上绘制）
@@ -1476,20 +2295,37 @@ void RenderMap(void) {
        后者的 15.6ms 台阶会让闪烁看起来像掉帧。 */
     for (int i = 0; i < containerCount; i++) {
         if (!containers[i].active || containers[i].searched) continue;
-        if (!explored[(int)containers[i].y][(int)containers[i].x]) continue;
+        /* v2.7：这些坐标是**存档里读回来的**，坏存档可以是任意值，
+           直接当下标会越界读。先按地图尺寸拦一道。 */
+        int cxi = (int)containers[i].x, cyi = (int)containers[i].y;
+        if (cxi < 0 || cxi >= MAP_WIDTH || cyi < 0 || cyi >= MAP_HEIGHT) continue;
+        if (!explored[cyi][cxi]) continue;
         if ((int)(g_timeSec * 4.5f) % 2) continue;
         int px = mapStartX + (int)containers[i].x * cellSize + cellSize / 2;
         int py = mapStartY + (int)containers[i].y * cellSize + cellSize / 2;
         for (int dy = -2; dy <= 2; dy++)
             for (int dx = -2; dx <= 2; dx++) PutPixel(px + dx, py + dy, 0x00E8C040);
     }
-    if (breaker.active && explored[(int)breaker.y][(int)breaker.x]) {
+    if (breaker.active &&
+        (int)breaker.x >= 0 && (int)breaker.x < MAP_WIDTH &&
+        (int)breaker.y >= 0 && (int)breaker.y < MAP_HEIGHT &&
+        explored[(int)breaker.y][(int)breaker.x]) {
         int px = mapStartX + (int)breaker.x * cellSize + cellSize / 2;
         int py = mapStartY + (int)breaker.y * cellSize + cellSize / 2;
         unsigned int c = breakerOpen ? 0x0030FF60 : 0x0030D0D0;
         for (int dy = -3; dy <= 3; dy++)
             for (int dx = -3; dx <= 3; dx++)
                 if (dx * dx + dy * dy <= 9) PutPixel(px + dx, py + dy, c);
+    }
+
+    /* v1.8：安全屋在小地图上标出来（绿色十字）—— 不然转头就忘在哪 */
+    if (safeRoom.active && explored[(int)safeRoom.y][(int)safeRoom.x]) {
+        int sx = mapStartX + (int)safeRoom.x * cellSize + cellSize / 2;
+        int sy = mapStartY + (int)safeRoom.y * cellSize + cellSize / 2;
+        for (int d = -3; d <= 3; d++) {
+            PutPixel(sx + d, sy, 0x0060FF90);
+            PutPixel(sx, sy + d, 0x0060FF90);
+        }
     }
 
     int pmX = mapStartX + (int)(posX * cellSize), pmY = mapStartY + (int)(posY * cellSize);
@@ -1504,12 +2340,18 @@ void RenderMap(void) {
         PutPixel(lx, ly, 0x00FFFFFF);
     }
 
-    /* 标题：告诉玩家当前是哪种形态，以及再按 M 会变成什么。
-       小窗模式下标题画在地图上方；全屏模式画在地图上方居中。 */
+    /* 标题：当前是哪种形态 + 还能按什么 + **代价**
+       v2.4 起看图要花电，这个数字必须一直在眼前，否则玩家不会知道自己
+       正在为什么买单。 */
     {
-        const char* label = mapFullScreen ? "MAP   M: SMALL   M: CLOSE" : "MAP   M: FULL   M: CLOSE";
+        const char* label = mapFullScreen
+            ? "MAP  -10 BAT/S   M: CLOSE   HOLD TAB"
+            : "MAP  -10/S   HOLD TAB   M: FULL";
         int tw = TextWidthRaw(label);
         int tx = mapFullScreen ? (renderW - tw) / 2 : mapStartX;
+        /* 小地图在右下角，标题从左往右排会顶出窗口 —— 夹回来 */
+        if (tx + tw > renderW - 2) tx = renderW - 2 - tw;
+        if (tx < 2) tx = 2;
         int ty = mapFullScreen ? (mapStartY - cellSize * 2 - FONT_H) : (mapStartY - FONT_H - 2);
         if (ty < 0) ty = 2;
         /* 底下垫一条深色条，浅色文字才看得清 */

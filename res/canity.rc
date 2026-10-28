@@ -1,0 +1,46 @@
+/*
+ * Canity 的 Windows 资源脚本（用 windres 编译，链接进 exe）
+ *
+ * 为什么要它：
+ *   一个"三无" exe（无图标 / 无版本信息 / 无清单）在别人电脑上
+ *   更容易被判成可疑程序：
+ *     · 资源管理器里显示的是通用空白图标
+ *     · 属性里没有"详细信息"页（发布者、版本、版权全是空的）
+ *     · 没有清单 → 系统可能套上兼容性垫片（文件/注册表重定向），
+ *       这正是"存档写不进去"的经典成因之一
+ *   这三样补齐之后，程序看上去就和正常发行的软件一样了。
+ *
+ * 但它**不能**替代代码签名 —— SmartScreen 的"未知发布者"只认
+ * Authenticode 证书。见 docs/分发与免弹窗.md。
+ */
+
+1 ICON "canity.ico"
+
+1 VERSIONINFO
+  FILEVERSION     2,0,0,0
+  PRODUCTVERSION  2,0,0,0
+  FILEOS          0x40004L   /* VOS_NT_WINDOWS32 */
+  FILETYPE        0x1L       /* VFT_APP */
+  BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+      BLOCK "040904B0"       /* 美国英语 / Unicode */
+      BEGIN
+        VALUE "CompanyName",      "Canity"
+        VALUE "FileDescription",  "Canity - raycasting horror game"
+        VALUE "FileVersion",      "2.0.0.0"
+        VALUE "InternalName",     "canity"
+        VALUE "OriginalFilename", "canity.exe"
+        VALUE "ProductName",      "Canity"
+        VALUE "ProductVersion",   "2.0.0.0"
+        VALUE "LegalCopyright",   "MIT License"
+      END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+      VALUE "Translation", 0x409, 1200
+    END
+  END
+
+/* 第三个参数 24 = RT_MANIFEST，ID 必须是 1 才会被当成进程清单 */
+1 24 "canity.manifest"

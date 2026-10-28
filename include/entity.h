@@ -9,6 +9,7 @@
 #include "common.h"
 
 /* ---- 玩家（位置 / 朝向 / 相机平面） ---- */
+int MonsterHpFor(int level);      /* v2.1 按层算怪的血量 */
 extern float posX, posY;
 extern float dirX, dirY;
 extern float planeX, planeY;
@@ -33,6 +34,12 @@ extern int jumperQteKey;        /* 阶段二要按的键编号 */
 extern int jumperResolved;      /* 本次事件是否已结算（防止重复结算） */
 extern float jumperTrigger;     /* 本关什么时候触发（秒）；<0 = 本关不出现 */
 
+/* ---- v1.8 偷电怪 ---- */
+void ResetLeeches(void);
+void SpawnLeech(int index);
+void UpdateLeech(float dt);
+int  LeechNearestDist2(void);      /* 最近偷电怪的距离平方，-1 = 没有 */
+
 /* ---- 状态效果 ---- */
 float FxStrength(int kind);
 void ApplyFx(int kind, float strength, float duration);
@@ -51,5 +58,6 @@ void UpdateParasite(float dt);
 int HasLOS(float x0, float y0, float x1, float y1);
 void MakeNoise(float x, float y, float radius);
 int HitMonster(Monster* m, int dmg);
+int ApplyDamage(Monster* m, int base, int type, float sx, float sy);
 
 #endif /* CANITY_ENTITY_H */

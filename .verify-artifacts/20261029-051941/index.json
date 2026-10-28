@@ -1,0 +1,14 @@
+{
+  "project": "C:\\Users\\ggg\\Desktop\\deepseek development\\canity-upgrade",
+  "verdict": "PASS",
+  "files": [
+    "C:\\Users\\ggg\\Desktop\\deepseek development\\canity-upgrade\\.verify-artifacts\\20261029-051941\\links.txt",
+    "C:\\Users\\ggg\\Desktop\\deepseek development\\canity-upgrade\\.verify-artifacts\\20261029-051941\\html.txt",
+    "C:\\Users\\ggg\\Desktop\\deepseek development\\canity-upgrade\\.verify-artifacts\\20261029-051941\\tests.txt",
+    "C:\\Users\\ggg\\Desktop\\deepseek development\\canity-upgrade\\.verify-artifacts\\20261029-051941\\runtime-web.txt",
+    "C:\\Users\\ggg\\Desktop\\deepseek development\\canity-upgrade\\.verify-artifacts\\20261029-051941\\browser.txt",
+    "C:\\Users\\ggg\\Desktop\\deepseek development\\canity-upgrade\\.verify-artifacts\\20261029-051941\\interaction.txt",
+    "C:\\Users\\ggg\\Desktop\\deepseek development\\canity-upgrade\\.verify-artifacts\\20261029-051941\\a11y.txt",
+    "C:\\Users\\ggg\\Desktop\\deepseek development\\canity-upgrade\\.verify-artifacts\\20261029-051941\\custom.txt"
+  ]
+}

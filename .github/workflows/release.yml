@@ -29,22 +29,38 @@ jobs:
           install: >
             mingw-w64-ucrt-x86_64-gcc
 
-      # 步骤 3：直接使用 gcc 编译
+      # 步骤 3：编译资源（图标 / 版本信息 / 清单）再链接
+      #   资源不能省：没有清单的 exe 会被系统套兼容性垫片，
+      #   没有图标/版本信息在别人电脑上更像"可疑程序"。
       - name: Build with gcc
         shell: msys2 {0}
-        run: gcc src/*.c -Iinclude -o canity.exe -O2 -Wall -Wextra -lgdi32 -luser32 -lwinmm -mwindows
-      # 步骤 4：打包产物（把 exe 压缩成 zip）
+        run: |
+          windres res/canity.rc -O coff -o res/canity_res.o
+          gcc src/*.c res/canity_res.o -Iinclude -o canity.exe -O2 -Wall -Wextra \
+              -lgdi32 -luser32 -lwinmm -mwindows
+
+      # 步骤 4：打包产物（exe + 解除锁定脚本 + 说明）
+      #   为什么会弹「Windows 已保护你的电脑」→ 见 docs/分发与免弹窗.md
       - name: Package files
         shell: pwsh
         run: |
-          # 如果以后有额外的资源文件（比如图片、音频），在下面用逗号分隔加上去，例如: "canity.exe", "assets/"
-          Compress-Archive -Path "canity.exe" -DestinationPath canity-windows-x64.zip
+          $ver = (Select-String -Path include/common.h -Pattern 'CANITY_VERSION_STR\s+"([^"]+)"').Matches[0].Groups[1].Value
+          $name = "CANITY_v$ver_win64"
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item canity.exe "$name/canity.exe"
+
+          $readme = Get-Content docs/package_readme.txt -Raw -Encoding UTF8
+          Set-Content -Path "$name/第一次运行请看.txt" -Value ($readme -replace '%VER%', $ver) -Encoding UTF8
+
+          Copy-Item docs/解除锁定.bat "$name/解除锁定.bat"
+
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
 
       # 步骤 5：创建 Release 并上传 zip 包
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: canity-windows-x64.zip
+          files: CANITY_v*_win64.zip
           generate_release_notes: true # 自动根据 commit 生成更新日志
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
