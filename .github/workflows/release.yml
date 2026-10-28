@@ -1,0 +1,66 @@
+name: Build and Release
+
+# 触发条件：只有当推送以 v 开头的标签（比如 v1.6.0）时才运行
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 权限设置：允许 Actions 创建 Release 和上传附件
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    # 使用最新的 Windows 环境
+    runs-on: windows-latest
+    
+    steps:
+      # 步骤 1：拉取你的代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 步骤 2：配置 MSYS2 环境，安装 MinGW (GCC)
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >
+            mingw-w64-ucrt-x86_64-gcc
+
+      # 步骤 3：编译资源（图标 / 版本信息 / 清单）再链接
+      #   资源不能省：没有清单的 exe 会被系统套兼容性垫片，
+      #   没有图标/版本信息在别人电脑上更像"可疑程序"。
+      - name: Build with gcc
+        shell: msys2 {0}
+        run: |
+          windres res/canity.rc -O coff -o res/canity_res.o
+          gcc src/*.c res/canity_res.o -Iinclude -o canity.exe -O2 -Wall -Wextra \
+              -lgdi32 -luser32 -lwinmm -mwindows
+
+      # 步骤 4：打包产物（exe + 解除锁定脚本 + 说明）
+      #   为什么会弹「Windows 已保护你的电脑」→ 见 docs/分发与免弹窗.md
+      - name: Package files
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path include/common.h -Pattern 'CANITY_VERSION_STR\s+"([^"]+)"').Matches[0].Groups[1].Value
+          $name = "CANITY_v$ver_win64"
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item canity.exe "$name/canity.exe"
+
+          $readme = Get-Content docs/package_readme.txt -Raw -Encoding UTF8
+          Set-Content -Path "$name/第一次运行请看.txt" -Value ($readme -replace '%VER%', $ver) -Encoding UTF8
+
+          Copy-Item docs/解除锁定.bat "$name/解除锁定.bat"
+
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+
+      # 步骤 5：创建 Release 并上传 zip 包
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: CANITY_v*_win64.zip
+          generate_release_notes: true # 自动根据 commit 生成更新日志
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Canity 应用清单（嵌入 exe，资源类型 RT_MANIFEST / ID 1）
+
+  作用：
+    · 声明 asInvoker —— 游戏**不需要管理员权限**。没有这一条时，
+      部分环境会因为"未知应用可能提权"给出额外提示；声明之后行为明确。
+    · dpiAware=true（系统级 DPI 感知）—— 和 main.c 里 SetProcessDPIAware()
+      保持一致。**故意不用 PerMonitorV2**：那样 GetSystemMetrics 会返回物理像素，
+      而 winW/winH 直接影响全屏逻辑与鼠标换算，换感知级别等于换一套坐标体系，
+      没有实测过就不动。
+    · supportedOS —— 告诉系统"这是 Win10/11 应用"，避免被套上兼容性垫片
+      （兼容性垫片会带来文件/注册表重定向，正是"存档写不进去"的经典成因之一）。
+    · longPathAware —— 安装到深目录时路径超过 260 字符也不会失败。
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="Canity.Raycaster" version="2.0.0.0"
+                    processorArchitecture="amd64"/>
+  <description>Canity - a pure C raycasting horror game</description>
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 / Windows 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+      <!-- Windows 8.1 -->
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+</assembly>

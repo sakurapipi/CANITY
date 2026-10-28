@@ -1,0 +1,8 @@
+# custom
+state: UNKNOWN
+risk: medium
+command: -
+exit: None
+
+## detail
+没有 verify.toml

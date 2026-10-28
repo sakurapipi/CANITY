@@ -1,0 +1,10 @@
+# paths
+state: FAIL
+risk: low
+command: 内置正则（Windows / POSIX 家目录）
+exit: 1
+
+## detail
+命中 1 处
+
+- {"file": "tools/package_release.py", "line": 28, "message": "Windows 用户绝对路径：C:\\Users\\ggg", "direction": {"class": "B", "evidence": "tools/package_release.py:28", "root_cause": "tools/package_release.py:28 Windows 用户绝对路径：C:\\Users\\ggg —— 要不要改取决于会不会发布它", "action": "如果这个文件会进仓库或发布：换成相对路径或环境变量；如果只是本机脚本：可以不改，但要知道它会泄漏用户名和目录结构", "must_not_touch": ["先确认发布范围：整个项目都要发布的话，这几处得一起改（半改半不改更乱）"], "verify": "verify_start(checks=[\"paths\"]) 应 0 处提示（只报告不参与判定；命令行 --checks paths）", "scale": "low", "blocking": false}, "id": "paths:tools/package_release.py:28:341e70fd94"}

@@ -1,0 +1,8 @@
+# tests
+state: UNKNOWN
+risk: high
+command: -
+exit: None
+
+## detail
+没有识别到测试入口（scripts.test / pytest / tests/*.py / tests/*.mjs / *.test.js / test_*.py）

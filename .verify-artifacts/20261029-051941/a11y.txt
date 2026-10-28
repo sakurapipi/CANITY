@@ -1,0 +1,8 @@
+# a11y
+state: UNKNOWN
+risk: low
+command: -
+exit: None
+
+## detail
+项目里没有 HTML 文件
