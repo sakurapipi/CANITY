@@ -19,6 +19,7 @@ typedef struct {
     int   active;
     int   kind;       /* 0 SHADE / 1 SPIDER / 2 ECHO */
     int   cool;       /* 接触伤害后的短暂无敌 */
+    int   hp;         /* v2.2：血量（原来没有 hp，三把武器都打不到它们） */
 } Extra;
 
 extern Extra extras[EXTRA_MAX];
@@ -26,6 +27,9 @@ extern Extra extras[EXTRA_MAX];
 void ExtrasReset(void);
 void ExtrasSpawnForLevel(int level);
 void UpdateExtras(float dt);
+
+/* v2.2：对指定位置附近的游荡怪造成伤害，返回打中的只数 */
+int  DamageExtrasAt(float x, float y, float radius, int dmg);
 
 /* 供渲染使用 */
 int  ExtrasCount(void);

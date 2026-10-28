@@ -1664,6 +1664,8 @@ void WeaponTryAttack(float charge) {
                 g_dmgIgnoreArmor = 0;
                 hits++;
             }
+            /* v2.2：游荡怪（影子/盲螨/回响）之前完全打不到 */
+            if (DamageExtrasAt(px, py, 0.45f, dmg)) hits++;
             for (int i = 0; i < LEECH_MAX; i++) {
                 if (!leeches[i].active) continue;
                 if (Dist2(px, py, leeches[i].x, leeches[i].y) < 0.42f) {

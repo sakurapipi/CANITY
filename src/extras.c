@@ -33,6 +33,26 @@ static int findSpot(float* ox, float* oy, float minD, float maxD) {
     return 0;
 }
 
+int DamageExtrasAt(float x, float y, float radius, int dmg) {
+    int hits = 0;
+    float r2 = radius * radius;
+    for (int i = 0; i < EXTRA_MAX; i++) {
+        Extra* ex = &extras[i];
+        if (!ex->active) continue;
+        float dx = ex->x - x, dy = ex->y - y;
+        if (dx * dx + dy * dy > r2) continue;
+        ex->hp -= dmg;
+        hits++;
+        if (ex->hp <= 0) {
+            ex->active = 0;
+            SpawnParticles(ex->x, ex->y, 1);
+            { extern int pendingShards; pendingShards += 18; }
+            PlaySfx(SFX_GLASS, 0.5f);
+        }
+    }
+    return hits;
+}
+
 void ExtrasSpawnForLevel(int level) {
     ExtrasReset();
     /* v2.0：第 1 层就出怪，数量随层数线性涨到 6 只 */
@@ -46,6 +66,8 @@ void ExtrasSpawnForLevel(int level) {
         extras[i].x = x;
         extras[i].y = y;
         extras[i].active = 1;
+        /* 影 20 / 盲螨 15 / 回响 10 —— 蜘蛛号称\\"血少\\"，之前根本没有 hp */
+        extras[i].hp = (extras[i].kind == 0) ? 20 : (extras[i].kind == 1 ? 15 : 10);
         extras[i].kind = rand() % 3;
         extras[i].timer = 1.0f + (float)(rand() % 200) / 100.0f;
         extras[i].cool = 0;
