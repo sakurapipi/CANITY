@@ -230,6 +230,13 @@ int bossMaxHp = 1;
 int bossDefeated = 0;
 int totalKills = 0;      /* v2.0：累计击杀，成就用 */
 int shortcutUsed = 0;
+/* v2.2：成就计数器（原来 15 个成就没有任何触发点） */
+int killsWrench = 0, killsBottle = 0;
+float crankSecondsTotal = 0.0f;
+int floorsNoLight = 0, floorsFlawless = 0, floorsPacifist = 0, floorsFast = 0, floorsQuiet = 0;
+float lowSanitySeconds = 0.0f;
+int floorKills = 0, floorTookDamage = 0;
+float floorStartTime = 0.0f;
 int lastResortUsed = 0;   /* v2.2 LAST RESORT：本局是否已用掉免死 */    /* v2.0 SHORTCUT：本局是否已用过跳层 */
 int dailyMode = 0;
 int dailySeed = 0;
@@ -1830,6 +1837,7 @@ void Update(float dt) {
         }
         sanity -= drain * siphonSan * dt;
     }
+    lowSanitySeconds += (sanity <= 1.0f) ? dt : 0.0f;   /* v2.2：LAST BREATH */
     if (sanity <= 0.0f) {
         sanity = 0.0f;
         runInProgress = 0;
@@ -2529,6 +2537,19 @@ void Update(float dt) {
             currentLevel++;
             GenerateLevel();
         }
+        /* v2.2：每层结算 —— 给"无伤/和平/速通/摸黑/安静"五个成就攒计数 */
+        {
+            float floorTime = runTime - floorStartTime;
+            if (floorTime < 90.0f)  floorsFast++;
+            if (floorKills == 0)    floorsPacifist++;
+            if (floorTookDamage == 0) floorsFlawless++;
+            if (!flashlightOn)      floorsNoLight++;
+        }
+        floorKills = 0;
+        floorTookDamage = 0;
+        floorStartTime = runTime;
+        CheckAchievements();
+
         /* v1.8：通过本层 → 事件加分进本局总分 */
         if (evThisLevel >= 0) eventBonus += EventScore(evThisLevel);
 
@@ -2829,6 +2850,21 @@ static void CheckAchievements(void) {
     if (totalShardsEarned >= 3000) UnlockAchievement(27);   /* SHARD TYCOON */
     if (BestiarySeenAll())  UnlockAchievement(26);          /* BESTIARY DONE */
     if (totalKills >= 100)  UnlockAchievement(38);          /* CENTURION */
+    /* ---- v2.2：把长期解不开的成就接上（原来 15 个没有任何触发点） ---- */
+    if (currentLevel >= 24) UnlockAchievement(33);              /* OFF BY ONE（与 19 同条件） */
+    if (currentLevel >= 12 && relicTotal == 0) UnlockAchievement(31);   /* NO RELICS */
+    if (gameWon && relicTotal == 0) UnlockAchievement(39);      /* TRUE ENDING */
+    if (gameWon && sanity <= 25.0f) UnlockAchievement(35);      /* BLOOD PRICE */
+    if (gameWon && !flashlightOn)   UnlockAchievement(36);      /* GHOST RUN */
+    if (killsWrench >= 25) UnlockAchievement(29);               /* KNIFE ONLY（用扳手） */
+    if (killsBottle >= 25) UnlockAchievement(30);               /* BOTTLE RAIN */
+    if (crankSecondsTotal >= 300.0f) UnlockAchievement(28);     /* CRANK ADDICT */
+    if (floorsNoLight >= 3) UnlockAchievement(21);              /* NO LIGHT RUN */
+    if (floorsFlawless >= 1) UnlockAchievement(20);             /* FLAWLESS FLOOR */
+    if (floorsPacifist >= 1) UnlockAchievement(22);             /* PACIFIST FLOOR */
+    if (floorsFast >= 1) UnlockAchievement(23);                 /* SPEED DEMON */
+    if (floorsQuiet >= 1) UnlockAchievement(34);                /* SILENT FLOOR */
+    if (lowSanitySeconds >= 30.0f) UnlockAchievement(37);       /* LAST BREATH */
     /* 9: SPEED RUNNER - 第 1 关 2 分钟内过关 */
     if (currentLevel == 1 && runTime < 120.0f && breakerOpen) UnlockAchievement(8);
     /* 10: DEEP DIVER - 到达第 10 层 */

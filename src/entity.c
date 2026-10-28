@@ -771,6 +771,16 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
                打一只怪要 20 秒才 4 碎片，最优解是永远不打。 */
             pendingShards += (m == &monster) ? 25 : 40;
             { extern int totalKills; totalKills++; }
+            /* v2.2：分武器计数（KNIFE ONLY / BOTTLE RAIN 成就） */
+            {
+                extern int totalKills, killsWrench, killsBottle, floorKills;
+                extern int curWeapon;
+                (void)totalKills;
+                floorKills++;
+                if (type == DT_BLUNT) killsWrench++;
+                else if (type == DT_SHARD) killsBottle++;
+                (void)curWeapon;
+            }
         }
         if (m == &monster) SpawnMonster();
         else SpawnLightBeast();
