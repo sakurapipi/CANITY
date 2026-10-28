@@ -1020,6 +1020,29 @@ static float FlareLightAt(float wx, float wy) {
     return best;
 }
 
+
+/* v2.2：把一次相机投影抽成函数（原来有三份拷贝，后两份没算 pitch）。
+   ProjectSprite 用 pitchCos/pitchSin，另外两处直接用 renderH/2，
+   抬头/低头时就会和墙错开。这里统一。 */
+static int ProjectPoint(float wx, float wy, float z,
+                        int* outX, int* outY, float* outUnit, float* outTy) {
+    float dx = wx - posX, dy = wy - posY;
+    float det = planeX * dirY - dirX * planeY;
+    if (det == 0.0f) return 0;
+    float invDet = 1.0f / det;
+    float tx = invDet * (dirY * dx - dirX * dy);
+    float ty = invDet * (-planeY * dx + planeX * dy);
+    if (ty <= 0.05f) return 0;
+    float unit = (float)renderH / ty;
+    *outX = (int)((renderW / 2.0f) * (1.0f + tx / ty));
+    /* 地平线按 pitch 偏移（和 ProjectSprite 一致） */
+    float hz = (float)renderH * 0.5f + (float)horizon;
+    *outY = (int)(hz + unit * (0.5f - z));
+    *outUnit = unit;
+    *outTy = ty;
+    return 1;
+}
+
 static void DrawOrbSprite(float wx, float wy, float z, float worldR,
                           unsigned int coreCol, unsigned int haloCol,
                           float alphaMul) {
@@ -1027,18 +1050,22 @@ static void DrawOrbSprite(float wx, float wy, float z, float worldR,
        spriteLight 原来只在出口光柱那里被显式置 1，其余自发光精灵
        会沿用"上一个画完的精灵"的衰减 —— 荧光棒的亮度取决于旁边的箱子有多近。 */
     spriteLight = 1.0f;
-    float dx = wx - posX, dy = wy - posY;
-    float det = planeX * dirY - dirX * planeY;
-    if (det == 0.0f) return;
-    float invDet = 1.0f / det;
-    float tx = invDet * (dirY * dx - dirX * dy);
-    float ty = invDet * (-planeY * dx + planeX * dy);
-    if (ty <= 0.05f) return;                 /* 背后或贴脸 */
-
-    float unit = renderH / ty;
-    int cx = (int)((renderW / 2.0f) * (1.0f + tx / ty));
-    int cyFloor = renderH / 2 + (int)(unit * 0.5f);
-    int cy = cyFloor - (int)(unit * z);
+    int cx, cy, cyFloor;
+    float unit, ty;
+    {
+        float hz = (float)renderH * 0.5f + (float)horizon;
+        float dx0 = wx - posX, dy0 = wy - posY;
+        float det = planeX * dirY - dirX * planeY;
+        if (det == 0.0f) return;
+        float invDet = 1.0f / det;
+        float tx = invDet * (dirY * dx0 - dirX * dy0);
+        ty = invDet * (-planeY * dx0 + planeX * dy0);
+        if (ty <= 0.05f) return;
+        unit = (float)renderH / ty;
+        cx = (int)((renderW / 2.0f) * (1.0f + tx / ty));
+        cyFloor = (int)(hz + unit * 0.5f);
+        cy = (int)(hz + unit * (0.5f - z));
+    }
 
     int r = (int)(unit * worldR);
     if (r < 3) r = 3;
@@ -1117,18 +1144,10 @@ static void DrawFlareSprite(int idx) {
    玻璃瓶沿用小球（它本来就是飞行的碎玻璃反光）。 */
 static void DrawShotModel(int idx) {
     float wx = shot[idx].x, wy = shot[idx].y, z = shot[idx].z;
-    float dx = wx - posX, dy = wy - posY;
-    float det = planeX * dirY - dirX * planeY;
-    if (det == 0.0f) return;
-    float invDet = 1.0f / det;
-    float tx = invDet * (dirY * dx - dirX * dy);
-    float ty = invDet * (-planeY * dx + planeX * dy);
-    if (ty <= 0.05f) return;
-
-    float unit = (float)renderH / ty;
-    int cx = (int)((renderW / 2.0f) * (1.0f + tx / ty));
-    int cyFloor = renderH / 2 + (int)(unit * 0.5f);
-    int cy = cyFloor - (int)(unit * z);
+    int cx, cy, cyFloor;
+    float unit, ty;
+    if (!ProjectPoint(wx, wy, z, &cx, &cy, &unit, &ty)) return;
+    cyFloor = (int)((float)renderH * 0.5f + (float)horizon + unit * 0.5f);
     int occ = cx < 0 ? 0 : (cx >= renderW ? renderW - 1 : cx);
     if (ty * 0.85f >= zBuffer[occ]) return;
 
