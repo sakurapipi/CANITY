@@ -1844,8 +1844,11 @@ void DrawSkillTree(void) {
 
     /* 跨支行：虚线框（不画连线 —— 它们不属于任何一列） */
     {
+        /* v3.0：**框要盖住全部 4 列** ——
+           原来右边界取的是第 3 列（id 2），第 4 列（SALVAGE）落在框外，
+           看起来像「右下角那一栏没有边框」（用户截图）。 */
         int x0 = L.node[SkillNodeIdAt(0, 4)].left  - TH / 4;
-        int x1 = L.node[SkillNodeIdAt(2, 4)].right + TH / 4;
+        int x1 = L.node[SkillNodeIdAt(3, 4)].right + TH / 4;
         int y0 = L.crossTop - TH / 6;
         int y1 = L.crossBot + TH / 6;
         SkillDrawDashFrame(x0, y0, x1, y1, kBranchColor[3], 0.40f,
@@ -3524,6 +3527,12 @@ void RenderFrame(void) {
             }
             if (dw < 1) dw = 1;
             if (dh < 1) dh = 1;
+            /* v3.0：**兜底** —— 等比算出来的画面如果不到窗口的 70%，
+               说明 renderW/renderH 和当前客户区严重不匹配（缩放中/切换分辨率），
+               这时宁愿拉满也不要留一条细带（那种情况比拉伸更难玩）。 */
+            if (dw < cw * 7 / 10 || dh < ch * 7 / 10) {
+                dw = cw; dh = ch;
+            }
             dx = (cw - dw) / 2;
             dy = (ch - dh) / 2;
         }
