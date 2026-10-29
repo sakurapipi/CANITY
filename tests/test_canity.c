@@ -158,8 +158,10 @@ static void test_stable_visuals_and_input(void) {
       /* v3.0：锁盘改成只认 Esc / M 关闭（原来任意键都关，解题时误按就没了）。 */
   check(contains(game, "wParam == VK_ESCAPE || wParam == 'M'"),
   "lock overlay key guard missing");
-    check(contains(ui, "int bandT = winH * 37 / 100;"),
-          "hide mask is not using stable bands");
+    /* v3.0：藏身遮罩已取消（用户要求：躲在柜子里也要看得见提示）。
+     现在反过来检查：那段不透明黑边不该再回来。 */
+    check(!contains(ui, "int bandT = winH * 37 / 100;"),
+          "hide mask bands came back (user asked to remove it)");
     check(contains(render, "int frameSeed = 17;"),
           "low-sanity vignette still uses animated full-screen noise");
     free((void*)game);
