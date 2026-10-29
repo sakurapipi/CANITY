@@ -1,6 +1,5 @@
-# —— 构建产物 ——
-*.exe
-!tools/release.exe
+# 鈥斺€?鏋勫缓浜х墿 鈥斺€?*.exe
+!/release.exe
 *.o
 *.obj
 *.dll
@@ -9,19 +8,15 @@
 dist/
 build/
 
-# —— 存档与备份 ——
-*.sav
+# 鈥斺€?瀛樻。涓庡浠?鈥斺€?*.sav
 *.bak
 
-# —— 临时分析与调试（下划线前缀 / 日志 / 截图）——
-_*
+# 鈥斺€?涓存椂鍒嗘瀽涓庤皟璇曪紙涓嬪垝绾垮墠缂€ / 鏃ュ織 / 鎴浘锛夆€斺€?_*
 debug.log
 *.log
 
-# —— 本地暂存目录（lockbox 的移植中间件，已验证后并入 src/）——
-port_staging/
+# 鈥斺€?鏈湴鏆傚瓨鐩綍锛坙ockbox 鐨勭Щ妞嶄腑闂翠欢锛屽凡楠岃瘉鍚庡苟鍏?src/锛夆€斺€?port_staging/
 
-# —— 系统与编辑器 ——
-.DS_Store
+# 鈥斺€?绯荤粺涓庣紪杈戝櫒 鈥斺€?.DS_Store
 Thumbs.db
 *.swp
