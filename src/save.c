@@ -553,8 +553,13 @@ void ContinueRun(void) {
     memcpy(explored, g_save.explored, sizeof(explored));
 
     /* v4 新增：安全屋 / 投掷物 / 词条 / 主题 */
-    flares = g_save.flares;
-    bottles = g_save.bottles;
+    /* v3.0：**道具数量必须夹取** ——
+       玩家实测「道具栏突然变成 MIRROR X99 / FLARE X99 / BOTTLE X99」，
+       就是因为这里只有直接赋值：坏存档/越界写入的值会原样进 HUD。
+       上限给 99（正常玩法永远到不了），下限 0。 */
+    #define CLAMP_ITEM(v) do { if ((v) < 0) (v) = 0; if ((v) > 99) (v) = 99; } while (0)
+    flares = g_save.flares;      CLAMP_ITEM(flares);
+    bottles = g_save.bottles;    CLAMP_ITEM(bottles);
     /* v13：v2.0 新系统（不读回来 = 中途退出丢光遗物/Boss 状态/每日战役） */
     for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = g_save.relicOwned[i];
     relicTotal = g_save.relicTotal;
@@ -565,9 +570,9 @@ void ContinueRun(void) {
     dailySeed = g_save.dailySeed;
     campaignMode = g_save.campaignMode;
     campaignStage = g_save.campaignStage;
-    firePots = g_save.firePots;
-    gluePots = g_save.gluePots;
-    mirrors = g_save.mirrors;
+    firePots = g_save.firePots;   CLAMP_ITEM(firePots);
+    gluePots = g_save.gluePots;   CLAMP_ITEM(gluePots);
+    mirrors = g_save.mirrors;   CLAMP_ITEM(mirrors);
     bankStreak = g_save.bankStreak;
     modBatteryMul = g_save.modBatteryMul;
     if (!(modBatteryMul > 0.0f)) modBatteryMul = 1.0f;
@@ -596,9 +601,9 @@ void ContinueRun(void) {
     for (int i = 0; i < MAX_THROWN; i++) thrown[i] = g_save.thr[i];
 
     /* v9：把新存的进度接回来（顺手夹一下，坏存档不至于把数量弄成负数） */
-    bricks      = g_save.bricks      < 0 ? 0 : g_save.bricks;
-    acids       = g_save.acids       < 0 ? 0 : g_save.acids;
-    smokeBombs  = g_save.smokeBombs  < 0 ? 0 : g_save.smokeBombs;
+    bricks      = g_save.bricks;      CLAMP_ITEM(bricks);
+    acids       = g_save.acids;       CLAMP_ITEM(acids);
+    smokeBombs  = g_save.smokeBombs;  CLAMP_ITEM(smokeBombs);
     pendingShards = g_save.pendingShards < 0 ? 0 : g_save.pendingShards;
     if (pendingShards > 999999) pendingShards = 0;      /* 明显是坏档 */
     runSkillMask = g_save.runSkillMask;
@@ -662,6 +667,7 @@ void ContinueRun(void) {
     tookDamage = 0;
     flashlightOffLevel = 0;
     sprintedThisLevel = 0;
+    #undef CLAMP_ITEM
 }
 
 void DeleteSave(void) {
