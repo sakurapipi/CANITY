@@ -750,7 +750,7 @@ static void LockGrain(LockBox b, float amount) {
     if (amount <= 0.0f) return;
     int w = b.x1 - b.x0, h = b.y1 - b.y0;
     if (w < 8 || h < 8) return;
-    int marks = 320;
+    int marks = 120;   /* v3.0：再降一档，320 在低端机上仍偏重 */
     int sz = LUIS(2);
     if (sz < 1) sz = 1;
     for (int k = 0; k < marks; k++) {
@@ -784,6 +784,7 @@ static void LockRust(LockBox b, float amount) {
 /* ③ 铆钉：实心小圆 + 左上高光，让边框有厚度 */
 static void LockRivet(int cx, int cy, int r) {
     if (r < 2) r = 2;
+    if (r > 24) r = 24;   /* v3.0：异常窗口尺寸下别让铆钉铺满屏幕 */
     /* v3.0：原来每个像素调一次 BlendRectWin，4 个铆钉 = 300+ 次调用/帧。
        改成 3 个矩形近似一个带高光的圆盘，调用次数降到 12。 */
     BlendRectWin(cx - r, cy - r, cx + r + 1, cy + r + 1, 0x00383028u, 0.85f);      /* 本体 */
@@ -794,6 +795,8 @@ static void LockRivet(int cx, int cy, int r) {
 
 /* 一条「脏面板」：外框阴影 → 底漆 → 噪点 → 锈 → 内凹高光 → 铆钉 */
 static void LockPanelDirty(LockBox b, float grime) {
+    /* v3.0：**矩形倒挂直接退出** —— 窗口极小时 LUIS 可能算出 x1<=x0。 */
+    if (b.x1 <= b.x0 || b.y1 <= b.y0) return;
     /* 投影 */
     BlendRectWin(b.x0 + LUIS(3), b.y0 + LUIS(3),
                  b.x1 + LUIS(3), b.y1 + LUIS(3), 0x00000000u, 0.55f);
