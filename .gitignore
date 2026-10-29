@@ -1,4 +1,27 @@
+# —— 构建产物 ——
 *.exe
+!tools/release.exe
 *.o
-*.sav
+*.obj
+*.dll
+*.pdb
+*.ilk
 dist/
+build/
+
+# —— 存档与备份 ——
+*.sav
+*.bak
+
+# —— 临时分析与调试（下划线前缀 / 日志 / 截图）——
+_*
+debug.log
+*.log
+
+# —— 本地暂存目录（lockbox 的移植中间件，已验证后并入 src/）——
+port_staging/
+
+# —— 系统与编辑器 ——
+.DS_Store
+Thumbs.db
+*.swp
