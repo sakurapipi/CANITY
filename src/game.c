@@ -203,6 +203,7 @@ float secondWindTimer = 0.0f;   /* v3.0 二次呼吸：体力归零后的宽限�
 float vanishTimer = 0.0f;       /* v3.0 消失：脱离视线累计秒数 */
 int   playDeadUsed = 0;         /* v3.0 假死：本局用过了吗 */
 int   tutorialOff = 0;          /* v3.0 开局引导：玩家按键关闭了 */
+float hideBlockTimer = 0.0f;    /* v3.0：刚解锁/刚翻完箱时短暂禁止进藏身点 */
 int   vanished = 0;             /* v3.0 消失：1 = 已隐身 */
 float vanishHold = 0.0f;        /* v3.0 消失：本次隐身剩余秒数 */
 float decoySelfTimer = 0.0f;  /* 投石后的自身噪声加成计时 */
@@ -2228,7 +2229,7 @@ void Update(float dt) {
                 keyPressed[g_bindings[ACT_INTERACT]] = 0;
                 uiDirty = 1;
             }
-        } else if (hideSpotNear >= 0 && hoverKind == 0) {
+        } else if (hideSpotNear >= 0 && hoverKind == 0 && hideBlockTimer <= 0.0f) {
             /* v3.0 修复：**附近有可交互的箱子时，藏身点不抢 E** ——
                原来藏身点无条件抢在容器前面消费按键
                （用户实测：箱子和躲藏点刷在一起时箱子开不了）。 */
@@ -2267,6 +2268,9 @@ void Update(float dt) {
 
     holdingNow = (hoverKind != 0 && IsActionDown(ACT_INTERACT));
     }
+
+    /* v3.0：锁定窗口递减（见 hideBlockTimer 的用法） */
+    if (hideBlockTimer > 0.0f) hideBlockTimer -= dt;
 
     /* v3.0：**周期自动存档** ——
        原来 SaveGame() 只在「解锁成就 / 换层 / 安全屋操作 / 退出」时调用，
@@ -2568,6 +2572,9 @@ void Update(float dt) {
         holdTimer += dt;
         if (holdTimer >= SEARCH_TIME * RunSearchTimeMul()) {
             holdTimer = 0.0f;
+            /* v3.0：翻完箱也上 0.4 秒封锁 ——
+               否则 E 还按着，同一帧/下一帧就会被旁边的藏身点吸进去。 */
+            hideBlockTimer = 0.4f;
             if (hoverKind == 1) {
                 Container* c = &containers[hoverIndex];
                 c->searched = 1;

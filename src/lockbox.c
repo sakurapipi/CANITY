@@ -138,6 +138,14 @@ void CloseLockOverlay(void) {
     lockActive = 0;
     lockTarget = -1;
     lockCooldown = 0.35f;
+    /* v3.0：**解锁后短暂禁止进藏身点** ——
+       用户实测「长按解锁箱完之后会被自动吸附到柜子里」：
+       E 还按着 -> 自动重复再置 keyPressed -> 藏身分支接管。
+       这里上 0.4 秒封锁，等玩家松手。 */
+    {
+        extern float hideBlockTimer;
+        hideBlockTimer = 0.4f;
+    }
     if (wasActive) {
         /* 鼠标交还视角控制，并复位输入边沿 ——
            否则「点 BACK」的那一下左键会被当成投掷起手。 */
