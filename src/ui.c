@@ -3497,6 +3497,15 @@ void RenderFrame(void) {
        结果玩游戏时锁盘一帧都不显示、藏身也没有任何视觉反馈。 */
     DrawLockOverlay();
     {
+        /* v3.0：**校准时不能盖遮罩** ——
+           用户实测「在衣柜全黑的情况下看不到判定条」：
+           校准条画在 UIS(146)（靠上），而遮罩上下各盖 37%，正好埋掉。
+           校准时让遮罩让路 —— 此时玩家本来就在盯着滑块，
+           看不清走廊不影响玩法。 */
+        {
+            extern int calibActive;
+            if (calibActive) goto skip_hide_mask;
+        }
         extern int hiddenIn;
         if (hiddenIn >= 0) {
             /* v3.0：**藏进去要看不出外面** ——
@@ -3515,6 +3524,7 @@ void RenderFrame(void) {
             BlendRectWin(0, winH - bandT, bandS, winH, 0x00000000u, 1.0f);
             BlendRectWin(winW - bandS, winH - bandT, winW, winH, 0x00000000u, 1.0f);
         }
+    skip_hide_mask: ;
     }
 
 
