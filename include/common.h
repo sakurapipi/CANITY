@@ -114,13 +114,17 @@ extern int bestEndlessScore;
    原来它只对噪音有反应，玩家站在它面前 2 米它也毫无反应
    （玩家实测：怪贴脸站了十几秒，不打人、血没掉，只有 SANITY 在滴）。
    视野给 7 格 + 需要视线不被墙挡。手电关着时减半，逼玩家学会省电。 */
-#define MONSTER_SIGHT       7.0f
-#define MONSTER_SIGHT_DARK  3.5f
-#define MONSTER_SPEED_BASE 2.15f    /* 寻声怪基础速度 */
+#define MONSTER_SIGHT       5.0f   /* v3.0 削弱：7 → 5 */
+#define MONSTER_SIGHT_DARK  2.5f   /* v3.0 削弱：3.5 → 2.5 */
+/* v3.0 削弱：2.15 → 1.90。
+   2.15 比玩家走路 2.0 还快，一旦被盯上只能靠 3.1 秒的冲刺，
+   体力一空就是必死 —— 用户反馈「怪物强度过高」。
+   1.90 低于走路，慢走能拉开但每 10 秒只赚 1 格，压力仍在。 */
+#define MONSTER_SPEED_BASE 1.90f    /* 寻声怪基础速度 */
 #define LIGHTBEAST_SPEED_BASE 1.50f /* 光敏怪基础速度 */
 #define MONSTER_SPEED_STEP 0.03f    /* 每层 +0.03 */
-#define MONSTER_SPEED_MAX 2.35f   /* v3.0 平衡：仍然 < 冲刺 3.0 */    /* v2.1：玩家 2.0，怪必须追不上但贴着 */
-#define MONSTER_SPEED_FINAL_MAX 2.35f  /* v2.1：叠 HUNTED 也不许超过玩家 */
+#define MONSTER_SPEED_MAX 2.05f   /* v3.0 削弱：2.35 → 2.05（刚超过走路） */   /* v3.0 平衡：仍然 < 冲刺 3.0 */    /* v2.1：玩家 2.0，怪必须追不上但贴着 */
+#define MONSTER_SPEED_FINAL_MAX 2.10f   /* v3.0 削弱 */  /* v2.1：叠 HUNTED 也不许超过玩家 */
 /* 最终上限 2.40 < MOVE_SPEED 2.50：玩家永远走得比怪快。
    基础上限留 1.85 是为了让 HUNTED 的 ×1.25 在深层仍有意义
    （1.85 × 1.25 = 2.3125，不会顶到最终上限）。 */
@@ -210,6 +214,7 @@ typedef struct {
     int path[MON_MAXPATH][2];
     int pathLen, pathIdx;
     float repath, stateTimer, wanderTimer, hitCooldown, growlTimer;
+    float sightHold;   /* v3.0：连续看见玩家的秒数（察觉延迟） */
     float huntTimer;   /* v3.0：本次追捕已持续秒数（超时放弃用） */
     float speed;
     int hp;                    /* 剩余血量 */

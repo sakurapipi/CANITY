@@ -612,7 +612,11 @@ void UpdateMonster(float dt) {
         float sd2 = sdx * sdx + sdy * sdy;
         float sight = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
         if (sd2 < sight * sight && HasLOS(monster.x, monster.y, posX, posY)) {
-            if (monster.state != 1) {
+            /* v3.0 削弱：**连续看见 0.6 秒才真的发现** ——
+               原来只要一帧视线通就立刻切追捕，玩家连反应的机会都没有。
+               现在有 0.6 秒的「察觉期」，这段时间内跑出视野就能断开。 */
+            monster.sightHold += dt;
+            if (monster.state != 1 && monster.sightHold >= 0.6f) {
                 monster.state = 1;
                 monster.repath = 0.0f;
                 monster.stateTimer = 0.0f;
@@ -621,6 +625,8 @@ void UpdateMonster(float dt) {
             /* 追捕中持续刷新目标（不然它只会跑向"最后一次听到的位置"） */
             monster.tx = posX;
             monster.ty = posY;
+        } else {
+            monster.sightHold = 0.0f;    /* 视线断开 → 察觉计时清零 */
         }
     }
 
