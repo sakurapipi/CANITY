@@ -509,11 +509,11 @@ enum {
     /* 筹 —— 风险与经济结构 */
     SK_BATTERY,   SK_CRANK,       SK_REST,      SK_METAB,
     /* 锋 —— 伤害交付方式 */
-    SK_BREATH,    SK_STILL,       SK_SLIP,      SK_RHYTHM,   /* v3.0：列 2 改成藏匿系 */
+    SK_BREATH,    SK_STILL,       SK_SLIP,      SK_PLAYDEAD,   /* v3.0：列 2 改成藏匿系 */
     /* 途 —— 整局形状 */
     SK_CARTO,     SK_BREAKER,     SK_FUSE_LESS, SK_SHORTCUT,
     /* 第 5 行：跨支 keystone */
-    SK_EXECUTE,   SK_WEATHERMAN,  SK_LASTRESORT, SK_SALVAGE
+    SK_SILENTRUN, SK_WEATHERMAN,  SK_LASTRESORT, SK_SALVAGE
 };
 
 #define META_COST 3.0f          /* 代谢：1 理智 = 3.0 电量（2.0 已验证会崩） */

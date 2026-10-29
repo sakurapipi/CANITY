@@ -142,3 +142,13 @@ int   RunFuseLess(void);
 int SkillsSelfTest(void);
 
 #endif /* CANITY_SKILLS_H */
+
+/* ==================== v3.0 逃生向效果（统一入口） ==================== */
+float HideStealthMul(void);      /* 屏息：藏身被发现概率 */
+float StillFaceMul(void);        /* 静面：追捕者放弃速度 */
+float SlipAwaySeconds(void);     /* 脱身：隐身所需脱战秒数 */
+int   PlayDeadAvailable(void);   /* 假死可用（技能树或改造树） */
+int   SilentRunOwned(void);      /* 静音冲刺 keystone */
+float QuietSoleMul(void);        /* 静底：走路噪音 */
+float ColdBloodMul(void);        /* 冷血：理智流失 */
+float ThickHideMul(void);        /* 厚皮：被抓扣理智 */

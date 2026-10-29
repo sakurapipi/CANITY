@@ -427,7 +427,7 @@ int RunFuseLess(void) {
 
 /* EXECUTIONER：目标 <25% 血时伤害 +80% */
 float SkillExecuteMul(int hp, int maxHp) {
-    if (!HasKeystone(SK_EXECUTE)) return 1.0f;
+    if (!HasKeystone(SK_SILENTRUN)) return 1.0f;
     if (maxHp <= 0) return 1.0f;
     if (hp * 4 >= maxHp) return 1.0f;          /* 还不到 1/4 血 */
     return 1.8f;
@@ -460,7 +460,7 @@ int SkillTypeWorkRank(void) {
 
 /* RELOAD RHYTHM：每第 3 次命中无视护甲 */
 int SkillRhythmActive(int hitCounter) {
-    if (!HasKeystone(SK_RHYTHM)) return 0;
+    if (!HasKeystone(SK_PLAYDEAD)) return 0;
     return (hitCounter % 3) == 0 ? 1 : 0;
 }
 
@@ -497,4 +497,57 @@ int SkillsSelfTest(void) {
     if (ult != 2) fail |= 32;
 
     return fail;
+}
+
+/* ==================== v3.0 逃生向效果（统一入口） ====================
+ * 两个来源会叠加：
+ *   ① HUB 技能树（skillRank[]，跨局持久）
+ *   ② 局内三选一（runSkillMask，每局重置）
+ * 这里把它们 OR 起来，调用方只问一次。
+ * ================================================================== */
+
+/* 屏息：藏身时被发现概率（越小越难被发现） */
+float HideStealthMul(void) {
+    float m = 1.0f;
+    if (SkillOwned(SK_BREATH)) m *= 0.55f;      /* 技能树 HOLD BREATH */
+    return m;
+}
+
+/* 静面：追捕者在藏身点旁放弃速度（越大放弃越快） */
+float StillFaceMul(void) {
+    if (SkillOwned(SK_STILL)) return 2.0f;      /* 放弃时间减半 */
+    return 1.0f;
+}
+
+/* 脱身：脱离视线多久后隐身（技能树 SLIP AWAY 从 3 秒降到 2 秒） */
+float SlipAwaySeconds(void) {
+    return SkillOwned(SK_SLIP) ? 2.0f : 3.0f;
+}
+
+/* 假死：技能树或改造树，任一拥有即可 */
+int PlayDeadAvailable(void) {
+    extern float BenchPlayDead(void);
+    if (SkillOwned(SK_PLAYDEAD)) return 1;
+    if (BenchPlayDead() > 0.5f) return 1;
+    return 0;
+}
+
+/* 静音冲刺（keystone SILENT RUN）：冲刺不再产生噪音 */
+int SilentRunOwned(void) {
+    return SkillOwned(SK_SILENTRUN);
+}
+
+/* 静底（局内 QUIET SOLE）：走路噪音 -25% */
+float QuietSoleMul(void) {
+    return RunSkillOwned(IR_STEADYHAND) ? 0.75f : 1.0f;
+}
+
+/* 冷血（局内 COLD BLOOD）：理智流失 -20% */
+float ColdBloodMul(void) {
+    return RunSkillOwned(IR_SWIFTRELOAD) ? 0.80f : 1.0f;
+}
+
+/* 厚皮（局内 THICK HIDE）：被抓扣理智 -35% */
+float ThickHideMul(void) {
+    return RunSkillOwned(IR_ARMOR) ? 0.65f : 1.0f;
 }

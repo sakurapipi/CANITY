@@ -295,7 +295,10 @@ void MakeNoise(float x, float y, float radius) {
             mm->stateTimer = 0.0f;
             /* v3.0 改造树「屏息」：玩家藏着时，追捕者更快放弃搜寻。
                之前这条补丁没落地（验证报告：BenchHideStealth 在 exe 里 0 个调用点）。 */
-            if (hiddenIn >= 0 && BenchHideStealth() < 1.0f) mm->stateTimer = 1.2f;
+            /* v3.0：屏息 = 改造树 + 技能树 HOLD BREATH，再加上静面 STILL FACE */
+            if (hiddenIn >= 0 && (BenchHideStealth() < 1.0f || HideStealthMul() < 1.0f)) {
+                mm->stateTimer = 1.2f * StillFaceMul();
+            }
 
         }
     }
@@ -767,7 +770,8 @@ void UpdateMonster(float dt) {
         {
             extern int playDeadUsed;
             extern int BenchPlayDead(void);
-            if (BenchPlayDead() && !playDeadUsed) {
+            /* v3.0：假死现在技能树和改造树任一拥有都可用 */
+            if (PlayDeadAvailable() && !playDeadUsed) {
                 playDeadUsed = 1;
                 monster.stun = 2.5f;
                 monster.state = 0;
@@ -782,7 +786,8 @@ void UpdateMonster(float dt) {
         }
 
         if (hiddenIn < 0) {
-            sanity -= catchLoss * RunDamageTakenMul() * BenchFearDamageMul();
+            /* v3.0：厚皮三层叠加 —— 改造树 -15%、局内 THICK HIDE -35% */
+            sanity -= catchLoss * RunDamageTakenMul() * BenchFearDamageMul() * ThickHideMul();
 
     AddHitFlash(0.85f);          /* v2.1：被抓的红闪 */
     AddShake(0.30f, 0.22f);

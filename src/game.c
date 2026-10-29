@@ -2143,6 +2143,8 @@ void Update(float dt) {
     /* v3.0：**被追捕者盯上时理智额外流失** ——
        这给「断开视线」一个具体理由，而藏身是最快的断开方式。
        藏着时不算被盯上（hiddenIn >= 0 直接跳过）。 */
+        /* v3.0：冷血（局内 COLD BLOOD）—— 理智流失 -20% */
+    drain *= ColdBloodMul();
     if (hiddenIn < 0 && monster.active && monster.state == 1) {
         float sdx = posX - monster.x, sdy = posY - monster.y;
         float sightNow = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
@@ -2373,7 +2375,8 @@ void Update(float dt) {
             vanishTimer = 0.0f;
         } else {
             vanishTimer += dt;
-            if (vanishTimer >= 3.0f) {
+            /* v3.0：SLIP AWAY 把这个时间从 3 秒降到 2 秒 */
+            if (vanishTimer >= SlipAwaySeconds()) {
                 vanished = 1;
                 vanishHold = 6.0f;       /* 隐身 6 秒 */
                 pickupMsg = g_lang == LANG_ZH ? "已隐身 6 秒" : "VANISHED 6s";
@@ -2850,7 +2853,10 @@ void Update(float dt) {
             if (stepTimer >= 0.30f) {
                 stepTimer = 0.0f;
                 PlaySfx(SFX_STEP, 0.50f);
-                MakeNoise(posX, posY, 9.0f * noiseMul * BenchWalkNoiseMul());   /* v3.0 轻步：冲刺脚步 */
+                /* v3.0：keystone SILENT RUN —— 冲刺完全不产生噪音 */
+                if (!SilentRunOwned())
+                    MakeNoise(posX, posY, 9.0f * noiseMul * BenchWalkNoiseMul()
+                              * QuietSoleMul());   /* 轻步 + 静底 */
             }
         } else if (moving && !holdingNow && !cranking) {
             /* v2.6：走路本来完全无声，现在连续走 5 秒之后开始有细微噪声。
@@ -2862,7 +2868,8 @@ void Update(float dt) {
                 if (walkStepTimer >= WALK_NOISE_INTERVAL) {
                     walkStepTimer = 0.0f;
                     PlaySfx(SFX_STEP, 0.28f);          /* 比冲刺轻 */
-                    MakeNoise(posX, posY, WALK_NOISE_RADIUS * noiseMul * BenchWalkNoiseMul());   /* v3.0 轻步：走路脚步 */
+                    MakeNoise(posX, posY, WALK_NOISE_RADIUS * noiseMul
+                              * BenchWalkNoiseMul() * QuietSoleMul());   /* 轻步 + 静底 */
                 }
             }
         } else {
