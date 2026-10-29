@@ -827,11 +827,56 @@ static void BuildTrainingArena(void) {
     containerCount = 0;
     breaker.active = 0;
 
-    /* v2.5：训练营里也放一个安全区 —— 用来试「校准小游戏」。
-       原来这里 safeRoom.active = 0，训练营里根本没有安全区。 */
+    /* v2.5：训练营里也放一个安全区 —— 用来试「校准小游戏」。 */
     safeRoom.x = 7.5f;
     safeRoom.y = (float)(MAP_HEIGHT / 2) + 0.5f;
     safeRoom.active = 1;
+
+    /* ===== v3.0：训练场重做 =====
+       用户要求：留 1 个（可搜容器）+ 2 个躲藏点 + 1 个解密装置。
+       走廊是 x=2..21、y=11..13 三格高，全部铺在这条线上。 */
+
+    /* ① 1 个可搜容器（带保险丝，方便测「捡→上电」链路） */
+    containers[0].x = 5.5f;
+    containers[0].y = (float)(MAP_HEIGHT / 2) + 0.5f;
+    containers[0].active = 1;
+    containers[0].searched = 0;
+    containers[0].content = 1;          /* 1 = 保险丝 */
+    containers[0].locked = 0;
+    containers[0].lockType = 0;
+    containers[0].lockCode = 0;
+    containerCount = 1;
+
+    /* ② 2 个躲藏点（衣柜 + 床底，正好覆盖两种高度） */
+    hideSpotCount = 2;
+    hideSpots[0].x = 9.5f;
+    hideSpots[0].y = (float)(MAP_HEIGHT / 2) + 0.5f;
+    hideSpots[0].kind = 0;              /* 衣柜 */
+    hideSpots[0].active = 1;
+
+    hideSpots[1].x = 14.5f;
+    hideSpots[1].y = (float)(MAP_HEIGHT / 2) + 0.5f;
+    hideSpots[1].kind = 1;              /* 床底 */
+    hideSpots[1].active = 1;
+
+    hiddenIn = -1;
+    hideSpotNear = -1;
+
+    /* ③ 1 个解密装置（上锁容器，四种锁型每次进训练场轮换，
+          这样四种锁都能试到） */
+    {
+        static int trainLockType = 0;
+        containers[1].x = 18.5f;
+        containers[1].y = (float)(MAP_HEIGHT / 2) + 0.5f;
+        containers[1].active = 1;
+        containers[1].searched = 0;
+        containers[1].content = 0;
+        containers[1].locked = 1;
+        containers[1].lockType = trainLockType % LOCK_TYPE_COUNT;
+        containers[1].lockCode = 0x2A5;    /* 固定密码，方便反复试同一个 */
+        trainLockType++;
+        containerCount = 2;
+    }
 
     ApplyFov();
 }
