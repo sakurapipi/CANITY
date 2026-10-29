@@ -2376,16 +2376,17 @@ static void DrawMapLegend(void) {
         { 0x0030D0D0u, "保险丝箱","FUSE"   },
         { 0x00B0C0D0u, "配电箱",  "BREAKER"},
         { 0x0060FF90u, "安全屋",  "SAFE"   },
+        { 0x0090E0FFu, "藏身点","HIDE"   },
     };
     extern int g_lang;
     int rowH = TextHeightWin() + UIS(6);
     int boxW = UIS(150);
-    int boxH = rowH * 5 + UIS(16);
+    int boxH = rowH * 6 + UIS(16);
     int bx0 = winW - boxW - UIS(24);
     int by0 = winH - boxH - UIS(24);
     BlendRectWin(bx0, by0, bx0 + boxW, by0 + boxH, 0x000A0E12u, 0.86f);
     FrameRectWin(bx0, by0, bx0 + boxW, by0 + boxH, 0x00C8B060u, 0.7f, 1);
-    for (int k = 0; k < 5; k++) {
+    for (int k = 0; k < 6; k++) {
         int cy = by0 + UIS(8) + k * rowH + TextHeightWin() / 2;
         BlendRectWin(bx0 + UIS(10), cy - UIS(5),
                      bx0 + UIS(20), cy + UIS(5), items[k].col, 1.0f);
@@ -2501,6 +2502,25 @@ void RenderMap(void) {
         for (int d = -3; d <= 3; d++) {
             PutPixel(sx + d, sy, 0x0060FF90);
             PutPixel(sx, sy + d, 0x0060FF90);
+        }
+    }
+
+    /* v3.0：**藏身点也要标出来** ——
+       逃生玩法里「哪里有柜子能躲」是最关键的信息，
+       原来小地图上只有箱子/配电箱/安全屋/出口，藏身点完全不可见。
+       画成青白色的菱形（区别于箱子的黄点），已探索过的才显示。 */
+    for (int i = 0; i < hideSpotCount; i++) {
+        if (!hideSpots[i].active) continue;
+        int hxi = (int)hideSpots[i].x, hyi = (int)hideSpots[i].y;
+        if (hxi < 0 || hxi >= MAP_WIDTH || hyi < 0 || hyi >= MAP_HEIGHT) continue;
+        if (!explored[hyi][hxi]) continue;
+        int px = mapStartX + hxi * cellSize + cellSize / 2;
+        int py = mapStartY + hyi * cellSize + cellSize / 2;
+        /* 菱形：比箱子的 5x5 方块小一点，一眼能分开 */
+        for (int d = -2; d <= 2; d++) {
+            int span = 2 - (d < 0 ? -d : d);
+            for (int e = -span; e <= span; e++)
+                PutPixel(px + e, py + d, 0x0090E0FF);
         }
     }
 

@@ -2992,33 +2992,51 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
        玩家实测：「双击 exe 直接掉进一局，没有标题画面也没有操作说明，
        E/F/R/T/M 全靠瞎按才发现」。这里在第 1 层前 25 秒给一段最简说明。 */
     if (currentState == STATE_PLAYING && currentLevel <= 1 && runTime < 25.0f) {
+        /* v3.0：**框必须按实际文字宽度算** ——
+           上一版固定 winW-80，最长那行「fuses -> power the breaker -> reach the exit」
+           比框还宽，文字直接溢出到框外（用户截图：「引导 UI 不完整被遮蔽」）。
+           这里先用 TextWidthWin 量出最宽一行，再决定框宽；同时把文案压短。 */
         static const char* hintZh[4] = {
             "WASD 移动    SHIFT 冲刺",
-            "E 翻箱/躲藏    F 手电    R 摇电",
-            "左键 敲击引怪    右键 扔东西",
-            "目标：找齐保险丝 → 给配电箱通电 → 跑出口",
+            "E 翻箱/躲藏   F 手电   R 摇电",
+            "左键 敲击引怪   右键 扔东西",
+            "保险丝 → 配电箱通电 → 出口",
         };
         static const char* hintEn[4] = {
             "WASD move    SHIFT sprint",
-            "E search / hide    F light    R crank",
+            "E search/hide   F light   R crank",
             "LMB knock to lure    RMB throw",
-            "GOAL: find fuses -> power the breaker -> reach the exit",
+            "fuses -> breaker -> exit",
         };
-        int lineH = TextHeightWin() + UIS(4);
-        int boxH = lineH * 4 + UIS(16);
-        int boxW = winW - UIS(80);
+        int lineH = TextHeightWin() + UIS(6);
+        int padX  = UIS(24), padY = UIS(14);
+
+        /* 量最宽一行 */
+        int maxW = 0;
+        for (int li = 0; li < 4; li++) {
+            const char* t = (g_lang == LANG_ZH) ? hintZh[li] : hintEn[li];
+            int w = TextWidthWin(t);
+            if (w > maxW) maxW = w;
+        }
+        int boxW = maxW + padX * 2;
+        int limitW = winW - UIS(40);
+        if (boxW > limitW) boxW = limitW;        /* 屏幕实在放不下才截 */
+        int boxH = lineH * 4 + padY * 2;
+
         int bx0 = (winW - boxW) / 2;
         int by0 = winH - UIS(200) - boxH;
         if (by0 < UIS(70)) by0 = UIS(70);
+
         float fade = 1.0f;
         if (runTime > 20.0f) fade = (25.0f - runTime) / 5.0f;
         if (fade < 0.0f) fade = 0.0f;
+
         BlendRectWin(bx0, by0, bx0 + boxW, by0 + boxH, 0x000C1116u, 0.82f * fade);
         FrameRectWin(bx0, by0, bx0 + boxW, by0 + boxH, 0x00C8B060u, 0.75f * fade, 1);
         for (int li = 0; li < 4; li++) {
             const char* t = (g_lang == LANG_ZH) ? hintZh[li] : hintEn[li];
             unsigned int col = (li == 3) ? 0x00FFD060u : 0x00C8C4BCu;
-            DrawTextCenterWin(winW / 2, by0 + UIS(8) + li * lineH, t, col);
+            DrawTextCenterWin(winW / 2, by0 + padY + li * lineH, t, col);
         }
     }
 
