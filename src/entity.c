@@ -688,9 +688,28 @@ void UpdateMonster(float dt) {
            追 8 秒还没抓到就降级为搜寻（3 秒），给玩家脱身窗口。 */
         monster.huntTimer += dt;
         if (monster.huntTimer > 8.0f) {
-            monster.state = 2;
-            monster.stateTimer = 3.0f;
+            /* v3.0：**超时后要真的走开，不能原地搜** ——
+               用户截图「还是在堵门」：原来超时只切到 state=2「原地搜寻」，
+               而原地就在玩家旁边，于是它永远堵在那儿。
+               现在给它一个「背离玩家 10 格」的撤退目标，走远了再变游荡。 */
+            float ax = monster.x - posX, ay = monster.y - posY;
+            float al = sqrtf(ax * ax + ay * ay);
+            if (al < 0.01f) { ax = 1.0f; ay = 0.0f; al = 1.0f; }
+            ax /= al; ay /= al;
+            float rx = monster.x + ax * 10.0f;
+            float ry = monster.y + ay * 10.0f;
+            /* 夹在地图内 */
+            if (rx < 1.5f) rx = 1.5f;
+            if (ry < 1.5f) ry = 1.5f;
+            if (rx > MAP_WIDTH - 1.5f) rx = MAP_WIDTH - 1.5f;
+            if (ry > MAP_HEIGHT - 1.5f) ry = MAP_HEIGHT - 1.5f;
+
+            monster.state = 2;              /* 搜寻（会走开） */
+            monster.stateTimer = 6.0f;
+            monster.tx = rx;
+            monster.ty = ry;
             monster.huntTimer = 0.0f;
+            monster.repath = 0.0f;
             monster.pathLen = 0;
             monster.pathIdx = 0;
         }
