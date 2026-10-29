@@ -3330,24 +3330,30 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         DrawTextCenterWin(winW / 2, by + barH + UIS(6), pct, 0x00FFFFFFu);
     }
 
-    /* v3.0：**摇电不再单独占一块面板** ——
-       前两版分别在画面中下方画大板和贴底细条，用户两次反馈「遮挡视野」。
-       最后改成完全并入 LIGHT 那一行：把状态文字换成 CRANK 28%，
-       再在手电条下方压一条 4px 的进度线。零额外占用。 */
+    /* v3.0：**摇电提示画在手电条内部** ——
+       前几版分别用大板 / 底部细条 / 条右侧文字，都有遮挡或重叠（用户三次截图）。
+       这一版把「CRANK 41%」直接居中画在 LIGHT 条里面：
+       横向位置被条本身限死，不可能再和任何其它 HUD 元素重叠。
+       同时条本身按进度填充，一眼能看出还差多少。 */
     if (cranking) {
         float cc = crankTimer / 2.4f;
         if (cc > 1.0f) cc = 1.0f;
-        char cbuf[24];
-        sprintf(cbuf, cc >= 1.0f ? "CRANK OK" : "CRANK %d%%",
-                (int)(cc * 100.0f + 0.5f));
-        unsigned int ccol = cc >= 1.0f ? 0x0060FF90u : 0x00E8C040u;
-        /* 覆盖掉原来的 ON/OFF 文字 */
-        DrawTextWin(barX + barW + UIS(12), y1 - UIS(3), cbuf, ccol);
-        /* 手电条正下方 4px 的细进度线 */
-        BlendRectWin(barX, y1 + barH + UIS(2), barX + barW, y1 + barH + UIS(6),
-                     0x00101010u, 0.75f);
-        BlendRectWin(barX, y1 + barH + UIS(2),
-                     barX + (int)(barW * cc), y1 + barH + UIS(6), ccol, 0.95f);
+        unsigned int ccol = (cc >= 1.0f) ? 0x00FFFFFFu : 0x00000000u;
+
+        /* 用进度覆盖手电条（黄色 → 满时转绿） */
+        BlendRectWin(barX, y1, barX + barW, y1 + barH,
+                     (cc >= 1.0f) ? 0x0060FF90u : 0x00E8C040u, 0.95f);
+
+        char cbuf[32];
+        if (cc >= 1.0f) sprintf(cbuf, "CRANK OK");
+        else            sprintf(cbuf, "CRANK %d%%", (int)(cc * 100.0f + 0.5f));
+        {
+            int tw = TextWidthWin(cbuf);
+            int tx = barX + (barW - tw) / 2;
+            int ty = y1 + (barH - TextHeightWin()) / 2;
+            if (ty < y1) ty = y1;
+            DrawTextWin(tx, ty, cbuf, ccol);
+        }
     }
 
     /* 碎片（SHARDS）是大厅货币，游戏过程中用不到 —— 不放进 HUD。
