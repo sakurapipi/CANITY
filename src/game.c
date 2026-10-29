@@ -1020,8 +1020,12 @@ void GenerateLevel(void) {
         fusesNeeded = 2 + currentLevel / 3;   /* 见下方与箱子数联动的夹取 */
         if (fusesNeeded > MAX_CONTAINERS) fusesNeeded = MAX_CONTAINERS; /* 新增限制 */
     } else {
-        fusesNeeded = 2 + currentLevel / 3;   /* 见下方与箱子数联动的夹取 */
-        if (fusesNeeded > 4) fusesNeeded = 4;
+        /* v3.0 平衡：**不再封顶 4** ——
+           原来第 6 层之后恒定 4 根，18 层零变化，玩家感觉不到难度推进。
+           新曲线：每 3 层 +1，封顶 6；并且不许多于「箱子数 - 2」，
+           给电池/药/投掷物留出货位（原来无尽第 18 层 8 根 = 全箱都是保险丝）。 */
+        fusesNeeded = 2 + currentLevel / 3;
+        if (fusesNeeded > 6) fusesNeeded = 6;
         fusesNeeded -= (HasKeystone(SK_FUSE_LESS) ? 1 : 0) + RunFuseLess();
         if (fusesNeeded < 2) fusesNeeded = 2;
     }
@@ -1036,6 +1040,11 @@ void GenerateLevel(void) {
     }
     int contCap = ContainerTargetCount(levelMod, baseContainers);
     if (contCap < fusesNeeded) contCap = fusesNeeded;
+
+    /* v3.0 平衡：保险丝不许多于「箱子数 - 2」——
+       否则整层所有箱子都是保险丝，电池/药/投掷物一件都搜不到。 */
+    if (fusesNeeded > contCap - 2) fusesNeeded = contCap - 2;
+    if (fusesNeeded < 2) fusesNeeded = 2;
 
     int attempts = 0;
     /* 阶段1：保证 fusesNeeded 个箱子 */
@@ -2953,7 +2962,11 @@ void Update(float dt) {
            第 4~6 层必死 —— 一条 10 层的主线硬生生变成了不可能。
            无尽给 30（原 12 的 2.5 倍），主线给 18。 */
         {
-            float gain = isEndlessRun ? (LEVEL_CLEAR_SANITY + 18.0f) : 18.0f;
+            /* v3.0 平衡：**层清奖励随层涨** ——
+       原来恒定 +18，而每层理智流失涨 0.012/秒，
+       深层等于是净亏，第 24 层每层净掉 30+ 理智。 */
+    float gain = isEndlessRun ? (LEVEL_CLEAR_SANITY + 18.0f)
+                              : (18.0f + (float)currentLevel * 2.0f);
             sanity += gain;
             if (sanity > SanityMax()) sanity = SanityMax();
         }

@@ -368,14 +368,14 @@ typedef struct { float x, y; int active; } Breaker;
 #define SEARCH_TIME 1.1f
 
 /* 手电筒 / 电池 / 体力 */
-#define BATTERY_DRAIN 0.85f      /* 每秒耗电 */
+#define BATTERY_DRAIN 1.10f     /* v3.0 平衡：0.85→1.10，118 秒太长 */      /* 每秒耗电 */
 /* v2.4：看地图要花电 —— 每开着一秒扣 10 点，电量见底自动关图。
    地图本来是"无解"的信息优势（一眼看到整层结构），现在标了价：
    开得越久，手电可用的时间越短。 */
 #define MAP_BATTERY_DRAIN 10.0f
 #define BATTERY_PICKUP 60.0f    /* v2.2：45→60（原来第 8 层就开始发黑） */     /* 电池补给量 */
-#define STAMINA_DRAIN 26.0f      /* 冲刺每秒消耗 */
-#define STAMINA_REGEN 24.0f
+#define STAMINA_DRAIN 32.0f      /* v3.0 平衡：26→32，冲刺变成"救命"而不是常态 */      /* 冲刺每秒消耗 */
+#define STAMINA_REGEN 18.0f      /* v3.0 平衡：24→18，藏起来回体力才有意义 */
 /* v2.3 新机制：武器能量。
    三把武器原来各烧一条资源（体力/电量/理智），结果是「体力自己会回」+
    「电量能摇回来」+「符印只烧 2 点」，一层里可以无限挥 —— 投掷物就没人用了。
