@@ -857,7 +857,7 @@ static void BuildTrainingArena(void) {
     hideSpots[0].kind = 0;              /* 衣柜 */
     hideSpots[0].active = 1;
 
-    hideSpots[1].x = 14.5f;
+    hideSpots[1].x = 12.0f;
     hideSpots[1].y = (float)(MAP_HEIGHT / 2) + 0.5f;
     hideSpots[1].kind = 1;              /* 床底 */
     hideSpots[1].active = 1;
@@ -865,28 +865,33 @@ static void BuildTrainingArena(void) {
     hiddenIn = -1;
     hideSpotNear = -1;
 
-    /* ③ **3 个解密装置，每种锁型各一个** ——
-       用户要求「加两个箱子进去，三个用不同的开锁器，我要检查 3 个 UI」。
-       走廊只有 x=2..21，前段已经排了箱子/藏身点/安全区，
-       所以这三个放在 x=16.5 / 18.5 / 20.5（末尾三段）。
-       四种锁型里固定取前三种：拨盘 / 接线 / 均衡器。
-       每次进训练场把起始偏移 +1，多进两次就能看到调波器。 */
+    /* ③ **4 个解密装置，四种锁型一次全摆出来** ——
+       用户要求「把波形锁也加进去，多加一个箱子」。
+       现在固定 4 个，每种锁型一个，进一次训练场就能把
+       拨盘 / 接线 / 均衡器 / 调波器 四个 UI 全看一遍，不用反复进出。
+
+       走廊 x=2..21 的分配：
+         x=5.5   可搜容器
+         x=7.5   安全区
+         x=9.5   藏身点 1（衣柜）
+         x=12.0  藏身点 2（床底）
+         x=13.5 / 15.5 / 17.5 / 19.5   四个锁箱
+         x=20.5  固定靶
+       注意调波器面板比别的锁宽（LUIS(760) vs LUIS(660)），
+       正好用来验证宽面板在小窗口下的表现。 */
     {
-        static int trainLockOfs = 0;
-        for (int k = 0; k < 3; k++) {
-            int i = 1 + k;                       /* containers[1..3] */
-            /* 16.5/18.5/20.5 会和 x=20.5 的固定靶重叠，改成 15.5/17.5/19.5 */
-            containers[i].x = 15.5f + (float)k * 2.0f;
+        for (int k = 0; k < LOCK_TYPE_COUNT; k++) {
+            int i = 1 + k;                       /* containers[1..4] */
+            containers[i].x = 13.5f + (float)k * 2.0f;
             containers[i].y = (float)(MAP_HEIGHT / 2) + 0.5f;
             containers[i].active = 1;
             containers[i].searched = 0;
             containers[i].content = 0;
             containers[i].locked = 1;
-            containers[i].lockType = (trainLockOfs + k) % LOCK_TYPE_COUNT;
+            containers[i].lockType = k;          /* 0 拨盘 1 接线 2 均衡 3 调波 */
             containers[i].lockCode = 0x2A5;
         }
-        trainLockOfs++;
-        containerCount = 4;                      /* 1 个可搜 + 3 个上锁 */
+        containerCount = 1 + LOCK_TYPE_COUNT;    /* 1 个可搜 + 4 个上锁 */
     }
 
     ApplyFov();
