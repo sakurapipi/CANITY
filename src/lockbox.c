@@ -585,7 +585,7 @@ static void LockDrawDialBody(int hit, int ha) {
 
     /* 解谜提示：声音是主反馈，绿色圈是视觉兜底 */
     LockBox p = LockPanelBox();
-    DrawTextCenterWin(winW / 2, p.y0 + LUIS(286), "CLICK + GREEN RING = RIGHT DIGIT", 0x00B0B8C0u);
+    DrawTextCenterWin(winW / 2, p.y0 + LUIS(286), "CLICK + GREEN RING = RIGHT", 0x00B0B8C0u);
     DrawTextCenterWin(winW / 2, p.y0 + LUIS(310), "THUD = WRONG", 0x00889098u);
 }
 
@@ -674,7 +674,9 @@ static void LockDrawEqBody(int hit, int ha) {
         int ty = bar.y1 - thgt;
         BlendRectWin(bar.x0 - LUIS(6), ty, bar.x1 + LUIS(6), ty + LUIS(3), 0x0040FF80u, 0.9f);
     }
-    DrawTextCenterWin(winW / 2, p.y0 + LUIS(96), "PUSH EACH BAR TO THE GREEN LINE", 0x00707880u);
+    /* v3.0：**这行原来压在三个 ^ 箭头上**（箭头在 p.y0+87..117，文字在 96）。
+       顶部标题 "MATCH EVERY BAR TO THE GREEN" 已经把规则说清楚了，
+       这行是冗余的，直接删掉。 */
 }
 
 /* 调波器：画一条正弦波。amp/freq/phase 都是 0..7 的整数档。 */
@@ -779,9 +781,11 @@ void DrawLockOverlay(void) {
         DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "EVERY DIAL MUST CLICK", 0x0090A0A8u);
         LockDrawDialBody(hit, ha);
     } else if (lockType == LOCK_TYPE_WIRE) {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH EACH LEFT TERMINAL BY COLOR", 0x0090A0A8u);
+        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH EACH TERMINAL BY COLOR", 0x0090A0A8u);
         LockDrawWireBody(hit, ha);
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(336), "WRONG COLOR = THUD", 0x00889098u);
+        /* v3.0：原来在 y0+336，而 BACK 按钮顶边在 y0+345，几乎贴死，
+           加上按钮的悬停高亮就把它盖住了。上移到 y0+300。 */
+        DrawTextCenterWin(winW / 2, p.y0 + LUIS(300), "WRONG COLOR = THUD", 0x00889098u);
     } else if (lockType == LOCK_TYPE_EQ) {
         DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH EVERY BAR TO THE GREEN LINE", 0x0090A0A8u);
         LockDrawEqBody(hit, ha);
@@ -793,5 +797,5 @@ void DrawLockOverlay(void) {
     LockDrawButton(LockBackBox(), "BACK", hit == LOCK_HIT_BACK, 0x00C05050u);
 
     /* v3.0：底部提示挪到面板**内部**（原来贴在 p.y1-32，正好压在框线上） */
-    DrawTextCenterWin(winW / 2, p.y1 - LUIS(26), "MOUSE ONLY   -   ESC / M TO LEAVE", 0x00707880u);
+    DrawTextCenterWin(winW / 2, p.y1 - LUIS(22), "MOUSE ONLY   -   ESC / M TO LEAVE", 0x00707880u);
 }
