@@ -23,6 +23,10 @@ debug.log
 # 本地移植暂存（lockbox 已验证并并入 src/）
 port_staging/
 
+# 验证助手产物
+.verify-artifacts/
+.verify-noise.json
+
 # 系统与编辑器
 .DS_Store
 Thumbs.db
