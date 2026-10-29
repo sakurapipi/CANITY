@@ -40,8 +40,9 @@ void GenerateVignette(void) {
         for (int x = 0; x < renderW; x++) {
             int dx = x - cx, dy = y - cy;
             float ratio = sqrtf((float)(dx * dx + dy * dy)) / maxDist;
-            if (ratio < 0.4f) ratio = 0.0f;
-            else ratio = (ratio - 0.4f) / 0.6f;
+            /* v3.0：中间清晰区从 40% 半径扩到 55% —— 留出足够能走路的空间 */
+            if (ratio < 0.55f) ratio = 0.0f;
+            else ratio = (ratio - 0.55f) / 0.45f;
             if (ratio > 1.0f) ratio = 1.0f;
             vignetteMask[y * renderW + x] = (unsigned char)(ratio * 255.0f);
         }
@@ -2118,8 +2119,11 @@ static void RenderWallBand(int x0, int x1) {
 static void RenderPostBand(int y0, int y1) {
     int intensity = 0;
     if (vignetteOn && sanity < 50.0f) {
-        intensity = (int)((50.0f - sanity) / 50.0f * 255.0f);
-        if (intensity > 255) intensity = 255;
+        /* v3.0：**红晕封顶 60%** ——
+           用户截图：6% 理智时整屏红噪点，「几乎看不见路」。
+           原来满强度 255（88%），恐怖氛围变成了致盲。 */
+        intensity = (int)((50.0f - sanity) / 50.0f * 255.0f * 0.60f);
+        if (intensity > 153) intensity = 153;
         if (intensity < 0) intensity = 0;
     }
     int heal = (healFlash > 0.0f);
