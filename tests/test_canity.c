@@ -146,7 +146,8 @@ static void test_tune_geometry(void) {
     {
         const char* lockbox = read_file("src/lockbox.c");
         check(contains(lockbox, "LockTuneReadout"), "tune readout missing");
-        check(contains(lockbox, "? LUIS(680)"), "tune panel width guard missing");
+        /* v3.0：面板加宽后基准从 680/540 变成 760/660，断言跟着更新 */
+  check(contains(lockbox, "? LUIS(760)"), "tune panel width guard missing");
         free((void*)lockbox);
     }
 }

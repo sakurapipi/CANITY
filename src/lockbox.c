@@ -360,7 +360,11 @@ static int LockIn(LockBox b, int x, int y) {
 static LockBox LockPanelBox(void) {
     /* 调波器的三个完整控件（- / 旋钮 / +）需要比旧版 540 基准更宽。
        其它锁型保留原尺寸，避免无关布局随调波器一起变形。 */
-    int pw = (lockType == LOCK_TYPE_TUNE) ? LUIS(680) : LUIS(540);
+    /* v3.0：**面板加宽** ——
+       原来 540 装不下 "EVERY DIAL MUST CLICK" 这类说明，
+       文字中心对齐在 winW/2，两侧直接溢出到面板外面。
+       540 → 660（调波器 680 → 760）。 */
+    int pw = (lockType == LOCK_TYPE_TUNE) ? LUIS(760) : LUIS(660);
     /* 调波器要放下示波器 + 三个旋钮，面板比别的锁高一点 */
     int ph = (lockType == LOCK_TYPE_TUNE) ? LUIS(540) : LUIS(440);
 
@@ -775,18 +779,19 @@ void DrawLockOverlay(void) {
         DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "TURN THE DIALS UNTIL EVERY ONE CLICKS", 0x0090A0A8u);
         LockDrawDialBody(hit, ha);
     } else if (lockType == LOCK_TYPE_WIRE) {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "CONNECT EACH LEFT TERMINAL TO ITS COLOR", 0x0090A0A8u);
+        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH EACH LEFT TERMINAL BY COLOR", 0x0090A0A8u);
         LockDrawWireBody(hit, ha);
         DrawTextCenterWin(winW / 2, p.y0 + LUIS(336), "WRONG COLOR = THUD", 0x00889098u);
     } else if (lockType == LOCK_TYPE_EQ) {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH EVERY BAR TO ITS GREEN LINE", 0x0090A0A8u);
+        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH EVERY BAR TO THE GREEN LINE", 0x0090A0A8u);
         LockDrawEqBody(hit, ha);
     } else {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "TUNE THE SCOPE UNTIL THE WAVES MATCH", 0x0090A0A8u);
+        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH BOTH WAVES", 0x0090A0A8u);
         LockDrawTuneBody(hit, ha);
     }
 
     LockDrawButton(LockBackBox(), "BACK", hit == LOCK_HIT_BACK, 0x00C05050u);
 
-    DrawTextCenterWin(winW / 2, p.y1 - LUIS(32), "MOUSE ONLY    -    ESC / M TO LEAVE", 0x00707880u);
+    /* v3.0：底部提示挪到面板**内部**（原来贴在 p.y1-32，正好压在框线上） */
+    DrawTextCenterWin(winW / 2, p.y1 - LUIS(26), "MOUSE ONLY   -   ESC / M TO LEAVE", 0x00707880u);
 }
