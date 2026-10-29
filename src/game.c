@@ -2230,7 +2230,10 @@ void Update(float dt) {
        原来 SaveGame() 只在「解锁成就 / 换层 / 安全屋操作 / 退出」时调用，
        中途强退或崩溃等于整局白玩（验证报告 BUG1：保存后重启 benchOwned 变 0）。
        这里在游戏中/安全屋每 20 秒存一次，代价是一次 6KB 的写盘。 */
-    if ((currentState == STATE_PLAYING || currentState == STATE_SAFEHOUSE) && !trainingMode) {
+    /* v3.0：**暂停也要存** —— 游戏失焦会自动暂停（STATE_PAUSED），
+           原来条件里没有它，于是切出去等多久都不会存盘。 */
+    if ((currentState == STATE_PLAYING || currentState == STATE_PAUSED ||
+         currentState == STATE_SAFEHOUSE) && !trainingMode) {
         static float autoSaveTimer = 0.0f;
         autoSaveTimer += dt;
         if (autoSaveTimer >= 20.0f) {

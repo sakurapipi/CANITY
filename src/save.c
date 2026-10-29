@@ -32,7 +32,7 @@ static SaveBlob g_save;
      ③ %LOCALAPPDATA%\Canity
      ④ %TEMP%
    实测这台机器上 ①② 都被拦（ACCESS_DENIED），所以列表要往多处退。 */
-#define SAVE_CAND_COUNT 4
+#define SAVE_CAND_COUNT 6   /* v3.0：加 Documents 与 TEMP 子目录兜底 */
 
 int g_saveSlot = 0;   /* v2.0：当前存档槽 0..2 */
 
@@ -65,7 +65,12 @@ static const char* SavePathCand(int i, char* buf, size_t n) {
     const char* sub = NULL;
     if (i == 1)      { base = getenv("APPDATA");      sub = "Canity"; }
     else if (i == 2) { base = getenv("LOCALAPPDATA"); sub = "Canity"; }
-    else             { base = getenv("TEMP");         sub = NULL;     }
+    else if (i == 3) { base = getenv("TEMP");         sub = NULL;     }
+    /* v3.0：**再补两条** —— 实测从某些启动方式下前四个候选全部返回
+       ERROR_ACCESS_DENIED(5)，存档一次都没写成功（g_saveState=2）。
+       Documents 和 TEMP 子目录是权限最稳的两个位置。 */
+    else if (i == 4) { base = getenv("USERPROFILE");  sub = "Documents\\Canity"; }
+    else             { base = getenv("TEMP");         sub = "Canity"; }
     if (!base || !*base) base = getenv("TEMP");
     if (!base || !*base) {
         size_t need = strlen(SAVE_FILE) + 1;
@@ -76,7 +81,16 @@ static const char* SavePathCand(int i, char* buf, size_t n) {
     if (sub) {
         char dir[MAX_PATH];
         snprintf(dir, sizeof(dir), "%s\\%s", base, sub);
+        /* v3.0：sub 里可能带反斜杠（Documents\Canity），逐级建 */
         CreateDirectoryA(dir, NULL);
+        {
+            char* slash = strchr(sub, '\\');
+            if (slash) {
+                char lvl1[MAX_PATH];
+                snprintf(lvl1, sizeof(lvl1), "%s\\%.*s", base, (int)(slash - sub), sub);
+                CreateDirectoryA(lvl1, NULL);
+            }
+        }
         snprintf(buf, n, "%s\\canity%d.sav", dir, g_saveSlot);
     } else {
         snprintf(buf, n, "%s\\canity%d.sav", base, g_saveSlot);
