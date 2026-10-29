@@ -819,6 +819,12 @@ static void LockPanelDirty(LockBox b, float grime) {
 
 void DrawLockOverlay(void) {
     if (!lockActive) return;   /* v3.0：没开锁盘就什么都不画 */
+    /* v3.0：**面板尺寸兜底** ——
+       用户反馈开锁后程序崩溃。锁盘的坐标全部走 LUIS()（按 winH 缩放），
+       窗口很小时 LOCK_TYPE_TUNE 的 LUIS(680) 可能算出倒挂的矩形
+       （x1 < x0 / y1 < y0），后续所有绘制都在反的矩形里循环。
+       这里先保证面板至少有 4 个逻辑像素宽高，且不倒挂。 */
+    if (winW < 32 || winH < 32) return;
     LockBox p = LockPanelBox();
     int mx = g_mousePos.x, my = g_mousePos.y;
     int ha = -1;

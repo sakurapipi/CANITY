@@ -3336,6 +3336,29 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         }
     }
 
+    /* v3.0：**校准倒计时常驻显示** ——
+       用户两次反馈「倒计时没有加进去」。
+       之前只在 hiddenIn >= 0（藏进藏身点）时才画，玩家在走廊里
+       根本看不到还剩多久。
+       现在只要在游戏中且冷却中，就显示在 RUN 条下方一行。 */
+    if (currentState == STATE_PLAYING) {
+        extern float calibCooldown;
+        char cd[48];
+        unsigned int cdc;
+        if (calibActive) {
+            sprintf(cd, Tr("CALIBRATING", "校准中"));
+            cdc = 0x00FFD040u;
+        } else if (calibCooldown > 0.0f) {
+            sprintf(cd, Tr("CALIB %ds", "校准冷却 %d 秒"),
+                    (int)(calibCooldown + 0.5f));
+            cdc = 0x00909090u;
+        } else {
+            sprintf(cd, Tr("CALIB READY", "校准就绪"));
+            cdc = 0x0060FF90u;
+        }
+        DrawTextWin(labelX, y2 + rowGap - UIS(6), cd, cdc);
+    }
+
     /* v3.0：**摇电只留一条黄线，不写任何文字** ——
        用户要求「改成之前底下有黄线的那一版，然后不带其他文字」。
        LIGHT 标签和 ON/OFF 状态照常显示，只在手电条下面压一条 4px 的
