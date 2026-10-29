@@ -2742,11 +2742,17 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
                 int y0 = UIS(44);   /* v2.6：18 太靠边会被切掉顶行，下移到 44 */
 
                 for (int k = -1; k <= 1; k++) {
+                    /* v3.0：**件数不够就不画上下行** ——
+                       原来 nvis=2 时，上一行和下一行都循环取到同一件，
+                       截图里 "1 FLARE x1" 出现两次。 */
+                    if (nvis == 1 && k != 0) continue;
+                    if (nvis == 2 && k != 0) {
+                        /* 两件时：只画当前 + 另一件（各一行），不重复 */
+                        if (curVis + k < 0 || curVis + k >= nvis) continue;
+                    }
                     int idx = curVis + k;
-                    /* 循环取，首尾不会出现空位 */
                     while (idx < 0) idx += nvis;
                     while (idx >= nvis) idx -= nvis;
-                    if (nvis == 1 && k != 0) continue;      /* 只有一件时只画中间 */
 
                     int i = vis[idx];
                     int y = y0 + k * rowH;
@@ -3007,14 +3013,31 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         }
 
         /* ② 敌人状态（三态雷达）—— 怪不可杀后这是唯一的威胁指标 */
-        if (monster.active && currentState == STATE_PLAYING) {
-            const char* st = NULL;
-            unsigned int sc = 0x0080FF80u;
-            if (monster.state == 1)      { st = Tr("HUNTING", "追捕中"); sc = 0x00FF3020u; }
-            else if (monster.state == 2) { st = Tr("SEARCHING", "搜寻中"); sc = 0x00E0A020u; }
-            else                          { st = Tr("WANDERING", "游荡"); sc = 0x0080C080u; }
-            int tw3 = TextWidthWin(st);
-            DrawTextWin(winW - UIS(24) - tw3, winH - UIS(150), st, sc);
+        /* v3.0：**两种追捕者都要显示** ——
+           原来只画寻声怪，光敏怪（lightBeast）完全不在雷达上，
+           玩家开着灯被它锁定时屏幕上一点提示都没有。 */
+        if (currentState == STATE_PLAYING) {
+            extern Monster lightBeast;
+            struct { Monster* m; const char* tag; } radar[2] = {
+                { &monster,    NULL },
+                { &lightBeast, "L" },
+            };
+            int ry = winH - UIS(150);
+            for (int ri2 = 0; ri2 < 2; ri2++) {
+                Monster* mm = radar[ri2].m;
+                if (!mm->active) continue;
+                const char* st = NULL;
+                unsigned int sc = 0x0080FF80u;
+                if (mm->state == 1)      { st = Tr("HUNTING", "追捕中"); sc = 0x00FF3020u; }
+                else if (mm->state == 2) { st = Tr("SEARCHING", "搜寻中"); sc = 0x00E0A020u; }
+                else                      { st = Tr("WANDERING", "游荡"); sc = 0x0080C080u; }
+                char rb[48];
+                if (radar[ri2].tag) sprintf(rb, "%s [%s]", st, radar[ri2].tag);
+                else                sprintf(rb, "%s", st);
+                int tw3 = TextWidthWin(rb);
+                DrawTextWin(winW - UIS(24) - tw3, ry, rb, sc);
+                ry -= TextHeightWin() + UIS(6);
+            }
         }
     }
 
