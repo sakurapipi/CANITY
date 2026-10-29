@@ -814,6 +814,27 @@ void UpdateMonster(float dt) {
             monster.walkPhase += sqrtf(d2) * 3.5f;   /* v3.0：1.2 太慢，腿看起来是滑行；3.5 步频自然又不闪 */
             if (monster.walkPhase > 1000.0f) monster.walkPhase -= 1000.0f;
         }
+
+        /* ===== v3.0：**站着不动 2 秒就丢失目标** =====
+           用户实测「老是堵门」：怪物卡在门口不移动，却一直保有你的位置，
+           于是它永远站在那儿等你出来。
+           现在统计「连续没移动」的时长，超过 2 秒就当作它跟丢了：
+           清空目标、回到游荡、并给一个新的漫游点，逼它走开。 */
+        if (d2 > 0.0004f) {          /* 这一帧动了（约 2cm） */
+            monster.stillTimer = 0.0f;
+        } else {
+            monster.stillTimer += dt;
+            if (monster.stillTimer > 2.0f && monster.state != 0) {
+                monster.state = 0;
+                monster.pathLen = 0;
+                monster.pathIdx = 0;
+                monster.sightHold = 0.0f;
+                monster.huntTimer = 0.0f;
+                monster.stillTimer = 0.0f;
+                monster.wanderTimer = 0.0f;   /* 立刻挑新漫游点，别又站着 */
+            }
+        }
+
         monster.prevX = monster.x;
         monster.prevY = monster.y;
     }

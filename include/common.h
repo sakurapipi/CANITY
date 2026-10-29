@@ -215,6 +215,7 @@ typedef struct {
     int pathLen, pathIdx;
     float repath, stateTimer, wanderTimer, hitCooldown, growlTimer;
     float sightHold;   /* v3.0：连续看见玩家的秒数（察觉延迟） */
+    float stillTimer;  /* v3.0：连续站着不动的秒数（超过就丢目标） */
     float huntTimer;   /* v3.0：本次追捕已持续秒数（超时放弃用） */
     float speed;
     int hp;                    /* 剩余血量 */
