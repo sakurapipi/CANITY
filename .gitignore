@@ -1,6 +1,5 @@
 # 构建产物
 *.exe
-!/release.exe
 *.o
 *.obj
 *.dll
@@ -8,6 +7,9 @@
 *.ilk
 dist/
 build/
+
+# 本地发布工具（自带 git add .，只在本机用，不入库）
+release.exe
 
 # 存档与备份
 *.sav
