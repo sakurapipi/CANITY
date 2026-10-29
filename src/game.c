@@ -1076,7 +1076,7 @@ void GenerateLevel(void) {
        （用户实测 hideSpotCount=0）。 */
     hideSpotCount = 0;
     {
-        int want = 3 + (rand() % 3);          /* 3~5 个 */
+        int want = 4 + (rand() % 3);   /* v3.0 平衡：3~5 → 4~6，被追时更有牌可打 */          /* 3~5 个 */
 
         /* ---- 第一轮：严格 ---- */
         for (int tries = 0; tries < 300 && hideSpotCount < want && emptyCount > 0; tries++) {
@@ -1707,7 +1707,7 @@ static void UpdateShots(float dt) {
                 PlaySfx(SFX_GLASS, 0.7f);
                 /* v3.0 逃生试炼：**扔东西制造噪音把追捕者引开**是核心手法，
                    落地的动静要够大，半径 14 → 22 格。 */
-                MakeNoise(shot[i].x, shot[i].y, 22.0f);
+                MakeNoise(shot[i].x, shot[i].y, 15.0f);   /* v3.0 平衡：22 → 15 */
                 shot[i].active = 0;
                 break;
             }
@@ -1716,7 +1716,7 @@ static void UpdateShots(float dt) {
             if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 PlaySfx(SFX_GLASS, 0.7f);
-                MakeNoise(shot[i].x, shot[i].y, 22.0f);   /* v3.0：撞墙也要够响 */
+                MakeNoise(shot[i].x, shot[i].y, 15.0f);   /* v3.0 平衡：22 → 15 */   /* v3.0：撞墙也要够响 */
                 shot[i].active = 0;
                 break;
             }
@@ -1864,7 +1864,7 @@ void WeaponTryAttack(float charge) {
        朝前方敲一下（墙/管道/门），制造噪音把追捕者引过去 ——
        这是逃生类的经典操作：用声音控制敌人的位置。
        不消耗能量、不判定伤害、不产生子弹。 */
-    MakeNoise(posX + dirX * 2.0f, posY + dirY * 2.0f, 18.0f);
+    MakeNoise(posX + dirX * 2.0f, posY + dirY * 2.0f, 11.0f);   /* v3.0 平衡：18 → 11 */
     PlaySfx(SFX_GLASS, 0.55f);
     pickupMsg = g_lang == LANG_ZH ? "敲击  制造噪音" : "KNOCK  NOISE";
     pickupMsgTimer = 0.8f;

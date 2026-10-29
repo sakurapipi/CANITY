@@ -105,11 +105,16 @@ extern int bestEndlessScore;
    理智是整局共用的计时器（100 点 ÷ 0.5/秒 = 200 秒），GenerateLevel 里
    不会重置它。如果按层数放大理智流失，那不是难度曲线，是「越往后死得越早」
    的反向曲线 —— 所以 SANITY_DRAIN 保持常量，难度只改怪物。 */
-#define MONSTER_SPEED_BASE 1.45f    /* 寻声怪基础速度 */
+/* v3.0 平衡：怪物必须**比走路快**（2.0）、**比冲刺慢**（3.0）。
+   原来是 1.45，比走路慢 0.55/秒 —— 玩家慢悠悠走 10 秒，怪反而落后 5.5 格，
+   追捕完全没有压迫感，逃生玩法立不住。
+   现在走路会被逐渐追上（+0.15/秒），必须靠冲刺甩开（3.8 秒甩 2.5 格），
+   然后找地方藏起来等体力回满 —— 这才是逃生的核心节奏。 */
+#define MONSTER_SPEED_BASE 2.15f    /* 寻声怪基础速度 */
 #define LIGHTBEAST_SPEED_BASE 1.50f /* 光敏怪基础速度 */
 #define MONSTER_SPEED_STEP 0.03f    /* 每层 +0.03 */
-#define MONSTER_SPEED_MAX 1.95f    /* v2.1：玩家 2.0，怪必须追不上但贴着 */
-#define MONSTER_SPEED_FINAL_MAX 1.95f  /* v2.1：叠 HUNTED 也不许超过玩家 */
+#define MONSTER_SPEED_MAX 2.35f   /* v3.0 平衡：仍然 < 冲刺 3.0 */    /* v2.1：玩家 2.0，怪必须追不上但贴着 */
+#define MONSTER_SPEED_FINAL_MAX 2.35f  /* v2.1：叠 HUNTED 也不许超过玩家 */
 /* 最终上限 2.40 < MOVE_SPEED 2.50：玩家永远走得比怪快。
    基础上限留 1.85 是为了让 HUNTED 的 ×1.25 在深层仍有意义
    （1.85 × 1.25 = 2.3125，不会顶到最终上限）。 */
