@@ -355,6 +355,14 @@ static LockBox LockPanelBox(void) {
     int pw = (lockType == LOCK_TYPE_TUNE) ? LUIS(680) : LUIS(540);
     /* 调波器要放下示波器 + 三个旋钮，面板比别的锁高一点 */
     int ph = (lockType == LOCK_TYPE_TUNE) ? LUIS(540) : LUIS(440);
+
+    /* v3.0：**面板不能超出窗口** ——
+       LUIS 跟 winH 缩放，但窗口可能是宽扁的（1280×960 实测溢出右边，
+       第 3 个拨盘与 BACK 出屏）。这里按 winW/winH 双向夹取。 */
+    if (pw > winW - LUIS(40)) pw = winW - LUIS(40);
+    if (ph > winH - LUIS(40)) ph = winH - LUIS(40);
+    if (pw < LUIS(360)) pw = LUIS(360);
+    if (ph < LUIS(320)) ph = LUIS(320);
     LockBox p;
     p.x0 = (winW - pw) / 2;
     p.y0 = (winH - ph) / 2;
