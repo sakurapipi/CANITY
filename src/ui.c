@@ -891,7 +891,7 @@ RECT RowRect(MenuGeo g, int i) {
     if (currentState == STATE_SAFEHOUSE) {
         int tx0, ty0, tx1, ty1;
         PageTabRect(0, &tx0, &ty0, &tx1, &ty1);
-        leftPad = (tx1 - g.panel.left) + UIS(30);
+        leftPad = (tx1 - g.panel.left) + UIS(60);   /* v3.0：30 → 60，商品名不再压到页签上 */
     }
     r.left = g.panel.left + leftPad;
     r.right = g.panel.right - UIS(18);
@@ -2908,25 +2908,6 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
     int y2 = y1 + rowGap;
     int y0 = y1 - rowGap;         /* v2.3：能量条在手电条**上方** */
 
-    /* v2.5：**游戏内**正在进行校准 → 把条画在屏幕底部中央。
-       原来只有安全屋面板里画，而小游戏是从游戏内按空格开的，
-       面板根本没画，所以条永远看不见。 */
-    if (currentState == STATE_PLAYING && calibActive) {
-        /* v2.5：放在屏幕**中上方**的空白带 —— 原来在 winH-150，
-           正好和武器行 / ENERGY 那一带重叠，被压住看不见。 */
-        /* v2.6：收窄 —— 原来 winW-200 太宽，左端会压到状态效果那几行 */
-        int bw2 = winW - UIS(320);
-        if (bw2 < UIS(180)) bw2 = winW - UIS(120);
-        int bx2 = (winW - bw2) / 2;
-        int bh2 = UIS(20);
-        int by2 = UIS(146);   /* v2.6：跟着提示上移 */
-        /* 明显的外框 + 不透明底，保证一眼能看到 */
-        BlendRectWin(bx2 - UIS(10), by2 - UIS(8), bx2 + bw2 + UIS(10), by2 + bh2 + UIS(8),
-                     0x000A0E14, 0.94f);
-        FrameRectWin(bx2 - UIS(10), by2 - UIS(8), bx2 + bw2 + UIS(10), by2 + bh2 + UIS(8),
-                     0x00C8B060u, 0.95f, 1);
-        DrawCalibBar(bx2, by2, bw2, bh2);
-    }
 
     /* v2.5：站在安全区里 → 屏幕下方给一行提示（用户要求的那行字） */
     if (playerInSafe && currentState == STATE_PLAYING) {
@@ -3518,6 +3499,34 @@ void RenderFrame(void) {
             BlendRectWin(winW - bandS, winH - bandT, winW, winH, 0x00000000u, 1.0f);
         }
     skip_hide_mask: ;
+
+    /* ===== v3.0：**校准条画在所有图层之上** =====
+       用户反复反馈「躲在柜子里看不到判定轴」。
+       之前试过「校准时跳过遮罩」，但只要还有别的覆盖层（低理智红晕、
+       锁定框、letterbox）就会再次被埋。
+       现在把整块校准 UI 挪到帧末、遮罩之后，**它一定是最后画的**。 */
+    if (currentState == STATE_PLAYING && calibActive) {
+        int bw2 = winW - UIS(320);
+        if (bw2 < UIS(180)) bw2 = winW - UIS(120);
+        int bx2 = (winW - bw2) / 2;
+        int bh2 = UIS(20);
+        int by2 = winH / 2 - bh2 / 2;      /* 屏幕正中，视野最好认 */
+
+        /* 三层实心底：外框 + 内底 + 边框，保证在任何背景上都看得清 */
+        BlendRectWin(bx2 - UIS(14), by2 - UIS(14),
+                     bx2 + bw2 + UIS(14), by2 + bh2 + UIS(14),
+                     0x00000000u, 0.88f);
+        BlendRectWin(bx2 - UIS(10), by2 - UIS(10),
+                     bx2 + bw2 + UIS(10), by2 + bh2 + UIS(10),
+                     0x00101418u, 1.0f);
+        FrameRectWin(bx2 - UIS(10), by2 - UIS(10),
+                     bx2 + bw2 + UIS(10), by2 + bh2 + UIS(10),
+                     0x00FFD040u, 1.0f, 2);
+        DrawCalibBar(bx2, by2, bw2, bh2);
+        DrawTextCenterWin(winW / 2, by2 - UIS(34),
+                          Tr("SPACE TO LOCK", "空格锁定"), 0x00FFD040u);
+    }
+
     }
 
 

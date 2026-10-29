@@ -123,18 +123,31 @@ const char* ShopRowText(int row) {
     }
 
     if (shopPage == SHP_BENCH) {
-        if (row == 0 || row == 1) {
-            int slot = row;
-            int cur = WeaponAttachAt(curWeapon, slot);
-            const char* slotName = (slot == 0) ? Tr("CORE", "核心") : Tr("MOD", "词条");
-            if (cur < 0) {
-                sprintf(sbuf, "%s: %s", slotName, Tr("(empty)", "（空）"));
-            } else {
-                sprintf(sbuf, "%s: %s", slotName, Tr(attachDefs[cur].nameKey, attachDefs[cur].nameZh));
-            }
+        /* v3.0：**改装台从「武器配件」改成「随身装备」** ——
+           原来两个槽是 CORE / MOD（武器核心与词条），
+           武器取消后这两个槽完全没意义，页面上只剩两行 "(empty)"。
+           现在改成逃生向的两件随身装备：
+             槽 1 = 手上的投掷物（瓶子/照明弹/砖头/酸/烟）
+             槽 2 = 照明工具（手电状态与电量）
+           内容实时反映当前库存，不是空槽。 */
+        if (row == 0) {
+            int n = 0;
+            if (bottles > 0) n++;
+            if (flares > 0) n++;
+            if (bricks > 0) n++;
+            if (acids > 0) n++;
+            if (smokeBombs > 0) n++;
+            sprintf(sbuf, "%s: %d %s", Tr("THROWABLES", "投掷物"), n,
+                    Tr("kinds", "种"));
             return sbuf;
         }
-        if (row == 2) return Tr("CLEAR BOTH SLOTS", "清空两个槽位");
+        if (row == 1) {
+            int bp = (int)(battery + 0.5f);
+            sprintf(sbuf, "%s: %s %d%%", Tr("LIGHT GEAR", "照明"),
+                    flashlightOn ? Tr("ON", "开") : Tr("OFF", "关"), bp);
+            return sbuf;
+        }
+        if (row == 2) return Tr("CHECK INVENTORY", "查看背包");
         return Tr("LEAVE  (ESC)", "离开  (ESC)");
     }
 
