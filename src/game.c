@@ -2236,8 +2236,7 @@ void Update(float dt) {
                 hiddenIn = hideSpotNear;
                 posX = hideSpots[hiddenIn].x;
                 posY = hideSpots[hiddenIn].y;
-                /* 钻进去 → 全场追捕者立刻失去目标 */
-                if (monster.active) { monster.state = 0; monster.pathLen = 0; monster.pathIdx = 0; }
+                }
                 pickupMsg = g_lang == LANG_ZH ? "藏好了  （再按 E 出来）" : "HIDDEN  (E TO LEAVE)";
                 pickupMsgTimer = 1.6f;
                 keyPressed[g_bindings[ACT_INTERACT]] = 0;
@@ -4987,4 +4986,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
    那样跨文件的 extern 数组尺寸会对不上。 */
 typedef char settingsSizeCheck[(sizeof(settings) / sizeof(settings[0]) == SETTING_COUNT) ? 1 : -1];
 typedef char optKeysSizeCheck[(sizeof(optKeys) / sizeof(optKeys[0]) == OPT_KEY_COUNT) ? 1 : -1];
-typedef char optKeyVKsSizeCheck[(sizeof(optKeyVKs) / sizeof(optKeyVKs[0]) == OPT_KEY_COUNT) ? 1 : -1];
+typedef char optKeyVKsSizeCheck[(sizeof(optKeyVKs) / sizeof(optKeyVKs[0]) == OPT_KEY_COUNT) ? 1 : -1];                /* v3.0：**当着他的面钻进去 = 他会来翻** ——
+                   原来钻进柜子怪物 100% 立刻丢目标，太安全了。
+                   如果它此刻正在追你（state==1）而且离得近（6 格内），
+                   它会跑到柜子前徘徊一阵，而不是当场忘掉你。 */
+                if (monster.active) {
+                    float hdx = monster.x - posX, hdy = monster.y - posY;
+                    int sawYou = (monster.state == 1) && (hdx * hdx + hdy * hdy < 36.0f);
+                    monster.state = sawYou ? 2 : 0;      /* 2 = 原地搜寻 */
+                    monster.tx = hideSpots[hiddenIn].x;
+                    monster.ty = hideSpots[hiddenIn].y;
+                    monster.stateTimer = sawYou ? 5.0f : 0.0f;
+                    monster.repath = 0.0f;
+                    if (sawYou) {
+                        pickupMsg = g_lang == LANG_ZH ? "他看见你进来了" : "IT SAW YOU HIDE";
+                        pickupMsgTimer = 1.8f;
+                    }
+
