@@ -2378,9 +2378,16 @@ void RenderMap(void) {
         cellSize = MAP_CORNER_CELL;
         mapW = MAP_WIDTH * cellSize;
         mapH = MAP_HEIGHT * cellSize;
-        /* 贴右下角，留出一点边距 */
+        /* v3.0：**小地图上移，别压住左下角的 LIGHT / RUN 两条** ——
+           玩家实测：「TAB 小地图盖住 LIGHT/RUN 条」。
+           原来贴右下角，而 LIGHT/RUN 标签 + 条正好横跨到右侧 2/3 屏宽。
+           抬高到 LIGHT 条上方（约屏高 78% 处起）。 */
         mapStartX = renderW - mapW - UIS(10);
-        mapStartY = renderH - mapH - UIS(10);
+        {
+            int safeBottom = renderH - UIS(120);   /* LIGHT/RUN 占的高度 */
+            if (mapStartY > safeBottom - mapH) mapStartY = safeBottom - mapH;
+            if (mapStartY < UIS(20)) mapStartY = UIS(20);
+        }
         if (mapStartX < 0) mapStartX = 0;
         if (mapStartY < 0) mapStartY = 0;
     }
