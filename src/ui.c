@@ -3505,24 +3505,13 @@ void RenderFrame(void) {
             extern int calibActive;
             if (calibActive) goto skip_hide_mask;
         }
-        extern int hiddenIn;
-        if (hiddenIn >= 0) {
-            /* v3.0：**藏进去要看不出外面** ——
-               玩家实测原来的 winH/5 上下边太薄，"走廊、怪、墙全都看得见"，
-               只像盖了块棕色矩形。改成上下各 37%（只留一条 26% 高的横缝），
-               左右各 18%，模拟从柜门缝往外看。 */
-            int bandT = winH * 37 / 100;
-            int bandS = winW * 18 / 100;
-            BlendRectWin(0, 0, winW, bandT, 0x00000000u, 0.96f);
-            BlendRectWin(0, winH - bandT, winW, winH, 0x00000000u, 0.96f);
-            BlendRectWin(0, 0, bandS, winH, 0x00000000u, 0.90f);
-            BlendRectWin(winW - bandS, 0, winW, winH, 0x00000000u, 0.90f);
-            /* 四角再压一层，避免从对角溜出去 */
-            BlendRectWin(0, 0, bandS, bandT, 0x00000000u, 1.0f);
-            BlendRectWin(winW - bandS, 0, winW, bandT, 0x00000000u, 1.0f);
-            BlendRectWin(0, winH - bandT, bandS, winH, 0x00000000u, 1.0f);
-            BlendRectWin(winW - bandS, winH - bandT, winW, winH, 0x00000000u, 1.0f);
-        }
+            /* v3.0：**藏身遮罩取消** ——
+               用户实测：「躲在柜子里视野受限，根本看不到任何小游戏提示」。
+               遮罩本来是为了「从柜门缝往外看」的氛围，
+               但它把 HUD 提示、判定条、商店开关全挡住了。
+               现在完全不遮 —— 躲进去只是不能动、不会被抓，
+               视野和平时一样。 */
+            (void)0;
     skip_hide_mask: ;
 
     /* ===== v3.0：**校准条画在所有图层之上** =====
