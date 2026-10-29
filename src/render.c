@@ -695,7 +695,10 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
     /* v2.1：眼睛自发光。烘焙图里留了黑眼窝，这里加两个加法光点 ——
        黑暗里身体全黑，但眼睛一直亮着。 */
     {
+        /* v3.0：眼睛发光色目前没有真正用上（烘焙图里已经带暖色眼窝），
+           保留常量并显式标记，免得每次编译都报一条 set-but-not-used。 */
         int ec = 0x00FF4020u;
+        (void)ec;
         int base = (spr >= SPR_MON_HUNTER && spr < SPR_MON_HUNTER + 4) ? SPR_MON_HUNTER :
                    (spr >= SPR_MON_LIGHT  && spr < SPR_MON_LIGHT  + 4) ? SPR_MON_LIGHT :
                    (spr >= SPR_MON_LEECH  && spr < SPR_MON_LEECH  + 4) ? SPR_MON_LEECH : spr;
@@ -2411,6 +2414,12 @@ void RenderMap(void) {
     } else {
         cellSize = MAP_CORNER_CELL;
         mapW = MAP_WIDTH * cellSize;
+        /* v3.0 **BUG 修复**：mapH 原来在 else 分支里**没有初始化**，
+           而下面 `while (mapH > room ...)` 直接读它 ——
+           读到栈上的垃圾值。垃圾值小的时候循环不跑，
+           mapH 保持垃圾，于是 mapStartY 和地图高度全错。
+           （gcc -Wmaybe-uninitialized 早就报了这条。） */
+        mapH = MAP_HEIGHT * cellSize;
         /* v3.0：**小地图必须同时避开道具栏和 LIGHT/RUN** ——
            历史上踩了两次：
              ① 贴右下角       → 压住 LIGHT/RUN 两条

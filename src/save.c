@@ -44,7 +44,8 @@ static void BackupSave(void) {
     char p[MAX_PATH];
     SavePathCand(0, p, sizeof(p));
     if (!p[0]) return;
-    char b[MAX_PATH];
+    /* v3.0：缓冲区要留后缀的位置，否则满路径时后缀被截断 */
+    char b[MAX_PATH + 16];
     snprintf(b, sizeof(b), "%s.bak", p);
     CopyFileA(p, b, FALSE);
 }
@@ -117,7 +118,7 @@ static int WriteWholeFile(const char* path, const void* data, size_t n) {
     /* v2.2：先写临时文件、flush 落盘、再原子改名。
        原来是 CREATE_ALWAYS 原地覆盖 —— 写到一半掉电/被杀就只剩半截文件，
        而半截文件能过 magic+version 校验，于是"存档存在但是空的"。 */
-    char tmp[MAX_PATH];
+    char tmp[MAX_PATH + 16];   /* v3.0：留 ".tmp" 的位置 */
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
     HANDLE h = CreateFileA(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                            FILE_ATTRIBUTE_NORMAL, NULL);
@@ -356,7 +357,7 @@ int LoadSettings(void) {
        当作"没有存档"处理。玩家的数据一定还在盘上，可以回滚，
        而不是被一个错误的迁移静默毁掉。 */
     if (g_save.version != SAVE_VERSION) {
-        char oldp[MAX_PATH], arc[MAX_PATH];
+        char oldp[MAX_PATH], arc[MAX_PATH + 24];   /* v3.0：留 ".v%d.bak" 的位置 */
         SavePathCand(0, oldp, sizeof(oldp));
         if (oldp[0]) {
             snprintf(arc, sizeof(arc), "%s.v%d.bak", oldp, g_save.version);

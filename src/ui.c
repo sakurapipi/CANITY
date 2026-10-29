@@ -2602,8 +2602,10 @@ void DrawHUD(void) {
        注意：右上角 FPS 那一行也占着 y=UIS(18)，所以这两行要排在它下面，
        否则开 FPS 时会叠在一起。 */
     {
+        /* v3.0：PENDING 行删掉后 hy 没人用了，显式标记避免编译告警。 */
         int hy = UIS(18);
         if (showFps) hy += TextHeightWin() + UIS(6);
+        (void)hy;
         /* v3.0：**删掉 HUD 上的 PENDING N** ——
        玩家实测「一整个小时都是 PENDING 12」，既看不懂又永远不变。
        待上缴碎片只在安全屋/结算页显示就够了。 */
@@ -3399,9 +3401,16 @@ static void DrawSaveStatusBanner(void) {
     if (currentState != STATE_PLAYING && currentState != STATE_PAUSED) return;
     int th = TextHeightWin();
     int h = th + th / 2;
-    const char* msg = (g_lang == LANG_ZH)
-        ? "存档写入失败  -  进度只在本次运行有效"
-        : "SAVE FAILED  -  PROGRESS ONLY LASTS THIS SESSION";
+    /* v3.0 **BUG 修复**：原来 msg 指向字符串字面量，直接传给 ClampRowText，
+       而 ClampRowText 内部会 `buf[k] = 0;` / `buf[n] = '.';` ——
+       往 .rdata 段里写，触发访问违例（程序直接消失）。
+       只要文字超宽需要截断就会命中，窗口一窄必崩。
+       现在用可写缓冲区。 */
+    static char msg[160];
+    snprintf(msg, sizeof(msg), "%s",
+             (g_lang == LANG_ZH)
+                ? "存档写入失败  -  进度只在本次运行有效"
+                : "SAVE FAILED  -  PROGRESS ONLY LASTS THIS SESSION");
     ClampRowText(msg, winW - UIS(20));
 
     /* v2.9：挪到屏幕**底部** —— 原来钉在最顶上，把安全屋的页签整行盖住了

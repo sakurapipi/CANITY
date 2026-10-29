@@ -54,7 +54,11 @@ static inline void cvPx(int x, int y, unsigned int col, float a) {
     int rr = (int)((sr * a + orr * oa * (1.0f - a)) / na + 0.5f);
     int gg = (int)((sg * a + og * oa * (1.0f - a)) / na + 0.5f);
     int bb = (int)((sb * a + ob * oa * (1.0f - a)) / na + 0.5f);
-    if (rr > 255) rr = 255; if (gg > 255) gg = 255; if (bb > 255) bb = 255;
+    /* v3.0：拆成三行 —— 原来挤在一行，gcc 报 -Wmisleading-indentation，
+       看起来像后两个 if 被第一个保护，其实不是。 */
+    if (rr > 255) rr = 255;
+    if (gg > 255) gg = 255;
+    if (bb > 255) bb = 255;
     *p = ((unsigned int)(na * 255.0f) << 24) | (rr << 16) | (gg << 8) | bb;
 }
 
