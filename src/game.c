@@ -3342,11 +3342,12 @@ void CalibStart(void) {
             return;
         }
     }
-    if (calibUsedLevel == currentLevel) {
-        pickupMsg = g_lang == LANG_ZH ? "本层已校准过" : "ALREADY CALIBRATED THIS LEVEL";
-        pickupMsgTimer = 1.2f;
-        return;
-    }
+    /* v3.0：**删掉「每层 1 次」限制** ——
+       用户要求「冷却改成 30 秒」，但这里还有一条按层锁死的检查：
+       同一层第二次按空格直接提示 ALREADY CALIBRATED THIS LEVEL，
+       30 秒冷却根本没机会生效。
+       现在只靠冷却控制节奏。 */
+    /* (calibUsedLevel 检查已移除) */
     /* v2.6：**取消次数限制** —— 只靠 60 秒冷却控制节奏 */
     if (calibCooldown > 0.0f) {
         char* m = (char*)(g_lang == LANG_ZH ? "校准冷却中" : "CALIBRATION COOLING");
