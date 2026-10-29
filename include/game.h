@@ -115,6 +115,58 @@ extern int hoverIndex;
 extern float holdTimer;
 extern int holdingNow;
 
+/* ---- 上锁容器（v1.8.0） ----
+   contLocked/contLockType/contLockCode 与 containers[] 一一对应，
+   独立于 Container 结构，因此不会改变 SaveBlob 的既有布局。
+   contLockCode 是**谜题参数**，含义随锁型变：
+     拨盘   = 3 个 4bit 数字拼成的密码
+     接线   = 右端子的排列编号（0..5）
+     均衡器 = 3 根推子的目标档位（每根 3bit 打包） */
+extern int contLocked[MAX_CONTAINERS];
+extern int contLockCode[MAX_CONTAINERS];
+extern int contLockType[MAX_CONTAINERS];
+extern int lockActive;                     /* 1 = 开锁覆盖层打开（游戏不暂停） */
+extern int lockTarget;                     /* 目标容器下标，-1 = 无 */
+extern int lockCursor;                     /* 拨盘锁：当前选中的拨盘 */
+extern int lockDigits[LOCK_DIALS];         /* 拨盘锁：三个拨盘当前显示的值 */
+extern int lockType;                       /* 当前打开的锁型（LOCK_TYPE_*） */
+
+/* 接线锁的运行时状态 */
+extern int lockWireSel;                    /* 选中的左端子，-1 = 无 */
+extern int lockWireLink[LOCK_WIRES];       /* 左 i 连到的右端子，-1 = 未连 */
+/* 均衡器锁的运行时状态 */
+extern int lockEqVal[LOCK_EQ_BANDS];       /* 当前档位 */
+/* 调波器锁的运行时状态（0=振幅 1=频率 2=相位） */
+extern int lockTuneVal[LOCK_TUNE_KNOBS];   /* 当前档位 */
+
+/* 纯函数：从打包的密码里取第 dial 位 / 比对对了几个位置 */
+int LockDigit(int code, int dial);
+int LockCorrectCount(int code, const int* digits);
+
+/* 覆盖层进出。三种锁型都在“解开”时自动开锁 */
+void OpenLockOverlay(int index);
+void CloseLockOverlay(void);
+
+/* 拨盘锁 */
+void LockTurnDial(int dial, int delta);
+int LockDialSolved(int dial);          /* 该拨盘是否已对（绿圈） */
+void LockAdjustDigit(int dial, int delta);
+
+/* 接线锁：左端子颜色 / 右端子颜色（由参数排列决定）/ 尝试连线 */
+int LockWireColor(int leftIdx);
+int LockWireRightColor(int rightIdx);
+int LockWireConnect(int left, int right);   /* 1 = 配色正确已连上 */
+
+/* 均衡器锁：目标档位 / 拨动 / 是否全部对上 */
+int LockEqTarget(int band);
+void LockEqAdjust(int band, int delta);
+int LockEqSolved(void);
+
+/* 调波器锁：目标档位 / 旋转 / 是否波形完全重合 */
+int LockTuneTarget(int knob);
+void LockTuneAdjust(int knob, int delta);
+int LockTuneSolved(void);
+
 /* ---- 输入 ---- */
 extern int keys[256];
 extern int keyPressed[256];
@@ -122,13 +174,12 @@ extern POINT lastMousePos;
 extern int firstMouseMove;
 extern POINT g_mousePos;       /* 窗口客户区坐标下的鼠标位置，用于 tooltip 等 */
 extern int isMapOpen;
-extern int mapFullScreen;
 extern int g_bindings[ACT_COUNT];
 
 /* ---- 设置模型 ---- */
 extern int settingsPage;
 extern int g_forceMod;
-extern int menuScrollOffsets[8];   /* 每个菜单状态的滚动偏移 */
+extern int menuScrollOffsets[9];   /* 每个菜单状态的滚动偏移（含 STATE_SKILLS） */
 extern SettingItem settings[SETTING_COUNT];
 extern const char* optKeys[OPT_KEY_COUNT];
 extern const int optKeyVKs[OPT_KEY_COUNT];
@@ -144,6 +195,48 @@ void ForceCursor(int visible);
 
 /* ---- 输入查询（entity.c 的 QTE 也要用） ---- */
 int IsActionPressed(ActionId act);
+
+/* ---- 主动技能（v1.9.0） ----
+   每局只能带一个技能，只受冷却限制。目前只有穿墙（SKILL_PHASE）。 */
+extern int selectedSkill;              /* 大厅里选定的技能（SKILL_*） */
+extern int runSkill;                   /* 这局实际带进来的技能 */
+extern int skillLevels[SKILL_CAP];
+extern float skillPhaseTimer;          /* 穿墙剩余秒数，0 = 没在穿 */
+extern float skillSightTimer;          /* 透视剩余秒数 */
+extern float skillCooldownTimer;       /* 冷却剩余秒数（三个技能共用） */
+extern int phaseActive;                /* 1 = 正在穿墙（渲染走透视） */
+extern int sightActive;                /* 1 = 正在透视（隔墙标出实体） */
+void TryActivateSkill(void);
+const char* SkillName(int skill);
+float SkillCooldown(int skill);
+float SkillDuration(int skill);
+int SkillLevel(int skill);
+int SkillUpgradeCost(int skill);     /* 返回残卷数量；-1 = 已满级 */
+void BuySkillUpgrade(void);
+extern int scrolls;                  /* 残卷：只用来升级技能 */
+/* 技能页：选中某个技能（换技能会作废当前这局）/ 直接升级某个技能 */
+void SkillSelect(int skill);
+void SkillUpgradeAt(int skill);
+void ActivateSkillRow(void);         /* 技能页当前行：换技能 / 升级 / 返回 */
+extern int skillSelection;           /* 技能页当前高亮行 */
+/* 大厅里换技能：当前这局作废（技能开局定死） */
+void CycleSkill(void);
+/* 玩家碰撞：穿墙期间忽略墙（地图边界仍然挡）。怪物用的是 Blocked()，不受影响。 */
+int PlayerBlocked(float x, float y);
+
+/* ---- 隐藏房间（v1.10.0） ---- */
+extern int hiddenActive;                    /* 本层有没有 */
+extern int hiddenOpened;
+extern int hiddenX0, hiddenY0, hiddenX1, hiddenY1;   /* 内部地板范围（含） */
+extern int hiddenDoorX, hiddenDoorY;
+extern int hiddenCodeCount;
+extern int hiddenCodesFound;
+extern int hiddenCodeX[HIDDEN_MAX_CODES], hiddenCodeY[HIDDEN_MAX_CODES];
+extern int hiddenCodeTaken[HIDDEN_MAX_CODES];
+/* 穿墙 / 瞬移都不能进隐藏房间（用户要求）；返回 1 = 被拦 */
+int HiddenBlocksPlayer(float x, float y);
+/* 在暗门前按 E：密码齐了才开 */
+void HiddenTryUnlock(void);
 
 /* ---- 世界碰撞 ---- */
 int Blocked(float x, float y);
@@ -182,6 +275,12 @@ extern int mapsFullyExplored;
 extern int tookDamage;
 extern int flashlightOffLevel;
 extern int sprintedThisLevel;
+/* v14 新成就计数（每局重置） */
+extern int locksOpened;
+extern int hiddenOpenedCount;
+extern int scrollsEarned;
+extern float phaseSeconds;
+extern int blinkCount;
 
 /* ---- 窗口过程 ---- */
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);

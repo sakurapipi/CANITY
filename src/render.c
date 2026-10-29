@@ -357,6 +357,12 @@ static void DrawCrateSprite(int i) {
                     if (!searched) color = (relY < 6) ? 0x00543a1a : 0x004a3416;
                     else color = (relY < 8) ? 0x002a1a0a : 0x000c0803;
                 }
+                /* 上锁的箱子：正面加一枚金色锁扣，隔着几格也能认出来 */
+                if (!searched && i < MAX_CONTAINERS && contLocked[i] &&
+                    relX > 11 && relX < 21 && relY > 12 && relY < 21) {
+                    int edge = (relX == 12 || relX == 20 || relY == 13 || relY == 20);
+                    color = edge ? 0x00a07820 : 0x00e8c040;
+                }
                 if (searched && relX > 8 && relX < 24 && relY > 9 && relY < 20) {
                     color = 0x000c0803;
                     if (relX > 13 && relX < 19 && relY > 11 && relY < 17) {
@@ -365,6 +371,7 @@ static void DrawCrateSprite(int i) {
                         else if (c->content == 3) color = 0x00d04040;
                         else if (c->content == 4) color = 0x00ffb050;
                         else if (c->content == 5) color = 0x00a0d0ff;
+                        else if (c->content == CONTENT_SCROLL) color = 0x00ffd060;   /* 高级箱：金色 */
                     }
                 }
             } else if (relX > 1 && relX < 31 && relY > 1 && relY < 32) {
@@ -894,8 +901,29 @@ static void DrawExitBeamSprite(void) {
 /* 所有 billboard 按距离从远到近画，近的盖住远的（画家算法）
    数组上界 MAX_SPRITES = 容器 + 投掷物 + 配电箱 + 两只怪 + 安全屋 + 出口光柱，
    写满时会被下面的断言拦下来，不会像以前那样悄悄越界。 */
-void RenderSprites(void) {
-    struct { float d2; int kind, idx; } list[MAX_SPRITES];
+/* 隐藏房间的密码碎片：地上一枚发光的青色菱片，会呼吸闪烁 */
+static void DrawCodeSprite(int idx) {
+    if (idx < 0 || idx >= hiddenCodeCount) return;
+    float wx = hiddenCodeX[idx] + 0.5f, wy = hiddenCodeY[idx] + 0.5f;
+    SpriteBox s = ProjectSprite(wx, wy, 0.0f, 0.18f);
+    if (!s.ok) return;
+    int cx = (s.x0 + s.x1) / 2, cy = (s.y0 + s.y1) / 2;
+    if (cx < 0 || cx >= renderW) return;
+    if (s.ty >= zBuffer[cx]) return;
+
+    float pulse = 0.65f + 0.35f * sinf((float)g_timeSec * 4.0f);
+    int rad = 6 + (int)(pulse * 2.0f);
+    for (int dy = -rad; dy <= rad; dy++) {
+        for (int dx = -rad; dx <= rad; dx++) {
+            int d = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
+            if (d > rad) continue;
+            unsigned int c = (d <= 2) ? 0x00B0FFF0u : 0x0040D0C0u;
+            PutPixelBlend(cx + dx, cy + dy, c, 0.55f + 0.3f * pulse);
+        }
+    }
+}
+
+void RenderSprites(void) {    struct { float d2; int kind, idx; } list[MAX_SPRITES];
     int n = 0;
 
     for (int i = 0; i < containerCount; i++) {
@@ -955,6 +983,15 @@ void RenderSprites(void) {
         list[n].idx = i;
         n++;
     }
+    /* 隐藏房间的密码碎片 */
+    for (int i = 0; i < hiddenCodeCount; i++) {
+        if (hiddenCodeTaken[i]) continue;
+        if (n >= MAX_SPRITES) break;
+        list[n].d2 = Dist2(hiddenCodeX[i] + 0.5f, hiddenCodeY[i] + 0.5f, posX, posY);
+        list[n].kind = 9;
+        list[n].idx = i;
+        n++;
+    }
     /* 跳脸虫不在这个表里 —— 它是屏幕空间的 overlay，
        要盖住整个场景，由 RenderFrame 直接绘制。 */
     if (n < MAX_SPRITES) {
@@ -987,6 +1024,7 @@ void RenderSprites(void) {
             case 6: DrawFlareSprite(list[i].idx); break;
             case 8: DrawShotSprite(list[i].idx); break;
             case 7: DrawFlowerSprite(); break;
+            case 9: DrawCodeSprite(list[i].idx); break;
             default: DrawExitBeamSprite(); break;
         }
     }
@@ -1132,6 +1170,46 @@ void BuildShadeTables(void) {
 }
 
 /* 地板：棋盘只有两种底色，亮度查表；出口发光只在出口所在格判断 */
+/* ---------------- 透视技能：隔墙标出实体 ----------------
+   不参与 zBuffer 遮挡 —— 直接画在墙上面，就是“看见墙后”的意思。 */
+static void SightMark(const SpriteBox* s, unsigned int c) {
+    if (!s->ok) return;
+    int cx = (s->x0 + s->x1) / 2;
+    int cy = (s->y0 + s->y1) / 2;
+    int r = (s->x1 - s->x0) / 2 + 2;
+    if (r < 5) r = 5;
+    if (r > 40) r = 40;
+    for (int i = -r; i <= r; i++) {
+        PutPixel(cx + i, cy - r, c);
+        PutPixel(cx + i, cy + r, c);
+        PutPixel(cx - r, cy + i, c);
+        PutPixel(cx + r, cy + i, c);
+    }
+}
+
+void RenderSightOverlay(void) {
+    if (!sightActive) return;
+    SpriteBox s;
+
+    s = ProjectSprite(monster.x, monster.y, 0.0f, 0.42f);
+    SightMark(&s, 0x00FF4848u);
+    if (lightBeast.active) {
+        s = ProjectSprite(lightBeast.x, lightBeast.y, 0.0f, 0.42f);
+        SightMark(&s, 0x00FF70C0u);
+    }
+    for (int i = 0; i < containerCount; i++) {
+        if (!containers[i].active || containers[i].searched) continue;
+        s = ProjectSprite(containers[i].x, containers[i].y, 0.0f, 0.40f);
+        SightMark(&s, 0x00E8C040u);
+    }
+    if (breaker.active) {
+        s = ProjectSprite(breaker.x, breaker.y, 0.0f, 0.45f);
+        SightMark(&s, 0x0030D0D0u);
+    }
+    s = ProjectSprite(exitX, exitY, 0.0f, 0.60f);
+    SightMark(&s, 0x0040F060u);
+}
+
 static void RenderFloorBand(int y0, int y1) {
     int halfH = renderH / 2;
     float rayDirX0 = dirX - planeX, rayDirY0 = dirY - planeY;
@@ -1252,6 +1330,9 @@ static void RenderWallBand(int x0, int x1) {
         if (perpWallDist < 0.1f) perpWallDist = 0.1f;
         zBuffer[x] = perpWallDist;
 
+        /* 穿墙期间墙画成「幽灵墙」：压暗 + 偏蓝，能看清结构但不完全挡视线 */
+        int ghostWall = phaseActive;
+
         int lineHeight = (int)(renderH / perpWallDist);
         int drawStart = -lineHeight / 2 + halfH;
         if (drawStart < 0) drawStart = 0;
@@ -1294,6 +1375,17 @@ static void RenderWallBand(int x0, int x1) {
             int g = (int)(((t >> 8) & 0xFF) * k8) >> 8;
             int b = (int)((t & 0xFF) * k8) >> 8;
             r += addR; g += addG; b += addB;
+            if (ghostWall) {
+                r = (r * 35) / 100 + 8;
+                g = (g * 35) / 100 + 16;
+                b = (b * 55) / 100 + 38;
+            }
+            /* 隐藏房间的暗门：染成暖金色，走到跟前能看出“这里有门” */
+            if (worldMap[mapY][mapX] == HIDDEN_DOOR_TILE) {
+                r = r / 2 + 105;
+                g = g / 2 + 78;
+                b = b / 3 + 18;
+            }
             if (r > 255) r = 255;
             if (g > 255) g = 255;
             if (b > 255) b = 255;
@@ -1408,42 +1500,23 @@ void Render3D(void) {
     if ((vignetteOn && sanity < 50.0f) || healFlash > 0.0f) RunPhase(3);
 }
 /* 小地图（在内部渲染分辨率上绘制）
-   两种形态：
-     角落小窗（默认）：cellSize 固定 8 -> 24*8 = 192px 见方，
-                       贴在右下角，不挡视野，可以边走边看。
-     全屏：cellSize 按屏幕大小算，铺满中央，用来规划路线。
-   之前只有全屏一种形态 —— 打开就得停下，关掉才看得见游戏，
-   失去了「导航」的意义。 */
+   只有一种形态：右下角小窗，cellSize 固定 8 -> 24*8 = 192px 见方，
+   不挡视野，可以边走边看。全屏大地图已经删掉 ——
+   它要求玩家停下来看，反而失去了「导航」的意义。 */
 #define MAP_CORNER_CELL 8
 
 void RenderMap(void) {
-    int cellSize, mapW, mapH, mapStartX, mapStartY;
-    if (mapFullScreen) {
-        cellSize = (renderW < renderH ? renderW : renderH) / (MAP_WIDTH + 2);
-        if (cellSize < 3) cellSize = 3;
-        mapW = MAP_WIDTH * cellSize;
-        mapH = MAP_HEIGHT * cellSize;
-        mapStartX = (renderW - mapW) / 2;
-        mapStartY = (renderH - mapH) / 2;
-    } else {
-        cellSize = MAP_CORNER_CELL;
-        mapW = MAP_WIDTH * cellSize;
-        mapH = MAP_HEIGHT * cellSize;
-        /* 贴右下角，留出一点边距 */
-        mapStartX = renderW - mapW - UIS(10);
-        mapStartY = renderH - mapH - UIS(10);
-        if (mapStartX < 0) mapStartX = 0;
-        if (mapStartY < 0) mapStartY = 0;
-    }
+    int cellSize = MAP_CORNER_CELL;
+    int mapW = MAP_WIDTH * cellSize;
+    int mapH = MAP_HEIGHT * cellSize;
+    /* 贴右下角，留出一点边距 */
+    int mapStartX = renderW - mapW - UIS(10);
+    int mapStartY = renderH - mapH - UIS(10);
+    if (mapStartX < 0) mapStartX = 0;
+    if (mapStartY < 0) mapStartY = 0;
 
-    if (mapFullScreen) {
-        /* 全屏：整个画面压暗，突出地图 */
-        int pad = cellSize;
-        for (int y = mapStartY - pad; y < mapStartY + mapH + pad; y++)
-            for (int x = mapStartX - pad; x < mapStartX + mapW + pad; x++)
-                PutPixelBlend(x, y, 0x00000000, 0.72f);
-    } else {
-        /* 小窗：只给地图区域加个边框底板，不压暗整个画面 */
+    /* 只给地图区域加个边框底板，不压暗整个画面 */
+    {
         int pad = 2;
         for (int y = mapStartY - pad; y < mapStartY + mapH + pad; y++) {
             if (y < 0 || y >= renderH) continue;
@@ -1504,13 +1577,12 @@ void RenderMap(void) {
         PutPixel(lx, ly, 0x00FFFFFF);
     }
 
-    /* 标题：告诉玩家当前是哪种形态，以及再按 M 会变成什么。
-       小窗模式下标题画在地图上方；全屏模式画在地图上方居中。 */
+    /* 标题：告诉玩家再按一次 M 会关掉地图。小窗模式下标题画在地图上方。 */
     {
-        const char* label = mapFullScreen ? "MAP   M: SMALL   M: CLOSE" : "MAP   M: FULL   M: CLOSE";
+        const char* label = "MAP   M: CLOSE";
         int tw = TextWidthRaw(label);
-        int tx = mapFullScreen ? (renderW - tw) / 2 : mapStartX;
-        int ty = mapFullScreen ? (mapStartY - cellSize * 2 - FONT_H) : (mapStartY - FONT_H - 2);
+        int tx = mapStartX;
+        int ty = mapStartY - FONT_H - 2;
         if (ty < 0) ty = 2;
         /* 底下垫一条深色条，浅色文字才看得清 */
         for (int y = ty - 2; y < ty + FONT_H + 2; y++) {

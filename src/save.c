@@ -38,7 +38,51 @@ void SaveGame(void) {
     g_save.upgRest = upgRest;
     g_save.bestLevel = bestLevel;
     g_save.volume = volumeF;
-    for (int a = 0; a < ACT_COUNT; a++) g_save.bindings[a] = g_bindings[a];
+    /* 键位分两段写：前 BINDINGS_BASE 个进老数组，后面的进 extraBindings */
+    for (int a = 0; a < ACT_COUNT; a++) {
+        if (a < BINDINGS_BASE) g_save.bindings[a] = g_bindings[a];
+        else if (a - BINDINGS_BASE < BINDINGS_EXTRA)
+            g_save.extraBindings[a - BINDINGS_BASE] = g_bindings[a];
+    }
+
+    /* v11：技能 */
+    g_save.selectedSkill = selectedSkill;
+    g_save.runSkill = runSkill;
+    for (int i = 0; i < SKILL_SLOTS; i++) g_save.skillLevels[i] = skillLevels[i];
+    /* v15 预留区：第 6 个之后的技能等级 */
+    for (int i = SKILL_BASE2; i < SKILL_CAP; i++)
+        g_save.skillLevelsX[i - SKILL_BASE2] = skillLevels[i];
+
+    /* v12：隐藏房间 */
+    g_save.hiddenActive = hiddenActive;
+    g_save.hiddenOpened = hiddenOpened;
+    g_save.hiddenX0 = hiddenX0;
+    g_save.hiddenY0 = hiddenY0;
+    g_save.hiddenX1 = hiddenX1;
+    g_save.hiddenY1 = hiddenY1;
+    g_save.hiddenDoorX = hiddenDoorX;
+    g_save.hiddenDoorY = hiddenDoorY;
+    g_save.hiddenCodeCount = hiddenCodeCount;
+    g_save.hiddenCodesFound = hiddenCodesFound;
+    for (int i = 0; i < HIDDEN_MAX_CODES; i++) {
+        g_save.hiddenCodeX[i] = hiddenCodeX[i];
+        g_save.hiddenCodeY[i] = hiddenCodeY[i];
+        g_save.hiddenCodeTaken[i] = hiddenCodeTaken[i];
+    }
+
+    /* v13：残卷 */
+    g_save.scrolls = scrolls;
+
+    /* v14：新增的 8 项成就 */
+    for (int i = 0; i < ACH_EXTRA; i++) {
+        g_save.achUnlocked2[i] = g_achievements[ACH_COUNT + i].unlocked;
+        g_save.achProgress2[i] = g_achievements[ACH_COUNT + i].progress;
+    }
+    /* v15 预留区：第 24 项之后的成就（当前还没用到） */
+    for (int i = ACH_BASE2; i < ACH_TOTAL; i++) {
+        g_save.achUnlockedX[i - ACH_BASE2] = g_achievements[i].unlocked;
+        g_save.achProgressX[i - ACH_BASE2] = g_achievements[i].progress;
+    }
 
     g_save.hasRun = runInProgress;
     g_save.level = currentLevel;
@@ -89,6 +133,13 @@ void SaveGame(void) {
     g_save.bestEndlessScore = bestEndlessScore;
     g_save.isEndlessRunSaved = isEndlessRun;
 
+    /* v9 新增：上锁容器 */
+    for (int i = 0; i < MAX_CONTAINERS; i++) {
+        g_save.contLocked[i] = contLocked[i];
+        g_save.contLockCode[i] = contLockCode[i];
+        g_save.contLockType[i] = contLockType[i];
+    }
+
     FILE* f = fopen(SAVE_FILE, "wb");
     if (!f) return;
     fwrite(&g_save, sizeof(g_save), 1, f);
@@ -112,11 +163,12 @@ int LoadSettings(void) {
     fclose(f);
     if (!got || g_save.magic != SAVE_MAGIC) return 0;
 
-    /* 存档**格式**版本：接受 v4 / v5（老结构）与 v6（当前结构）。
-       老存档按文件长度就能认出来 —— 新增字段永远追加在结构末尾，
-       老文件的字节数正好少一块。这里**不**做「版本不符就整份丢弃」：
-       键位与显示偏好丢了没有意义，而丢弃整份存档会让玩家进度全没。 */
-    if (g_save.version != SAVE_VERSION && g_save.version != 4 && g_save.version != 5) return 0;
+    /* 存档**格式**版本：接受 v4 ~ 当前版本（v8）。
+       新增字段永远追加在结构末尾，老文件的字节数正好少一块，
+       所以「缺了哪些字段」由文件长度决定（见下面的偏移量判断）。
+       这里只拒绝两种：比 v4 还老（结构对不上）和比当前版本还新（未来格式）。
+       不做「版本不符就整份丢弃」—— 那会让玩家进度全没。 */
+    if (g_save.version < 4 || g_save.version > SAVE_VERSION) return 0;
     int isOldSave = (fileSize < sizeof(SaveBlob));
 
     /* 迁移：老存档缺的字段给默认值。
@@ -131,7 +183,7 @@ int LoadSettings(void) {
         size_t bindNeed = bindOff + sizeof(g_save.bindings);
         if (fileSize < bindNeed) {
             static const int defBindings[ACT_COUNT] = BINDINGS_DEFAULT;
-            for (int a = 0; a < ACT_COUNT; a++) g_save.bindings[a] = defBindings[a];
+            for (int a = 0; a < BINDINGS_BASE; a++) g_save.bindings[a] = defBindings[a];
             g_save.upgEco = 0;
             g_save.upgRest = 0;
         }
@@ -179,11 +231,22 @@ int LoadSettings(void) {
     if (upgRest < 0 || upgRest > UPG_MAX) upgRest = 0;
 
     /* 键位：逐项夹取。非 0 的值必须能在 optKeyVKs 里找到，否则还原成默认 ——
-       防止损坏的存档把「移动」绑成一个不存在的键，玩家被锁死。 */
+       防止损坏的存档把「移动」绑成一个不存在的键，玩家被锁死。
+       前 BINDINGS_BASE 个读老数组；新增动作读末尾的 extraBindings，
+       v11 之前的存档没有这段，直接取出厂默认。 */
     {
         static const int defBindings[ACT_COUNT] = BINDINGS_DEFAULT;
+        size_t extraEnd = (size_t)((char*)&g_save.extraBindings[0] - (char*)&g_save)
+                          + sizeof(g_save.extraBindings);
+        int hasExtra = (fileSize >= extraEnd);
         for (int a = 0; a < ACT_COUNT; a++) {
-            int vk = g_save.bindings[a];
+            int vk;
+            if (a < BINDINGS_BASE) {
+                vk = g_save.bindings[a];
+            } else {
+                int e = a - BINDINGS_BASE;
+                vk = (hasExtra && e < BINDINGS_EXTRA) ? g_save.extraBindings[e] : defBindings[a];
+            }
             if (vk == 0) { g_bindings[a] = 0; continue; }   /* 允许显式无绑定 */
             int known = 0;
             for (int k = 0; k < OPT_KEY_COUNT; k++)
@@ -199,25 +262,174 @@ int LoadSettings(void) {
     if (gammaValue < 0.7f || gammaValue > 1.6f) gammaValue = 1.0f;
     if (mouseSens < 0.2f || mouseSens > 3.0f) mouseSens = 1.0f;
 
-    /* v7 新增：恢复成就数据（如果存档里有） */
-    if (fileSize >= sizeof(SaveBlob)) {
-        for (int i = 0; i < ACH_COUNT; i++) {
-            g_achievements[i].unlocked = g_save.achUnlocked[i];
-            g_achievements[i].progress = g_save.achProgress[i];
+    /* v14 追加：第 17~24 项成就。老档没有这段，一律置 0。 */
+    {
+        size_t ach2End = (size_t)((char*)&g_save.achProgress2[0] - (char*)&g_save)
+                         + sizeof(g_save.achProgress2);
+        for (int i = 0; i < ACH_EXTRA; i++) {
+            if (fileSize >= ach2End) {
+                g_achievements[ACH_COUNT + i].unlocked = g_save.achUnlocked2[i];
+                g_achievements[ACH_COUNT + i].progress = g_save.achProgress2[i];
+            } else {
+                g_achievements[ACH_COUNT + i].unlocked = 0;
+                g_achievements[ACH_COUNT + i].progress = 0;
+            }
         }
-        /* v8 新增：恢复无尽模式进度 */
-        bestEndlessLevel = g_save.bestEndlessLevel;
-        bestEndlessScore = g_save.bestEndlessScore;
-        isEndlessRun = g_save.isEndlessRunSaved;
-    } else {
-        /* 老存档没有成就数据，全置 0 */
-        for (int i = 0; i < ACH_COUNT; i++) {
-            g_achievements[i].unlocked = 0;
-            g_achievements[i].progress = 0;
+    }
+
+    /* v15 追加：第 25 项及以后的成就（预留区）。老档缺这段，置 0。
+       注意这段在文件最末尾，位置在残卷/扩展成就之后。 */
+    {
+        size_t achXEnd = (size_t)((char*)&g_save.achProgressX[0] - (char*)&g_save)
+                         + sizeof(g_save.achProgressX);
+        for (int i = ACH_BASE2; i < ACH_CAP; i++) {
+            if (i < ACH_TOTAL && fileSize >= achXEnd) {
+                g_achievements[i].unlocked = g_save.achUnlockedX[i - ACH_BASE2];
+                g_achievements[i].progress = g_save.achProgressX[i - ACH_BASE2];
+            } else {
+                g_achievements[i].unlocked = 0;
+                g_achievements[i].progress = 0;
+            }
         }
-        bestEndlessLevel = 0;
-        bestEndlessScore = 0;
-        isEndlessRun = 0;
+    }
+
+    /* v7 追加：成就数组。文件长度不够就是 v7 之前的老档，成就全置 0。
+       注意不能拿 sizeof(SaveBlob) 判断 —— 那会把 v7 档（只缺 v8 的三个 int）
+       也当成「没有成就」，一升级就把玩家的成就清零。 */
+    {
+        size_t achEnd = (size_t)((char*)&g_save.achProgress[0] - (char*)&g_save)
+                        + sizeof(g_save.achProgress);
+        if (fileSize >= achEnd) {
+            for (int i = 0; i < ACH_COUNT; i++) {
+                g_achievements[i].unlocked = g_save.achUnlocked[i];
+                g_achievements[i].progress = g_save.achProgress[i];
+            }
+        } else {
+            for (int i = 0; i < ACH_COUNT; i++) {
+                g_achievements[i].unlocked = 0;
+                g_achievements[i].progress = 0;
+            }
+        }
+    }
+
+    /* v8 追加：无尽模式进度。v8 之前的存档取默认值。 */
+    {
+        size_t endlEnd = (size_t)((char*)&g_save.isEndlessRunSaved - (char*)&g_save)
+                         + sizeof(int);
+        if (fileSize >= endlEnd) {
+            bestEndlessLevel = g_save.bestEndlessLevel;
+            bestEndlessScore = g_save.bestEndlessScore;
+            isEndlessRun = g_save.isEndlessRunSaved;
+        } else {
+            bestEndlessLevel = 0;
+            bestEndlessScore = 0;
+            isEndlessRun = 0;
+        }
+    }
+
+    /* v9 追加：上锁容器。缺这段就是 v9 之前的老档 —— 一律当没上锁。
+       v10 再追加锁型；v9 老档没有锁型字段，memset 后默认 0 = 拨盘。 */
+    {
+        size_t lockEnd = (size_t)((char*)&g_save.contLockCode[0] - (char*)&g_save)
+                         + sizeof(g_save.contLockCode);
+        size_t typeEnd = (size_t)((char*)&g_save.contLockType[0] - (char*)&g_save)
+                         + sizeof(g_save.contLockType);
+        for (int i = 0; i < MAX_CONTAINERS; i++) {
+            if (fileSize >= lockEnd) {
+                contLocked[i] = g_save.contLocked[i] ? 1 : 0;
+                contLockCode[i] = g_save.contLockCode[i];
+            } else {
+                contLocked[i] = 0;
+                contLockCode[i] = 0;
+            }
+            if (fileSize >= typeEnd) {
+                int t = g_save.contLockType[i];
+                contLockType[i] = (t >= 0 && t < LOCK_TYPE_COUNT) ? t : LOCK_TYPE_DIAL;
+            } else {
+                contLockType[i] = LOCK_TYPE_DIAL;
+            }
+        }
+        /* 读档不恢复「正在开锁」这个瞬时状态：锁盘永远从关闭开始 */
+        lockActive = 0;
+        lockTarget = -1;
+    }
+
+    /* v11 追加：技能选择 / 本局技能。v10 之前没有这段 —— 默认都带穿墙。 */
+    {
+        size_t skillEnd = (size_t)((char*)&g_save.skillLevels[0] - (char*)&g_save)
+                          + sizeof(g_save.skillLevels);
+        if (fileSize >= skillEnd) {
+            selectedSkill = g_save.selectedSkill;
+            runSkill = g_save.runSkill;
+            for (int i = 0; i < SKILL_SLOTS; i++) skillLevels[i] = g_save.skillLevels[i];
+        } else {
+            selectedSkill = SKILL_PHASE;
+            runSkill = SKILL_PHASE;
+            for (int i = 0; i < SKILL_SLOTS; i++) skillLevels[i] = 0;
+        }
+        if (selectedSkill < 0 || selectedSkill >= SKILL_COUNT) selectedSkill = SKILL_PHASE;
+        if (runSkill < 0 || runSkill >= SKILL_COUNT) runSkill = SKILL_PHASE;
+        for (int i = 0; i < SKILL_SLOTS; i++)
+            if (skillLevels[i] < 0 || skillLevels[i] > 3) skillLevels[i] = 0;
+        /* v15 预留区：第 6 个之后的技能等级 */
+        {
+            size_t skillXEnd = (size_t)((char*)&g_save.skillLevelsX[0] - (char*)&g_save)
+                               + sizeof(g_save.skillLevelsX);
+            for (int i = SKILL_BASE2; i < SKILL_CAP; i++) {
+                int v = (fileSize >= skillXEnd) ? g_save.skillLevelsX[i - SKILL_BASE2] : 0;
+                skillLevels[i] = (v >= 0 && v <= 3) ? v : 0;
+            }
+        }
+
+        /* 中途换过技能 = 这一局不能续（技能是开局定死的） */
+        if (g_save.hasRun && runSkill != selectedSkill) {
+            g_save.hasRun = 0;
+            runInProgress = 0;
+        }
+    }
+
+    /* v12 追加：隐藏房间。老档没有这段 —— 视为本层没有隐藏房间。 */
+    {
+        size_t hiddenEnd = (size_t)((char*)&g_save.hiddenCodeTaken[0] - (char*)&g_save)
+                           + sizeof(g_save.hiddenCodeTaken);
+        if (fileSize >= hiddenEnd) {
+            hiddenActive = g_save.hiddenActive ? 1 : 0;
+            hiddenOpened = g_save.hiddenOpened ? 1 : 0;
+            hiddenX0 = g_save.hiddenX0;
+            hiddenY0 = g_save.hiddenY0;
+            hiddenX1 = g_save.hiddenX1;
+            hiddenY1 = g_save.hiddenY1;
+            hiddenDoorX = g_save.hiddenDoorX;
+            hiddenDoorY = g_save.hiddenDoorY;
+            hiddenCodeCount = g_save.hiddenCodeCount;
+            hiddenCodesFound = g_save.hiddenCodesFound;
+            for (int i = 0; i < HIDDEN_MAX_CODES; i++) {
+                hiddenCodeX[i] = g_save.hiddenCodeX[i];
+                hiddenCodeY[i] = g_save.hiddenCodeY[i];
+                hiddenCodeTaken[i] = g_save.hiddenCodeTaken[i] ? 1 : 0;
+            }
+        } else {
+            hiddenActive = 0;
+            hiddenOpened = 0;
+            hiddenCodeCount = 0;
+            hiddenCodesFound = 0;
+            hiddenDoorX = hiddenDoorY = -1;
+            for (int i = 0; i < HIDDEN_MAX_CODES; i++) {
+                hiddenCodeX[i] = hiddenCodeY[i] = -1;
+                hiddenCodeTaken[i] = 0;
+            }
+        }
+        if (hiddenCodeCount < 0 || hiddenCodeCount > HIDDEN_MAX_CODES) hiddenCodeCount = 0;
+        if (hiddenCodesFound < 0) hiddenCodesFound = 0;
+        if (hiddenCodesFound > hiddenCodeCount) hiddenCodesFound = hiddenCodeCount;
+        if (!hiddenActive) hiddenOpened = 0;
+    }
+
+    /* v13 追加：残卷。v12 老档没有这段 —— 从 0 开始。 */
+    {
+        size_t scrollEnd = (size_t)((char*)&g_save.scrolls - (char*)&g_save) + sizeof(int);
+        scrolls = (fileSize >= scrollEnd) ? g_save.scrolls : 0;
+        if (scrolls < 0) scrolls = 0;
     }
 
     return g_save.hasRun;
@@ -271,6 +483,12 @@ void ContinueRun(void) {
 
     ApplyFov();
     GenerateThemeTextures(themeId);   /* 主题变了，墙面/地板贴图要跟着重建 */
+    /* 技能是瞬时状态，读档一律从「没在穿墙/透视、冷却已好」开始 */
+    phaseActive = 0;
+    sightActive = 0;
+    skillPhaseTimer = 0.0f;
+    skillSightTimer = 0.0f;
+    skillCooldownTimer = 0.0f;
     SpawnMonster();
     SpawnLightBeast();
     isEndlessRun = g_save.isEndlessRunSaved;  /* 恢复无尽模式标记 */
@@ -301,6 +519,11 @@ void ContinueRun(void) {
     tookDamage = 0;
     flashlightOffLevel = 0;
     sprintedThisLevel = 0;
+    locksOpened = 0;
+    hiddenOpenedCount = 0;
+    scrollsEarned = 0;
+    phaseSeconds = 0.0f;
+    blinkCount = 0;
 }
 
 void DeleteSave(void) {

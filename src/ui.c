@@ -268,6 +268,12 @@ MenuGeo GetMenuGeo(void) {
         case STATE_PAUSED:    return MakeGeo("PAUSED", 3, UIS(56), UIS(38), UIS(520), UIS(56), STATE_PAUSED);
         case STATE_GAMEOVER:  return MakeGeo(gameWon ? "YOU ESCAPED" : "YOU LOST YOUR MIND", 3, UIS(48), UIS(34), UIS(660), UIS(40), STATE_GAMEOVER);
         case STATE_SETTINGS:  return MakeGeo(PageTitle(settingsPage), SettingsRowCount(), UIS(44), UIS(30), UIS(680), UIS(44), STATE_SETTINGS);
+        case STATE_SKILLS: {
+            /* 标题动态带上残卷数量：这是唯一花残卷的地方 */
+            static char skillTitle[64];
+            sprintf(skillTitle, "SKILLS    %d SCROLL", scrolls);
+            return MakeGeo(skillTitle, SKILL_COUNT, UIS(46), UIS(30), UIS(780), UIS(46), STATE_SKILLS);
+        }
         case STATE_ACHIEVEMENTS: {
             /* 成就页使用自己的 600x400 面板（见 DrawAchievementsWindow）。
                不能用 MakeGeo：那个会把面板高度算成 count*rowH（17 行约 800px），
@@ -276,7 +282,7 @@ MenuGeo GetMenuGeo(void) {
             MenuGeo g;
             memset(&g, 0, sizeof(g));
             g.title = "ACHIEVEMENTS";
-            g.count = ACH_COUNT + 1;          /* 16 条成就 + Back */
+            g.count = ACH_TOTAL + 1;          /* 24 条成就 + Back */
             g.rowH = UIS(30);
 
             int panelW = ACH_PANEL_W;
@@ -442,15 +448,35 @@ static const char* MenuLabel(int i) {
         }
         case STATE_HUB: {
             static char hb[96];
-            if (i >= UPGRADE_COUNT) return "Back";
+            if (i > UPGRADE_COUNT) return "Back";
+            if (i == UPGRADE_COUNT) {
+                sprintf(hb, "Skills: %s LV%d   %d SCROLL   (open)",
+                        SkillName(selectedSkill), SkillLevel(selectedSkill), scrolls);
+                return hb;
+            }
             int cost = UpgradeCost(i);
             if (cost < 0) sprintf(hb, "%s   LV%d/%d   MAX", UpgradeName(i), UpgradeLevel(i), UPG_MAX);
             else sprintf(hb, "%s   LV%d/%d   %d SHARDS", UpgradeName(i), UpgradeLevel(i), UPG_MAX, cost);
             return hb;
         }
         case STATE_GAMEOVER: return "Return to Menu";
+        case STATE_SKILLS: {
+            static char sb[128];
+            if (i >= SKILL_COUNT - 1) return "Back";
+            int sk = i + 1;
+            const char* mark = (sk == selectedSkill) ? "[*]" : "[ ]";
+            int lv = SkillLevel(sk);
+            int cost = SkillUpgradeCost(sk);
+            if (cost < 0)
+                sprintf(sb, "%s %s   LV%d/%d   CD %.0fs   MAX",
+                        mark, SkillName(sk), lv, SKILL_UPG_MAX, SkillCooldown(sk));
+            else
+                sprintf(sb, "%s %s   LV%d/%d   CD %.0fs   %d SCROLL",
+                        mark, SkillName(sk), lv, SKILL_UPG_MAX, SkillCooldown(sk), cost);
+            return sb;
+        }
         case STATE_ACHIEVEMENTS: {
-            if (i >= ACH_COUNT) return "Back";
+            if (i >= ACH_TOTAL) return "Back";
             static char ab[256];
             if (g_achievements[i].unlocked) {
                 sprintf(ab, "[*] %s  (%d/%d)", g_achievements[i].name,
@@ -649,6 +675,11 @@ static void DrawMenuText(void) {
             else if (shards >= cost) c = (i == sel) ? 0x008CFF8Cu : 0x00A0FFA0u;
             else c = (i == sel) ? 0x00FF8080u : 0x00B06060u;
         }
+        else if (currentState == STATE_SKILLS && i < SKILL_COUNT - 1) {
+            int sk = i + 1;
+            if (sk == selectedSkill) c = (i == sel) ? 0x008CFF8Cu : 0x00A8E0B0u;
+            else c = (i == sel) ? 0x008CFF8Cu : 0x009B9B9Bu;
+        }
         else c = (i == sel) ? 0x008CFF8Cu : 0x009B9B9Bu;
 
         if (currentState == STATE_GAMEOVER && i > 0) {
@@ -766,11 +797,11 @@ static void DrawAchievementsWindow(MenuGeo g) {
             BlendRectWin(listX, drawY, listX + listW, drawY + rowHeight, highlight, 1.0f);
         }
 
-        /* 成就文本（先判 ACH_COUNT，Back 行不能再解引用 g_achievements） */
+        /* 成就文本（先判 ACH_TOTAL，Back 行不能再解引用 g_achievements） */
         char line[128];
         unsigned int textColor;
         int unlocked = 0;
-        if (actualIndex >= ACH_COUNT) {
+        if (actualIndex >= ACH_TOTAL) {
             strcpy(line, "Back");
             textColor = 0x00808080u;
         } else {
@@ -827,14 +858,14 @@ static void DrawAchievementsWindow(MenuGeo g) {
     }
 
     /* === Tooltip：鼠标悬停在成就上时显示详细说明 === */
-    if (achHovered >= 0 && achHovered < ACH_COUNT) {
+    if (achHovered >= 0 && achHovered < ACH_TOTAL) {
         DrawAchievementTooltip(0, 0, achHovered, g);  /* mx/my 不用，函数内部用全局鼠标位置 */
     }
 }
 
 static void DrawAchievementTooltip(int mx, int my, int hoveredIndex, MenuGeo g) {
     (void)mx; (void)my; (void)g;
-    if (hoveredIndex < 0 || hoveredIndex >= ACH_COUNT) return;
+    if (hoveredIndex < 0 || hoveredIndex >= ACH_TOTAL) return;
     if (currentState != STATE_ACHIEVEMENTS) return;
 
     const Achievement* ach = &g_achievements[hoveredIndex];
@@ -975,8 +1006,386 @@ static void DrawBar(int x, int y, int w, int h, float frac, unsigned int color) 
     if (fw > 0) BlendRectWin(x, y, x + fw, y + h, color, 0.92f);
     FrameRectWin(x, y, x + w, y + h, 0x00909090, 0.55f, 1);
 }
+/* ---------------- 开锁锁盘（v1.8.0） ----------------
+   布局、绘制、命中测试共用同一套几何（和菜单 MakeGeo 一个思路）：
+   鼠标点击由 game.c 调 LockHitTest，绘制在本文件，两边不会对不上。 */
+
+typedef struct { int x0, y0, x1, y1; } LockBox;
+
+static int LockIn(LockBox b, int x, int y) {
+    return x >= b.x0 && x < b.x1 && y >= b.y0 && y < b.y1;
+}
+
+static LockBox LockPanelBox(void) {
+    int pw = UIS(540);
+    /* 调波器要放下示波器 + 三个旋钮，面板比别的锁高一点 */
+    int ph = (lockType == LOCK_TYPE_TUNE) ? UIS(520) : UIS(440);
+    LockBox p;
+    p.x0 = (winW - pw) / 2;
+    p.y0 = (winH - ph) / 2;
+    p.x1 = p.x0 + pw;
+    p.y1 = p.y0 + ph;
+    return p;
+}
+
+/* 第 d 个拨盘的三块：上箭头 / 数字格 / 下箭头 */
+static void LockDialBox(int d, LockBox* up, LockBox* digit, LockBox* down) {
+    LockBox p = LockPanelBox();
+    int box = UIS(96), gap = UIS(34);
+    int total = LOCK_DIALS * box + (LOCK_DIALS - 1) * gap;
+    int bx = p.x0 + (p.x1 - p.x0 - total) / 2 + d * (box + gap);
+    int by = p.y0 + UIS(122);
+    up->x0 = bx; up->y0 = by - UIS(38); up->x1 = bx + box; up->y1 = by - UIS(10);
+    digit->x0 = bx; digit->y0 = by; digit->x1 = bx + box; digit->y1 = by + box;
+    down->x0 = bx; down->y0 = by + box + UIS(10); down->x1 = bx + box; down->y1 = by + box + UIS(38);
+}
+
+/* 接线锁：左右两列端子。side 0 = 左，1 = 右 */
+static void LockWireNodeBox(int side, int idx, LockBox* b) {
+    LockBox p = LockPanelBox();
+    int size = UIS(44);
+    int x = (side == 0) ? (p.x0 + UIS(110)) : (p.x1 - UIS(110) - size);
+    int y = p.y0 + UIS(132) + idx * UIS(70);
+    b->x0 = x; b->y0 = y; b->x1 = x + size; b->y1 = y + size;
+}
+
+/* 均衡器：第 band 根推子的柱体 / 上箭头 / 下箭头 */
+static void LockEqBarBox(int band, LockBox* bar) {
+    LockBox p = LockPanelBox();
+    int bw = UIS(64), bh = UIS(170), gap = UIS(46);
+    int total = LOCK_EQ_BANDS * bw + (LOCK_EQ_BANDS - 1) * gap;
+    int x0 = p.x0 + (p.x1 - p.x0 - total) / 2 + band * (bw + gap);
+    int y1 = p.y0 + UIS(295);
+    bar->x0 = x0; bar->y0 = y1 - bh; bar->x1 = x0 + bw; bar->y1 = y1;
+}
+
+static void LockEqArrowBox(int band, int isUp, LockBox* b) {
+    LockBox bar;
+    LockEqBarBox(band, &bar);
+    b->x0 = bar.x0;
+    b->x1 = bar.x1;
+    if (isUp) { b->y1 = bar.y0 - UIS(8); b->y0 = b->y1 - UIS(30); }
+    else      { b->y0 = bar.y1 + UIS(8); b->y1 = b->y0 + UIS(30); }
+}
+
+/* 调波器：示波器区域 + 三个旋钮（每个旋钮左右各一个 - / + 按钮） */
+static void LockTuneScopeBox(LockBox* s) {
+    LockBox p = LockPanelBox();
+    s->x0 = p.x0 + UIS(90);
+    s->y0 = p.y0 + UIS(82);
+    s->x1 = p.x1 - UIS(90);
+    s->y1 = p.y0 + UIS(282);
+}
+
+static void LockTuneBoxes(int i, LockBox* dec, LockBox* knob, LockBox* inc) {
+    LockBox p = LockPanelBox();
+    int ks = UIS(76), bs = UIS(36), gap = UIS(90);
+    int total = LOCK_TUNE_KNOBS * ks + (LOCK_TUNE_KNOBS - 1) * gap;
+    int kx = p.x0 + (p.x1 - p.x0 - total) / 2 + i * (ks + gap);
+    int ky = p.y0 + UIS(312);
+    knob->x0 = kx; knob->y0 = ky; knob->x1 = kx + ks; knob->y1 = ky + ks;
+
+    dec->x0 = kx - bs - UIS(10);
+    dec->y0 = ky + (ks - bs) / 2;
+    dec->x1 = dec->x0 + bs;
+    dec->y1 = dec->y0 + bs;
+
+    inc->x0 = kx + ks + UIS(10);
+    inc->y0 = dec->y0;
+    inc->x1 = inc->x0 + bs;
+    inc->y1 = inc->y0 + bs;
+}
+
+/* 底部只有一个 BACK 按钮：谜题一解开就自动开锁，不需要 TRY */
+static LockBox LockBackBox(void) {
+    LockBox p = LockPanelBox();
+    int bw = UIS(200), bh = UIS(48);
+    int x0 = p.x0 + (p.x1 - p.x0 - bw) / 2;
+    int y0 = p.y1 - UIS(95);
+    LockBox b = { x0, y0, x0 + bw, y0 + bh };
+    return b;
+}
+
+int LockHitTest(int mx, int my, int* a) {
+    if (a) *a = -1;
+    if (LockIn(LockBackBox(), mx, my)) return LOCK_HIT_BACK;
+
+    if (lockType == LOCK_TYPE_DIAL) {
+        for (int d = 0; d < LOCK_DIALS; d++) {
+            LockBox up, dg, dn;
+            LockDialBox(d, &up, &dg, &dn);
+            if (LockIn(dg, mx, my)) { if (a) *a = d; return LOCK_HIT_DIAL; }
+            if (LockIn(up, mx, my)) { if (a) *a = d; return LOCK_HIT_UP; }
+            if (LockIn(dn, mx, my)) { if (a) *a = d; return LOCK_HIT_DOWN; }
+        }
+    } else if (lockType == LOCK_TYPE_WIRE) {
+        for (int i = 0; i < LOCK_WIRES; i++) {
+            LockBox b;
+            LockWireNodeBox(0, i, &b);
+            if (LockIn(b, mx, my)) { if (a) *a = i; return LOCK_HIT_NODE_L; }
+            LockWireNodeBox(1, i, &b);
+            if (LockIn(b, mx, my)) { if (a) *a = i; return LOCK_HIT_NODE_R; }
+        }
+    } else if (lockType == LOCK_TYPE_EQ) {
+        for (int band = 0; band < LOCK_EQ_BANDS; band++) {
+            LockBox up, dn;
+            LockEqArrowBox(band, 1, &up);
+            LockEqArrowBox(band, 0, &dn);
+            if (LockIn(up, mx, my)) { if (a) *a = band; return LOCK_HIT_BAR_UP; }
+            if (LockIn(dn, mx, my)) { if (a) *a = band; return LOCK_HIT_BAR_DOWN; }
+        }
+    } else if (lockType == LOCK_TYPE_TUNE) {
+        for (int k = 0; k < LOCK_TUNE_KNOBS; k++) {
+            LockBox dec, kn, inc;
+            LockTuneBoxes(k, &dec, &kn, &inc);
+            if (LockIn(dec, mx, my)) { if (a) *a = k; return LOCK_HIT_KNOB_DEC; }
+            if (LockIn(inc, mx, my)) { if (a) *a = k; return LOCK_HIT_KNOB_INC; }
+        }
+    }
+    return LOCK_HIT_NONE;
+}
+
+/* 一个带悬停反馈的按钮 */
+static void LockDrawButton(LockBox b, const char* label, int hot, unsigned int accent) {
+    BlendRectWin(b.x0, b.y0, b.x1, b.y1, hot ? 0x00323A42u : 0x001A2026u, 0.98f);
+    FrameRectWin(b.x0, b.y0, b.x1, b.y1, hot ? accent : 0x004A525Au, 0.95f, hot ? 2 : 1);
+    DrawTextCenterWin((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2 - TextHeightWin() / 2,
+                      label, hot ? 0x00FFE080u : 0x00C8D0D8u);
+}
+
+/* 开锁覆盖层（v1.8.0）：游戏**不暂停** —— 只是挡住移动与搜索，怪照常过来。
+   所以先把整屏压暗，让面板从场景里浮出来，而不是在花花绿绿的背景上叠半透明块。 */
+static void LockDrawDialBody(int hit, int ha) {
+    for (int d = 0; d < LOCK_DIALS; d++) {
+        LockBox up, dg, dn;
+        LockDialBox(d, &up, &dg, &dn);
+        int sel = (d == lockCursor);
+        int hotUp = (hit == LOCK_HIT_UP && ha == d);
+        int hotDn = (hit == LOCK_HIT_DOWN && ha == d);
+        int hotDg = (hit == LOCK_HIT_DIAL && ha == d);
+
+        LockDrawButton(up, "^", hotUp, 0x00E0C060u);
+        LockDrawButton(dn, "v", hotDn, 0x00E0C060u);
+
+        unsigned int fill = sel ? 0x00202832u : 0x0013181Du;
+        unsigned int edge = sel ? 0x00E0C060u : (hotDg ? 0x00988A50u : 0x004A525Au);
+        BlendRectWin(dg.x0, dg.y0, dg.x1, dg.y1, fill, 0.98f);
+        FrameRectWin(dg.x0, dg.y0, dg.x1, dg.y1, edge, 0.95f, sel ? UIS(2) : 1);
+        /* 这一格已经拨对：内侧描一圈细绿边（声音之外的视觉兜底） */
+        if (LockDialSolved(d)) {
+            int t = UIS(2);
+            FrameRectWin(dg.x0 + t, dg.y0 + t, dg.x1 - t, dg.y1 - t,
+                         0x0040FF80u, 0.85f, 2);
+        }
+
+        char dbuf[8];
+        sprintf(dbuf, "%d", lockDigits[d] % LOCK_DIGITS);
+        DrawTextCenterWin((dg.x0 + dg.x1) / 2, (dg.y0 + dg.y1) / 2 - TextHeightWin() / 2,
+                          dbuf, sel ? 0x00FFE080u : 0x00D0D8E0u);
+    }
+
+    /* 解谜提示：声音是主反馈，绿色圈是视觉兜底 */
+    LockBox p = LockPanelBox();
+    DrawTextCenterWin(winW / 2, p.y0 + UIS(286), "CLICK + GREEN RING = RIGHT DIGIT", 0x00B0B8C0u);
+    DrawTextCenterWin(winW / 2, p.y0 + UIS(310), "THUD = WRONG", 0x00889098u);
+}
+
+/* 端子颜色：0 红 / 1 绿 / 2 蓝 */
+static unsigned int LockTermColor(int c) {
+    if (c == 0) return 0x00E05050u;
+    if (c == 1) return 0x0050D060u;
+    if (c == 2) return 0x005090E0u;
+    return 0x00909090u;
+}
+
+/* 粗线（Bresenham），用于接线锁的导线 */
+static void LockDrawLine(int x0, int y0, int x1, int y1, unsigned int c) {
+    int dx = x1 - x0, dy = y1 - y0;
+    int adx = (dx < 0) ? -dx : dx, ady = (dy < 0) ? -dy : dy;
+    int sx = (dx < 0) ? -1 : 1, sy = (dy < 0) ? -1 : 1;
+    int err = adx - ady;
+    for (int guard = 0; guard < 4000; guard++) {
+        BlendRectWin(x0, y0, x0 + UIS(3), y0 + UIS(3), c, 0.95f);
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = err * 2;
+        if (e2 > -ady) { err -= ady; x0 += sx; }
+        if (e2 < adx) { err += adx; y0 += sy; }
+    }
+}
+
+static void LockDrawWireBody(int hit, int ha) {
+    LockBox p = LockPanelBox();
+
+    /* 先画已经接好的线，压在端子下面 */
+    for (int i = 0; i < LOCK_WIRES; i++) {
+        if (lockWireLink[i] < 0) continue;
+        LockBox lb, rb;
+        LockWireNodeBox(0, i, &lb);
+        LockWireNodeBox(1, lockWireLink[i], &rb);
+        LockDrawLine((lb.x0 + lb.x1) / 2, (lb.y0 + lb.y1) / 2,
+                     (rb.x0 + rb.x1) / 2, (rb.y0 + rb.y1) / 2,
+                     LockTermColor(LockWireColor(i)));
+    }
+
+    for (int i = 0; i < LOCK_WIRES; i++) {
+        LockBox b;
+        LockWireNodeBox(0, i, &b);
+        BlendRectWin(b.x0, b.y0, b.x1, b.y1, LockTermColor(LockWireColor(i)), 0.95f);
+        int selHere = (lockWireSel == i);
+        unsigned int edge = selHere ? 0x00FFE080u
+                          : (hit == LOCK_HIT_NODE_L && ha == i) ? 0x00FFFFFFu : 0x00202020u;
+        FrameRectWin(b.x0, b.y0, b.x1, b.y1, edge, 0.95f, selHere ? UIS(3) : UIS(2));
+
+        LockWireNodeBox(1, i, &b);
+        BlendRectWin(b.x0, b.y0, b.x1, b.y1, LockTermColor(LockWireRightColor(i)), 0.95f);
+        FrameRectWin(b.x0, b.y0, b.x1, b.y1,
+                     (hit == LOCK_HIT_NODE_R && ha == i) ? 0x00FFFFFFu : 0x00202020u,
+                     0.95f, UIS(2));
+    }
+
+    DrawTextCenterWin(winW / 2, p.y0 + UIS(96),
+                      (lockWireSel >= 0) ? "PICK A MATCHING TERMINAL" : "PICK A LEFT TERMINAL",
+                      (lockWireSel >= 0) ? 0x00E0C060u : 0x00707880u);
+}
+
+static void LockDrawEqBody(int hit, int ha) {
+    LockBox p = LockPanelBox();
+    for (int band = 0; band < LOCK_EQ_BANDS; band++) {
+        LockBox bar, up, dn;
+        LockEqBarBox(band, &bar);
+        LockEqArrowBox(band, 1, &up);
+        LockEqArrowBox(band, 0, &dn);
+
+        int solved = (lockEqVal[band] == LockEqTarget(band));
+        LockDrawButton(up, "^", hit == LOCK_HIT_BAR_UP && ha == band, 0x00E0C060u);
+        LockDrawButton(dn, "v", hit == LOCK_HIT_BAR_DOWN && ha == band, 0x00E0C060u);
+
+        /* 槽 */
+        BlendRectWin(bar.x0, bar.y0, bar.x1, bar.y1, 0x0013181Du, 0.98f);
+        FrameRectWin(bar.x0, bar.y0, bar.x1, bar.y1, 0x004A525Au, 0.9f, 1);
+
+        /* 当前高度 */
+        int barH = bar.y1 - bar.y0;
+        int hgt = barH * (lockEqVal[band] + 1) / LOCK_EQ_STEPS;
+        BlendRectWin(bar.x0 + UIS(4), bar.y1 - hgt, bar.x1 - UIS(4), bar.y1 - UIS(4),
+                     solved ? 0x0040C060u : 0x004080C0u, 0.95f);
+
+        /* 目标高度：一条绿色标线 —— 这就是视觉线索 */
+        int thgt = barH * (LockEqTarget(band) + 1) / LOCK_EQ_STEPS;
+        int ty = bar.y1 - thgt;
+        BlendRectWin(bar.x0 - UIS(6), ty, bar.x1 + UIS(6), ty + UIS(3), 0x0040FF80u, 0.9f);
+    }
+    DrawTextCenterWin(winW / 2, p.y0 + UIS(96), "PUSH EACH BAR TO THE GREEN LINE", 0x00707880u);
+}
+
+/* 调波器：画一条正弦波。amp/freq/phase 都是 0..7 的整数档。 */
+static void LockTuneWave(LockBox a, int amp, int freq, int phase, unsigned int color) {
+    int w = a.x1 - a.x0;
+    if (w <= 0) return;
+    int midY = (a.y0 + a.y1) / 2;
+    float cycles = 1.0f + (float)freq * 3.0f / 7.0f;              /* 1 ~ 4 个周期 */
+    float ph = (float)phase * 6.2831853f / (float)LOCK_TUNE_STEPS;
+    float ampScale = 0.18f + 0.82f * (float)amp / 7.0f;
+    float maxAmp = (float)(a.y1 - a.y0) * 0.42f;
+    int prevX = 0, prevY = 0;
+    for (int i = 0; i <= w; i += 2) {
+        float u = (float)i / (float)w;
+        float s = sinf(6.2831853f * cycles * u + ph);
+        int x = a.x0 + i;
+        int y = midY - (int)(s * maxAmp * ampScale);
+        if (i > 0) LockDrawLine(prevX, prevY, x, y, color);
+        prevX = x;
+        prevY = y;
+    }
+}
+
+static void LockDrawTuneBody(int hit, int ha) {
+    static const char* knobNames[LOCK_TUNE_KNOBS] = {
+        "1.AMPLITUDE", "2.FREQUENCY", "3.PHASE"
+    };
+    LockBox p = LockPanelBox();
+    LockBox scope;
+    LockTuneScopeBox(&scope);
+
+    /* 示波器：底 + 边框 + 中线和竖分隔 */
+    BlendRectWin(scope.x0, scope.y0, scope.x1, scope.y1, 0x00060C0Au, 0.96f);
+    FrameRectWin(scope.x0, scope.y0, scope.x1, scope.y1, 0x00384A44u, 0.9f, UIS(2));
+    int midY = (scope.y0 + scope.y1) / 2;
+    BlendRectWin(scope.x0 + UIS(4), midY, scope.x1 - UIS(4), midY + 1, 0x001A2624u, 0.9f);
+    for (int q = 1; q <= 3; q++) {
+        int gx = scope.x0 + (scope.x1 - scope.x0) * q / 4;
+        BlendRectWin(gx, scope.y0 + UIS(4), gx + 1, scope.y1 - UIS(4), 0x001A2624u, 0.9f);
+    }
+
+    /* 目标波形（暗）+ 玩家波形（亮）：重合即匹配 */
+    LockTuneWave(scope, LockTuneTarget(0), LockTuneTarget(1), LockTuneTarget(2), 0x004A5A62u);
+    LockTuneWave(scope, lockTuneVal[0], lockTuneVal[1], lockTuneVal[2], 0x0060FFC0u);
+
+    for (int k = 0; k < LOCK_TUNE_KNOBS; k++) {
+        LockBox dec, kn, inc;
+        LockTuneBoxes(k, &dec, &kn, &inc);
+        int onTarget = (lockTuneVal[k] == LockTuneTarget(k));
+
+        LockDrawButton(dec, "-", hit == LOCK_HIT_KNOB_DEC && ha == k, 0x00E0C060u);
+        LockDrawButton(inc, "+", hit == LOCK_HIT_KNOB_INC && ha == k, 0x00E0C060u);
+
+        BlendRectWin(kn.x0, kn.y0, kn.x1, kn.y1, 0x001A2026u, 0.98f);
+        FrameRectWin(kn.x0, kn.y0, kn.x1, kn.y1,
+                     onTarget ? 0x0040FF80u : 0x005A6268u, 0.95f, onTarget ? UIS(2) : 1);
+
+        /* 指针：0 档朝上，顺时针一圈 */
+        float ang = (float)lockTuneVal[k] * 6.2831853f / (float)LOCK_TUNE_STEPS - 1.5707963f;
+        int cx = (kn.x0 + kn.x1) / 2, cy = (kn.y0 + kn.y1) / 2;
+        int r = (kn.x1 - kn.x0) / 2 - UIS(8);
+        LockDrawLine(cx, cy, cx + (int)(cosf(ang) * r), cy + (int)(sinf(ang) * r),
+                     onTarget ? 0x0040FF80u : 0x00E0C060u);
+
+        DrawTextCenterWin((kn.x0 + kn.x1) / 2, kn.y1 + UIS(10), knobNames[k],
+                          onTarget ? 0x0080E0A0u : 0x00A8B0B8u);
+    }
+
+    DrawTextCenterWin(winW / 2, p.y0 + UIS(236), "MATCH THE BRIGHT WAVE TO THE DIM ONE", 0x00707880u);
+}
+
+/* 开锁覆盖层总入口：四种锁型共用同一块面板与底栏 */
+static void DrawLockOverlay(void) {
+    LockBox p = LockPanelBox();
+    int mx = g_mousePos.x, my = g_mousePos.y;
+    int ha = -1;
+    int hit = LockHitTest(mx, my, &ha);
+
+    BlendRectWin(0, 0, winW, winH, 0x00000000u, 0.55f);
+
+    BlendRectWin(p.x0, p.y0, p.x1, p.y1, 0x000A0E12u, 0.97f);
+    FrameRectWin(p.x0, p.y0, p.x1, p.y1, 0x00C8A040u, 0.85f, UIS(2));
+
+    DrawTextCenterWin(winW / 2, p.y0 + UIS(24), "LOCKED", 0x00E05050u);
+
+    if (lockType == LOCK_TYPE_DIAL) {
+        DrawTextCenterWin(winW / 2, p.y0 + UIS(52), "TURN THE DIALS UNTIL EVERY ONE CLICKS", 0x0090A0A8u);
+        LockDrawDialBody(hit, ha);
+    } else if (lockType == LOCK_TYPE_WIRE) {
+        DrawTextCenterWin(winW / 2, p.y0 + UIS(52), "CONNECT EACH LEFT TERMINAL TO ITS COLOR", 0x0090A0A8u);
+        LockDrawWireBody(hit, ha);
+        DrawTextCenterWin(winW / 2, p.y0 + UIS(336), "WRONG COLOR = THUD", 0x00889098u);
+    } else if (lockType == LOCK_TYPE_EQ) {
+        DrawTextCenterWin(winW / 2, p.y0 + UIS(52), "MATCH EVERY BAR TO ITS GREEN LINE", 0x0090A0A8u);
+        LockDrawEqBody(hit, ha);
+    } else {
+        DrawTextCenterWin(winW / 2, p.y0 + UIS(52), "TUNE THE SCOPE UNTIL THE WAVES MATCH", 0x0090A0A8u);
+        LockDrawTuneBody(hit, ha);
+    }
+
+    LockDrawButton(LockBackBox(), "BACK", hit == LOCK_HIT_BACK, 0x00C05050u);
+
+    DrawTextCenterWin(winW / 2, p.y1 - UIS(32), "MOUSE ONLY    -    ANY KEY TO LEAVE", 0x00707880u);
+}
+
 void DrawHUD(void) {
     char buf[96];
+
+    /* 穿墙期间整屏薄薄压一层蓝：让玩家立刻意识到「我现在在墙里」 */
+    if (phaseActive) BlendRectWin(0, 0, winW, winH, 0x0030A0FFu, 0.10f);
 
     /* ------------------------------------------------------------------ */
     /* HUD 详细度                                                        */
@@ -1155,6 +1564,42 @@ void DrawHUD(void) {
         DrawTextWin(tx, ty, pickupMsg, 0x00E8E060u);
     }
 
+    /* 技能槽：左下，LIGHT 条上面一行。冷却好 = 绿，冷却中 = 灰，生效中 = 亮蓝 */
+    {
+        int sy = winH - UIS(126);
+        const char* key = VkName(g_bindings[ACT_SKILL]);
+        const char* sname = SkillName(runSkill);
+        int activeNow = (runSkill == SKILL_PHASE && phaseActive) ||
+                        (runSkill == SKILL_SIGHT && sightActive);
+        float left = (runSkill == SKILL_SIGHT) ? skillSightTimer : skillPhaseTimer;
+        float full = SkillDuration(runSkill);
+        char sbuf[64];
+        unsigned int scol;
+        if (activeNow) {
+            sprintf(sbuf, "%s  %s  %.1fs", key, sname, left);
+            scol = 0x0060D0FFu;
+        } else if (skillCooldownTimer > 0.0f) {
+            sprintf(sbuf, "%s  %s  %.0fs", key, sname, skillCooldownTimer);
+            scol = 0x00888888u;
+        } else {
+            sprintf(sbuf, "%s  %s  READY", key, sname);
+            scol = 0x0060E0A0u;
+        }
+        DrawTextWin(UIS(20), sy, sbuf, scol);
+
+        int sbw = UIS(180), sbh = UIS(5);
+        int sbx = UIS(20), sby = sy + TextHeightWin() + UIS(4);
+        float frac;
+        if (activeNow) frac = (full > 0.0f) ? left / full : 0.0f;
+        else if (skillCooldownTimer > 0.0f) frac = 1.0f - skillCooldownTimer / SkillCooldown(runSkill);
+        else frac = 1.0f;
+        if (frac < 0.0f) frac = 0.0f;
+        if (frac > 1.0f) frac = 1.0f;
+        BlendRectWin(sbx, sby, sbx + sbw, sby + sbh, 0x00202020u, 0.75f);
+        if (frac > 0.0f) BlendRectWin(sbx, sby, sbx + (int)(sbw * frac), sby + sbh, scol, 0.95f);
+        FrameRectWin(sbx, sby, sbx + sbw, sby + sbh, 0x00808080u, 0.6f, 1);
+    }
+
     /* 手电电量 / 体力：左下两条细条，标签按实际文字宽度排版 */
     int barW = UIS(180), barH = UIS(12);
     int labelX = UIS(20);
@@ -1179,19 +1624,29 @@ void DrawHUD(void) {
     /* 交互提示 + 长按进度 */
     if (hoverKind != 0) {
         char pbuf[64];
-        if (hoverKind == 1) sprintf(pbuf, "HOLD E  SEARCH");
+        int lockedHere = (hoverKind == 1 && hoverIndex >= 0 && hoverIndex < MAX_CONTAINERS &&
+                          contLocked[hoverIndex]);
+        if (hoverKind == 4) sprintf(pbuf, "PRESS E  TAKE CODE");
+        else if (hoverKind == 3) {
+            if (hiddenCodesFound >= hiddenCodeCount) sprintf(pbuf, "PRESS E  OPEN HIDDEN DOOR");
+            else sprintf(pbuf, "HIDDEN DOOR   CODES %d/%d", hiddenCodesFound, hiddenCodeCount);
+        }
+        else if (hoverKind == 1 && lockedHere) sprintf(pbuf, "PRESS E  UNLOCK");
+        else if (hoverKind == 1) sprintf(pbuf, "HOLD E  SEARCH");
         else if (fusesHeld >= fusesNeeded) sprintf(pbuf, "HOLD E  POWER ON");
         else sprintf(pbuf, "NEED %d MORE FUSE", fusesNeeded - fusesHeld);
 
         int tw = TextWidthWin(pbuf);
         int px = (winW - tw) / 2;
         int py = winH - UIS(150);
-        DrawTextWin(px, py, pbuf, (hoverKind == 2 && fusesHeld < fusesNeeded) ? 0x00C05050u : 0x00E8E8E8u);
+        DrawTextWin(px, py, pbuf, (hoverKind == 2 && fusesHeld < fusesNeeded) ? 0x00C05050u
+                                  : (lockedHere ? 0x00E0B040u : 0x00E8E8E8u));
 
         int barW = UIS(240), barH = UIS(8);
         int bx = (winW - barW) / 2;
         int by = py + UIS(30);
         BlendRectWin(bx, by, bx + barW, by + barH, 0x00202020, 0.8f);
+        /* 上锁的箱子是「按一下」不是「长按」，不画进度条 */
         if (holdingNow) {
             float f = holdTimer / SEARCH_TIME;
             if (f > 1.0f) f = 1.0f;
@@ -1214,7 +1669,7 @@ void DrawHUD(void) {
     }
 
     /* 蓄力投掷进度条：按住鼠标左键时显示 */
-    int mouseFree = (currentState != STATE_PLAYING) || (isMapOpen && mapFullScreen);
+    int mouseFree = (currentState != STATE_PLAYING);
     /* 只有选中道具有库存时才显示蓄力条 */
     int hasItem = (throwSelected == 1 && bottles > 0) || (throwSelected == 0 && flares > 0);
     if (isCharging && mouseCharge > 0.0f && !mouseFree && hasItem) {
@@ -1271,7 +1726,8 @@ void RenderFrame(void) {
 
     if (showScene) {
         Render3D();
-        if (currentState == STATE_PLAYING && isMapOpen) RenderMap();
+        /* 透视：隔墙标记，画在场景之上（不参与 zBuffer 遮挡） */
+        if (sightActive) RenderSightOverlay();
         /* 跳脸虫：屏幕空间 overlay，盖在场景之上、HUD 之下 */
         if (currentState == STATE_PLAYING) DrawParasiteSprite();
         if (flashTime > 0.0f)
@@ -1291,12 +1747,15 @@ void RenderFrame(void) {
         }
         /* 改绑提示框：最顶层，盖住所有菜单 */
         DrawRebindOverlay();
-    } else if (isMapOpen && mapFullScreen) {
-        /* 全屏地图：不画 HUD —— 整个屏幕就是地图，别在上面压一堆数值。
-           小窗地图则照常画 HUD（它只是右下角一个叠加层）。 */
     } else {
         DrawHUD();
+        /* 开锁覆盖层画在 HUD 之上：它是当前唯一可操作的东西 */
+        if (lockActive) DrawLockOverlay();
     }
+
+    /* 小地图永远画在最上层：它是常驻小窗，菜单/锁盘/暂停都不该把它盖住，
+       也不该让它消失 —— 只有玩家自己按 M 才关。 */
+    if (showScene && isMapOpen) RenderMap();
 
     if (g_useDIB) {
         if (renderW == winW && renderH == winH) {

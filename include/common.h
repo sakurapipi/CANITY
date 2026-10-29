@@ -28,8 +28,8 @@
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 21         /* 整数版本，进存档做记录 */
-#define CANITY_VERSION_STR "1.7.0"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_NUM 28         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_STR "2.2.0"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -40,7 +40,8 @@ typedef enum {
     STATE_GAMEOVER,
     STATE_HUB,
     STATE_HELP,
-    STATE_ACHIEVEMENTS
+    STATE_ACHIEVEMENTS,
+    STATE_SKILLS
 } GameState;
 
 /* ------------------------------------------------------------------ */
@@ -98,7 +99,7 @@ extern int bestEndlessScore;
 /* 精灵排序表的上界：容器 + 配电箱 + 寻声怪 + 安全屋 + 光敏怪 + 投掷物 + 出口光柱
    + 飞行中的玻璃瓶
    注意：跳脸虫不在这个表里 —— 它是屏幕空间 overlay，由 RenderFrame 直接画。 */
-#define MAX_SPRITES (MAX_CONTAINERS + MAX_THROWN + 6 + MAX_SHOTS)
+#define MAX_SPRITES (MAX_CONTAINERS + MAX_THROWN + 6 + MAX_SHOTS + HIDDEN_MAX_CODES)
 
 /* 内部渲染的像素预算上限。
    窗口再大，内部渲染分辨率也不超过这个像素数 —— 这是全屏帧时间的保护阀。
@@ -117,7 +118,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 35
+#define SETTING_COUNT 36
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 
@@ -271,6 +272,31 @@ typedef struct {
 
 typedef struct { float x, y; int active; } Breaker;
 
+/* 上锁容器（v1.8.0）：小节拍解谜。
+   锁状态**不能**塞进 Container —— Container 嵌在 SaveBlob 中间，
+   加字段会让后面 worldMap / 成就 / 无尽进度整体偏移，老存档全错位。
+   所以存档里用平行数组（见 save.h 末尾），运行时也一样。 */
+
+/* 四种锁型：拨盘（听声）/ 接线（配色）/ 均衡器（对高度）/ 调波器（对波形） */
+enum {
+    LOCK_TYPE_DIAL = 0,   /* 3 个拨盘，拨对给「咔哒」+ 绿圈 */
+    LOCK_TYPE_WIRE = 1,   /* 把同色端子连起来 */
+    LOCK_TYPE_EQ   = 2,   /* 3 根推子调到正确高度 */
+    LOCK_TYPE_TUNE = 3,   /* 示波器调波：振幅 / 频率 / 相位 */
+    LOCK_TYPE_COUNT
+};
+
+#define LOCK_DIALS 3
+#define LOCK_DIGITS 8
+#define LOCK_WIRES 3          /* 接线锁：3 对端子 */
+#define LOCK_EQ_BANDS 3       /* 均衡器锁：3 根推子 */
+#define LOCK_EQ_STEPS 8       /* 每根推子 0..7 档 */
+#define LOCK_TUNE_KNOBS 3     /* 调波器：振幅 / 频率 / 相位 */
+#define LOCK_TUNE_STEPS 8     /* 每个旋钮 0..7 档 */
+#define LOCK_MIN_LEVEL 2      /* 第 2 关起才会遇到锁 */
+#define LOCK_CHANCE 18        /* 每个箱子上锁的概率（%）—— 太高会烦 */
+#define LOCK_MAX_PER_LEVEL 2  /* 一层最多几个锁：再多就变负担了 */
+
 /* 交互（长按 E） */
 #define INTERACT_RANGE 1.25f
 #define SEARCH_TIME 1.1f
@@ -287,13 +313,28 @@ typedef struct { float x, y; int active; } Breaker;
 /* 升级项：Battery / Speed / Quiet / Calm / Eco / Rest */
 #define UPGRADE_COUNT 6
 #define UPG_MAX 3
-/* 大厅菜单行数：6 项升级 + Back */
-#define HUB_ROWS (UPGRADE_COUNT + 1)
+/* 大厅菜单行数：6 项升级 + 技能页入口 + Back */
+#define HUB_ROWS (UPGRADE_COUNT + 2)
 
 /* ------------------------------------------------------------------ */
 /* 成就系统                                                              */
 /* ------------------------------------------------------------------ */
 #define ACH_COUNT 16
+/* v14 追加的 8 项成就。老的 ACH_COUNT 冻结在 16 ——
+   成就数组嵌在 SaveBlob 中间，改长度会让后面所有字段错位，
+   所以新成就放存档末尾的独立数组（见 save.h）。 */
+#define ACH_EXTRA 8
+#define ACH_TOTAL (ACH_COUNT + ACH_EXTRA)
+/* 一次性容量预留（v15）：成就最多 64 项、技能最多 16 个。
+   前 24 项/前 6 个存在老数组里，之后的进存档末尾的固定长度预留区。
+   以后加成就只要把 ACH_TOTAL 调大、往 InitAchievements 里加名字即可，
+   **不需要再升存档版本**；技能同理（SKILL_COUNT 调大）。 */
+#define ACH_CAP 64
+#define ACH_BASE2 24
+#define ACH_RESERVE (ACH_CAP - ACH_BASE2)
+#define SKILL_CAP 16
+#define SKILL_BASE2 6
+#define SKILL_RESERVE (SKILL_CAP - SKILL_BASE2)
 #define ACH_NAME_MAX 32
 #define ACH_DESC_MAX 64
 
@@ -306,7 +347,7 @@ typedef struct {
     int target;        /* 目标值 */
 } Achievement;
 
-extern Achievement g_achievements[ACH_COUNT];
+extern Achievement g_achievements[ACH_CAP];
 extern int achSelection;
 extern int achHovered;
 
@@ -336,8 +377,39 @@ typedef enum {
     ACT_MENU_CONFIRM,      /* 菜单确认 */
     ACT_MENU_CANCEL,       /* 菜单取消 */
     ACT_DODGE,             /* 跳脸虫 QTE：躲开（默认 SPACE，可改绑） */
+    ACT_SKILL,             /* 主动技能（默认 Q）—— 新动作必须加在这个位置之后 */
     ACT_COUNT
 } ActionId;
+
+/* 存档里的键位槽位分两段，**冻结**：
+     BINDINGS_BASE  前 22 个动作（v6 时代就有），数组长度永远不变；
+     BINDINGS_EXTRA 后面新加的动作（技能等），放在 SaveBlob 末尾。
+   这样以后再加动作只动 extraBindings，不会把后面的字段整体顶偏。 */
+#define BINDINGS_BASE 22
+#define BINDINGS_EXTRA 16
+
+/* 主动技能。每局只能带一个，靠冷却限制，不耗资源。
+   SKILL_SLOTS 是存档里的升级槽位容量（先留够，避免以后再改结构）。 */
+#define SKILL_SLOTS 6          /* v11 时代冻结的槽位数（只用于存档老字段） */
+#define SKILL_COUNT 4          /* NONE / PHASE / SIGHT / BLINK */
+enum { SKILL_NONE = 0, SKILL_PHASE = 1, SKILL_SIGHT = 2, SKILL_BLINK = 3 };
+#define PHASE_DURATION 2.0f    /* 穿墙持续秒数 */
+#define PHASE_COOLDOWN 18.0f   /* 冷却秒数 */
+#define SIGHT_DURATION 5.0f    /* 透视持续秒数 */
+#define SIGHT_COOLDOWN 20.0f
+#define BLINK_RANGE 4.0f       /* 瞬移最远格数 */
+#define BLINK_COOLDOWN 12.0f
+
+/* 隐藏房间（可选，一层最多一个）：找到 N 个密码才能开暗门。
+   房间里不放箱子，避免「关键保险丝锁在隐藏房间」导致卡关。 */
+#define HIDDEN_MAX_CODES 3
+#define HIDDEN_DOOR_TILE 2     /* worldMap 里的值：2 = 未打开的暗门（等同于墙） */
+#define HIDDEN_CHANCE 20       /* 第 2 关起每层出现的概率（%） */
+#define HIDDEN_MIN_LEVEL 2
+#define HIDDEN_REWARD_SHARDS 20    /* 高级箱里的碎片 */
+#define HIDDEN_REWARD_SCROLLS 2    /* 高级箱里的残卷（技能升级唯一来源） */
+#define CONTENT_SCROLL 6           /* Container.content：高级箱（残卷） */
+#define SKILL_UPG_MAX UPG_MAX      /* 技能最高 3 级 */
 
 /* 每个动作绑定一个虚拟键码，0=无绑定。
    默认值集中在一个宏里 —— Settings 的 Reset to Defaults 和自检都要用它，
@@ -355,6 +427,7 @@ typedef enum {
     [ACT_MENU_LEFT] = VK_LEFT, [ACT_MENU_RIGHT] = VK_RIGHT, \
     [ACT_MENU_CONFIRM] = VK_RETURN, [ACT_MENU_CANCEL] = VK_ESCAPE, \
     [ACT_DODGE] = VK_SPACE, \
+    [ACT_SKILL] = 'Q', \
 }
 
 /* ------------------------------------------------------------------ */

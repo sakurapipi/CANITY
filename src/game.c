@@ -111,6 +111,12 @@ int mapsFullyExplored = 0;  /* 全探索地图数 */
 int tookDamage = 0;         /* 本局是否受过伤 */
 int flashlightOffLevel = 0; /* 关灯过关标记 */
 int sprintedThisLevel = 0;  /* 本局是否冲刺过 */
+/* v14 新成就用的计数（每局重置，成就进度本身存在存档里） */
+int locksOpened = 0;        /* 本局开锁次数 */
+int hiddenOpenedCount = 0;  /* 本局开隐藏房间次数 */
+int scrollsEarned = 0;      /* 本局获得残卷数 */
+float phaseSeconds = 0.0f;  /* 本局穿墙累计秒数 */
+int blinkCount = 0;         /* 本局瞬移次数 */
 const char* pickupMsg = NULL;    /* 拾取提示文本 */
 float pickupMsgTimer = 0.0f;     /* 提示显示剩余时间 */
 int bestLevel = 0;
@@ -125,6 +131,112 @@ int hoverKind = 0;        /* 0=无 1=容器 2=配电箱 */
 int hoverIndex = -1;
 float holdTimer = 0.0f;
 int holdingNow = 0;
+
+/* 上锁容器（v1.8.0）：与 containers[] 平行的运行时数组。
+   刻意不放进 Container 结构 —— 那会改变 SaveBlob 的既有布局。 */
+int contLocked[MAX_CONTAINERS] = {0};
+int contLockCode[MAX_CONTAINERS] = {0};
+int contLockType[MAX_CONTAINERS] = {0};
+int lockActive = 0;
+int lockTarget = -1;
+int lockCursor = 0;
+int lockDigits[LOCK_DIALS] = {0};
+int lockType = LOCK_TYPE_DIAL;
+int lockWireSel = -1;
+int lockWireLink[LOCK_WIRES] = {-1, -1, -1};
+int lockEqVal[LOCK_EQ_BANDS] = {0, 0, 0};
+int lockTuneVal[LOCK_TUNE_KNOBS] = {0, 0, 0};
+
+/* ---- 主动技能（v1.9.0）---- */
+int selectedSkill = SKILL_PHASE;
+int runSkill = SKILL_PHASE;
+int skillLevels[SKILL_CAP] = {0};
+float skillPhaseTimer = 0.0f;
+float skillSightTimer = 0.0f;
+float skillCooldownTimer = 0.0f;
+int phaseActive = 0;
+int sightActive = 0;
+
+/* ---- 隐藏房间（v1.10.0）---- */
+int hiddenActive = 0;
+int hiddenOpened = 0;
+int hiddenX0 = 0, hiddenY0 = 0, hiddenX1 = 0, hiddenY1 = 0;
+int hiddenDoorX = -1, hiddenDoorY = -1;
+int hiddenCodeCount = 0;
+int hiddenCodesFound = 0;
+int hiddenCodeX[HIDDEN_MAX_CODES] = {-1, -1, -1};
+int hiddenCodeY[HIDDEN_MAX_CODES] = {-1, -1, -1};
+int hiddenCodeTaken[HIDDEN_MAX_CODES] = {0, 0, 0};
+/* 穿墙结束时如果人还在墙里，退回最后一个安全点 —— 每帧更新 */
+static float lastFreeX = 1.5f, lastFreeY = 1.5f;
+
+int scrolls = 0;                  /* 残卷：只用来升级技能 */
+int skillSelection = 0;           /* 技能页高亮行 */
+
+const char* SkillName(int skill) {
+    switch (skill) {
+        case SKILL_PHASE: return "PHASE";
+        case SKILL_SIGHT: return "SIGHT";
+        case SKILL_BLINK: return "BLINK";
+        default: return "NONE";
+    }
+}
+
+int SkillLevel(int skill) {
+    if (skill <= 0 || skill >= SKILL_CAP) return 0;
+    return skillLevels[skill];
+}
+
+/* 每级：冷却 -15%，持续 +15%。升级价格 40 / 90 / 140 碎片。 */
+float SkillCooldown(int skill) {
+    float base = PHASE_COOLDOWN;
+    if (skill == SKILL_SIGHT) base = SIGHT_COOLDOWN;
+    else if (skill == SKILL_BLINK) base = BLINK_COOLDOWN;
+    return base * (1.0f - 0.15f * SkillLevel(skill));
+}
+
+float SkillDuration(int skill) {
+    float base = (skill == SKILL_SIGHT) ? SIGHT_DURATION : PHASE_DURATION;
+    return base * (1.0f + 0.15f * SkillLevel(skill));
+}
+
+/* 技能升级只花残卷：1 级 1 张、2 级 2 张、3 级 3 张 */
+int SkillUpgradeCost(int skill) {
+    int lv = SkillLevel(skill);
+    if (lv >= SKILL_UPG_MAX) return -1;
+    return lv + 1;
+}
+
+/* 直接升级指定技能（残卷够才扣） */
+void SkillUpgradeAt(int skill) {
+    if (skill <= SKILL_NONE || skill >= SKILL_COUNT) return;
+    int cost = SkillUpgradeCost(skill);
+    if (cost < 0 || scrolls < cost) return;
+    scrolls -= cost;
+    skillLevels[skill]++;
+    SaveGame();
+    uiDirty = 1;
+}
+
+void BuySkillUpgrade(void) {
+    SkillUpgradeAt(selectedSkill);
+}
+
+/* 选中某个技能作为本局携带的技能。换技能会作废当前这局（技能开局定死）。 */
+void SkillSelect(int skill) {
+    if (skill <= SKILL_NONE || skill >= SKILL_COUNT) return;
+    if (selectedSkill == skill) return;
+    selectedSkill = skill;
+    if (runInProgress) {
+        runInProgress = 0;
+        hasSave = 0;
+    }
+    SaveGame();
+    uiDirty = 1;
+}
+/* 关掉锁盘后的短暂冷却：按住 E（或把 INTERACT 绑到鼠标键）时，
+   系统会不停重复触发「按下」边沿，没有冷却的话一按 Esc 就立刻又弹开 */
+static float lockCooldown = 0.0f;
 /* Gamma：0.7 ~ 1.6，1.0 为线性 */
 float gammaValue = 1.0f;
 float gammaBuilt = -1.0f;
@@ -146,10 +258,10 @@ void ClearKeyEdges(void) {
 
 int achSelection = 0;
 int achHovered = -1;     /* 鼠标悬停的成就索引，-1 = 无；用于显示 tooltip */
-Achievement g_achievements[ACH_COUNT] = {0};
+Achievement g_achievements[ACH_CAP] = {0};
 
 /* 每个菜单状态的滚动偏移，持久化避免 GetMenuGeo 重新计算 */
-int menuScrollOffsets[8] = {0};  /* 下标 = GameState，包含 STATE_ACHIEVEMENTS=7 */
+int menuScrollOffsets[9] = {0};  /* 下标 = GameState，包含 STATE_SKILLS=8 */
 
 int g_bindings[ACT_COUNT] = BINDINGS_DEFAULT;
 
@@ -178,7 +290,7 @@ const char* actionNames[ACT_COUNT] = {
     "SPRINT", "INTERACT", "CRANK BATTERY", "FLASHLIGHT", "TOGGLE MAP",
     "THROW", "CANCEL CHARGE", "SELECT FLARE", "SELECT BOTTLE", "SELECT SLOT 3",
     "PAUSE", "MENU UP", "MENU DOWN", "MENU LEFT", "MENU RIGHT",
-    "MENU CONFIRM", "MENU CANCEL", "DODGE (QTE)"
+    "MENU CONFIRM", "MENU CANCEL", "DODGE (QTE)", "USE SKILL"
 };
 /* 编译期守卫：表项数量必须与动作数一致，漏一个改绑框就会画到 NULL */
 typedef char actionNamesSizeCheck[(ACT_COUNT == (int)(sizeof(actionNames) / sizeof(actionNames[0]))) ? 1 : -1];
@@ -210,15 +322,10 @@ POINT lastMousePos;
 int firstMouseMove = 1;
 int isMapOpen = 0;
 POINT g_mousePos = {0, 0};
-/* 小地图有两种形态：
-     0 = 角落小窗（默认）—— 一边走一边看，不挡视野
-     1 = 全屏 —— 停下来仔细规划路线
-   按 M 切换形态，按 M 关闭。再按 M 会先切形态，再按一次才关闭。 */
-int mapFullScreen = 0;
+/* 小地图：只有一个形态（右下角小窗），M 键开关。
+   不随菜单 / 锁盘 / 换层关闭 —— 除非玩家自己再按一次 M。 */
 
-/* 该设置项是否是键位绑定（value 指向 g_bindings 的某一项）。
-   是的话返回对应 ActionId，否则返回 -1。
-   之前这里是一串 21 项的地址比较链，三处各抄一份，漏一个就出 bug。 */
+/* 该设置项是否是键位绑定（value 指向 g_bindings 的某丢）项）   是的话返回对应ActionId，否则返回-1   之前这里是一串21 项的地址比较链，三处各抄丢份，漏一个就出bug。*/
 int BindActionOfItem(const SettingItem* it) {
     for (int a = 0; a < ACT_COUNT; a++)
         if (it->value == &g_bindings[a]) return a;
@@ -273,6 +380,7 @@ SettingItem settings[] = {
     {"Select Flare",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_1],      NULL, 0, 0, 0, 4},
     {"Select Bottle",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_2],      NULL, 0, 0, 0, 4},
     {"Select Slot 3",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_3],      NULL, 0, 0, 0, 4},
+    {"Use Skill",       SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SKILL],         NULL, 0, 0, 0, 4},
 
     /* ========== 分类: KEY BINDINGS / MENU KEYS ========== */
     {"Dodge (QTE)",     SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DODGE],         NULL, 0, 0, 0, 5},
@@ -345,6 +453,142 @@ int Blocked(float x, float y) {
     return 0;
 }
 
+int PlayerBlocked(float x, float y) {
+    if (phaseActive) {
+        /* 穿墙：墙不挡人，但地图边界必须挡（否则会跑出世界）*/
+        int cx = (int)floorf(x), cy = (int)floorf(y);
+        if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return 1;
+        /* 隐藏房间：暗门与室内都不许穿过去 */
+        if (HiddenBlocksPlayer(x, y)) return 1;
+        return 0;
+    }
+    return Blocked(x, y);
+}
+
+/* 瞬移：沿视线方向找最远的可站立点，中间可以跨过墙。
+   找不到落点就不消耗冷却。 */
+static int DoBlink(void) {
+    for (float t = BLINK_RANGE; t >= 0.3f; t -= 0.25f) {
+        float nx = posX + dirX * t;
+        float ny = posY + dirY * t;
+        if (Blocked(nx, ny)) continue;      /* 落点必须在空地上 */
+        if (HiddenBlocksPlayer(nx, ny)) continue;   /* 不能瞬移进隐藏房间 */
+        if ((int)nx == (int)posX && (int)ny == (int)posY) continue;
+        posX = nx;
+        posY = ny;
+        blinkCount++;               /* BLINK MASTER 成就 */
+        PlaySfx(SFX_GATE, 0.45f);
+        uiDirty = 1;
+        return 1;
+    }
+    return 0;
+}
+
+/* 隐藏房间：穿墙和瞬移都不能进（用户明确要求） */
+int HiddenBlocksPlayer(float x, float y) {
+    if (!hiddenActive || hiddenOpened) return 0;
+    int cx = (int)floorf(x), cy = (int)floorf(y);
+    if (cx >= hiddenX0 && cx <= hiddenX1 && cy >= hiddenY0 && cy <= hiddenY1) return 1;
+    if (cx == hiddenDoorX && cy == hiddenDoorY) return 1;
+    return 0;
+}
+
+/* 在暗门前按 E：密码齐了才开门，奖励直接结算 */
+void HiddenTryUnlock(void) {
+    if (!hiddenActive || hiddenOpened) return;
+    if (hiddenDoorX < 0 || hiddenDoorY < 0) return;
+
+    if (hiddenCodesFound < hiddenCodeCount) {
+        pickupMsg = "NOT ENOUGH CODES";
+        pickupMsgTimer = 2.0f;
+        PlaySfx(SFX_DULL, 0.5f);
+        return;
+    }
+
+    hiddenOpened = 1;
+    hiddenOpenedCount++;        /* SECRET KEEPER 成就 */
+    worldMap[hiddenDoorY][hiddenDoorX] = 0;
+
+    /* 密室里放一个高级箱（残卷）—— 只装残卷，不会卡关。
+       容器数组满了就直接把奖励发给玩家，避免出现“开了门却什么都没有”。 */
+    if (containerCount < MAX_CONTAINERS) {
+        Container* c = &containers[containerCount++];
+        c->x = hiddenX0 + 0.5f;
+        c->y = hiddenY0 + 0.5f;
+        c->active = 1;
+        c->searched = 0;
+        c->content = CONTENT_SCROLL;
+    } else {
+        scrolls += HIDDEN_REWARD_SCROLLS;
+        scrollsEarned += HIDDEN_REWARD_SCROLLS;
+        shards += HIDDEN_REWARD_SHARDS;
+        totalShardsEarned += HIDDEN_REWARD_SHARDS;
+    }
+
+    PlaySfx(SFX_POWER, 0.75f);
+    pickupMsg = "HIDDEN ROOM OPEN";
+    pickupMsgTimer = 2.5f;
+    uiDirty = 1;
+}
+
+/* 走到密码碎片旁边按 E：收下 */
+static void TakeHiddenCode(int idx) {
+    if (idx < 0 || idx >= hiddenCodeCount || idx >= HIDDEN_MAX_CODES) return;
+    if (hiddenCodeTaken[idx]) return;
+    hiddenCodeTaken[idx] = 1;
+    hiddenCodesFound++;
+    if (hiddenCodesFound >= hiddenCodeCount) UnlockAchievement(19);   /* CODEBREAKER */
+    PlaySfx(SFX_PICKUP, 0.6f);
+    static char codeMsg[48];   /* pickupMsg 是 const char*，不能指向栈上的临时缓冲 */
+    sprintf(codeMsg, "CODE %d/%d", hiddenCodesFound, hiddenCodeCount);
+    pickupMsg = codeMsg;
+    pickupMsgTimer = 2.0f;
+    uiDirty = 1;
+}
+
+/* 按 Q 放技能。每局只有一个技能，冷却共用一条。 */
+void TryActivateSkill(void) {
+    if (currentState != STATE_PLAYING) return;
+    if (lockActive) return;                  /* 开锁时不放技能 */
+    if (phaseActive || sightActive) return;
+    if (skillCooldownTimer > 0.0f) return;
+    if (runSkill <= SKILL_NONE || runSkill >= SKILL_COUNT) return;
+
+    if (runSkill == SKILL_PHASE) {
+        phaseActive = 1;
+        skillPhaseTimer = SkillDuration(SKILL_PHASE);
+        PlaySfx(SFX_POWER, 0.55f);
+    } else if (runSkill == SKILL_SIGHT) {
+        sightActive = 1;
+        skillSightTimer = SkillDuration(SKILL_SIGHT);
+        PlaySfx(SFX_PICKUP, 0.45f);
+    } else if (runSkill == SKILL_BLINK) {
+        if (!DoBlink()) return;              /* 没落地就不进冷却 */
+    }
+    skillCooldownTimer = SkillCooldown(runSkill);
+    /* TRIPLE THREAT：三种技能各用过一次（进度按位存，跨局有效） */
+    g_achievements[21].progress |= 1 << (runSkill - 1);
+    if ((g_achievements[21].progress & 7) == 7) UnlockAchievement(21);
+    uiDirty = 1;
+}
+
+/* 大厅里换技能。技能是开局定死的 —— 换了之后这一局不能再续。 */
+void CycleSkill(void) {
+    int next = selectedSkill;
+    for (int i = 0; i < SKILL_COUNT; i++) {
+        next = (next + 1) % SKILL_COUNT;
+        if (next != SKILL_NONE) break;
+    }
+    if (next == selectedSkill) return;
+    selectedSkill = next;
+    if (runInProgress) {
+        runInProgress = 0;    /* 旧进度作废，但大厅升级/碎片/成就不动 */
+        hasSave = 0;
+    }
+    SaveGame();
+    uiDirty = 1;
+}
+
 /* 弹丸的墙判定：只用**点**，不套玩家的碰撞半径。
    Blocked() 带 0.24 的半径，那是给玩家用的；弹丸如果也用它，
    出生点附近稍微贴墙就会立刻判定为「撞墙」—— 瓶子一扔就碎。
@@ -401,6 +645,266 @@ static int ContainerTargetCount(int mod, int base) {
    注意：无论走哪条分支，都必须消耗同样次数的 rand()，
    否则后续的地图/容器随机序列会错位，测试就没法做对照了。 */
 int g_forceMod = -1;
+
+/* ------------------------------------------------------------------ */
+/* 上锁容器（v1.8.0）                                                  */
+/*  锁的状态放在 contLocked/contLockCode 两个平行数组里，不进 Container。*/
+/*  所以 SaveBlob 的既有字段偏移一个都没动。                            */
+/* ------------------------------------------------------------------ */
+
+/* 从打包密码里取第 dial 个拨盘的数：每盘 4 bit，低位是 0 号盘 */
+int LockDigit(int code, int dial) {
+    if (dial < 0 || dial >= LOCK_DIALS) return 0;
+    return (code >> (dial * 4)) & (LOCK_DIGITS - 1);
+}
+
+/* 比对「位置正确」的位数，用于给玩家反馈 */
+int LockCorrectCount(int code, const int* digits) {
+    if (!digits) return 0;
+    int n = 0;
+    for (int d = 0; d < LOCK_DIALS; d++)
+        if (digits[d] == LockDigit(code, d)) n++;
+    return n;
+}
+
+/* 掷密码：全 0 也是合法密码（有没有锁由 contLocked 决定，不看密码值） */
+static int RollLockCode(void) {
+    int code = 0;
+    for (int d = 0; d < LOCK_DIALS; d++)
+        code |= (rand() % LOCK_DIGITS) << (d * 4);
+    return code;
+}
+
+void LockAdjustDigit(int dial, int delta) {
+    if (dial < 0 || dial >= LOCK_DIALS) return;
+    int v = lockDigits[dial] + delta;
+    v %= LOCK_DIGITS;
+    if (v < 0) v += LOCK_DIGITS;   /* C 的 % 对负数取负，这里补回环形 */
+    lockDigits[dial] = v;
+}
+
+void CloseLockOverlay(void) {
+    int wasActive = lockActive;
+    lockActive = 0;
+    lockTarget = -1;
+    lockCooldown = 0.35f;
+    if (wasActive) {
+        /* 鼠标交还视角控制，并复位输入边沿 ——
+           否则「点 BACK」的那一下左键会被当成投掷起手。 */
+        ForceCursor(0);
+        resetInputState = 1;
+        firstMouseMove = 1;
+    }
+    uiDirty = 1;
+}
+
+void OpenLockOverlay(int index) {
+    if (index < 0 || index >= containerCount || index >= MAX_CONTAINERS) return;
+    if (!contLocked[index]) return;    /* 没锁的箱子走长按搜索，不弹锁盘 */
+    lockActive = 1;
+    lockTarget = index;
+    lockType = contLockType[index];
+    lockCursor = 0;
+    for (int d = 0; d < LOCK_DIALS; d++) lockDigits[d] = 0;
+    lockWireSel = -1;
+    for (int i = 0; i < LOCK_WIRES; i++) lockWireLink[i] = -1;
+    for (int b = 0; b < LOCK_EQ_BANDS; b++) lockEqVal[b] = 0;
+    for (int k = 0; k < LOCK_TUNE_KNOBS; k++) lockTuneVal[k] = 0;
+    isCharging = 0;       /* 打开锁盘时不能带着投掷蓄力 */
+    mouseCharge = 0.0f;
+    /* 鼠标要能点按钮：释放光标。小地图**不关** —— 它挂在右下角，
+       玩家开着地图开锁是合理需求（锁盘面板在中央，不冲突）。 */
+    ForceCursor(1);
+    SetCursor(LoadCursor(NULL, IDC_ARROW));
+    firstMouseMove = 1;
+    PlaySfx(SFX_SEARCH, 0.4f);
+    uiDirty = 1;
+}
+
+/* 开锁成功：三种锁型共用这一段 */
+static void LockUnlock(int idx) {
+    if (idx < 0 || idx >= MAX_CONTAINERS) return;
+    contLocked[idx] = 0;
+    contLockCode[idx] = 0;      /* 开了就不必再留着谜题参数 */
+    contLockType[idx] = LOCK_TYPE_DIAL;
+    locksOpened++;              /* LOCKSMITH 成就 */
+    PlaySfx(SFX_POWER, 0.7f);
+    pickupMsg = "UNLOCKED";
+    pickupMsgTimer = 2.0f;
+    CloseLockOverlay();
+}
+
+/* 某个拨盘是不是已经停在正确数字上。
+   声音是主反馈，这个给的是视觉兜底（静音玩家 / 没听清时也能确认）。 */
+int LockDialSolved(int dial) {
+    if (!lockActive || lockTarget < 0 || lockTarget >= containerCount) return 0;
+    if (dial < 0 || dial >= LOCK_DIALS) return 0;
+    return lockDigits[dial] == LockDigit(contLockCode[lockTarget], dial);
+}
+
+/* 三个拨盘是否都停在正确数字上 */
+static int LockAllCorrect(void) {
+    if (lockTarget < 0 || lockTarget >= containerCount) return 0;
+    return LockCorrectCount(contLockCode[lockTarget], lockDigits) == LOCK_DIALS;
+}
+
+/* ---- 拨盘锁 ---- */
+/* 拨一格：这一格**拨对了**给清脆的「咔哒」，拨错给沉闷的一声。
+   玩家靠耳朵找数字，不需要任何密码提示；三个盘都对了直接开锁。 */
+void LockTurnDial(int dial, int delta) {
+    if (!lockActive || lockType != LOCK_TYPE_DIAL) return;
+    if (lockTarget < 0 || lockTarget >= containerCount) return;
+    if (dial < 0 || dial >= LOCK_DIALS) return;
+    int idx = lockTarget;
+    if (!contLocked[idx]) { CloseLockOverlay(); return; }
+
+    LockAdjustDigit(dial, delta);
+    lockCursor = dial;
+    int right = (lockDigits[dial] == LockDigit(contLockCode[idx], dial));
+    PlaySfx(right ? SFX_TICK : SFX_DULL, right ? 0.60f : 0.45f);
+
+    if (LockAllCorrect()) LockUnlock(idx);
+    uiDirty = 1;
+}
+
+/* ---- 接线锁 ----
+   左端子颜色固定（上到下 0/1/2），右端子是它的一种排列。
+   点左端再点右端：颜色相同就接上，不同就断开重选。 */
+static const int kWirePerm[6][LOCK_WIRES] = {
+    {0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}
+};
+
+int LockWireColor(int leftIdx) {
+    if (leftIdx < 0 || leftIdx >= LOCK_WIRES) return -1;
+    return leftIdx;
+}
+
+int LockWireRightColor(int rightIdx) {
+    if (rightIdx < 0 || rightIdx >= LOCK_WIRES) return -1;
+    if (lockTarget < 0 || lockTarget >= containerCount) return -1;
+    int p = contLockCode[lockTarget] % 6;
+    if (p < 0) p += 6;
+    return kWirePerm[p][rightIdx];
+}
+
+/* 返回 1 = 配色正确、已连上；0 = 颜色不对（拨错，给沉闷声） */
+int LockWireConnect(int left, int right) {
+    if (!lockActive || lockType != LOCK_TYPE_WIRE) return 0;
+    if (left < 0 || left >= LOCK_WIRES || right < 0 || right >= LOCK_WIRES) return 0;
+    if (lockWireLink[left] >= 0) return 0;          /* 这根已经接好了 */
+
+    if (LockWireColor(left) != LockWireRightColor(right)) {
+        PlaySfx(SFX_DULL, 0.50f);
+        lockWireSel = -1;
+        return 0;
+    }
+    lockWireLink[left] = right;
+    lockWireSel = -1;
+    PlaySfx(SFX_TICK, 0.60f);
+
+    int all = 1;
+    for (int i = 0; i < LOCK_WIRES; i++) if (lockWireLink[i] < 0) all = 0;
+    if (all && lockTarget >= 0) LockUnlock(lockTarget);
+    uiDirty = 1;
+    return 1;
+}
+
+static void LockWireClickNode(int idx, int side) {
+    if (side == 0) {
+        lockWireSel = idx;
+        PlaySfx(SFX_TICK, 0.30f);
+        uiDirty = 1;
+    } else if (lockWireSel >= 0) {
+        LockWireConnect(lockWireSel, idx);
+    }
+}
+
+/* ---- 均衡器锁 ----
+   3 根推子各 0..LOCK_EQ_STEPS-1 档，目标高度藏在 contLockCode 里。
+   拨到正确档位给「咔哒」，否则沉闷；三根都对自动开锁。 */
+int LockEqTarget(int band) {
+    if (band < 0 || band >= LOCK_EQ_BANDS) return 0;
+    if (lockTarget < 0 || lockTarget >= containerCount) return 0;
+    return (contLockCode[lockTarget] >> (band * 3)) & 7;
+}
+
+int LockEqSolved(void) {
+    if (lockTarget < 0 || lockTarget >= containerCount) return 0;
+    for (int b = 0; b < LOCK_EQ_BANDS; b++)
+        if (lockEqVal[b] != LockEqTarget(b)) return 0;
+    return 1;
+}
+
+void LockEqAdjust(int band, int delta) {
+    if (!lockActive || lockType != LOCK_TYPE_EQ) return;
+    if (lockTarget < 0 || lockTarget >= containerCount) return;
+    if (band < 0 || band >= LOCK_EQ_BANDS) return;
+    int idx = lockTarget;
+    int v = lockEqVal[band] + delta;
+    v %= LOCK_EQ_STEPS;
+    if (v < 0) v += LOCK_EQ_STEPS;
+    lockEqVal[band] = v;
+
+    PlaySfx(v == LockEqTarget(band) ? SFX_TICK : SFX_DULL, 0.50f);
+    if (LockEqSolved()) LockUnlock(idx);
+    uiDirty = 1;
+}
+
+/* ---- 调波器锁 ----
+   示波器上叠着两条波形：目标是暗色，玩家的是亮色。
+   三个旋钮（振幅 / 频率 / 相位）拧到目标值，两条曲线就完全重合。
+   旋钮到位给「咔哒」，没到位给沉闷声 —— 和另外两种锁一致。 */
+int LockTuneTarget(int knob) {
+    if (knob < 0 || knob >= LOCK_TUNE_KNOBS) return 0;
+    if (lockTarget < 0 || lockTarget >= containerCount) return 0;
+    return (contLockCode[lockTarget] >> (knob * 3)) & 7;
+}
+
+int LockTuneSolved(void) {
+    if (lockTarget < 0 || lockTarget >= containerCount) return 0;
+    for (int k = 0; k < LOCK_TUNE_KNOBS; k++)
+        if (lockTuneVal[k] != LockTuneTarget(k)) return 0;
+    return 1;
+}
+
+void LockTuneAdjust(int knob, int delta) {
+    if (!lockActive || lockType != LOCK_TYPE_TUNE) return;
+    if (lockTarget < 0 || lockTarget >= containerCount) return;
+    if (knob < 0 || knob >= LOCK_TUNE_KNOBS) return;
+    int idx = lockTarget;
+    int v = lockTuneVal[knob] + delta;
+    v %= LOCK_TUNE_STEPS;
+    if (v < 0) v += LOCK_TUNE_STEPS;
+    lockTuneVal[knob] = v;
+
+    PlaySfx(v == LockTuneTarget(knob) ? SFX_TICK : SFX_DULL, 0.50f);
+    if (LockTuneSolved()) LockUnlock(idx);
+    uiDirty = 1;
+}
+
+/* 鼠标点击锁盘：按锁型分派到各自的控件。
+   布局由 ui.c 的 LockHitTest 提供，和绘制共用同一套几何。 */
+static void LockClick(int mx, int my) {
+    int a = -1;
+    int hit = LockHitTest(mx, my, &a);
+    if (hit == LOCK_HIT_BACK) { CloseLockOverlay(); return; }
+    if (a < 0 && hit != LOCK_HIT_BACK) return;
+
+    if (lockType == LOCK_TYPE_DIAL) {
+        if (hit == LOCK_HIT_UP) LockTurnDial(a, +1);
+        else if (hit == LOCK_HIT_DOWN) LockTurnDial(a, -1);
+        else if (hit == LOCK_HIT_DIAL) LockTurnDial(a, +1);   /* 点数字格 = 快转一格 */
+    } else if (lockType == LOCK_TYPE_WIRE) {
+        if (hit == LOCK_HIT_NODE_L) LockWireClickNode(a, 0);
+        else if (hit == LOCK_HIT_NODE_R) LockWireClickNode(a, 1);
+    } else if (lockType == LOCK_TYPE_EQ) {
+        if (hit == LOCK_HIT_BAR_UP) LockEqAdjust(a, +1);
+        else if (hit == LOCK_HIT_BAR_DOWN) LockEqAdjust(a, -1);
+    } else if (lockType == LOCK_TYPE_TUNE) {
+        if (hit == LOCK_HIT_KNOB_INC) LockTuneAdjust(a, +1);
+        else if (hit == LOCK_HIT_KNOB_DEC) LockTuneAdjust(a, -1);
+    }
+}
 
 void GenerateLevel(void) {
     for (int y = 0; y < MAP_HEIGHT; y++)
@@ -604,6 +1108,138 @@ void GenerateLevel(void) {
                 else if (r < 80) containers[k].content = 4;
                 else if (r < 92) containers[k].content = 5;
                 else containers[k].content = 0;
+            }
+        }
+
+        /* 上锁（v1.8.0）：第 2 关起，少量箱子带锁。
+           概率刻意压低（LOCK_CHANCE）+ 每层封顶（LOCK_MAX_PER_LEVEL）——
+           锁是调味料，多了就变成负担。保底至少留一个没锁的箱子。 */
+        for (int k = 0; k < MAX_CONTAINERS; k++) {
+            contLocked[k] = 0;
+            contLockCode[k] = 0;
+            contLockType[k] = LOCK_TYPE_DIAL;
+        }
+        CloseLockOverlay();
+        if (currentLevel >= LOCK_MIN_LEVEL && containerCount > 0) {
+            int lockedCount = 0;
+            for (int k = 0; k < containerCount && lockedCount < LOCK_MAX_PER_LEVEL; k++) {
+                if (rand() % 100 >= LOCK_CHANCE) continue;
+                int roll = rand() % 100;
+                contLocked[k] = 1;
+                if (roll < 40) {
+                    /* 拨盘：听声找数字 */
+                    contLockType[k] = LOCK_TYPE_DIAL;
+                    contLockCode[k] = RollLockCode();
+                } else if (roll < 65) {
+                    /* 接线：同色端子对接，参数是右端子的排列编号 */
+                    contLockType[k] = LOCK_TYPE_WIRE;
+                    contLockCode[k] = rand() % 6;
+                } else if (roll < 85) {
+                    /* 均衡器：3 根推子各 3bit 目标高度 */
+                    contLockType[k] = LOCK_TYPE_EQ;
+                    contLockCode[k] = (rand() % LOCK_EQ_STEPS) |
+                                      ((rand() % LOCK_EQ_STEPS) << 3) |
+                                      ((rand() % LOCK_EQ_STEPS) << 6);
+                } else {
+                    /* 调波器：振幅 / 频率 / 相位，各 3bit */
+                    contLockType[k] = LOCK_TYPE_TUNE;
+                    contLockCode[k] = (rand() % LOCK_TUNE_STEPS) |
+                                      ((rand() % LOCK_TUNE_STEPS) << 3) |
+                                      ((rand() % LOCK_TUNE_STEPS) << 6);
+                }
+                lockedCount++;
+            }
+            int anyOpen = 0;
+            for (int k = 0; k < containerCount; k++) if (!contLocked[k]) anyOpen = 1;
+            if (!anyOpen) {
+                int k = rand() % containerCount;
+                contLocked[k] = 0;
+                contLockCode[k] = 0;   /* 保底放开的箱子不能留着密码 */
+                contLockType[k] = LOCK_TYPE_DIAL;
+            }
+        }
+
+        /* 隐藏房间（v1.10.0）：从死胡同往墙里挖一格密室，把死胡同口变成暗门。
+           这样不会破坏迷宫连通性（死胡同本来只有一条路），也不会多出第二个入口。
+           房间里不放箱子 —— 避免把关键保险丝锁进可选房间造成卡关。 */
+        hiddenActive = 0;
+        hiddenOpened = 0;
+        hiddenCodesFound = 0;
+        hiddenCodeCount = 0;
+        hiddenDoorX = hiddenDoorY = -1;
+        hiddenX0 = hiddenY0 = hiddenX1 = hiddenY1 = 0;
+        for (int c = 0; c < HIDDEN_MAX_CODES; c++) {
+            hiddenCodeX[c] = hiddenCodeY[c] = -1;
+            hiddenCodeTaken[c] = 0;
+        }
+        if (currentLevel >= HIDDEN_MIN_LEVEL && rand() % 100 < HIDDEN_CHANCE) {
+            static int candX[MAP_WIDTH * MAP_HEIGHT], candY[MAP_WIDTH * MAP_HEIGHT];
+            int candN = 0;
+            static const int dx4[4] = { 1, -1, 0, 0 };
+            static const int dy4[4] = { 0, 0, 1, -1 };
+            for (int y = 1; y < MAP_HEIGHT - 1; y++) {
+                for (int x = 1; x < MAP_WIDTH - 1; x++) {
+                    if (worldMap[y][x] != 0) continue;
+                    if (Dist2((float)x + 0.5f, (float)y + 0.5f, 1.5f, 1.5f) < 64.0f) continue;
+                    if (Dist2((float)x + 0.5f, (float)y + 0.5f, exitX, exitY) < 16.0f) continue;
+
+                    /* 从走廊往墙上挖一格：这一格的三面（除朝向走廊那面）都得是墙。
+                       走廊那一格**不动**，所以不会影响连通性。 */
+                    for (int d = 0; d < 4; d++) {
+                        int rx0 = x + dx4[d];
+                        int ry0 = y + dy4[d];
+                        if (rx0 < 1 || ry0 < 1 || rx0 >= MAP_WIDTH - 1 || ry0 >= MAP_HEIGHT - 1) continue;
+                        if (worldMap[ry0][rx0] != 1) continue;
+
+                        int ok = 1;
+                        for (int k = 0; k < 4; k++) {
+                            int nx2 = rx0 + dx4[k], ny2 = ry0 + dy4[k];
+                            if (nx2 == x && ny2 == y) continue;   /* 朝向走廊 */
+                            if (worldMap[ny2][nx2] != 1) { ok = 0; break; }
+                        }
+                        if (!ok) continue;
+
+                        candX[candN] = rx0;
+                        candY[candN] = ry0;
+                        candN++;
+                        break;   /* 同一格走廊只取一个方向就够了 */
+                    }
+                }
+            }
+            if (candN > 0) {
+                int pick = rand() % candN;
+                hiddenDoorX = candX[pick];
+                hiddenDoorY = candY[pick];
+                hiddenX0 = hiddenDoorX;
+                hiddenY0 = hiddenDoorY;
+                hiddenX1 = hiddenX0;
+                hiddenY1 = hiddenY0;
+                worldMap[hiddenDoorY][hiddenDoorX] = HIDDEN_DOOR_TILE;
+                hiddenActive = 1;
+                hiddenCodeCount = HIDDEN_MAX_CODES;
+
+                /* 三个密码散在空地上，互相隔开 */
+                for (int c = 0; c < hiddenCodeCount && emptyCount > 0; c++) {
+                    for (int t = 0; t < 256; t++) {
+                        int idx = rand() % emptyCount;
+                        int cx2 = cells[idx][0], cy2 = cells[idx][1];
+                        if (worldMap[cy2][cx2] != 0) continue;
+                        if (Dist2((float)cx2 + 0.5f, (float)cy2 + 0.5f, 1.5f, 1.5f) < 64.0f) continue;
+                        if (Dist2((float)cx2 + 0.5f, (float)cy2 + 0.5f, exitX, exitY) < 9.0f) continue;
+                        int spaced = 1;
+                        for (int k = 0; k < c; k++)
+                            if (Dist2((float)cx2 + 0.5f, (float)cy2 + 0.5f,
+                                      (float)hiddenCodeX[k] + 0.5f, (float)hiddenCodeY[k] + 0.5f) < 16.0f) spaced = 0;
+                        for (int k = 0; k < containerCount; k++)
+                            if (Dist2((float)cx2 + 0.5f, (float)cy2 + 0.5f,
+                                      containers[k].x, containers[k].y) < 2.0f) spaced = 0;
+                        if (!spaced) continue;
+                        hiddenCodeX[c] = cx2;
+                        hiddenCodeY[c] = cy2;
+                        hiddenCodeTaken[c] = 0;
+                        break;
+                    }
+                }
             }
         }
 
@@ -969,15 +1605,44 @@ static void SpawnShards(float x, float y, float vx, float vy, float charge) {
 void Update(float dt) {
     if (flashTime > 0.0f) flashTime -= dt;
     if (healFlash > 0.0f) healFlash -= dt;
-    /* 全屏地图：游戏**暂停**（专心规划路线）。
-       小窗地图：游戏**继续**（边看边玩，鼠标仍能转视角）。 */
-    if (currentState != STATE_PLAYING || (isMapOpen && mapFullScreen)) return;
+    /* 全屏地图：游戏*暂停**（专心规划路线）。       小窗地图：游戏*继续**（边看边玩，鼠标仍能转视角）。*/
+    if (currentState != STATE_PLAYING) return;
     if (flashTime > 0.0f) return;
 
     runTime += dt;
     if (levelBanner > 0.0f) levelBanner -= dt;
 
-    /* 成就检查 */
+    if (skillCooldownTimer > 0.0f) {
+        skillCooldownTimer -= dt;
+        if (skillCooldownTimer < 0.0f) skillCooldownTimer = 0.0f;
+    }
+    if (phaseActive) {
+        skillPhaseTimer -= dt;
+        phaseSeconds += dt;          /* PHASE WALKER 成就 */
+        if (skillPhaseTimer <= 0.0f) {
+            skillPhaseTimer = 0.0f;
+            phaseActive = 0;
+            /* 结束瞬间如果还嵌在墙里，逢回最后一个安全点 */
+            if (PlayerBlocked(posX, posY)) {
+                posX = lastFreeX;
+                posY = lastFreeY;
+            }
+            PlaySfx(SFX_DULL, 0.4f);
+            uiDirty = 1;
+        }
+    }
+    if (sightActive) {
+        skillSightTimer -= dt;
+        if (skillSightTimer <= 0.0f) {
+            skillSightTimer = 0.0f;
+            sightActive = 0;
+            PlaySfx(SFX_DULL, 0.3f);
+            uiDirty = 1;
+        }
+    }
+    if (IsActionPressed(ACT_SKILL)) TryActivateSkill();
+
+    /* 成就棢。*/
     CheckAchievements();
 
     /* 状态效果计时。强度变化时重算 FOV（视野收窄要立刻生效） */
@@ -1006,28 +1671,69 @@ void Update(float dt) {
         if (battery <= 0.0f) { battery = 0.0f; flashlightOn = 0; }
     }
 
+    /* 开锁覆盖层：世界照常推进（怪会摸过来），但玩家不能移动/搜索/投掷。
+       键盘不参与解谜 —— 解谜全用鼠标，随便按个键就直接退出（方便跑路）。 */
+    if (lockCooldown > 0.0f) {
+        lockCooldown -= dt;
+        if (lockCooldown < 0.0f) lockCooldown = 0.0f;
+    }
+    if (lockActive) {
+        if (lockTarget < 0 || lockTarget >= containerCount || !contLocked[lockTarget])
+            CloseLockOverlay();
+    }
+
     /* 先判断交互目标，决定这一帧能不能移动 */
     hoverKind = 0;
     hoverIndex = -1;
-    float bestD = INTERACT_RANGE * INTERACT_RANGE;
-    for (int i = 0; i < containerCount; i++) {
-        if (!containers[i].active || containers[i].searched) continue;
-        float d = Dist2(posX, posY, containers[i].x, containers[i].y);
-        if (d < bestD) { bestD = d; hoverKind = 1; hoverIndex = i; }
-    }
-    if (!breakerOpen && breaker.active) {
-        float d = Dist2(posX, posY, breaker.x, breaker.y);
-        if (d < INTERACT_RANGE * INTERACT_RANGE) {
-            /* 配电箱优先于容器 */
-            hoverKind = 2;
+    if (!lockActive && !phaseActive) {
+        float bestD = INTERACT_RANGE * INTERACT_RANGE;
+        for (int i = 0; i < containerCount; i++) {
+            if (!containers[i].active || containers[i].searched) continue;
+            float d = Dist2(posX, posY, containers[i].x, containers[i].y);
+            if (d < bestD) { bestD = d; hoverKind = 1; hoverIndex = i; }
+        }
+        if (!breakerOpen && breaker.active) {
+            float d = Dist2(posX, posY, breaker.x, breaker.y);
+            if (d < INTERACT_RANGE * INTERACT_RANGE) {
+                /* 配电箱优先于容器 */
+                hoverKind = 2;
+                hoverIndex = -1;
+            }
+        }
+        /* 隐藏房间：密码碎片（kind 4）与暗门（kind 3）*/
+        for (int c = 0; c < hiddenCodeCount; c++) {
+            if (hiddenCodeTaken[c]) continue;
+            float d = Dist2(posX, posY, hiddenCodeX[c] + 0.5f, hiddenCodeY[c] + 0.5f);
+            if (d < bestD) { bestD = d; hoverKind = 4; hoverIndex = c; }
+        }
+        if (hiddenActive && !hiddenOpened) {
+            float d = Dist2(posX, posY, hiddenDoorX + 0.5f, hiddenDoorY + 0.5f);
+            if (d < INTERACT_RANGE * INTERACT_RANGE) { hoverKind = 3; hoverIndex = -1; }
+        }
+        if (hoverKind == 4 && IsActionPressed(ACT_INTERACT)) {
+            TakeHiddenCode(hoverIndex);
+            hoverKind = 0;
+            hoverIndex = -1;
+        } else if (hoverKind == 3 && IsActionPressed(ACT_INTERACT)) {
+            HiddenTryUnlock();
+        }
+
+        /* 上锁的箱子按丢E 就进开锁界面，不用长按翻找 */
+        if (hoverKind == 1 && contLocked[hoverIndex] &&
+            IsActionPressed(ACT_INTERACT) && lockCooldown <= 0.0f) {
+            OpenLockOverlay(hoverIndex);
+            hoverKind = 0;
             hoverIndex = -1;
         }
     }
 
+    /* 上锁的箱子不接受「长按搜索」—— 只能走锁盘；
+       密码碎片和暗门也是按一下 E，不长按 */
+    int hoveringLocked = (hoverKind == 1 && hoverIndex >= 0 && contLocked[hoverIndex]);
+    int noHold = hoveringLocked || hoverKind == 3 || hoverKind == 4;
+    holdingNow = (!lockActive && hoverKind != 0 && !noHold && IsActionDown(ACT_INTERACT));
 
-    holdingNow = (hoverKind != 0 && IsActionDown(ACT_INTERACT));
-
-    /* 冲刺与体力 */
+    /* 冲刺与体力*/
     int wantSprint = IsActionDown(ACT_SPRINT);
     int inF = IsActionDown(ACT_MOVE_FWD) - IsActionDown(ACT_MOVE_BACK);
     int inS = IsActionDown(ACT_MOVE_RIGHT) - IsActionDown(ACT_MOVE_LEFT);
@@ -1063,7 +1769,7 @@ void Update(float dt) {
 
     /* 手摇发电：站着摇，摇满一次回一截电；期间不能移动 */
     cranking = 0;
-    if (IsActionDown(ACT_CRANK) && battery < (float)BatteryMax() - 0.1f && !holdingNow) {
+    if (IsActionDown(ACT_CRANK) && battery < (float)BatteryMax() - 0.1f && !holdingNow && !lockActive) {
         cranking = 1;
         crankTimer += dt;
         crankClick += dt;
@@ -1089,7 +1795,7 @@ void Update(float dt) {
     float sp = MOVE_SPEED * (1.0f + 0.06f * upgSpeed) * slowMul * dt * (sprinting ? SPRINT_MULT : 1.0f);
     float perpX = -dirY, perpY = dirX;      /* 单位侧向，与 FOV 无关 */
     float dx = 0.0f, dy = 0.0f;
-    if (!holdingNow && !cranking) {          /* 翻找/摇电时不接受移动输入 */
+    if (!holdingNow && !cranking && !lockActive) {          /* 翻找/摇电/开锁时不接受移动输入*/
         if (inF > 0) { dx += dirX * sp;  dy += dirY * sp; }
         if (inF < 0) { dx -= dirX * sp;  dy -= dirY * sp; }
         if (inS > 0) { dx += perpX * sp; dy += perpY * sp; }
@@ -1099,8 +1805,10 @@ void Update(float dt) {
         sprinting = 0;
     }
 
-    if (dx != 0.0f && !Blocked(posX + dx, posY)) posX += dx;
-    if (dy != 0.0f && !Blocked(posX, posY + dy)) posY += dy;
+    if (dx != 0.0f && !PlayerBlocked(posX + dx, posY)) posX += dx;
+    if (dy != 0.0f && !PlayerBlocked(posX, posY + dy)) posY += dy;
+    /* 记下最后一个完全在空地上的位置：穿墙结束时用它兜底 */
+    if (!phaseActive && !Blocked(posX, posY)) { lastFreeX = posX; lastFreeY = posY; }
 
     UpdateExplored();
 
@@ -1126,6 +1834,22 @@ void Update(float dt) {
                 if (c->content == 1) { fusesHeld++; fusesCollectedRun++; pickupMsg = "+FUSE"; }
                 else if (c->content == 4) { flares++; pickupMsg = "+FLARE"; }
                 else if (c->content == 5) { bottles++; pickupMsg = "+BOTTLE"; }
+                else if (c->content == CONTENT_SCROLL) {
+                    /* 高级箱：残卷 + 碎片 + 一件道具 */
+                    scrolls += HIDDEN_REWARD_SCROLLS;
+                    scrollsEarned += HIDDEN_REWARD_SCROLLS;
+                    shards += HIDDEN_REWARD_SHARDS;
+                    totalShardsEarned += HIDDEN_REWARD_SHARDS;
+                    AddAchievementProgress(3, HIDDEN_REWARD_SHARDS);
+                    int roll = rand() % 3;
+                    if (roll == 0) flares++;
+                    else if (roll == 1) bottles++;
+                    else {
+                        battery += BATTERY_PICKUP;
+                        if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
+                    }
+                    pickupMsg = "+SCROLL";
+                }
                 else if (c->content == 2) {
                     battery += BATTERY_PICKUP;
                     if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
@@ -1188,8 +1912,8 @@ void Update(float dt) {
     int mouseLeftNow = IsActionDown(ACT_THROW);
     int mouseRightNow = IsActionDown(ACT_CANCEL_CHARGE);
 
-    if (mouseLeftNow && !mouseLeftPrev && throwCd <= 0.0f && !holdingNow && !cranking) {
-        /* 未按下 -> 按下：开始蓄力 */
+    if (mouseLeftNow && !mouseLeftPrev && throwCd <= 0.0f && !holdingNow && !cranking && !lockActive) {
+        /* 未按下-> 按下：开始蓄力*/
         isCharging = 1;
         mouseCharge = 0.0f;
     }
@@ -1373,6 +2097,13 @@ void StartGame(void) {
     currentState = STATE_PLAYING;
     currentLevel = 1;
     gameWon = 0;
+    /* 这一局带哪个技能，开局就定死 —— 中途换技能不允许续这局。 */
+    runSkill = selectedSkill;
+    phaseActive = 0;
+    sightActive = 0;
+    skillPhaseTimer = 0.0f;
+    skillSightTimer = 0.0f;
+    skillCooldownTimer = 0.0f;
     flares = 1;
     bottles = 1;
     runInProgress = 1;
@@ -1399,6 +2130,11 @@ void StartGame(void) {
     tookDamage = 0;
     flashlightOffLevel = 0;
     sprintedThisLevel = 0;
+    locksOpened = 0;
+    hiddenOpenedCount = 0;
+    scrollsEarned = 0;
+    phaseSeconds = 0.0f;
+    blinkCount = 0;
     InitAchievements();  /* 初始化成就定义（仅首次） */
     ClearFx();
     for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
@@ -1413,13 +2149,15 @@ void StartGame(void) {
 
 static void InitAchievements(void) {
     /* 总是初始化静态字段（name/desc/target/id），存档只保存动态字段(unlocked/progress) */
-    const char* names[ACH_COUNT] = {
+    const char* names[ACH_TOTAL] = {
         "FIRST STEPS", "SURVIVOR", "ESCAPE ARTIST", "SHARD HUNTER",
         "SILENT SHADOW", "BOTTLE MASTER", "FACE DODGER", "NOCTURNAL",
         "SPEED RUNNER", "DEEP DIVER", "FUSE FINDER", "GENERATOR GURU",
-        "UPGRADE JUNKIE", "MAP MASTER", "PERFECT ESCAPE", "TRUE SURVIVOR"
+        "UPGRADE JUNKIE", "MAP MASTER", "PERFECT ESCAPE", "TRUE SURVIVOR",
+        "LOCKSMITH", "SECRET KEEPER", "SCROLL HOARDER", "CODEBREAKER",
+        "FOCUSED MIND", "TRIPLE THREAT", "PHASE WALKER", "BLINK MASTER"
     };
-    const char* descs[ACH_COUNT] = {
+    const char* descs[ACH_TOTAL] = {
         "Complete level 1",
         "Reach level 5",
         "Beat the game (reach level 10 exit)",
@@ -1435,12 +2173,21 @@ static void InitAchievements(void) {
         "Max out all 6 upgrades",
         "Fully explore 3 maps in one run",
         "Beat the game without taking damage",
-        "Beat the game on level 10 with all upgrades maxed"
+        "Beat the game on level 10 with all upgrades maxed",
+        "Open 5 locked crates",
+        "Open a hidden room",
+        "Collect 10 scrolls total",
+        "Find all 3 codes in one level",
+        "Raise any skill to level 3",
+        "Use all three skills (across runs)",
+        "Spend 30 seconds phased through walls",
+        "Blink 20 times"
     };
-    int targets[ACH_COUNT] = {
-        1, 5, 10, 500, 5, 10, 5, 1, 120, 10, 5, 60, 18, 3, 1, 1
+    int targets[ACH_TOTAL] = {
+        1, 5, 10, 500, 5, 10, 5, 1, 120, 10, 5, 60, 18, 3, 1, 1,
+        5, 1, 10, 1, 3, 7, 30, 20
     };
-    for (int i = 0; i < ACH_COUNT; i++) {
+    for (int i = 0; i < ACH_TOTAL; i++) {
         g_achievements[i].id = i + 1;
         strncpy(g_achievements[i].name, names[i], ACH_NAME_MAX - 1);
         g_achievements[i].name[ACH_NAME_MAX - 1] = '\0';
@@ -1453,7 +2200,7 @@ static void InitAchievements(void) {
 
 /* 成就辅助：解锁并保存 */
 static void UnlockAchievement(int idx) {
-    if (idx < 0 || idx >= ACH_COUNT) return;
+    if (idx < 0 || idx >= ACH_TOTAL) return;
     if (g_achievements[idx].unlocked) return;
     g_achievements[idx].unlocked = 1;
     g_achievements[idx].progress = g_achievements[idx].target;
@@ -1461,7 +2208,7 @@ static void UnlockAchievement(int idx) {
 }
 
 static void AddAchievementProgress(int idx, int amount) {
-    if (idx < 0 || idx >= ACH_COUNT) return;
+    if (idx < 0 || idx >= ACH_TOTAL) return;
     if (g_achievements[idx].unlocked) return;
     g_achievements[idx].progress += amount;
     if (g_achievements[idx].progress >= g_achievements[idx].target) {
@@ -1502,6 +2249,22 @@ static void CheckAchievements(void) {
     if (mapsFullyExplored >= 3) UnlockAchievement(13);
     /* 15: PERFECT ESCAPE - 通关无伤（需标记） */
     /* 16: TRUE SURVIVOR - 通关且全满级（在 gameWon 时检查） */
+    /* 17: LOCKSMITH - 开 5 个锁 */
+    if (locksOpened >= 5) UnlockAchievement(16);
+    /* 18: SECRET KEEPER - 开一次隐藏房间 */
+    if (hiddenOpenedCount >= 1) UnlockAchievement(17);
+    /* 19: SCROLL HOARDER - 累计 10 张残卷 */
+    if (scrollsEarned >= 10) UnlockAchievement(18);
+    /* 20: CODEBREAKER - 集齐一层密码（在拾取碎片时直接解锁） */
+    /* 21: FOCUSED MIND - 任意技能满 3 级 */
+    for (int s = SKILL_PHASE; s < SKILL_COUNT; s++)
+        if (skillLevels[s] >= SKILL_UPG_MAX) UnlockAchievement(20);
+    /* 22: TRIPLE THREAT - 三种技能都用过（在放技能时按位记录） */
+    if ((g_achievements[21].progress & 7) == 7) UnlockAchievement(21);
+    /* 23: PHASE WALKER - 穿墙累计 30 秒 */
+    if (phaseSeconds >= 30.0f) UnlockAchievement(22);
+    /* 24: BLINK MASTER - 瞬移 20 次 */
+    if (blinkCount >= 20) UnlockAchievement(23);
 }
 
 void PauseGame(void) {
@@ -1635,12 +2398,32 @@ void ActivateMenuItem(void) {
     }
 }
 
+/* 技能页的一行：高亮的不是当前技能 → 换；已经是当前技能 → 花残卷升级。
+   Back 行直接回大厅。键盘和鼠标都走这一个入口。 */
+void ActivateSkillRow(void) {
+    if (skillSelection >= SKILL_COUNT - 1) {
+        currentState = STATE_HUB;
+        uiDirty = 1;
+        return;
+    }
+    int sk = skillSelection + 1;
+    if (sk == selectedSkill) SkillUpgradeAt(sk);
+    else SkillSelect(sk);
+}
+
 void ActivateHubRow(void) {
-    if (hubSelection >= UPGRADE_COUNT) {
+    if (hubSelection > UPGRADE_COUNT) {
         SaveGame();
         currentState = STATE_MAIN_MENU;
         menuSelection = 0;
         ForceCursor(1);
+        uiDirty = 1;
+        return;
+    }
+    if (hubSelection == UPGRADE_COUNT) {
+        currentState = STATE_SKILLS;
+        skillSelection = 0;
+        menuScrollOffsets[STATE_SKILLS] = 0;
         uiDirty = 1;
         return;
     }
@@ -1864,12 +2647,25 @@ static void ClickMenu(int mx, int my) {
             RECT r = RowRect(g, i);
             if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
                 achSelection = i;
-                if (i >= ACH_COUNT) {
+                if (i >= ACH_TOTAL) {
                     /* 点 Back 直接退出，不是只把光标移过去 */
                     currentState = STATE_MAIN_MENU;
                     menuSelection = 0;
                     uiDirty = 1;
                 }
+                return;
+            }
+        }
+        return;
+    }
+
+    if (currentState == STATE_SKILLS) {
+        MenuGeo g = GetMenuGeo();
+        for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
+            RECT r = RowRect(g, i);
+            if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
+                skillSelection = i;
+                ActivateSkillRow();
                 return;
             }
         }
@@ -1932,9 +2728,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_SETCURSOR:
             if (LOWORD(lParam) == HTCLIENT) {
-                /* 游戏中（含小窗地图）隐藏光标 —— 鼠标是锁定的。
-                   只有全屏地图才显示箭头光标。 */
-                int mouseFree = (currentState != STATE_PLAYING) || (isMapOpen && mapFullScreen);
+                /* 游戏中只在小地图是“小窗”时隐藏光标；开锁时必须显示箭头，
+                   否则每次 SetCursor 都会把 ForceCursor(1) 盖回去。 */
+                /* 小地图是常驻小窗：游戏中任何时候都不隐藏光标，除了开锁时
+                   需要鼠标点按钮 —— 所以只看 lockActive。 */
+                int mouseFree = (currentState != STATE_PLAYING) || lockActive;
                 if (!mouseFree) SetCursor(NULL);
                 else SetCursor(LoadCursor(NULL, IDC_ARROW));
                 return TRUE;
@@ -1943,6 +2741,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_MOUSEMOVE: {
             int mx = (short)LOWORD(lParam), my = (short)HIWORD(lParam);
+
+            /* 开锁锁盘：鼠标用来点按钮，不转视角 */
+            if (currentState == STATE_PLAYING && lockActive) {
+                g_mousePos.x = mx;
+                g_mousePos.y = my;
+                return 0;
+            }
 
             if (currentState != STATE_PLAYING) {
                 if (currentState == STATE_SETTINGS && rebindingAct >= 0) return 0;
@@ -1959,11 +2764,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 HitTestMenu(mx, my);
                 return 0;
             }
-            /* 全屏地图：鼠标交给菜单（此时鼠标是释放的，可以点东西）。
-               小窗地图：**不拦截** —— 鼠标仍然锁定在中心，
-               玩家可以边看小地图边转视角、继续玩。 */
-            if (isMapOpen && mapFullScreen) return 0;
-
             POINT center = {winW / 2, winH / 2};
             ClientToScreen(hwnd, &center);
 
@@ -1995,6 +2795,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
 
         case WM_MOUSEWHEEL: {
+            /* 开锁：滚轮拨当前（或鼠标悬停的）拨。*/
+            if (currentState == STATE_PLAYING && lockActive) {
+                int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+                int d = -1;
+                LockHitTest(g_mousePos.x, g_mousePos.y, &d);
+                if (d < 0) d = lockCursor;
+                if (delta != 0) {
+                    LockAdjustDigit(d, delta > 0 ? +1 : -1);
+                    lockCursor = d;
+                    uiDirty = 1;
+                }
+                return 0;
+            }
             /* 鼠标滚轮滚动菜单 */
             if (currentState != STATE_PLAYING && !settingsPopupOpen) {
                 int delta = GET_WHEEL_DELTA_WPARAM(wParam);
@@ -2018,6 +2831,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_LBUTTONDOWN: {
             int mx = (short)LOWORD(lParam), my = (short)HIWORD(lParam);
+            /* 开锁：左键点锁盘控件 */
+            if (currentState == STATE_PLAYING && lockActive) {
+                g_mousePos.x = mx;
+                g_mousePos.y = my;
+                LockClick(mx, my);
+                return 0;
+            }
             if (currentState != STATE_PLAYING) {
                 /* 改绑模式：点击也可以绑定为「鼠标左键」 */
                 if (currentState == STATE_SETTINGS && rebindingAct >= 0) {
@@ -2065,6 +2885,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 /* 记下「刚按下」的边沿，供 QTE 消费。
                    只在游戏进行中记 —— 菜单里按的键不该触发 QTE。 */
                 if (currentState == STATE_PLAYING) keyPressed[wParam] = 1;
+            }
+
+            /* 开锁锁盘：解谜全用鼠标，键盘只负责「赶紧跑」——
+               按任意键直接把锁盘关掉。E 和修饰键除外：
+               E 是打开锁盘的那颗键，按住时的系统重复会立刻把它关掉。 */
+            if (currentState == STATE_PLAYING && lockActive) {
+                int vk = (int)wParam;
+                int isMod = (vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU ||
+                             vk == VK_LSHIFT || vk == VK_RSHIFT ||
+                             vk == VK_LCONTROL || vk == VK_RCONTROL ||
+                             vk == VK_LMENU || vk == VK_RMENU);
+                if (!isMod && vk != g_bindings[ACT_INTERACT]) CloseLockOverlay();
+                return 0;
             }
 
             /* 切投掷槽位：在消息里即时处理，后按的键立即生效。
@@ -2182,41 +3015,43 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     uiDirty = 1;
                 }
             } else if (currentState == STATE_ACHIEVEMENTS) {
-                int n = ACH_COUNT + 1;
+                int n = ACH_TOTAL + 1;
                 if (menuUp) { achSelection = (achSelection + n - 1) % n; uiDirty = 1; }
                 if (menuDown) { achSelection = (achSelection + 1) % n; uiDirty = 1; }
                 MenuGeo ag = GetMenuGeo();
                 if (achSelection < ag.scrollOffset) menuScrollOffsets[STATE_ACHIEVEMENTS] = achSelection;
                 else if (achSelection >= ag.scrollOffset + ag.maxVisibleRows) menuScrollOffsets[STATE_ACHIEVEMENTS] = achSelection - ag.maxVisibleRows + 1;
                 /* 只有 Back 行（或者 Esc）才退出；成就条目本身按回车不做事 */
-                if (menuCancel || (menuConfirm && achSelection >= ACH_COUNT)) {
+                if (menuCancel || (menuConfirm && achSelection >= ACH_TOTAL)) {
                     currentState = STATE_MAIN_MENU;
                     menuSelection = 0;
                     uiDirty = 1;
                 }
+            } else if (currentState == STATE_SKILLS) {
+                int n = SKILL_COUNT;             /* 3 个技能 + Back */
+                if (menuUp) { skillSelection = (skillSelection + n - 1) % n; uiDirty = 1; }
+                if (menuDown) { skillSelection = (skillSelection + 1) % n; uiDirty = 1; }
+                MenuGeo sg = GetMenuGeo();
+                if (skillSelection < sg.scrollOffset) menuScrollOffsets[STATE_SKILLS] = skillSelection;
+                else if (skillSelection >= sg.scrollOffset + sg.maxVisibleRows)
+                    menuScrollOffsets[STATE_SKILLS] = skillSelection - sg.maxVisibleRows + 1;
+                if (menuCancel || (menuConfirm && skillSelection >= SKILL_COUNT - 1)) {
+                    currentState = STATE_HUB;
+                    uiDirty = 1;
+                } else if (menuConfirm) {
+                    ActivateSkillRow();
+                }
             } else if (currentState == STATE_PLAYING) {
+                /* 开锁覆盖层开着时，暂停/地图/手电都先不响应：
+                   Esc 留给「退出开锁」（Update 里按 ACT_MENU_CANCEL 处理），
+                   否则一按 Esc 就把整个游戏暂停了，锁盘还挂在暂停画面后面。 */
+                if (lockActive) return 0;
                 if (wParam == (WPARAM)g_bindings[ACT_PAUSE]) PauseGame();
                 if (wParam == (WPARAM)g_bindings[ACT_MAP]) {
-                    /* 三态循环：小窗 -> 全屏 -> 关闭 -> 小窗 ...
-                       第一次按看到角落小窗（能边走边看），
-                       再按一次变全屏（停下来规划路线），再按关闭。
-
-                       鼠标行为跟着形态走：
-                         小窗 —— 鼠标继续锁定，**视角能转、能继续玩**
-                         全屏 —— 释放鼠标，**停下**专心看图 */
-                    if (!isMapOpen) {
-                        isMapOpen = 1;
-                        mapFullScreen = 0;
-                    } else if (!mapFullScreen) {
-                        mapFullScreen = 1;
-                    } else {
-                        isMapOpen = 0;
-                        mapFullScreen = 0;
-                    }
-                    /* 只有全屏才释放鼠标；小窗保持锁定，游戏继续 */
-                    int wantCursor = (isMapOpen && mapFullScreen) ? 1 : 0;
-                    ForceCursor(wantCursor);
-                    if (wantCursor) SetCursor(LoadCursor(NULL, IDC_ARROW));
+                    /* 就一个形态：右下角小窗。按一次开，再按一次关。
+                       开着小地图时游戏照常进行（鼠标仍锁定、视角能转）。
+                       菜单 / 锁盘 / 换层都不会自动关掉它 —— 只有这里能关。 */
+                    isMapOpen = !isMapOpen;
                     firstMouseMove = 1;
                     uiDirty = 1;
                 }
