@@ -3330,31 +3330,23 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         DrawTextCenterWin(winW / 2, by + barH + UIS(6), pct, 0x00FFFFFFu);
     }
 
-    /* v3.0：**摇电进度改用「换标签」表达，不在条里写字** ——
-       第五版。前四版都有问题：
-         ① 大板挡视野  ② 贴底条压 RUN  ③ 右侧文字横向撞
-         ④ 条内写字 → 文字 24px 而条只有十几 px，上下全被切掉（用户截图）
-       这一版把 LIGHT 那两个字直接换成「CRANK 10%」，
-       条本身按进度填充 —— 完全不需要在条内或条外新开一块文字区。 */
+    /* v3.0：**摇电只留一条黄线，不写任何文字** ——
+       用户要求「改成之前底下有黄线的那一版，然后不带其他文字」。
+       LIGHT 标签和 ON/OFF 状态照常显示，只在手电条下面压一条 4px 的
+       黄色进度线。位置取 y1 与 y2（RUN 行）之间的空隙，不会碰到任何东西。 */
     if (cranking) {
         float cc = crankTimer / 2.4f;
         if (cc > 1.0f) cc = 1.0f;
-        int done = (cc >= 1.0f);
-        unsigned int ccol = done ? 0x0060FF90u : 0x00E8C040u;
-
-        /* 用进度覆盖手电条 */
-        BlendRectWin(barX, y1, barX + barW, y1 + barH, ccol, 0.95f);
-
-        /* 覆盖掉左边的 LIGHT 标签 */
-        {
-            char lbuf[32];
-            if (done) sprintf(lbuf, "CRANK OK");
-            else      sprintf(lbuf, "CRANK %d%%", (int)(cc * 100.0f + 0.5f));
-            BlendRectWin(labelX - UIS(2), y1 - UIS(3),
-                         labelX + TextWidthWin("LIGHT") + UIS(2),
-                         y1 - UIS(3) + TextHeightWin(), 0x000A0E12u, 0.92f);
-            DrawTextWin(labelX, y1 - UIS(3), lbuf, ccol);
+        int lineY = y1 + barH + UIS(2);
+        int lineH = UIS(4);
+        /* 空隙不够就往上贴，绝不压到 RUN 行 */
+        if (lineY + lineH > y2 - UIS(2)) {
+            lineY = y2 - UIS(2) - lineH;
+            if (lineY < y1 + barH) lineY = y1 + barH;
         }
+        unsigned int ccol = (cc >= 1.0f) ? 0x0060FF90u : 0x00FFD040u;
+        BlendRectWin(barX, lineY, barX + barW, lineY + lineH, 0x00202020u, 0.80f);
+        BlendRectWin(barX, lineY, barX + (int)(barW * cc), lineY + lineH, ccol, 1.0f);
     }
 
     /* 碎片（SHARDS）是大厅货币，游戏过程中用不到 —— 不放进 HUD。
