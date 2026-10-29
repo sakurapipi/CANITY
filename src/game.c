@@ -203,6 +203,7 @@ float secondWindTimer = 0.0f;   /* v3.0 二次呼吸：体力归零后的宽限�
 float vanishTimer = 0.0f;       /* v3.0 消失：脱离视线累计秒数 */
 int   playDeadUsed = 0;         /* v3.0 假死：本局用过了吗 */
 int   vanished = 0;             /* v3.0 消失：1 = 已隐身 */
+float vanishHold = 0.0f;        /* v3.0 消失：本次隐身剩余秒数 */
 float decoySelfTimer = 0.0f;  /* 投石后的自身噪声加成计时 */
 int hubPage = 1;              /* v2.8：属性面板已并入技能树，HUB 只有一页（保留变量给旧代码判断） */
 int levelEvent = -1;         /* 本层随机事件，-1 = 无 */
@@ -1115,6 +1116,18 @@ void GenerateLevel(void) {
             for (int k = 0; k < hideSpotCount; k++)
                 if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < 1.5f) { bad = 1; break; }
             if (bad) continue;
+            /* v3.0 修复（用户实测）：**兜底也不能压在箱子上** ——
+               原来第二轮完全不走 SpotClear，藏身点可以和容器刷在同一格。
+               运行时藏身点的 E 处理在容器之前，会抢先消费按键，
+               表现就是「箱子看得见、按 E 却进了柜子 / 箱子开不了」。 */
+            for (int k = 0; k < containerCount; k++) {
+                if (!containers[k].active) continue;
+                if (Dist2(hx2, hy2, containers[k].x, containers[k].y) < 2.25f) { bad = 1; break; }
+            }
+            if (bad) continue;
+            /* 配电箱和保险库也一样 */
+            if (breaker.active && Dist2(hx2, hy2, breaker.x, breaker.y) < 2.25f) continue;
+            if (safeRoom.active && Dist2(hx2, hy2, safeRoom.x, safeRoom.y) < 2.25f) continue;
             hideSpots[hideSpotCount].x = hx2;
             hideSpots[hideSpotCount].y = hy2;
             hideSpots[hideSpotCount].kind = rand() % 3;
@@ -1450,8 +1463,8 @@ float SanityDrainRate(void) {
 
 /* v1.8：瓶子携带上限（绣刀的代价是把它压到 1） */
 int BottleCap(void) {
-    int cap = 4;
-    /* v2.0：RUST KNIFE 已删除 */
+    int cap = 4 + RunUpgCarryBonus();   /* v3.0：强化第 0 条「携带量」+2/级 */
+    if (cap < 4) cap = 4;
     return cap;
 }
 
@@ -1875,7 +1888,7 @@ void WeaponTryAttack(float charge) {
        不消耗能量、不判定伤害、不产生子弹。 */
     MakeNoise(posX + dirX * 2.0f, posY + dirY * 2.0f, 11.0f);   /* v3.0 平衡：18 → 11 */
     PlaySfx(SFX_GLASS, 0.55f);
-    pickupMsg = g_lang == LANG_ZH ? "敲击  制造噪音" : "KNOCK  NOISE";
+    pickupMsg = g_lang == LANG_ZH ? "敲击  制造噪音" : "KNOCK";
     pickupMsgTimer = 0.8f;
     uiDirty = 1;
     (void)charge;
@@ -2185,7 +2198,7 @@ void Update(float dt) {
         /* v3.0：藏身点 —— 找最近的一个，按 E 进出 */
     {
         hideSpotNear = -1;
-        float bestHD = 2.6f * 2.6f;
+        float bestHD = 1.9f * 1.9f;   /* v3.0：2.6 → 1.9，避免和箱子的 1.25 交互区重叠 */
         for (int i = 0; i < hideSpotCount; i++) {
             if (!hideSpots[i].active) continue;
             float d = Dist2(posX, posY, hideSpots[i].x, hideSpots[i].y);
@@ -2209,12 +2222,15 @@ void Update(float dt) {
             if (IsActionPressed(ACT_INTERACT)) {
                 hideKeyLatch = 1;
                 hiddenIn = -1;
-                pickupMsg = g_lang == LANG_ZH ? "出来了" : "LEFT COVER";
+                pickupMsg = g_lang == LANG_ZH ? "出来了" : "YOU LEAVE THE COVER";
                 pickupMsgTimer = 1.0f;
                 keyPressed[g_bindings[ACT_INTERACT]] = 0;
                 uiDirty = 1;
             }
-        } else if (hideSpotNear >= 0) {
+        } else if (hideSpotNear >= 0 && hoverKind == 0) {
+            /* v3.0 修复：**附近有可交互的箱子时，藏身点不抢 E** ——
+               原来藏身点无条件抢在容器前面消费按键
+               （用户实测：箱子和躲藏点刷在一起时箱子开不了）。 */
             if (IsActionPressed(ACT_INTERACT)) {
                 hideKeyLatch = 1;
                 hiddenIn = hideSpotNear;
@@ -2256,15 +2272,37 @@ void Update(float dt) {
     /* v3.0 改造树「消失」：脱离视线 3 秒后完全隐身。
        判据用「怪物是否在追捕状态」——它没在追（游荡/搜寻）就算脱离视线。 */
     if (BenchVanish()) {
-        int seen = (monster.active && monster.state == 1);
-        if (seen) {
+        /* v3.0 修正：**隐身必须有持续时间，且"被发现"不能看 monster.state**。
+           原来用 state==1 判发现，而隐身时 MakeNoise 直接 return，
+           state 永远回不到 1 → vanished 自锁成永久隐身，追捕者整局停摆。
+           现在改判「怪物离玩家多近」：5 格内算被发现，立刻破隐。 */
+        float d2v = 1e9f;
+        if (monster.active) {
+            float dxv = monster.x - posX, dyv = monster.y - posY;
+            d2v = dxv * dxv + dyv * dyv;
+        }
+        int seen = (d2v < 25.0f);        /* 5 格内 */
+
+        if (vanished) {
+            vanishHold -= dt;
+            if (seen || vanishHold <= 0.0f) {
+                vanished = 0;
+                vanishHold = 0.0f;
+                vanishTimer = 0.0f;      /* 破隐后要重新脱战 3 秒 */
+                if (seen) {
+                    pickupMsg = g_lang == LANG_ZH ? "隐身被打断" : "REVEALED";
+                    pickupMsgTimer = 1.2f;
+                }
+                uiDirty = 1;
+            }
+        } else if (seen) {
             vanishTimer = 0.0f;
-            vanished = 0;
         } else {
             vanishTimer += dt;
-            if (vanishTimer >= 3.0f && !vanished) {
+            if (vanishTimer >= 3.0f) {
                 vanished = 1;
-                pickupMsg = g_lang == LANG_ZH ? "已隐身" : "VANISHED";
+                vanishHold = 6.0f;       /* 隐身 6 秒 */
+                pickupMsg = g_lang == LANG_ZH ? "已隐身 6 秒" : "VANISHED 6s";
                 pickupMsgTimer = 1.4f;
                 uiDirty = 1;
             }
@@ -2272,6 +2310,7 @@ void Update(float dt) {
     } else {
         vanishTimer = 0.0f;
         vanished = 0;
+        vanishHold = 0.0f;
     }
 
     int wantSprint = IsActionDown(ACT_SPRINT);
@@ -2965,8 +3004,12 @@ void Update(float dt) {
             /* v3.0 平衡：**层清奖励随层涨** ——
        原来恒定 +18，而每层理智流失涨 0.012/秒，
        深层等于是净亏，第 24 层每层净掉 30+ 理智。 */
+    /* v3.0 平衡修正：**奖励必须涨得比流失慢**。
+       流失每层 +0.012/秒 = 每层 +0.72 点/分钟，
+       上一版给 +2 点/层 → 净 +1.28/层，深层反而越玩越赚，难度曲线是反的。
+       改成 +0.5 点/层：第 1 层净 -12、第 24 层净 -17，越深越紧。 */
     float gain = isEndlessRun ? (LEVEL_CLEAR_SANITY + 18.0f)
-                              : (18.0f + (float)currentLevel * 2.0f);
+                              : (18.0f + (float)currentLevel * 0.5f);
             sanity += gain;
             if (sanity > SanityMax()) sanity = SanityMax();
         }
@@ -3268,6 +3311,13 @@ void StartGame(void) {
        benchOwned / runUpg 都已进存档（benchOwnedSave / runUpgSave），
        本来就是元进度。每局该清的只有「假死」这类局内一次性状态。 */
     playDeadUsed = 0;   /* v3.0 假死每局重置 */
+    /* v3.0：这几个也必须在开局清零，否则上一局用过之后新局直接失效 */
+    calibUsedLevel = -1;
+    lastResortUsed = 0;
+    secondWindTimer = 0.0f;
+    vanished = 0;
+    vanishTimer = 0.0f;
+    vanishHold = 0.0f;
 
 
     int startMode = pendingStartMode;
@@ -4634,12 +4684,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 uiDirty = 1;
                 return 0;
             }
-            /* 锁盘是游戏内的模态层：底栏明确提示「任意键退出」。
-               必须在通用 Esc/菜单处理之前消费按键，否则 Esc 会误进暂停，
-               玩家看起来就像被锁盘卡住了。 */
+            /* v3.0：**锁盘只认 Esc / M 关闭** ——
+               原来这里是「任意键退出」，解题时误按一个键就把面板关掉，
+               玩家得重新按 E 再从头对一遍（用户反馈「解密码的时候按键会出 bug」）。
+               上游原本就是 M 关闭（原版截图底栏写的是 M: CLOSE）。 */
             if (lockActive) {
-                CloseLockOverlay();
-                return 0;
+                if (wParam == VK_ESCAPE || wParam == 'M') {
+                    CloseLockOverlay();
+                }
+                return 0;      /* 其它键一律吞掉，不影响锁盘 */
             }
             /* 小键盘数字（NumLock 开启时是 VK_NUMPAD0..9）统一折算成主键盘数字，
                这样 1/2/3 选投掷槽位、以及改绑数字键都不会因为按小键盘而失效。 */
