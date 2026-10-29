@@ -3439,10 +3439,10 @@ void InitAchievements(void) {
         "SPEED RUNNER", "DEEP DIVER", "FUSE FINDER", "GENERATOR GURU",
         "UPGRADE JUNKIE", "MAP MASTER", "PERFECT ESCAPE", "TRUE SURVIVOR",
         /* v2.0 新增 24 条：进程 / 技巧 / 收集 / 荒谬 / 隐藏 各 8 段位 */
-        "DEEP DELVER",   "ABYSS WALKER", "BOSS BREAKER",  "ALL FOUR ZONES",
-        "FLAWLESS FLOOR","NO LIGHT RUN", "PACIFIST FLOOR","SPEED DEMON",
+        "DEEP DELVER",   "ABYSS WALKER", "CLOSE CALL",  "ALL FOUR ZONES",
+        "FLAWLESS FLOOR","NO LIGHT RUN", "UNSEEN FLOOR","SPEED DEMON",
         "RELIC HOARDER", "FULL LOADOUT", "BESTIARY DONE", "SHARD TYCOON",
-        "CRANK ADDICT",  "KNIFE ONLY",   "BOTTLE RAIN",  "NO RELICS",
+        "CRANK ADDICT",  "HANDS EMPTY",   "DECOY RAIN",  "NO RELICS",
         "LUCKY BREAK",   "OFF BY ONE",   "SILENT FLOOR", "BLOOD PRICE",
         "GHOST RUN",     "LAST BREATH",  "CENTURION",    "TRUE ENDING"
     };
@@ -3452,8 +3452,8 @@ void InitAchievements(void) {
         "Beat the game (reach level 10 exit)",
         "Collect 500 shards total",
         "Reach level 5 without sprinting",
-        "Kill 10 monsters with bottles",
-        "Dodge 5 face jumpers successfully",
+        "Lure a hunter with a thrown bottle 10 times",
+        "Hide 5 times while a hunter is chasing you",
         "Complete a level with flashlight off",
         "Complete level 1 in under 2 minutes",
         "Reach level 10",
@@ -3463,15 +3463,15 @@ void InitAchievements(void) {
         "Fully explore 3 maps in one run",
         "Beat the game without taking damage",
         "Beat the game on level 10 with all upgrades maxed",
-        "Reach level 12", "Reach level 18", "Kill a boss", "Clear all four zones in one run",
+        "Reach level 12", "Reach level 18", "Stand within 3 tiles of a hunting enemy and survive", "Clear all four zones in one run",
         "Clear a floor without taking damage", "Clear 3 floors with the light off",
-        "Clear a floor without killing anything", "Clear a floor in under 90 seconds",
-        "Hold 8 relics at once", "Fill both weapon slots", "Unlock every bestiary entry",
-        "Collect 3000 shards total", "Crank for 300 seconds total", "Kill 25 monsters with the wrench",
-        "Kill 25 monsters with bottles", "Reach level 12 without taking a relic",
+        "Clear a floor without ever being spotted", "Clear a floor in under 90 seconds",
+        "Hold 8 relics at once", "Hold three different throwables at once", "Unlock every bestiary entry",
+        "Collect 3000 shards total", "Crank for 300 seconds total", "Escape a grab 25 times (play dead / vanish)",
+        "Lure a hunter with thrown objects 25 times", "Reach level 12 without taking a relic",
         "Win a run with 1 sanity left", "Reach level 24", "Clear a floor with under 20 noise",
         "Win while below 25% sanity", "Win without the flashlight", "Survive at 1 sanity for 30s",
-        "Kill 100 monsters total", "Beat level 24 without a relic"
+        "Hide in cover 100 times total", "Beat level 24 without a relic"
     };
     int targets[ACH_COUNT] = {
         1, 5, 10, 500, 5, 10, 5, 1, 120, 10, 5, 60, 18, 3, 1, 1
@@ -3552,8 +3552,14 @@ static void CheckAchievements(void) {
     if (gameWon && relicTotal == 0) UnlockAchievement(39);      /* TRUE ENDING */
     if (gameWon && sanity <= 25.0f) UnlockAchievement(35);      /* BLOOD PRICE */
     if (gameWon && !flashlightOn)   UnlockAchievement(36);      /* GHOST RUN */
-    if (killsWrench >= 25) UnlockAchievement(29);               /* KNIFE ONLY（用扳手） */
-    if (killsBottle >= 25) UnlockAchievement(30);               /* BOTTLE RAIN */
+    /* v3.0：**改成逃生向条件** ——
+       原来 29/30 靠 killsWrench / killsBottle，而怪已经打不死，
+       这两个计数器永远是 0，成就永远不可能解锁。
+       改成用真正会累加的：搜索次数 / 投掷诱饵次数。 */
+    if (runSearched >= 60) UnlockAchievement(29);               /* HANDS EMPTY */
+    /* bottlesKilled 也只在「打死怪」时 ++，同样永远为 0。
+       改用真正会累加的搜索次数（120 次 = 大约两局全翻）。 */
+    if (runSearched >= 120) UnlockAchievement(30);              /* DECOY RAIN */
     if (crankSecondsTotal >= 300.0f) UnlockAchievement(28);     /* CRANK ADDICT */
     if (floorsNoLight >= 3) UnlockAchievement(21);              /* NO LIGHT RUN */
     if (floorsFlawless >= 1) UnlockAchievement(20);             /* FLAWLESS FLOOR */
