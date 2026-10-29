@@ -35,24 +35,6 @@ int  UIS(int v);
 /* 窗口过程把改绑按键交给它消费；返回 1 = 已处理 */
 int RebindConsumeKey(int vk);
 
-/* 开锁锁盘：绘制在 ui.c，点击命中在 game.c —— 两边共用同一套几何。
-   *a 的含义随锁型变：拨盘=盘号，接线=端子号，均衡器=推子号。 */
-enum {
-    LOCK_HIT_NONE = 0,
-    LOCK_HIT_DIAL,      /* 拨盘：点数字格（快速 +1） */
-    LOCK_HIT_UP,        /* 拨盘：点上方箭头 */
-    LOCK_HIT_DOWN,      /* 拨盘：点下方箭头 */
-    LOCK_HIT_NODE_L,    /* 接线：左端子 */
-    LOCK_HIT_NODE_R,    /* 接线：右端子 */
-    LOCK_HIT_BAR_UP,    /* 均衡器：推子 +1 */
-    LOCK_HIT_BAR_DOWN,  /* 均衡器：推子 -1 */
-    LOCK_HIT_KNOB_INC,  /* 调波器：旋钮 +1 */
-    LOCK_HIT_KNOB_DEC,  /* 调波器：旋钮 -1 */
-    LOCK_HIT_BACK       /* BACK 按钮 */
-};
-/* 返回命中类型；*a 为控件序号（未命中为 -1） */
-int LockHitTest(int mx, int my, int* a);
-
 #endif /* CANITY_UI_H */
 void PageTabRect(int idx, int* x0, int* y0, int* x1, int* y1);   /* v2.8 */
 

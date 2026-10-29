@@ -88,8 +88,6 @@ void Render3D(void);
 void RenderSprites(void);
 void RenderMap(void);
 void DrawParasiteSprite(void);
-/* 透视技能：隔墙标出怪物 / 容器 / 配电箱 / 出口（没有它就不画） */
-void RenderSightOverlay(void);
 
 /* 基准测试用：单独跑某个渲染阶段（1=地板 2=墙体 3=后处理） */
 void RunPhase(int phase);

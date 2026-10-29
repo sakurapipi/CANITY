@@ -9,9 +9,7 @@
 #include "common.h"
 
 enum { SFX_STEP = 0, SFX_HEART, SFX_PICKUP, SFX_POWER, SFX_GATE, SFX_CRANK,
-       SFX_SCREAM, SFX_GLASS, SFX_SEARCH, SFX_THROW,
-       SFX_TICK, SFX_DULL,   /* 锁盘：拨到正确数字（清脆）/ 拨错（沉闷） */
-       SFX_COUNT };
+       SFX_SCREAM, SFX_GLASS, SFX_SEARCH, SFX_THROW, SFX_COUNT };
 
 void PlaySfx(int id, float vol);
 void InitAudio(void);

@@ -27,8 +27,6 @@ static short g_sndScream[13230];   /* 0.60s 尖叫 */
 static short g_sndGlass[6615];     /* 0.30s 玻璃碎裂 */
 static short g_sndSearch[3307];    /* 0.15s 翻箱子：金属刮擦+闷响 */
 static short g_sndThrow[4410];     /* 0.20s 投掷：呼啸+出手音 */
-static short g_sndTick[1323];      /* 0.06s 锁盘：拨对了（清脆咔哒） */
-static short g_sndDull[2647];      /* 0.12s 锁盘：拨错了（沉闷一声） */
 
 typedef struct { const short* data; int len, pos; float vol; int active; } Voice;
 
@@ -98,8 +96,6 @@ void PlaySfx(int id, float vol) {
         case SFX_GLASS:  data = g_sndGlass; len = (int)(sizeof(g_sndGlass) / sizeof(short)); break;
         case SFX_SEARCH: data = g_sndSearch;len = (int)(sizeof(g_sndSearch) / sizeof(short)); break;
         case SFX_THROW:  data = g_sndThrow; len = (int)(sizeof(g_sndThrow) / sizeof(short)); break;
-        case SFX_TICK:   data = g_sndTick;  len = (int)(sizeof(g_sndTick) / sizeof(short)); break;
-        case SFX_DULL:   data = g_sndDull;  len = (int)(sizeof(g_sndDull) / sizeof(short)); break;
         default: return;
     }
     EnterCriticalSection(&g_audioLock);
@@ -264,38 +260,6 @@ static void GenSounds(void) {
                 v += sinf(6.2831f * 60.0f * t) * expf(-t * 50.0f) * 0.4f * p;
             }
             g_sndThrow[i] = (short)(v * 32000.0f);
-        }
-    }
-
-    /* 锁盘拨对：清脆的金属咔哒（高频 + 噪声齿音，极快衰减） */
-    {
-        int tl = (int)(sizeof(g_sndTick) / sizeof(short));
-        for (int i = 0; i < tl; i++) {
-            float t = (float)i / AUDIO_RATE;
-            seed = seed * 1664525u + 1013904223u;
-            float n = ((float)((seed >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
-            float v = sinf(6.2831f * 2350.0f * t) * 0.55f + n * 0.30f;
-            v *= expf(-t * 150.0f);
-            /* 一点更亮的回弹，让“咔哒”听起来是金属的 */
-            float d2 = t - 0.022f;
-            if (d2 > 0.0f) v += sinf(6.2831f * 3120.0f * d2) * expf(-d2 * 240.0f) * 0.30f;
-            g_sndTick[i] = (short)(v * 0.75f * 32000.0f);
-        }
-    }
-
-    /* 锁盘拨错：沉闷的一下（强低通噪声 + 低频正弦，慢衰减） */
-    {
-        int dl = (int)(sizeof(g_sndDull) / sizeof(short));
-        float lp3 = 0.0f;
-        for (int i = 0; i < dl; i++) {
-            float t = (float)i / AUDIO_RATE;
-            seed = seed * 1664525u + 1013904223u;
-            float n = ((float)((seed >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
-            lp3 = lp3 * 0.88f + n * 0.12f;                 /* 强低通：闷 */
-            float f = 118.0f - 38.0f * (t / 0.12f);        /* 低频一点点下滑 */
-            float v = sinf(6.2831f * f * t) * 0.45f + lp3 * 0.85f;
-            v *= expf(-t * 24.0f);
-            g_sndDull[i] = (short)(v * 0.55f * 32000.0f);
         }
     }
 }
