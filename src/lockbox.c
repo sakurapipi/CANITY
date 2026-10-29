@@ -745,5 +745,5 @@ void DrawLockOverlay(void) {
 
     LockDrawButton(LockBackBox(), "BACK", hit == LOCK_HIT_BACK, 0x00C05050u);
 
-    DrawTextCenterWin(winW / 2, p.y1 - LUIS(32), "MOUSE ONLY    -    ANY KEY TO LEAVE", 0x00707880u);
+    DrawTextCenterWin(winW / 2, p.y1 - LUIS(32), "MOUSE ONLY    -    ESC / M TO LEAVE", 0x00707880u);
 }
