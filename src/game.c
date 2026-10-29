@@ -865,20 +865,28 @@ static void BuildTrainingArena(void) {
     hiddenIn = -1;
     hideSpotNear = -1;
 
-    /* ③ 1 个解密装置（上锁容器，四种锁型每次进训练场轮换，
-          这样四种锁都能试到） */
+    /* ③ **3 个解密装置，每种锁型各一个** ——
+       用户要求「加两个箱子进去，三个用不同的开锁器，我要检查 3 个 UI」。
+       走廊只有 x=2..21，前段已经排了箱子/藏身点/安全区，
+       所以这三个放在 x=16.5 / 18.5 / 20.5（末尾三段）。
+       四种锁型里固定取前三种：拨盘 / 接线 / 均衡器。
+       每次进训练场把起始偏移 +1，多进两次就能看到调波器。 */
     {
-        static int trainLockType = 0;
-        containers[1].x = 18.5f;
-        containers[1].y = (float)(MAP_HEIGHT / 2) + 0.5f;
-        containers[1].active = 1;
-        containers[1].searched = 0;
-        containers[1].content = 0;
-        containers[1].locked = 1;
-        containers[1].lockType = trainLockType % LOCK_TYPE_COUNT;
-        containers[1].lockCode = 0x2A5;    /* 固定密码，方便反复试同一个 */
-        trainLockType++;
-        containerCount = 2;
+        static int trainLockOfs = 0;
+        for (int k = 0; k < 3; k++) {
+            int i = 1 + k;                       /* containers[1..3] */
+            /* 16.5/18.5/20.5 会和 x=20.5 的固定靶重叠，改成 15.5/17.5/19.5 */
+            containers[i].x = 15.5f + (float)k * 2.0f;
+            containers[i].y = (float)(MAP_HEIGHT / 2) + 0.5f;
+            containers[i].active = 1;
+            containers[i].searched = 0;
+            containers[i].content = 0;
+            containers[i].locked = 1;
+            containers[i].lockType = (trainLockOfs + k) % LOCK_TYPE_COUNT;
+            containers[i].lockCode = 0x2A5;
+        }
+        trainLockOfs++;
+        containerCount = 4;                      /* 1 个可搜 + 3 个上锁 */
     }
 
     ApplyFov();

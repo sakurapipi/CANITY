@@ -776,7 +776,7 @@ void DrawLockOverlay(void) {
     DrawTextCenterWin(winW / 2, p.y0 + LUIS(24), "LOCKED", 0x00E05050u);
 
     if (lockType == LOCK_TYPE_DIAL) {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "TURN THE DIALS UNTIL EVERY ONE CLICKS", 0x0090A0A8u);
+        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "EVERY DIAL MUST CLICK", 0x0090A0A8u);
         LockDrawDialBody(hit, ha);
     } else if (lockType == LOCK_TYPE_WIRE) {
         DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH EACH LEFT TERMINAL BY COLOR", 0x0090A0A8u);
