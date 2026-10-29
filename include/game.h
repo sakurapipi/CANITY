@@ -7,6 +7,7 @@
 #define CANITY_GAME_H
 
 #include "common.h"
+#include "score.h"
 
 /* ---- 窗口与状态机 ---- */
 extern int winW, winH;              /* 窗口客户区尺寸（逻辑/显示分辨率） */
@@ -25,7 +26,7 @@ extern int sliderDragging;
 
 /* ---- 系统设置 ---- */
 extern int resIndex;
-extern const int resolutions[5][2];
+extern const int resolutions[RES_COUNT][2];
 extern int isFullscreen;
 extern int showFps;
 extern int fpsCapIndex;             /* 30 / 60 / 120 / 144 / 不限制 */
@@ -54,9 +55,14 @@ extern float flashTime;             /* 切关白屏剩余秒数 */
 extern float healFlash;             /* 回血白闪剩余秒数 */
 
 /* ---- 关卡词条 ---- */
+extern int levelEvent;
+extern int eventBonus;
+extern const char* const eventNames[EVENT_COUNT];
+int EventScore(int ev);
 extern int levelMod;
 extern float modSanityMul;
 extern float modSpeedMul;
+extern float modBatteryMul, modShardMul, modNoiseMul;
 extern float levelBanner;           /* 进关后显示词条名的秒数 */
 extern float safeZoneMsg;           /* 进入安全屋后提示「SAFE ZONE」的剩余秒数 */
 
@@ -80,6 +86,12 @@ extern Shard shards_debris[MAX_SHOTS * SHARD_COUNT];
 /* ---- 场景 ---- */
 extern SafeRoom safeRoom;
 extern Container containers[MAX_CONTAINERS];
+/* v3.0：藏身点 */
+extern HideSpot hideSpots[HIDESPOT_MAX];
+extern int hideSpotCount;
+extern int hiddenIn;
+extern int hideSpotNear;
+extern int lockedThisFloor;   /* v3.0：本层已上锁的箱子数 */
 extern int containerCount;
 extern Breaker breaker;
 
@@ -88,6 +100,7 @@ extern int fusesHeld;
 extern int fusesNeeded;
 extern int breakerOpen;
 extern float runTime;
+extern int   weaponPickSel;      /* v2.0：开局选武器光标 */
 extern float stepTimer;
 extern float crankTimer;
 extern float throwCd;
@@ -115,58 +128,6 @@ extern int hoverIndex;
 extern float holdTimer;
 extern int holdingNow;
 
-/* ---- 上锁容器（v1.8.0） ----
-   contLocked/contLockType/contLockCode 与 containers[] 一一对应，
-   独立于 Container 结构，因此不会改变 SaveBlob 的既有布局。
-   contLockCode 是**谜题参数**，含义随锁型变：
-     拨盘   = 3 个 4bit 数字拼成的密码
-     接线   = 右端子的排列编号（0..5）
-     均衡器 = 3 根推子的目标档位（每根 3bit 打包） */
-extern int contLocked[MAX_CONTAINERS];
-extern int contLockCode[MAX_CONTAINERS];
-extern int contLockType[MAX_CONTAINERS];
-extern int lockActive;                     /* 1 = 开锁覆盖层打开（游戏不暂停） */
-extern int lockTarget;                     /* 目标容器下标，-1 = 无 */
-extern int lockCursor;                     /* 拨盘锁：当前选中的拨盘 */
-extern int lockDigits[LOCK_DIALS];         /* 拨盘锁：三个拨盘当前显示的值 */
-extern int lockType;                       /* 当前打开的锁型（LOCK_TYPE_*） */
-
-/* 接线锁的运行时状态 */
-extern int lockWireSel;                    /* 选中的左端子，-1 = 无 */
-extern int lockWireLink[LOCK_WIRES];       /* 左 i 连到的右端子，-1 = 未连 */
-/* 均衡器锁的运行时状态 */
-extern int lockEqVal[LOCK_EQ_BANDS];       /* 当前档位 */
-/* 调波器锁的运行时状态（0=振幅 1=频率 2=相位） */
-extern int lockTuneVal[LOCK_TUNE_KNOBS];   /* 当前档位 */
-
-/* 纯函数：从打包的密码里取第 dial 位 / 比对对了几个位置 */
-int LockDigit(int code, int dial);
-int LockCorrectCount(int code, const int* digits);
-
-/* 覆盖层进出。三种锁型都在“解开”时自动开锁 */
-void OpenLockOverlay(int index);
-void CloseLockOverlay(void);
-
-/* 拨盘锁 */
-void LockTurnDial(int dial, int delta);
-int LockDialSolved(int dial);          /* 该拨盘是否已对（绿圈） */
-void LockAdjustDigit(int dial, int delta);
-
-/* 接线锁：左端子颜色 / 右端子颜色（由参数排列决定）/ 尝试连线 */
-int LockWireColor(int leftIdx);
-int LockWireRightColor(int rightIdx);
-int LockWireConnect(int left, int right);   /* 1 = 配色正确已连上 */
-
-/* 均衡器锁：目标档位 / 拨动 / 是否全部对上 */
-int LockEqTarget(int band);
-void LockEqAdjust(int band, int delta);
-int LockEqSolved(void);
-
-/* 调波器锁：目标档位 / 旋转 / 是否波形完全重合 */
-int LockTuneTarget(int knob);
-void LockTuneAdjust(int knob, int delta);
-int LockTuneSolved(void);
-
 /* ---- 输入 ---- */
 extern int keys[256];
 extern int keyPressed[256];
@@ -174,12 +135,13 @@ extern POINT lastMousePos;
 extern int firstMouseMove;
 extern POINT g_mousePos;       /* 窗口客户区坐标下的鼠标位置，用于 tooltip 等 */
 extern int isMapOpen;
+extern int mapFullScreen;
 extern int g_bindings[ACT_COUNT];
 
 /* ---- 设置模型 ---- */
 extern int settingsPage;
 extern int g_forceMod;
-extern int menuScrollOffsets[9];   /* 每个菜单状态的滚动偏移（含 STATE_SKILLS） */
+extern int menuScrollOffsets[16];   /* 每个菜单状态的滚动偏移 */
 extern SettingItem settings[SETTING_COUNT];
 extern const char* optKeys[OPT_KEY_COUNT];
 extern const int optKeyVKs[OPT_KEY_COUNT];
@@ -196,48 +158,6 @@ void ForceCursor(int visible);
 /* ---- 输入查询（entity.c 的 QTE 也要用） ---- */
 int IsActionPressed(ActionId act);
 
-/* ---- 主动技能（v1.9.0） ----
-   每局只能带一个技能，只受冷却限制。目前只有穿墙（SKILL_PHASE）。 */
-extern int selectedSkill;              /* 大厅里选定的技能（SKILL_*） */
-extern int runSkill;                   /* 这局实际带进来的技能 */
-extern int skillLevels[SKILL_CAP];
-extern float skillPhaseTimer;          /* 穿墙剩余秒数，0 = 没在穿 */
-extern float skillSightTimer;          /* 透视剩余秒数 */
-extern float skillCooldownTimer;       /* 冷却剩余秒数（三个技能共用） */
-extern int phaseActive;                /* 1 = 正在穿墙（渲染走透视） */
-extern int sightActive;                /* 1 = 正在透视（隔墙标出实体） */
-void TryActivateSkill(void);
-const char* SkillName(int skill);
-float SkillCooldown(int skill);
-float SkillDuration(int skill);
-int SkillLevel(int skill);
-int SkillUpgradeCost(int skill);     /* 返回残卷数量；-1 = 已满级 */
-void BuySkillUpgrade(void);
-extern int scrolls;                  /* 残卷：只用来升级技能 */
-/* 技能页：选中某个技能（换技能会作废当前这局）/ 直接升级某个技能 */
-void SkillSelect(int skill);
-void SkillUpgradeAt(int skill);
-void ActivateSkillRow(void);         /* 技能页当前行：换技能 / 升级 / 返回 */
-extern int skillSelection;           /* 技能页当前高亮行 */
-/* 大厅里换技能：当前这局作废（技能开局定死） */
-void CycleSkill(void);
-/* 玩家碰撞：穿墙期间忽略墙（地图边界仍然挡）。怪物用的是 Blocked()，不受影响。 */
-int PlayerBlocked(float x, float y);
-
-/* ---- 隐藏房间（v1.10.0） ---- */
-extern int hiddenActive;                    /* 本层有没有 */
-extern int hiddenOpened;
-extern int hiddenX0, hiddenY0, hiddenX1, hiddenY1;   /* 内部地板范围（含） */
-extern int hiddenDoorX, hiddenDoorY;
-extern int hiddenCodeCount;
-extern int hiddenCodesFound;
-extern int hiddenCodeX[HIDDEN_MAX_CODES], hiddenCodeY[HIDDEN_MAX_CODES];
-extern int hiddenCodeTaken[HIDDEN_MAX_CODES];
-/* 穿墙 / 瞬移都不能进隐藏房间（用户要求）；返回 1 = 被拦 */
-int HiddenBlocksPlayer(float x, float y);
-/* 在暗门前按 E：密码齐了才开 */
-void HiddenTryUnlock(void);
-
 /* ---- 世界碰撞 ---- */
 int Blocked(float x, float y);
 int ShotBlocked(float x, float y);
@@ -251,6 +171,85 @@ const char* VkName(int vk);
 int BindActionOfItem(const SettingItem* it);
 int IsKeyBindItem(const SettingItem* it);
 
+/* ---- v1.8 新状态（存档 / 结算 / 技能界面用） ---- */
+extern int bestMainScore;
+extern int pendingShards;      /* 本层未上缴的碎片 */
+extern int bankStreak;         /* 连续上缴层数 */
+extern int modsSeenMask;
+extern int modsSeenCount;
+extern int runSearched;
+extern float knifeCd;
+/* v2.9 剑气：RUST KNIFE 不再原地挥砍，而是向前射出一道剑气 */
+extern int   slashActive;
+extern float slashX, slashY, slashDX, slashDY, slashTravel, slashFade;
+extern float slashHitStop;
+/* v2.1 屏幕特效 */
+extern float g_shakeOffX, g_shakeOffY;
+extern float hitFlash, muzzleFlash;
+extern float bobPhase;
+void AddShake(float seconds, float mag);
+void SpawnParticles(float x, float y, int tint);   /* v2.1 0 玻璃 1 血 2 尘 */
+void AddHitFlash(float amount);
+extern int   slashDmg;        /* v2.0：光束伤害（剑气 999 / 符印按武器表） */
+extern float weaponAtkCharge; /* 武器蓄力 0..1 */
+extern float decoySelfTimer;
+extern int hubPage;            /* 0=基础升级 1=技能树 */
+extern int playerInSafe;
+extern int autoPaused;
+int itemHasStock(void);   /* v1.18：当前槽位有没有货 */
+extern float smokeDim;
+extern int monsterMuted;
+void SpawnSmoke(float x, float y);
+void UpdateSmokes(float dt);
+int PlayerInSmoke(void);
+extern SmokeCloud smokes[MAX_SMOKE];
+extern int bricks, acids, smokeBombs;
+extern int firePots, gluePots, mirrors;   /* v2.0 */
+extern int g_dmgIgnoreArmor;
+int ApplyDamage(Monster* m, int base, int type, float sx, float sy);
+extern int trainingMode, trainingTotal, trainingLast, trainingCount, trainingDps;
+extern int trainingHist[6];
+extern float trainingDpsTimer;
+extern int lastHitDamage;
+extern float lastHitTimer;
+extern int lastHitBackstab;
+void UiLayoutBegin(void);
+void DumpUILayout(const char* path);
+extern int forceFrame;       /* v1.8：玩家在安全屋时为 1 */
+extern ScoreBreakdown lastScore;
+extern int skillPickOptions[INRUN_CHOICES];
+extern int skillPickSel;
+extern float leechHintTimer;
+
+void PollInput(void);
+void OpenSkillPick(void);
+void OpenRelicPick(void);   /* v2.0 遗物三选一 */
+extern int pickMode;
+extern int bossLevel;      /* 1 = 本层是 Boss 层 */
+extern int bossMaxHp;      /* Boss 满血（HUD 条用） */
+extern int bossDefeated;
+extern int dailyMode;      /* v2.0：每日挑战 */
+extern int dailySeed;
+extern int campaignMode;   /* v2.0：战役模式 */
+extern int campaignStage;  /* 0..4 */
+extern const char* campaignName(int stage);   /* 本层 Boss 已击杀 */
+void CloseSkillPick(void);
+float SanityDrainRate(void);
+int   BottleCap(void);
+float SanityMax(void);   /* v2.0 理智上限 */
+float StaminaMax(void);   /* 体力上限（LONG WIND 会 +25） */
+extern float energy;      /* v2.3：武器能量 */
+extern float treeVX, treeVY, treeVK;   /* v2.8：改造树视口 */
+int   EnergyMax(void);
+/* v2.4 校准小游戏 */
+extern int   calibActive, calibAttempts, calibResult;
+extern float calibPos, calibZoneC, calibCooldown, calibResultTimer;
+void  CalibStart(void);
+void  CalibLock(void);
+void  CalibTick(float dt);
+float CalibZoneScale(void);   /* v2.6：目标区缩放 */
+float CalibSpeedScale(void);  /* v2.6：滑块速度缩放 */
+
 /* ---- 升级 ---- */
 int BatteryMax(void);
 int UpgradeLevel(int kind);
@@ -259,7 +258,17 @@ int UpgradeCost(int kind);
 
 /* ---- 菜单动作 ---- */
 void StartGame(void);
+void SyncWindowSize(void);   /* v2.2：每帧对齐 UI 空间 */
+extern int clientW, clientH;   /* v2.2：真实客户区，仅用于鼠标换算 */
+void StartDailyRun(void);   /* v2.0 每日挑战 */
+void StartCampaign(int stage);  /* v2.0 战役 */
+void SkipOneLevel(void);        /* v2.0 SHORTCUT */
+extern int shortcutUsed;
 void PauseGame(void);
+/* 成就表初始化：只填 name/desc/target/id 这些静态字段，不碰 unlocked/progress
+   （那两个由存档恢复）。必须在 LoadSettings 之后调用 —— 否则任何"直接跳进
+   成就页"的路径都会显示一片空白名字。 */
+void InitAchievements(void);
 void ApplySetting(int item, int value);
 void ActivateMenuItem(void);
 void ActivateHubRow(void);
@@ -275,14 +284,15 @@ extern int mapsFullyExplored;
 extern int tookDamage;
 extern int flashlightOffLevel;
 extern int sprintedThisLevel;
-/* v14 新成就计数（每局重置） */
-extern int locksOpened;
-extern int hiddenOpenedCount;
-extern int scrollsEarned;
-extern float phaseSeconds;
-extern int blinkCount;
 
 /* ---- 窗口过程 ---- */
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 #endif /* CANITY_GAME_H */
+
+/* v2.2：从函数内 extern 提到这里（类型改动不再静默错位） */
+extern int totalKills, killsWrench, killsBottle, floorKills;
+
+/* v2.2：从函数内 extern 提到这里（类型改动不再静默错位） */
+extern int weaponAttach[3][2];
+extern int helpPage;   /* v2.2：帮助页分页 */

@@ -12,6 +12,7 @@
 #include "common.h"
 #include "entity.h"
 #include "game.h"
+#include "sprites.h"
 #include "render.h"
 #include "ui.h"
 #include "audio.h"
@@ -26,7 +27,19 @@
    离线自检程序会用 `#define WinMain CanityAppMain` 把本函数改名，
    这样它就能 include 整个 canity_unity.c 并自己定义 main() —— 但那不影响本文件的独立性，
    单独编译 main.c 依然得到完整的游戏。 */
+static int FileExists(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    /* v1.8：声明 DPI 感知。
+       不声明的话，125%/150% 缩放的笔记本上 Windows 会把窗口"虚拟放大"，
+       800x600 的窗口占掉更多像素，画面糊、还可能放不进屏幕。 */
+    SetProcessDPIAware();
+
     (void)hPrevInstance;
     (void)lpCmdLine;
 
@@ -35,9 +48,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     timeBeginPeriod(1);
 
     hasSave = LoadSettings();
+    InitAchievements();          /* 只填静态字段，不覆盖存档里的进度 */
     InitAudio();
 
     InitPixels();
+    SpritesInit();   /* v2.1：烘焙精灵（一次性，约 40~80ms） */
     GenerateThemeTextures(0);   /* 启动用 BRICK 主题 */
     InitWorkers();
 
@@ -52,7 +67,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     RegisterClass(&wc);
 
     g_hwnd = CreateWindowEx(0, CLASS_NAME, "Canity v" CANITY_VERSION_STR,
-                            WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX,
+                            WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME,   /* v1.8：保留最大化按钮（原来被 ~WS_MAXIMIZEBOX 禁掉） */
                             CW_USEDEFAULT, CW_USEDEFAULT, 816, 639,
                             NULL, NULL, hInstance, NULL);
     if (!g_hwnd) return 1;
@@ -75,6 +90,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     int running = 1;
     MSG msg;
     while (running) {
+        SyncWindowSize();   /* v2.2：每帧对齐 winW/winH（DPI/最大化/改窗口都能兜住） */
         int guard = 0;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) { running = 0; break; }
@@ -102,6 +118,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         accum += dt;
         int steps = 0;
         while (accum >= LOGIC_STEP && steps < 16) {
+            PollInput();          /* v1.8：每帧轮询键盘，不依赖焦点消息 */
+            UpdatePitch();        /* v1.13：真俯仰（每帧刷新 cos/sin/focal） */
             Update((float)LOGIC_STEP);
             accum -= LOGIC_STEP;
             steps++;
@@ -138,6 +156,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 if (nextRender < clock) nextRender = clock + interval;
             }
         }
+
+        /* v1.9：UI 布局自检 —— exe 同目录放一个 dump_ui.flag，
+           游戏就会每 30 帧把当前帧的文字矩形写进 ui_layout.txt。
+           这样不依赖键盘，脚本也能触发。 */
+        {
+            static int uiCheckFrames = 0;
+            static int uiFlagChecked = 0;
+            if (!uiFlagChecked) {
+                char probe[MAX_PATH];
+                GetModuleFileNameA(NULL, probe, MAX_PATH);
+                char* sl = strrchr(probe, '\\');
+                if (sl) sl[1] = 0; else probe[0] = 0;
+                strncat(probe, "dump_ui.flag", MAX_PATH - strlen(probe) - 1);
+                uiFlagChecked = FileExists(probe) ? 1 : -1;
+            }
+            if (uiFlagChecked > 0 && (++uiCheckFrames % 30) == 0) {
+                DumpUILayout("ui_layout.txt");
+            }
+        }
+
+        /* v1.9：把实测渲染耗时交给动态分辨率 */
+        if (playing) UpdateDynamicRes(lastRenderMs);
 
         fpsAcc += dt;
         if (fpsAcc >= 0.5) {

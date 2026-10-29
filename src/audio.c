@@ -336,13 +336,23 @@ void ShutdownAudio(void) {
     g_audioOn = 0;
     InterlockedExchange(&g_audioQuit, 1);
     if (g_audioEvent) SetEvent(g_audioEvent);
-    if (g_audioThread) { WaitForSingleObject(g_audioThread, 500); CloseHandle(g_audioThread); g_audioThread = NULL; }
+    /* v2.7：等不到线程退出就别销毁锁/事件 —— 它可能还卡在
+       EnterCriticalSection / WaitForSingleObject 上，
+       DeleteCriticalSection / CloseHandle 都是 UB。进程马上退出，这点泄漏无所谓。 */
+    int threadExited = 1;
+    if (g_audioThread) {
+        threadExited = (WaitForSingleObject(g_audioThread, 500) == WAIT_OBJECT_0);
+        CloseHandle(g_audioThread);
+        g_audioThread = NULL;
+    }
     if (g_wave) {
         waveOutReset(g_wave);
         for (int i = 0; i < AUDIO_BUFS; i++) waveOutUnprepareHeader(g_wave, &g_hdr[i], sizeof(WAVEHDR));
         waveOutClose(g_wave);
         g_wave = NULL;
     }
-    if (g_audioEvent) { CloseHandle(g_audioEvent); g_audioEvent = NULL; }
-    DeleteCriticalSection(&g_audioLock);
+    if (threadExited) {
+        if (g_audioEvent) { CloseHandle(g_audioEvent); g_audioEvent = NULL; }
+        DeleteCriticalSection(&g_audioLock);
+    }
 }

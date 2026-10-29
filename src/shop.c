@@ -71,7 +71,7 @@ const char* ShopPageTitle(void) {
     switch (shopPage) {
     case SHP_BENCH: return Tr("SAFE HOUSE  -  BENCH", "安全屋  -  改装台");
     case SHP_REST:  return Tr("SAFE HOUSE  -  REST",  "安全屋  -  休息");
-    case SHP_TREE:  return "THE BENCH";
+    case SHP_TREE:  return Tr("WORKBENCH TREE", "改造树");
     case SHP_UPGRADE: return "CRYSTAL UPGRADE";
     default:        return Tr("SAFE HOUSE  -  SHOP",  "安全屋  -  商店");
 }
@@ -152,7 +152,7 @@ const char* ShopRowText(int row) {
         extern int curWeapon;
         static const char* wname[WPN_COUNT] = { "CRANKWRENCH", "FLARE PISTOL", "SIGIL" };
         /* v3.0：武器取消 → 这一行改成「静步开关」提示（占位，不消耗） */
-        sprintf(sbuf, "%s", Tr("REST HERE", "在这里休息"));
+        sprintf(sbuf, "%s", Tr("RECOVER STAMINA", "恢复体力"));
         return sbuf;
     }
     if (row == 3) {

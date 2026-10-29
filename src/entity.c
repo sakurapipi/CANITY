@@ -5,6 +5,12 @@
  */
 #include "common.h"
 #include "entity.h"
+#include "upgrade_run.h"
+#include "bench.h"
+#include "relics.h"
+#include "weapons.h"
+#include "game.h"
+#include "skills.h"
 #include "game.h"
 #include "render.h"
 #include "audio.h"
@@ -171,7 +177,37 @@ void SpawnMonster(void) {
     monster.wanderTimer = 1.5f;
     monster.hitCooldown = HitCooldownFor(currentLevel);
     monster.growlTimer = 3.0f;
-    monster.hp = MONSTER_HP;
+    /* v2.1：Boss 层把寻声鬼强化成 Boss（8 倍血、更大只、更慢） */
+    extern int bossLevel, bossMaxHp;
+    monster.hp = MonsterHpFor(currentLevel);
+    /* v2.0：战役每关加码 —— 原来 5 关全都用第 1 层数值，没有任何递进 */
+    {
+        extern int campaignMode, campaignStage;
+        if (campaignMode && campaignStage > 0)
+            monster.hp = (int)((float)monster.hp * (1.0f + 0.28f * (float)campaignStage) + 0.5f);
+    }
+    if (bossLevel) {
+        /* v2.0：3 个 Boss 各走一条路线 —— 第 6 层「快」、12 层「厚」、18 层「全能」。
+           原来三个 Boss 都是同一只怪 ×8 血 ×0.72 速，玩家完全分不出来。 */
+        int lv = currentLevel;
+        if (lv <= 6)        { monster.hp *= 6;    monster.speed *= 1.10f; }   /* 快攻 */
+        else if (lv <= 12)  { monster.hp *= 6;    monster.speed *= 0.62f; }   /* v2.2：10→6（符印原来打不完） */   /* 厚甲 */
+        else                { monster.hp *= 5.5f; monster.speed *= 0.95f; }  /* v2.2：9→5.5 */   /* 全能 */
+        bossMaxHp = monster.hp;
+        /* v2.2：Boss 原来三抗全同 → 符印（理智）和信号枪（电量）
+           在 12/18 层算术上打不死（要 216/264 点，上限 100）。
+           给法术和碎片各 -30% 抗性（弱点），让三把武器都能通。 */
+        monster.resist[DT_SLASH] = -30;
+        monster.resist[DT_SHARD] = -30;
+        monster.resist[DT_BLUNT] = 10;
+    } else {
+        bossMaxHp = monster.hp;
+    }
+    /* v1.15：护甲 0；抗玻璃（它是被瓶子砸醒的），弱钝击 */
+    monster.armor = 0;
+    monster.resist[DT_SLASH] = 0;
+    monster.resist[DT_BLUNT] = -25;
+    monster.resist[DT_SHARD] = 20;
     monster.stun = 0.0f;
     for (int t = 0; t < 512; t++) {
         int x = 1 + rand() % (MAP_WIDTH - 2);
@@ -201,15 +237,62 @@ int HasLOS(float x0, float y0, float x1, float y1) {
 }
 
 /* 玩家制造声音：只有跑步、翻找、手摇会调用 */
+/* v3.0：藏身判定 —— 很多 AI 分支都要问「玩家是不是藏着」 */
+extern int hiddenIn;
+
+/* v3.0：**噪音可视化** —— 逃生类的第三块反馈。
+   玩家扔瓶子/敲墙之后必须看得见「声音传了多远、持续多久」，
+   否则这个核心手法是纯盲操作。
+   noiseDisplay 是 0..1 的衰减值，HUD 拿它画噪音环。 */
+float noiseDisplay = 0.0f;
+float noiseDisplayTimer = 0.0f;
+float noiseSrcX = 0.0f, noiseSrcY = 0.0f;   /* v3.0：听觉用 */
+
 void MakeNoise(float x, float y, float radius) {
+    /* v3.0 消失：隐身时噪音也不会暴露位置 */
+    {
+        extern int vanished;
+        if (vanished) return;
+    }
+    /* v3.0：**噪音要通知所有追捕者** ——
+       原来只写 monster，于是扔瓶子引开对追光鬼/影子/蜘蛛完全无效，
+       「用噪音控制敌人」这个逃生核心手法只对三分之一的怪成立。 */
+    {
+        extern Monster lightBeast;
+        Monster* all[2] = { &monster, &lightBeast };
+        for (int mi = 0; mi < 2; mi++) {
+            Monster* mm = all[mi];
+            if (!mm->active) continue;
+            float r2 = radius;
+            extern float modNoiseMul;
+            r2 *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;
+            if (Dist2(x, y, mm->x, mm->y) > r2 * r2) continue;
+            mm->state = 1;
+            mm->tx = x;
+            mm->ty = y;
+            mm->repath = 0.0f;
+            mm->stateTimer = 0.0f;
+
+        }
+    }
     if (!monster.active) return;
-    radius *= (1.0f - 0.15f * upgQuiet);
+    extern float modNoiseMul;
+    radius *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;   /* QUIET LID + 遗物 + 事件 */
     if (Dist2(x, y, monster.x, monster.y) > radius * radius) return;
     monster.state = 1;
     monster.tx = x;
     monster.ty = y;
     monster.repath = 0.0f;
     monster.stateTimer = 0.0f;
+    /* v3.0：记录一次噪音事件，供 HUD 显示 */
+    {
+        extern float noiseDisplay, noiseDisplayTimer;
+        float k = radius / 22.0f;
+        if (k > 1.0f) k = 1.0f;
+        if (k > noiseDisplay) noiseDisplay = k;
+        noiseDisplayTimer = 2.2f;
+        noiseSrcX = x; noiseSrcY = y;
+    }
 }
 
 void SpawnLightBeast(void) {
@@ -227,7 +310,12 @@ void SpawnLightBeast(void) {
     lightBeast.wanderTimer = 1.5f;
     lightBeast.hitCooldown = HitCooldownFor(currentLevel);
     lightBeast.growlTimer = 3.0f;
-    lightBeast.hp = LIGHTBEAST_HP;
+    lightBeast.hp = (int)((float)MonsterHpFor(currentLevel) * LIGHTBEAST_HP_MUL);
+    /* v1.15：有甲、抗刀、怕钝击 */
+    lightBeast.armor = 1;
+    lightBeast.resist[DT_SLASH] = 20;
+    lightBeast.resist[DT_BLUNT] = -20;
+    lightBeast.resist[DT_SHARD] = 0;
     lightBeast.stun = 0.0f;
     for (int t = 0; t < 512; t++) {
         int x = 1 + rand() % (MAP_WIDTH - 2);
@@ -309,12 +397,14 @@ void UpdateLightBeast(float dt) {
 
     float pd2 = Dist2(lightBeast.x, lightBeast.y, posX, posY);
     if (lightBeast.hitCooldown <= 0.0f && pd2 < 0.55f) {
+            if (hiddenIn < 0) {   /* v3.0：藏起来抓不到 */
         sanity -= 14.0f;
+            }
         if (sanity < 0.0f) sanity = 0.0f;
         extern int tookDamage;
         tookDamage = 1;
         healFlash = 0.16f;
-        PlaySfx(SFX_SCREAM, 1.0f);
+        if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
         SpawnLightBeast();
     }
     if (lightBeast.hitCooldown > 0.0f) lightBeast.hitCooldown -= dt;
@@ -333,7 +423,7 @@ static void JumperFail(void) {
     ApplyFx(FX_BLIND, JUMPER_FAIL_FX_POWER, JUMPER_FAIL_FX_TIME);
     ApplyFx(FX_SLOW, JUMPER_FAIL_FX_POWER, JUMPER_FAIL_FX_TIME);
     healFlash = 0.25f;
-    PlaySfx(SFX_SCREAM, 1.0f);
+    if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
 }
 
 /* 事件结束（无论成功失败）—— 虫子退场，本关不再出现 */
@@ -386,7 +476,7 @@ void SpawnParasite(void) {
     jumperTimer = JUMPER_APPROACH_TIME;
     jumperResolved = 0;
     jumperQteKey = rand() % JMP_KEY_COUNT;
-    PlaySfx(SFX_SCREAM, 0.35f);
+    if (!monsterMuted) PlaySfx(SFX_SCREAM, 0.35f);
 }
 
 void UpdateParasite(float dt) {
@@ -420,7 +510,7 @@ void UpdateParasite(float dt) {
             jumperTimer = JUMPER_DODGE_WINDOW;
             parasite.x = tx;
             parasite.y = ty;
-            PlaySfx(SFX_SCREAM, 0.8f);
+            if (!monsterMuted) PlaySfx(SFX_SCREAM, 0.8f);
         }
         break;
     }
@@ -436,7 +526,7 @@ void UpdateParasite(float dt) {
             /* 没躲开：跿上脸，进入阶段二 */
             jumperPhase = JMP_QTE;
             jumperTimer = JUMPER_QTE_WINDOW;
-            PlaySfx(SFX_SCREAM, 1.0f);
+            if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
         }
         break;
     }
@@ -448,17 +538,13 @@ void UpdateParasite(float dt) {
            绑定就对不上了。改成从**已绑定的动作键**里取：QTE 让你按的
            永远是你自己绑过的键，肌肉记忆直接可用。 */
         {
-            static int keyCodes[JMP_KEY_COUNT];
-            static int poolBuilt = 0;
-            if (!poolBuilt) {
-                /* 从常用动作里挑 4 个不重复、非 0 的绑定键做池子 */
-                static const ActionId poolSrc[JMP_KEY_COUNT] = {
-                    ACT_MOVE_FWD, ACT_MOVE_BACK, ACT_MOVE_LEFT, ACT_MOVE_RIGHT
-                };
-                for (int i = 0; i < JMP_KEY_COUNT; i++) keyCodes[i] = g_bindings[poolSrc[i]];
-                poolBuilt = 1;
-            }
-            int want = keyCodes[jumperQteKey % JMP_KEY_COUNT];
+            /* v2.7：每帧现算。缓存一次的话，玩家在设置里改过移动键之后，
+           提示显示新键、判定用旧键，按了没反应只能白吃惩罚。 */
+        static const ActionId poolSrc[JMP_KEY_COUNT] = {
+            ACT_MOVE_FWD, ACT_MOVE_BACK, ACT_MOVE_LEFT, ACT_MOVE_RIGHT
+        };
+        int want = g_bindings[poolSrc[jumperQteKey % JMP_KEY_COUNT]];
+        if (want == 0) want = g_bindings[ACT_MOVE_FWD];   /* 绑成 None 也别卡死 */
             if (want != 0 && keyPressed[want]) {
                 JumperKeyHit();
                 return;
@@ -493,7 +579,36 @@ static void MonsterWander(void) {
 }
 
 void UpdateMonster(float dt) {
+    /* v3.0 消失：隐身时追捕者立刻丢失目标 */
+    {
+        extern int vanished;
+        if (vanished && monster.active) {
+            monster.state = 0;
+            monster.pathLen = 0;
+            monster.pathIdx = 0;
+        }
+    }
+
+    /* v3.0：噪音显示衰减 */
+    {
+        extern float noiseDisplay, noiseDisplayTimer;
+        if (noiseDisplayTimer > 0.0f) {
+            noiseDisplayTimer -= dt;
+            if (noiseDisplayTimer <= 0.0f) noiseDisplay = 0.0f;
+        }
+    }
+    /* v3.0：进入函数时先把**上一帧位置**推进 —— 函数末尾用它算位移，
+       从而得到「怪自己面朝哪」和「走了多远」。
+       原来朝向用的是屏幕方位角（16:9 下恒为正面，6 张侧面帧全废），
+       走路帧用的是全局时钟（静止也踏步、所有怪同相）。 */
+    {
+        extern Monster monster;
+        monster.prevX = monster.x;
+        monster.prevY = monster.y;
+    }
     if (!monster.active) return;
+    /* v1.8：玩家进安全屋 → 怪物立刻丢目标 */
+    if (playerInSafe && monster.state != 0) { monster.state = 0; monster.pathLen = 0; monster.pathIdx = 0; }
     if (monster.hitCooldown > 0.0f) monster.hitCooldown -= dt;
     if (monster.growlTimer > 0.0f) monster.growlTimer -= dt;
 
@@ -554,18 +669,62 @@ void UpdateMonster(float dt) {
     float pd2 = Dist2(monster.x, monster.y, posX, posY);
     if (pd2 < 36.0f && monster.growlTimer <= 0.0f) {
         monster.growlTimer = 2.6f;
-        PlaySfx(SFX_SCREAM, pd2 < 9.0f ? 0.55f : 0.28f);
+        if (!monsterMuted) PlaySfx(SFX_SCREAM, pd2 < 9.0f ? 0.55f : 0.28f);
     }
 
     /* 抓到玩家：掉理智 + 怪被弹开（以后可以换成真正的地图事件） */
-    if (monster.hitCooldown <= 0.0f && pd2 < 0.55f) {
-        sanity -= 18.0f;
+    if (!playerInSafe && monster.hitCooldown <= 0.0f && pd2 < 0.55f) {
+        /* v1.8：被抓的惩罚随层数增长，且受局内"铁皮"减免 */
+        float catchLoss = CATCH_SANITY_BASE *
+                          (1.0f + CATCH_SANITY_STEP * (float)(currentLevel > 0 ? currentLevel - 1 : 0));
+        /* v3.0：**藏在柜子里 = 完全抓不到**。
+           原来只包住了扣理智那一行，后面的红屏/尖叫/tookDamage/
+           怪物重生全在 if 外照跑 —— 怪贴到 0.55 格内照样红屏，
+           而且 tookDamage=1 会让 PERFECT ESCAPE 成就失效。 */
+        /* v3.0 改造树「假死」：每局一次，被抓住时骗过怪物 */
+        {
+            extern int playDeadUsed;
+            extern int BenchPlayDead(void);
+            if (BenchPlayDead() && !playDeadUsed) {
+                playDeadUsed = 1;
+                monster.stun = 2.5f;
+                monster.state = 0;
+                monster.pathLen = 0;
+                monster.hitCooldown = 2.5f;
+                pickupMsg = "PLAYED DEAD";
+                pickupMsgTimer = 2.0f;
+                PlaySfx(SFX_HEART, 1.0f);
+                uiDirty = 1;
+                return;
+            }
+        }
+
+        if (hiddenIn < 0) {
+            sanity -= catchLoss * RunDamageTakenMul() * BenchFearDamageMul();
+
+    AddHitFlash(0.85f);          /* v2.1：被抓的红闪 */
+    AddShake(0.30f, 0.22f);
+    PlaySfx(SFX_HEART, 0.95f);
         if (sanity < 0.0f) sanity = 0.0f;
         extern int tookDamage;
         tookDamage = 1;
         healFlash = 0.18f;
-        PlaySfx(SFX_SCREAM, 1.0f);
+        if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
         SpawnMonster();
+        }
+    }
+    /* v3.0：用实际位移更新朝向和走路相位（全局 monster 单例） */
+    {
+        float mdx = monster.x - monster.prevX;
+        float mdy = monster.y - monster.prevY;
+        float d2 = mdx * mdx + mdy * mdy;
+        if (d2 > 1e-7f) {
+            monster.facing = atan2f(mdy, mdx);
+            monster.walkPhase += sqrtf(d2) * 1.2f;   /* v3.0：9 → 1.2，原来每米换 27 次帧，像频闪 */
+            if (monster.walkPhase > 1000.0f) monster.walkPhase -= 1000.0f;
+        }
+        monster.prevX = monster.x;
+        monster.prevY = monster.y;
     }
 }
 
@@ -588,7 +747,9 @@ static void KnockbackMonster(Monster* m) {
         float ny = m->y + dy * MONSTER_FLEE_DIST * (float)step / 3.0f;
         if (!Blocked(nx, ny)) { m->x = nx; m->y = ny; break; }
     }
-    m->stun = MONSTER_STUN;
+    /* v2.7：接上 STAGGER（瓶子硬直 +0.2s/级）。原来这里写死 MONSTER_STUN，
+       导致技能树里买了 STAGGER 完全没反应。 */
+    m->stun = MONSTER_STUN + SkillStunAdd();
     m->pathLen = 0;
     m->pathIdx = 0;
     m->state = 0;              /* 被打断，重新游荡 */
@@ -596,6 +757,188 @@ static void KnockbackMonster(Monster* m) {
 }
 
 /* 玻璃瓶命中一只怪。返回 1 表示命中。 */
+/* v1.15 伤害结算。
+   base  基础伤害
+   type  伤害类型（决定吃哪条抗性）
+   sx,sy 伤害来源位置（用于判定背刺：来源在怪的背后 → ×1.5） */
+extern int g_dmgIgnoreArmor;   /* v1.16：1 = 本次伤害无视护甲（酸瓶） */
+
+/* v2.1：怪物血量随层成长。第 1 层 60，第 10 层 240。
+   武器满蓄力 59/39/72 → 开局 1~2 击，第 10 层 3~6 击，
+   熟练度（+24%）和配件（×1.5）第一次有了可观察的效果。 */
+
+int MonsterHpFor(int level) {
+    if (level < 1) level = 1;
+    return MONSTER_HP + MONSTER_HP_STEP * (level - 1);
+}
+
+#if NO_COMBAT
+/* v3.0 逃生试炼：**攻击不再造成伤害**。
+   打中怪物只制造噪音（把附近的追捕者引过来）+ 短暂硬直。
+   玩家永远不会「打死」任何东西 —— 这是逃生类的核心前提。 */
+int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
+    (void)base; (void)type; (void)sx; (void)sy;
+    if (!m || !m->active) return 0;
+    MakeNoise(m->x, m->y, 14.0f);
+    m->stun = 0.35f;
+    PlaySfx(SFX_GLASS, 0.5f);
+    SpawnParticles(m->x, m->y, 2);
+    return 0;
+}
+#else
+int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
+
+    if (!m->active) return 0;
+    if (base <= 0) return 0;
+    if (type < 0 || type >= DT_COUNT) type = DT_SLASH;
+
+    /* ① 偷袭：打"还没发现你"或"正在硬直"的怪 → 1.5 倍。
+       （没有怪物朝向数据，所以不用背刺判定，改用状态判定，语义更清楚） */
+    int backstab = (m->state == 0) ? 1 : 0;   /* v2.2：硬直不算背刺，否则全程 ×1.5 */
+
+    /* ② 乘法段：抗性（负数是弱点） */
+    int res = (int)m->resist[type];
+    /* 向上取整：否则 1 点基础伤害 × 抗性 20% 会被截成 0，
+       偷袭的 1.5 倍又截回 1 —— 玩家会觉得"暴击没感觉"。 */
+    int afterRes = (base * (100 - res) + 99) / 100;
+    if (afterRes < 0) afterRes = 0;
+
+    /* ③ 偷袭加成（同样向上取整） */
+    if (backstab) afterRes = (afterRes * 3 + 1) / 2;
+
+    /* v2.0：VAMP 配件 —— 命中回智（每击 +1，上限 100） */
+    {
+        for (int a = 0; a < 3; a++)
+            for (int sl = 0; sl < 2; sl++)
+                if (weaponAttach[a][sl] == 9) {   /* ATT_VAMP */
+                    sanity += 1.0f;
+                    if (sanity > 100.0f) sanity = 100.0f;
+                }
+    }
+
+    /* v2.0：KNOCK 配件 —— 命中击退。WeaponKnockNow() 原来定义了却 0 调用，
+       这个配件在商店里卖 150 碎片但完全不生效。 */
+    if (sx != 0.0f || sy != 0.0f) {
+        /* v2.2 修复：原来声明成 float，而 weapons.c 里是 int ——
+           x64 下 ABI 不同，返回值是垃圾，KNOCK 配件会把怪瞬移 */
+        int kb = WeaponKnockNow(curWeapon);
+        if (kb > 0.0f) {
+            float dx = m->x - sx, dy = m->y - sy;
+            float d = dx * dx + dy * dy;
+            if (d > 0.0001f) {
+                d = (float)sqrt((double)d);
+                m->x += (dx / d) * kb * 0.15f;
+                m->y += (dy / d) * kb * 0.15f;
+                if (Blocked(m->x, m->y)) { m->x -= (dx / d) * kb * 0.15f; m->y -= (dy / d) * kb * 0.15f; }
+            }
+        }
+    }
+
+    /* ④ 减法段：护甲 */
+    /* v3.0：穿甲的「无视 5 护甲」必须叠进这里 ——
+   原来 BenchArmorIgnore() 全项目 0 调用，280 碎片买了空气（数值审查 #3）。 */
+    int effArmor = m->armor - BenchArmorIgnore();
+    if (effArmor < 0) effArmor = 0;
+    int finalDmg = g_dmgIgnoreArmor ? afterRes : (afterRes - effArmor);
+    /* v3.0：**总倍率封顶** ——
+       数值审查算过：满配叠满能达到 60 倍（裸扳手 36 → 单刀 2156），
+       而 L24 怪只有 254 血，溢出 8.5 倍。这里把「来自倍率的部分」夹到 8 倍。 */
+    {
+        float mul = RelicDamageMul() * RunUpgDamageMul() * BenchDamageMul();
+        if (mul > 8.0f) mul = 8.0f;
+        finalDmg = (int)((float)finalDmg * mul + 0.5f);
+    }
+    if (m->glued) finalDmg = (int)((float)finalDmg * 1.5f + 0.5f);   /* v2.2 胶水 */
+    /* v2.0 EXECUTIONER：目标 <25% 血时 +80% */
+    {
+        extern int bossMaxHp, bossLevel;
+        int mx = (bossLevel && m == &monster) ? bossMaxHp : MonsterHpFor(currentLevel);
+        finalDmg = (int)((float)finalDmg * SkillExecuteMul(m->hp, mx) + 0.5f);
+    }
+    if (finalDmg < 1) finalDmg = 1;                  /* 保底 1 点 */
+
+    /* ⑤ 结算 */
+    m->hp -= finalDmg;
+    m->hitCooldown = 0.0f;
+    /* 钝击额外硬直 */
+    if (type == DT_BLUNT) m->stun = 0.8f;
+    else if (m->stun < 0.15f) m->stun = 0.15f;
+
+    /* ⑥ 反馈：交给 HUD 画一个伤害数字 */
+    extern int lastHitDamage;
+    extern float lastHitTimer;
+    extern int lastHitBackstab;
+    /* v1.20b：命中反馈在所有模式下都保留（用户要求） */
+    lastHitDamage = finalDmg;
+    lastHitTimer = 0.7f;
+    lastHitBackstab = backstab;
+
+    /* v1.17 训练场：只记录伤害，标本不掉血 */
+    {
+        extern int trainingMode, trainingTotal, trainingLast, trainingCount, trainingDps;
+        extern int trainingHist[6];
+        extern float trainingDpsTimer;
+        if (trainingMode) {
+            trainingTotal += finalDmg;
+            trainingLast = finalDmg;
+            trainingDps += finalDmg;
+            trainingDpsTimer = 1.0f;
+            for (int i = 5; i > 0; i--) trainingHist[i] = trainingHist[i - 1];
+            trainingHist[0] = finalDmg;
+            trainingCount++;
+            m->hp = 9999;
+            m->stun = 0.0f;
+            return finalDmg;
+        }
+    }
+
+    /* v3.0：逃生试炼下怪物永不死亡 —— 即使血量被别处扣到 0 也钳住 */
+    if (m->hp < 1) m->hp = 1;
+
+    if (m->hp <= 0) {
+        /* v2.1：死亡要有尸体消失的交代 —— 撒一把血 */
+        SpawnParticles(m->x, m->y, 1);
+        if (bossLevel && m == &monster) {
+            /* Boss 不会重生：给一笔碎片，标记本层已清 */
+            bossDefeated = 1;
+            pendingShards += 120;
+            SpawnParticles(m->x, m->y, 0);
+            PlaySfx(SFX_POWER, 1.0f);
+            m->active = 0;
+            return finalDmg;
+        }
+        /* v2.0：击杀给碎片（审计指出原来击杀 0 收益，最优解是不打） */
+        {
+                /* v2.0：原来 4/6 —— 搜一个箱子 7 碎片只用 1.1 秒，
+               打一只怪要 20 秒才 4 碎片，最优解是永远不打。 */
+            pendingShards += (m == &monster) ? 25 : 40;
+            totalKills++;
+            /* v2.2：分武器计数（KNIFE ONLY / BOTTLE RAIN 成就） */
+            {
+                extern int totalKills, killsWrench, killsBottle, floorKills;
+                extern int benchKills;
+                benchKills++;   /* v2.7 嗜血 */
+                extern int curWeapon;
+                (void)totalKills;
+                floorKills++;
+                if (type == DT_BLUNT) killsWrench++;
+                else if (type == DT_SHARD) killsBottle++;
+                (void)curWeapon;
+            }
+        }
+        if (m == &monster) SpawnMonster();
+        else SpawnLightBeast();
+        extern int bottlesKilled;
+        bottlesKilled++;
+    } else {
+        KnockbackMonster(m);
+    }
+    PlaySfx(SFX_GLASS, 0.9f);
+    if (!RunBottleSilent()) MakeNoise(m->x, m->y, 9.0f);
+    return finalDmg;
+}
+#endif  /* NO_COMBAT */
+
 int HitMonster(Monster* m, int dmg) {
     if (!m->active) return 0;
     if (m->stun > 0.0f) return 0;    /* 已经在硬直里，不重复结算 */
@@ -617,6 +960,123 @@ int HitMonster(Monster* m, int dmg) {
         KnockbackMonster(m);
     }
     PlaySfx(SFX_GLASS, 0.9f);
-    MakeNoise(m->x, m->y, 9.0f);     /* 砸怪的代价：暴露自己的位置 */
+    if (!RunBottleSilent())          /* v1.8：静默瓶规则可免除这次暴露 */
+        MakeNoise(posX, posY, 9.0f);   /* v2.2：打怪发声应当暴露玩家，而不是让怪自己失忆 */ /* 砸怪的代价：暴露自己的位置 */
     return 1;
+}
+
+
+/* ================================================================== */
+/* v1.8 偷电怪：不造成直接伤害，只悄悄抽电；只有手电照到才可见          */
+/* ================================================================== */
+Leech leeches[LEECH_MAX];
+
+void ResetLeeches(void) {
+    for (int i = 0; i < LEECH_MAX; i++) {
+        leeches[i].active = 0;
+        leeches[i].x = leeches[i].y = 0.0f;
+        leeches[i].age = leeches[i].repelTimer = leeches[i].litTimer = 0.0f;
+    }
+}
+
+/* 随机挑一个地图空地生成 */
+void SpawnLeech(int index) {
+    if (index < 0 || index >= LEECH_MAX) return;
+    for (int attempt = 0; attempt < 200; attempt++) {
+        int x = 1 + rand() % (MAP_WIDTH - 2);
+        int y = 1 + rand() % (MAP_HEIGHT - 2);
+        if (worldMap[y][x]) continue;
+        float cx = x + 0.5f, cy = y + 0.5f;
+        if (Dist2(cx, cy, posX, posY) < 9.0f) continue;      /* 别贴脸出生 */
+        leeches[index].x = cx;
+        leeches[index].y = cy;
+        leeches[index].age = 0.0f;
+        leeches[index].repelTimer = 0.0f;
+        leeches[index].litTimer = 0.0f;
+        leeches[index].active = 1;
+        return;
+    }
+}
+
+/* 最近偷电怪的距离平方（HUD / 声音提示用） */
+int LeechNearestDist2(void) {
+    float best = -1.0f;
+    for (int i = 0; i < LEECH_MAX; i++) {
+        if (!leeches[i].active) continue;
+        float d = Dist2(posX, posY, leeches[i].x, leeches[i].y);
+        if (best < 0.0f || d < best) best = d;
+    }
+    if (best < 0.0f) return -1;
+    return (int)best;
+}
+
+void UpdateLeech(float dt) {
+    for (int i = 0; i < LEECH_MAX; i++) {
+        Leech* L = &leeches[i];
+        if (!L->active) continue;
+        L->age += dt;
+        L->draining = 0;
+
+        /* v1.8：手电照住 0.6 秒 → 直接逃走消失。
+           必须放在最前面：下面"被照退避"那一支会 continue，
+           放在后面的话计时永远累积不到（第一版就踩了这个坑）。 */
+        {
+            float ldx = L->x - posX, ldy = L->y - posY;
+            float ld2 = ldx * ldx + ldy * ldy;
+            int lit = 0;
+            if (flashlightOn && battery > 0.0f && ld2 < 64.0f) {
+                float ang = atan2f(ldy, ldx), face = atan2f(dirY, dirX);
+                float diff = ang - face;
+                while (diff > 3.14159f) diff -= 6.28318f;
+                while (diff < -3.14159f) diff += 6.28318f;
+                /* 不要求严格视线：它在墙后也能偷电，玩家举着手电对着它照
+                   就应该算数（否则会出现"照了没反应"的怪异手感）。 */
+                if (fabsf(diff) < 0.6f) lit = 1;
+            }
+            if (lit) {
+                L->litTimer += dt;
+                if (L->litTimer >= 0.6f) {
+                    L->active = 0;
+                    if (!monsterMuted) PlaySfx(SFX_SCREAM, 0.55f);
+                    continue;
+                }
+            } else {
+                L->litTimer -= dt * 0.5f;
+                if (L->litTimer < 0.0f) L->litTimer = 0.0f;
+            }
+        }
+        if (L->repelTimer > 0.0f) {
+            L->repelTimer -= dt;
+            /* 被手电照着就后退 */
+            float dx = L->x - posX, dy = L->y - posY;
+            float d = sqrtf(dx * dx + dy * dy);
+            if (d > 0.01f) {
+                L->x += dx / d * 1.2f * dt;
+                L->y += dy / d * 1.2f * dt;
+            }
+            continue;
+        }
+        /* 速度随时间成长，上限 1.7（永远慢于玩家 2.0） */
+        float sp = LEECH_SPEED_BASE + LEECH_SPEED_GROW * L->age;
+        if (sp > LEECH_SPEED_CAP) sp = LEECH_SPEED_CAP;
+        if (levelMod >= 0 && levelMod == 1) sp *= LEECH_HUNTED_MUL;   /* HUNTED 词条 */
+
+        float dx = posX - L->x, dy = posY - L->y;
+        float d = sqrtf(dx * dx + dy * dy);
+        if (d > LEECH_RANGE) {
+            /* 追玩家，但会被墙挡住（简单轴分离） */
+            float nx = L->x + dx / d * sp * dt;
+            float ny = L->y + dy / d * sp * dt;
+            if (!Blocked(nx, L->y)) L->x = nx;
+            if (!Blocked(L->x, ny)) L->y = ny;
+        } else if (!playerInSafe) {
+            /* 范围内：抽电（安全屋里不抽） */
+            float rate = LEECH_DRAIN_BASE + LEECH_DRAIN_STEP * (float)currentLevel;
+            if (rate > LEECH_DRAIN_CAP) rate = LEECH_DRAIN_CAP;
+            battery -= rate * dt;
+            if (battery < 0.0f) battery = 0.0f;
+            L->draining = 1;
+        }
+
+    }
 }

@@ -7,23 +7,28 @@
 #define CANITY_SAVE_H
 
 #include "common.h"
+#include "relics.h"
+#include "game.h"
 
 #define SAVE_MAGIC 0x43414E32u   /* "CAN2" */
-/* 存档**格式**版本。
-   v5 在末尾追加了 HUD 详细度 / QTE 提示两个字段。
+/* 存档**格式**版本。v5 在末尾追加了 HUD 详细度 / QTE 提示两个字段。
    v6 又在末尾追加：键位绑定表（ACT_COUNT 个 int）+ ECO/REST 两个新升级。
-   v7 追加成就数组；v8 追加无尽模式进度；v9 追加上锁容器状态；
-   v10 追加锁型；v11 追加新动作绑定 + 技能选择；v12 追加隐藏房间；
-   v13 追加残卷（技能升级唯一货币）；v14 追加 8 项新成就；
-   v15 预留容量：成就最多 64 项、技能最多 16 个。
    读档时会按文件的**实际长度**判断是老版本还是新版本：
    老存档照样能读（新增字段取默认值），不用丢玩家进度。
    —— 参见 LoadSettings 里的迁移逻辑。 */
-#define SAVE_VERSION 15
+#define SAVE_VERSION 17  /* v17：藏身点进存档（HideSpot[6] + count + hiddenIn） */
+#define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
 #define SAVE_FILE "canity.sav"
 #endif
+
+/* 存档结果（UI 要显示）：0 = 还没试过，1 = 写成功，2 = 一个位置都写不进去。
+   失败时 g_saveError 是 exe 目录那次的 Win32 错误码。 */
+extern int  g_saveState;
+extern int  g_saveError;
+extern int  g_saveSlot;      /* v2.0：当前存档槽 0..2 */
+extern char g_savePath[MAX_PATH];
 
 typedef struct {
     unsigned int magic;
@@ -63,11 +68,8 @@ typedef struct {
     int qteHint;
 
     /* v6 新增：键位绑定表 + 两个新升级（ECO/REST）。同样放末尾，
-       v5 存档按文件长度识别后取默认键位与 0 级升级。
-       注意 bindings 是 **BINDINGS_BASE 固定长度**，不是 ACT_COUNT ——
-       以后加动作时 ACT_COUNT 会变，但这个数组绝不能跟着变，
-       否则它后面的 upgEco/成就/无尽/锁字段全部错位。 */
-    int bindings[BINDINGS_BASE];
+       v5 存档按文件长度识别后取默认键位与 0 级升级。 */
+    int bindings[BINDING_SLOTS];   /* v8：固定 32 槽，加动作不再改布局 */
     int upgEco, upgRest;
 
     /* v7 新增：成就系统。放在结构末尾以保持兼容性。 */
@@ -79,51 +81,48 @@ typedef struct {
     int bestEndlessScore;
     int isEndlessRunSaved;
 
-    /* v9 新增：上锁容器（v1.8.0）。
-       **必须**用平行数组，不能往 Container 里加字段 ——
-       Container 嵌在结构中间，加字段会让 worldMap / 成就 / 无尽进度
-       整体后移，老存档全部错位。 */
-    int contLocked[MAX_CONTAINERS];
-    int contLockCode[MAX_CONTAINERS];
+    /* 应用 1.8.0 新增：技能树 / 核心 / keystone。
+       测试版不做向后兼容：旧存档被 SAVE_VERSION 校验挡掉。 */
+    int skillRank[SKILL_COUNT];
+    int cores;
+    int activeKeystone;
+    int bestMainScore;
+    int seenMonsters;      /* v1.8：怪物图鉴解锁位掩码 */
+    /* ---- v9：以前没存的运行时进度 ---- */
+    int bricks, acids, smokeBombs;
+    int pendingShards;
+    unsigned int runSkillMask;
+    int lang;              /* v2.0：界面语言 */
+    int saveSlot;          /* v2.0：存档槽 0..2 */
+    /* ---- v11：武器局外成长 ---- */
+    int weaponRank[3];
+    int weaponXp[3];
+    /* ---- v13：v2.0 新系统 ---- */
+    int   relicOwned[RELIC_COUNT];
+    int   relicTotal;
+    int   bossLevel, bossMaxHp, bossDefeated;
+    int   dailyMode, dailySeed;
+    int   campaignMode, campaignStage;
+    int   firePots, gluePots, mirrors;
+    int   bankStreak;
+    float modBatteryMul, modShardMul, modNoiseMul;
+    int weaponAttach[3][2];
+    int attachOwned[10];
+    int curWeapon;
 
-    /* v10 新增：锁型（拨盘 / 接线 / 均衡器 / 调波器）。v9 老档默认全当拨盘。 */
-    int contLockType[MAX_CONTAINERS];
+    int runUltimate;
 
-    /* v11 新增：第 BINDINGS_BASE 个之后的新动作绑定（目前只有技能）。
-       放在整个结构末尾，以后再加动作只需要扩这个数组，老存档不受影响。 */
-    int extraBindings[BINDINGS_EXTRA];
-
-    /* v11 新增：技能。
-       selectedSkill = 大厅里选中的技能；runSkill = 这局实际带的技能。
-       两者不一致（中途换过技能）时这局不允许续 —— 见 LoadSettings。 */
-    int selectedSkill;
-    int runSkill;
-    int skillLevels[SKILL_SLOTS];   /* 预留升级槽，固定容量避免以后再改结构 */
-
-    /* v12 新增：隐藏房间（可选，一层最多一个）。
-       worldMap 里已经存了暗门的状态（2 = 未开），这里存的是房间几何与收集进度。 */
-    int hiddenActive, hiddenOpened;
-    int hiddenX0, hiddenY0, hiddenX1, hiddenY1;
-    int hiddenDoorX, hiddenDoorY;
-    int hiddenCodeCount, hiddenCodesFound;
-    int hiddenCodeX[HIDDEN_MAX_CODES], hiddenCodeY[HIDDEN_MAX_CODES];
-    int hiddenCodeTaken[HIDDEN_MAX_CODES];
-
-    /* v13 新增：残卷。技能升级只能花这个，不能花碎片。 */
-    int scrolls;
-
-    /* v14 新增：第 17~24 项成就。老的前 16 项仍在 achUnlocked/achProgress 里，
-       这两个数组长度永远不变，所以新成就不动既有布局。 */
-    int achUnlocked2[ACH_EXTRA];
-    int achProgress2[ACH_EXTRA];
-
-    /* v15：一次性容量预留。
-       索引从 ACH_BASE2(24) / SKILL_BASE2(6) 开始，长度**固定**；
-       以后加成就只改 ACH_TOTAL、加技能只改 SKILL_COUNT，
-       不再需要动存档结构或升 SAVE_VERSION。 */
-    int achUnlockedX[ACH_RESERVE];
-    int achProgressX[ACH_RESERVE];
-    int skillLevelsX[SKILL_RESERVE];
+    /* ---- v2.3：武器能量（追加在末尾，老档读到 0，载入时补满） ---- */
+    float energy;
+    /* v3.0：局内改造树 / 强化必须存盘 ——
+       原来重启后这两个全归零，但买它们的碎片已经从 shards 扣掉了，
+       等于每重启一次就吞掉玩家最多 5720 碎片（数值审查 #4）。 */
+    unsigned int benchOwnedSave;   /* 改造树位掩码 */
+    int runUpgSave[4];             /* 强化 4 条线的等级 */
+    /* v17：藏身点必须存盘 —— 否则读档后整层一个都没有（玩法审查 #3） */
+    int hideSpotSaveCount;
+    HideSpot hideSpotSave[6];
+    int hiddenInSave;
 } SaveBlob;
 
 /* 写当前进度（游戏中 / 退出时） */
