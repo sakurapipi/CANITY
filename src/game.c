@@ -2095,6 +2095,14 @@ void Update(float dt) {
     /* 理智流失：随层数增长（v1.8），代谢 keystone 把它换成电量消耗 */
     float drainMul = 1.0f + FxStrength(FX_DRAIN) * 1.5f;
     float drain = SanityDrainRate() * SkillCalmMul() * modSanityMul * drainMul * RelicSanityMul() * BenchSanityDrainMul();
+    /* v3.0：**被追捕者盯上时理智额外流失** ——
+       这给「断开视线」一个具体理由，而藏身是最快的断开方式。
+       藏着时不算被盯上（hiddenIn >= 0 直接跳过）。 */
+    if (hiddenIn < 0 && monster.active && monster.state == 1) {
+        float sdx = posX - monster.x, sdy = posY - monster.y;
+        float sightNow = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
+        if (sdx * sdx + sdy * sdy < sightNow * sightNow) drain += SEEN_SANITY_EXTRA;
+    }
     /* v3.0：改造树「镇定」—— 关灯时恐惧增长 -25% */
     if (!flashlightOn) drain *= BenchDarkFearMul();
     if (HasKeystone(SK_METAB)) {
@@ -2370,7 +2378,8 @@ void Update(float dt) {
     } else if (staminaIdle > 0.0f) {
         staminaIdle -= dt;
     } else if (stamina < StaminaMax()) {
-        stamina += STAMINA_REGEN * dt;
+        /* v3.0：藏在藏身点里体力回得更快（×3）—— 这是藏身点的主要收益 */
+    stamina += STAMINA_REGEN * dt * ((hiddenIn >= 0) ? HIDE_STAMINA_REGEN_MUL : 1.0f);
         if (stamina > StaminaMax()) stamina = StaminaMax();
     }
 
