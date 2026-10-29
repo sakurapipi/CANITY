@@ -785,7 +785,12 @@ void DrawLockOverlay(void) {
         LockDrawWireBody(hit, ha);
         /* v3.0：原来在 y0+336，而 BACK 按钮顶边在 y0+345，几乎贴死，
            加上按钮的悬停高亮就把它盖住了。上移到 y0+300。 */
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(300), "WRONG COLOR = THUD", 0x00889098u);
+        /* v3.0：**删掉这行** ——
+           端子纵向是 y0+132 / 202 / 272（每个 44 高），第三个占到 y0+316，
+           而 BACK 顶边在 y0+345。
+           这行放 300 会压第三个端子，放 330 会压 BACK —— 没有空位。
+           规则顶部已写（MATCH EACH TERMINAL BY COLOR），
+           声音反馈本身也够清楚，直接去掉。 */
     } else if (lockType == LOCK_TYPE_EQ) {
         DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH EVERY BAR TO THE GREEN LINE", 0x0090A0A8u);
         LockDrawEqBody(hit, ha);
