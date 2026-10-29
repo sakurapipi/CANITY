@@ -3311,6 +3311,22 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         DrawTextCenterWin(winW / 2, by + barH + UIS(6), pct, 0x00FFFFFFu);
     }
 
+    /* v3.0：**大招提示** —— 拿到之后在 HUD 上告诉玩家「按 Q」 */
+    {
+        extern int runUltimate, ultUsed;
+        extern const InRunDef inRunDefs[];
+        if (runUltimate >= 0 && currentState == STATE_PLAYING) {
+            const char* nm = (runUltimate < INRUN_COUNT)
+                ? inRunDefs[runUltimate].name : "?";
+            char ub[64];
+            if (!ultUsed) sprintf(ub, "Q: %s", nm);
+            else          sprintf(ub, "%s USED", nm);
+            int uw = TextWidthWin(ub);
+            DrawTextWin(winW - UIS(24) - uw, y1 - UIS(3), ub,
+                        ultUsed ? 0x00606060u : 0x00FFD040u);
+        }
+    }
+
     /* v3.0：**摇电只留一条黄线，不写任何文字** ——
        用户要求「改成之前底下有黄线的那一版，然后不带其他文字」。
        LIGHT 标签和 ON/OFF 状态照常显示，只在手电条下面压一条 4px 的

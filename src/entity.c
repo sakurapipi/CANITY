@@ -613,7 +613,11 @@ void UpdateMonster(float dt) {
     if (monster.active && !playerInSafe) {
         float sdx = posX - monster.x, sdy = posY - monster.y;
         float sd2 = sdx * sdx + sdy * sdy;
+        /* v3.0：BLACKOUT 生效期间追捕者完全失明 */
+        extern float ultTimer;
+        extern int ultKind;
         float sight = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
+        if (ultTimer > 0.0f) sight = 0.0f;
         if (sd2 < sight * sight && HasLOS(monster.x, monster.y, posX, posY)) {
             /* v3.0 削弱：**连续看见 0.6 秒才真的发现** ——
                原来只要一帧视线通就立刻切追捕，玩家连反应的机会都没有。

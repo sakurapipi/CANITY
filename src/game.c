@@ -204,6 +204,9 @@ float vanishTimer = 0.0f;       /* v3.0 消失：脱离视线累计秒数 */
 int   playDeadUsed = 0;         /* v3.0 假死：本局用过了吗 */
 int   tutorialOff = 0;          /* v3.0 开局引导：玩家按键关闭了 */
 float hideBlockTimer = 0.0f;    /* v3.0：刚解锁/刚翻完箱时短暂禁止进藏身点 */
+int   ultUsed = 0;              /* v3.0：本局大招用过了吗 */
+float ultTimer = 0.0f;          /* v3.0：大招持续秒数 */
+int   ultKind = -1;             /* v3.0：正在生效的大招 id */
 int   vanished = 0;             /* v3.0 消失：1 = 已隐身 */
 float vanishHold = 0.0f;        /* v3.0 消失：本次隐身剩余秒数 */
 float decoySelfTimer = 0.0f;  /* 投石后的自身噪声加成计时 */
@@ -2322,6 +2325,62 @@ void Update(float dt) {
     }
 
     holdingNow = (hoverKind != 0 && IsActionDown(ACT_INTERACT));
+    }
+
+    /* ===== v3.0：主动大招（Q 键） =====
+       原来 runUltimate 只被存读档，**从来没有激活入口** ——
+       三选一拿到的大招等于永远用不出来。现在按 Q 释放，一局一次。 */
+    if (ultTimer > 0.0f) ultTimer -= dt;
+    if (runUltimate >= 0 && !ultUsed && currentState == STATE_PLAYING
+        && IsActionPressed(ACT_SWING)) {
+
+        extern Monster lightBeast;
+        Monster* targets[2] = { &monster, &lightBeast };
+        ultUsed = 1;
+        ultKind = runUltimate;
+        keyPressed[g_bindings[ACT_SWING]] = 0;
+        uiDirty = 1;
+
+        /* 按名字判断是哪一个（inRunDefs 的顺序：WHISTLE / SMOKE OUT / ... / BLACKOUT） */
+        const char* nm = inRunDefs[runUltimate].name;
+        if (strstr(nm, "BLACKOUT")) {
+            ultTimer = ULT_BLACKOUT_TIME;
+            pickupMsg = g_lang == LANG_ZH ? "全黑  10 秒" : "BLACKOUT  10s";
+            PlaySfx(SFX_POWER, 1.0f);
+        } else if (strstr(nm, "WHISTLE")) {
+            ultTimer = ULT_WHISTLE_TIME;
+            /* 把所有追捕者引到远处一个点 */
+            float fx = posX, fy = posY;
+            for (int k = 0; k < 12; k++) {
+                fx = 2.0f + (float)(rand() % (MAP_WIDTH - 4));
+                fy = 2.0f + (float)(rand() % (MAP_HEIGHT - 4));
+                float ddx = fx - posX, ddy = fy - posY;
+                if (ddx * ddx + ddy * ddy > 144.0f) break;   /* 至少 12 格远 */
+            }
+            for (int k = 0; k < 2; k++) {
+                if (!targets[k]->active) continue;
+                targets[k]->state = 1;
+                targets[k]->tx = fx;
+                targets[k]->ty = fy;
+                targets[k]->repath = 0.0f;
+                targets[k]->stateTimer = 0.0f;
+            }
+            pickupMsg = g_lang == LANG_ZH ? "哨声  它们被引走了" : "WHISTLE  THEY LEFT";
+            PlaySfx(SFX_CRANK, 1.0f);
+        } else {
+            /* SMOKE OUT：立刻断开所有视线 */
+            ultTimer = 0.01f;
+            for (int k = 0; k < 2; k++) {
+                if (!targets[k]->active) continue;
+                targets[k]->state = 0;
+                targets[k]->pathLen = 0;
+                targets[k]->pathIdx = 0;
+                targets[k]->sightHold = 0.0f;
+            }
+            pickupMsg = g_lang == LANG_ZH ? "烟幕  视线已断" : "SMOKE OUT";
+            PlaySfx(SFX_GLASS, 0.9f);
+        }
+        pickupMsgTimer = 2.0f;
     }
 
     /* v3.0：锁定窗口递减（见 hideBlockTimer 的用法） */

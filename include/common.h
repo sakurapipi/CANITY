@@ -400,6 +400,13 @@ typedef struct { float x, y; int active; } Breaker;
 
    没加怪物速度，避免又变成「追不上就必死」。 */
 #define HIDE_STAMINA_REGEN_MUL 3.0f
+
+/* v3.0：三个主动大招（局内三选一拿到，按 Q 释放，一局一次）
+   BLACKOUT   全场追捕者失明 10 秒
+   WHISTLE    把所有追捕者引向远处
+   SMOKE OUT  立刻断开所有视线 */
+#define ULT_BLACKOUT_TIME 10.0f
+#define ULT_WHISTLE_TIME  8.0f
 #define SEEN_SANITY_EXTRA     0.9f   /* 被盯上时每秒额外掉这么多理智 */      /* v3.0 平衡：24→18，藏起来回体力才有意义 */
 /* v2.3 新机制：武器能量。
    三把武器原来各烧一条资源（体力/电量/理智），结果是「体力自己会回」+
