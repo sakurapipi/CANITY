@@ -97,18 +97,22 @@ def extract():
         if y is None:
             continue
 
-        # 取一个能读懂的标签：优先第一个字符串字面量
+        # 取一个能读懂的标签：优先第一个字符串字面量；取不到就跳过
         lit = re.search(r'"([^"\\]{2,32})"', rest)
-        label = lit.group(1) if lit else fn
+        if not lit:
+            continue
+        label = lit.group(1)
 
-        # 估算 x 区间
+        # 估算 x 区间；解析不出来就跳过（猜一个默认值只会造假重叠）
         if fn == "DrawTextCenterWin":
             w = len(label) * 12
             x0, x1 = BASE_H / 2 - w / 2, BASE_H / 2 + w / 2
         else:
             xm = re.search(r"UIS\(\s*(-?\d+)\s*\)", xexpr)
-            x0 = int(xm.group(1)) if xm else 20
-            if "winW -" in xexpr.replace(" ", ""):
+            if not xm:
+                continue                      # x 无法解析，跳过
+            x0 = int(xm.group(1))
+            if "winW" in xexpr.replace(" ", ""):
                 x0 = 800 - x0
             x1 = x0 + len(label) * 12
 
