@@ -2991,7 +2991,10 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
     /* ===== v3.0 开局引导 =====
        玩家实测：「双击 exe 直接掉进一局，没有标题画面也没有操作说明，
        E/F/R/T/M 全靠瞎按才发现」。这里在第 1 层前 25 秒给一段最简说明。 */
-    if (currentState == STATE_PLAYING && currentLevel <= 1 && runTime < 25.0f) {
+    {
+        extern int tutorialOff;
+        if (currentState == STATE_PLAYING && currentLevel <= 1 &&
+            runTime < 25.0f && !tutorialOff) {
         /* v3.0：**框必须按实际文字宽度算** ——
            上一版固定 winW-80，最长那行「fuses -> power the breaker -> reach the exit」
            比框还宽，文字直接溢出到框外（用户截图：「引导 UI 不完整被遮蔽」）。
@@ -3037,6 +3040,12 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
             const char* t = (g_lang == LANG_ZH) ? hintZh[li] : hintEn[li];
             unsigned int col = (li == 3) ? 0x00FFD060u : 0x00C8C4BCu;
             DrawTextCenterWin(winW / 2, by0 + padY + li * lineH, t, col);
+        }
+        /* v3.0：告诉玩家怎么关 —— 原来只能等 25 秒自动消失，
+           玩家反馈「不知道怎么关闭新手指引」。 */
+        DrawTextCenterWin(winW / 2, by0 + boxH + UIS(8),
+                          Tr("PRESS ANY KEY TO DISMISS", "按任意键关闭"),
+                          0x0090A0A8u);
         }
     }
 

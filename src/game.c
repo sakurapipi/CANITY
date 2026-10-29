@@ -202,6 +202,7 @@ float weaponAtkCharge = 0.0f;  /* 武器蓄力 0..1 */
 float secondWindTimer = 0.0f;   /* v3.0 二次呼吸：体力归零后的宽限秒数 */
 float vanishTimer = 0.0f;       /* v3.0 消失：脱离视线累计秒数 */
 int   playDeadUsed = 0;         /* v3.0 假死：本局用过了吗 */
+int   tutorialOff = 0;          /* v3.0 开局引导：玩家按键关闭了 */
 int   vanished = 0;             /* v3.0 消失：1 = 已隐身 */
 float vanishHold = 0.0f;        /* v3.0 消失：本次隐身剩余秒数 */
 float decoySelfTimer = 0.0f;  /* 投石后的自身噪声加成计时 */

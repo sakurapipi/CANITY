@@ -2370,7 +2370,7 @@ void Render3D(void) {
    原来一个标注都没有，只能靠猜。 */
 static void DrawMapLegend(void) {
     extern int winW, winH;
-    struct { unsigned int col; const char* zh; const char* en; } items[5] = {
+    struct { unsigned int col; const char* zh; const char* en; } items[6] = {
         { 0x0030FF60u, "你",      "YOU"    },
         { 0x00E8C040u, "出口",    "EXIT"   },
         { 0x0030D0D0u, "保险丝箱","FUSE"   },
