@@ -3066,37 +3066,14 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
                         Tr("PRESS E  -  HIDE", "按 E 躲进去"), 0x0090D0F0u);
         }
 
-        /* ② 敌人状态（三态雷达）—— 怪不可杀后这是唯一的威胁指标 */
-        /* v3.0：**两种追捕者都要显示** ——
-           原来只画寻声怪，光敏怪（lightBeast）完全不在雷达上，
-           玩家开着灯被它锁定时屏幕上一点提示都没有。 */
-        if (currentState == STATE_PLAYING) {
-            extern Monster lightBeast;
-            struct { Monster* m; const char* tag; } radar[2] = {
-                { &monster,    NULL },
-                { &lightBeast, "L" },
-            };
-            int ry = winH - UIS(150);
-            for (int ri2 = 0; ri2 < 2; ri2++) {
-                Monster* mm = radar[ri2].m;
-                if (!mm->active) continue;
-                const char* st = NULL;
-                unsigned int sc = 0x0080FF80u;
-                /* v3.0：**不播报 AI 状态** ——
-                   玩家实测「HUNTING/SEARCHING 等于把怪的 AI 明着播报，恐怖感直接归零」。
-                   改成只有「有威胁 / 没威胁」两档氛围提示，不告诉玩家它在干嘛。 */
-                if (mm->state == 1)      { st = Tr("!!", "!!");  sc = 0x00FF3020u; }
-                else if (mm->state == 2) { st = Tr("?", "?");    sc = 0x00E0A020u; }
-                else                      { st = "";             sc = 0x0080C080u; }
-                char rb[48];
-                if (!st[0]) continue;                  /* 游荡时不显示任何东西 */
-                if (radar[ri2].tag) sprintf(rb, "%s [%s]", st, radar[ri2].tag);
-                else                sprintf(rb, "%s", st);
-                int tw3 = TextWidthWin(rb);
-                DrawTextWin(winW - UIS(24) - tw3, ry, rb, sc);
-                ry -= TextHeightWin() + UIS(6);
-            }
-        }
+        /* v3.0：**删掉「敌人状态」雷达** ——
+           历史：
+             ① 最初播报 WANDERING / SEARCHING / HUNTING —— 等于把 AI 明着播报
+             ② 改成 !! / ? —— 用户截图：「右下角出现红色感叹号，有bug」
+           两次都不对。恐怖游戏不该在 HUD 上告诉玩家「敌人在想什么」，
+           该让玩家靠声音、脚步、画面边缘的压迫感去感知。
+           （感知系改造树里的「预知」已经提供了屏幕边缘泛红，
+             那是更克制、更符合类型的做法。） */
     }
 
     DrawTextWin(labelX, y1 - UIS(3), "LIGHT", 0x00A0A0A0u);
