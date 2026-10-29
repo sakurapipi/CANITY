@@ -29,18 +29,21 @@ const SkillDef skillDefs[SKILL_COUNT] = {
     {"CRANK WALK",   "Crank while walking, move -20%",     1, 3, {100, 500, 900}, 0, SK_BATTERY, 0},
     {"REST",         "Safe heal +25%, sanity drain -10%",  1, 3, {100, 500, 900}, 0, SK_CRANK, 0},
     {"METABOLISM",   "Sanity loss burns battery (1:3)",    1, 1, {2000, 0},  1, SK_REST, 1},
-    /* ---- 列 2：锋（伤害交付方式） ---- */
-    {"HEAVY HAND",   "Weapon damage +8%/rank",             2, 3, {250, 900, 0}, 0, -1, 0},
-    {"STAGGER",      "Hits stun +0.2s per rank",           2, 3, {250, 900, 0}, 0, SK_DMG, 0},
-    {"TYPE WORK",    "Weapon deals your chosen damage type", 2, 3, {250, 900, 0}, 0, SK_STUN, 0},
-    {"RELOAD RHYTHM","3rd hit ignores armor",              2, 1, {1800, 0},  1, SK_TYPEWORK, 1},
+    /* ---- 列 2：隐（藏匿与脱身） ----
+       v3.0：整列重做。原来 4 个节点全是伤害（HEAVY HAND / STAGGER /
+       TYPE WORK / RELOAD RHYTHM），无战斗后完全无效。
+       换成逃生玩法的核心：怎么躲、怎么脱身。 */
+    {"HOLD BREATH",  "Harder to spot while hiding",        2, 3, {250, 900, 0}, 0, -1, 0},
+    {"STILL FACE",   "Hunters give up at cover twice as fast", 2, 3, {250, 900, 0}, 0, SK_BREATH, 0},
+    {"SLIP AWAY",    "Vanish after 2s out of sight (was 3s)", 2, 3, {250, 900, 0}, 0, SK_STILL, 0},
+    {"PLAY DEAD",    "Once per run: escape a grab",        2, 1, {1800, 0},  1, SK_SLIP, 1},
     /* ---- 列 3：途（整局形状） ---- */
     {"CARTOGRAPHER", "Reveal safe house + breaker at start", 3, 2, {250, 900}, 0, -1, 0},
     {"BREAKER HAND", "Power-on faster, monsters slowed 20s", 3, 2, {250, 900}, 0, SK_CARTO, 0},
     {"FUSE SMITH",   "Fuse need -1 (min 2)",               3, 3, {200, 450, 900}, 0, SK_BREAKER, 0},
     {"SHORTCUT",     "Skip one non-boss level per run",    3, 1, {1800, 0},  1, SK_FUSE_LESS, 1},
     /* ---- 第 5 行：跨支 keystone（全局只持有一个） ---- */
-    {"EXECUTIONER",  "<25% HP targets take +80% damage",   4, 1, {1200, 0},  2, -1, 1},
+    {"SILENT RUN",   "Sprint makes no noise (stamina -30%)", 4, 1, {1200, 0},  2, -1, 1},
     {"WEATHERMAN",   "Preview next modifier, reroll 150",  4, 1, {1200, 0},  2, -1, 1},
     {"LAST RESORT",  "Sanity 0 saves you once (4s)",       4, 1, {1200, 0},  2, -1, 1},
     {"SALVAGE",      "Keep 50% pending shards on death",   4, 1, {1200, 0},  2, -1, 1},
@@ -193,7 +196,7 @@ float SkillRestAdd(void) {
     return 0.25f * (float)skillRank[SK_REST];
 }
 float SkillStunAdd(void) {
-    return 0.20f * (float)skillRank[SK_STUN];
+    return 0.20f * (float)skillRank[SK_STILL];
 }
 
 /* ---- v2.8：Hub 的 6 项基础升级折进技能树 ------------------------------
@@ -259,18 +262,18 @@ float SkillGhostStepDrainMul(void) {
 
 /* HEAVY HAND：满蓄力（>=0.85）额外伤害，代价是蓄力更慢 */
 int SkillHeavyHand(void) {
-    return skillRank[SK_DMG];
+    return skillRank[SK_BREATH];
 }
 float SkillHeavyHandChargeMul(void) {
-    return skillRank[SK_DMG] > 0 ? 1.40f : 1.0f;
+    return skillRank[SK_BREATH] > 0 ? 1.40f : 1.0f;
 }
 
 /* SCAVENGER：翻箱额外掉一件投掷物，代价是碎片收入变少 */
 int SkillScavenger(void) {
-    return skillRank[SK_TYPEWORK] > 0 ? 1 : 0;
+    return skillRank[SK_SLIP] > 0 ? 1 : 0;
 }
 float SkillScavengerShardMul(void) {
-    int r = skillRank[SK_TYPEWORK];
+    int r = skillRank[SK_SLIP];
     if (r <= 0) return 1.0f;
     if (r >= 3) return 1.0f;                    /* 满级没有碎片惩罚了 */
     return (r >= 2) ? 0.90f : 0.75f;
@@ -452,7 +455,7 @@ int SkillLastResortOneshot(void) {
 
 /* TYPE WORK：武器伤害类型（0 = 不启用，1..3 = 砍/钝/碎片） */
 int SkillTypeWorkRank(void) {
-    return skillRank[SK_TYPEWORK];
+    return skillRank[SK_SLIP];
 }
 
 /* RELOAD RHYTHM：每第 3 次命中无视护甲 */

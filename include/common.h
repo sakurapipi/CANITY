@@ -509,7 +509,7 @@ enum {
     /* 筹 —— 风险与经济结构 */
     SK_BATTERY,   SK_CRANK,       SK_REST,      SK_METAB,
     /* 锋 —— 伤害交付方式 */
-    SK_DMG,       SK_STUN,        SK_TYPEWORK,  SK_RHYTHM,
+    SK_BREATH,    SK_STILL,       SK_SLIP,      SK_RHYTHM,   /* v3.0：列 2 改成藏匿系 */
     /* 途 —— 整局形状 */
     SK_CARTO,     SK_BREAKER,     SK_FUSE_LESS, SK_SHORTCUT,
     /* 第 5 行：跨支 keystone */
