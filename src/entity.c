@@ -602,6 +602,28 @@ static void MonsterWander(void) {
 }
 
 void UpdateMonster(float dt) {
+    /* v3.0：**寻声怪要能看见玩家** ——
+       原来它只对噪音有反应（MakeNoise 是唯一的 state=1 入口），
+       于是玩家站在它面前 2 米，它依然在"游荡"，看起来像坏了。
+       这里补视线检测：视野内 + HasLOS 通 → 切追捕并把目标锁定到玩家。
+       手电关着时视野减半，这样"关灯潜行"才有实际收益。 */
+    if (monster.active && !playerInSafe) {
+        float sdx = posX - monster.x, sdy = posY - monster.y;
+        float sd2 = sdx * sdx + sdy * sdy;
+        float sight = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
+        if (sd2 < sight * sight && HasLOS(monster.x, monster.y, posX, posY)) {
+            if (monster.state != 1) {
+                monster.state = 1;
+                monster.repath = 0.0f;
+                monster.stateTimer = 0.0f;
+                PlaySfx(SFX_HEART, 0.55f);   /* 心跳：它发现你了 */
+            }
+            /* 追捕中持续刷新目标（不然它只会跑向"最后一次听到的位置"） */
+            monster.tx = posX;
+            monster.ty = posY;
+        }
+    }
+
     /* v3.0 消失：隐身时追捕者立刻丢失目标 */
     {
         extern int vanished;

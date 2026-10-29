@@ -110,6 +110,12 @@ extern int bestEndlessScore;
    追捕完全没有压迫感，逃生玩法立不住。
    现在走路会被逐渐追上（+0.15/秒），必须靠冲刺甩开（3.8 秒甩 2.5 格），
    然后找地方藏起来等体力回满 —— 这才是逃生的核心节奏。 */
+/* v3.0：**寻声怪必须能"看见"玩家** ——
+   原来它只对噪音有反应，玩家站在它面前 2 米它也毫无反应
+   （玩家实测：怪贴脸站了十几秒，不打人、血没掉，只有 SANITY 在滴）。
+   视野给 7 格 + 需要视线不被墙挡。手电关着时减半，逼玩家学会省电。 */
+#define MONSTER_SIGHT       7.0f
+#define MONSTER_SIGHT_DARK  3.5f
 #define MONSTER_SPEED_BASE 2.15f    /* 寻声怪基础速度 */
 #define LIGHTBEAST_SPEED_BASE 1.50f /* 光敏怪基础速度 */
 #define MONSTER_SPEED_STEP 0.03f    /* 每层 +0.03 */
