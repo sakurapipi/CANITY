@@ -2988,6 +2988,40 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
 
 
 
+    /* ===== v3.0 开局引导 =====
+       玩家实测：「双击 exe 直接掉进一局，没有标题画面也没有操作说明，
+       E/F/R/T/M 全靠瞎按才发现」。这里在第 1 层前 25 秒给一段最简说明。 */
+    if (currentState == STATE_PLAYING && currentLevel <= 1 && runTime < 25.0f) {
+        static const char* hintZh[4] = {
+            "WASD 移动    SHIFT 冲刺",
+            "E 翻箱/躲藏    F 手电    R 摇电",
+            "左键 敲击引怪    右键 扔东西",
+            "目标：找齐保险丝 → 给配电箱通电 → 跑出口",
+        };
+        static const char* hintEn[4] = {
+            "WASD move    SHIFT sprint",
+            "E search / hide    F light    R crank",
+            "LMB knock to lure    RMB throw",
+            "GOAL: find fuses -> power the breaker -> reach the exit",
+        };
+        int lineH = TextHeightWin() + UIS(4);
+        int boxH = lineH * 4 + UIS(16);
+        int boxW = winW - UIS(80);
+        int bx0 = (winW - boxW) / 2;
+        int by0 = winH - UIS(200) - boxH;
+        if (by0 < UIS(70)) by0 = UIS(70);
+        float fade = 1.0f;
+        if (runTime > 20.0f) fade = (25.0f - runTime) / 5.0f;
+        if (fade < 0.0f) fade = 0.0f;
+        BlendRectWin(bx0, by0, bx0 + boxW, by0 + boxH, 0x000C1116u, 0.82f * fade);
+        FrameRectWin(bx0, by0, bx0 + boxW, by0 + boxH, 0x00C8B060u, 0.75f * fade, 1);
+        for (int li = 0; li < 4; li++) {
+            const char* t = (g_lang == LANG_ZH) ? hintZh[li] : hintEn[li];
+            unsigned int col = (li == 3) ? 0x00FFD060u : 0x00C8C4BCu;
+            DrawTextCenterWin(winW / 2, by0 + UIS(8) + li * lineH, t, col);
+        }
+    }
+
     /* ===== v3.0 逃生向 HUD：藏身提示 + 被发现状态 =====
        怪已经打不死了，「它现在有没有在追我」是唯一需要盯的信息。 */
     {
@@ -3464,10 +3498,27 @@ void RenderFrame(void) {
         int ch = cr.bottom - cr.top;
         if (cw <= 0 || ch <= 0) { ReleaseDC(g_hwnd, hdc); return; }
 
-        /* v1.8：改成**真铺满**（不再等比例留黑边）——
-           玩家要的是最大化后整屏都是画面，接受轻微拉伸。 */
-        int dw = cw, dh = ch;
-        int dx = 0, dy = 0;
+        /* v3.0：**等比 + 黑边**（回退 v1.8 的「真铺满」）——
+           玩家实测：「最大化后 4:3 画面被横向拉满 16:9，墙都变扁」。
+           轻微拉伸在恐怖游戏里非常出戏（透视全乱），所以恢复等比缩放。
+           宽屏两侧留黑边，这才是正确做法。 */
+        int dw, dh, dx, dy;
+        {
+            /* 目标比例 = 渲染缓冲的宽高比 */
+            double wantR = (double)renderW / (double)renderH;
+            double haveR = (double)cw / (double)ch;
+            if (haveR > wantR) {
+                dh = ch;
+                dw = (int)((double)ch * wantR + 0.5);
+            } else {
+                dw = cw;
+                dh = (int)((double)cw / wantR + 0.5);
+            }
+            if (dw < 1) dw = 1;
+            if (dh < 1) dh = 1;
+            dx = (cw - dw) / 2;
+            dy = (ch - dh) / 2;
+        }
 
         /* 离屏合成：黑底 + 缩放后的画面先在内存 DC 里拼好，
            再一次性 BitBlt 到窗口。直接往窗口 DC 先填黑再画内容会闪
