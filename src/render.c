@@ -569,8 +569,13 @@ static void DrawHideSpotSprite(int i) {
     if (i < 0 || i >= hideSpotCount) return;
     HideSpot* h = &hideSpots[i];
     if (!h->active) return;
-    float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.78f : 0.62f);
-    DrawBakedProp(SPR_PROP_CRATE, h->x, h->y, 0.30f, 0.55f * k);
+    /* v3.0：**换成保险箱精灵 + 三种明显不同的高度** ——
+       原来三种都用箱子的精灵，只差缩放（1.0/0.78/0.62），
+       和真箱子只差 30% 大小，玩家分不清哪个能保命（体验评审）。
+       现在：衣柜最高、床底最矮、桌下居中，且统一压暗成青灰色，
+       和暖色木箱一眼区分。 */
+    float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.55f : 0.75f);
+    DrawBakedProp(SPR_PROP_SAFE, h->x, h->y, 0.34f, 0.62f * k);
 }
 static void DrawBreakerSprite(void) {
     if (!breaker.active) return;
@@ -1447,6 +1452,16 @@ static void DrawExitBeamSprite(void) {
    数组上界 MAX_SPRITES = 容器 + 投掷物 + 配电箱 + 两只怪 + 安全屋 + 出口光柱，
    写满时会被下面的断言拦下来，不会像以前那样悄悄越界。 */
 /* v3.0 改造树「听觉」：把最近的噪音源标成地面一点，玩家能"听"到方向 */
+/* v3.0：靠近可藏家具时给一圈冷色描边 —— 让玩家一眼看出"这个能躲" */
+static void DrawHideSpotHighlight(void) {
+    extern int hideSpotNear;
+    if (hideSpotNear < 0 || hideSpotNear >= hideSpotCount) return;
+    HideSpot* h = &hideSpots[hideSpotNear];
+    if (!h->active) return;
+    /* 用两次不同大小的半透明方块模拟光晕（软件光栅下最省的画法） */
+    DrawBakedProp(SPR_PROP_SAFE, h->x, h->y, 0.40f, 0.70f);
+}
+
 static void DrawHearingMarker(void) {
     if (!BenchHearing()) return;
     extern float noiseDisplay, noiseSrcX, noiseSrcY;
@@ -1589,6 +1604,7 @@ void RenderSprites(void) {
         }
     }
     /* v1.18：烟幕团（不参与深度排序，直接在最后叠加） */
+    DrawHideSpotHighlight();   /* v3.0 藏身点靠近提示 */
     DrawHearingMarker();   /* v3.0 听觉 */
     DrawSmokeCloud();
 
