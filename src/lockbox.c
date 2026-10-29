@@ -746,110 +746,6 @@ static void LockDrawTuneBody(int hit, int ha) {
 
 /* 开锁覆盖层总入口：四种锁型共用同一块面板与底栏 */
 
-/* ==================== v3.0：脏污与工业质感 ====================
- * 用户要求「更像逃生里的接线盒，更脏、更有贵感，同时遵循上游风格」。
- * 上游是纯色块 + 细边框，干净得像调试面板；接线盒该有的东西一样没有：
- * 金属划痕、锈迹、铆钉、内凹边缘。
- * 这里补三层，全部**确定性**（不用 rand，避免每帧闪烁）：
- *   ① 细噪点     —— 模拟磨砂金属表面
- *   ② 锈斑       —— 几处不规则暖褐色块
- *   ③ 铆钉       —— 四角 + 长边中点的实心小圆
- * ============================================================== */
-
-/* 确定性伪随机（同一个坐标永远同一个值，不会闪） */
-static unsigned int LockNoiseAt(int x, int y) {
-    unsigned int h = (unsigned int)(x * 374761393) + (unsigned int)(y * 668265263);
-    h = (h ^ (h >> 13)) * 1274126177u;
-    return h ^ (h >> 16);
-}
-
-/* ① 细噪点：稀疏的暗点 + 亮点，让平涂的表面「起毛」
-   v3.0 修正：**第一版会崩**。
-   原写法按 3px 步长扫满整个面板 —— 700x680 的面板就是
-   233 x 226 = 5.2 万次 BlendRectWin/帧，每帧还要各自跑一遍像素循环，
-   直接把渲染线程拖死（用户实测「开锁时程序崩溃」）。
-   现在改成**固定上限的稀疏采样**：最多 320 个点，一个点一次 2x2 填充。 */
-static void LockGrain(LockBox b, float amount) {
-    if (amount <= 0.0f) return;
-    int w = b.x1 - b.x0, h = b.y1 - b.y0;
-    if (w < 8 || h < 8) return;
-    int marks = 120;   /* v3.0：再降一档，320 在低端机上仍偏重 */
-    int sz = LUIS(2);
-    if (sz < 1) sz = 1;
-    for (int k = 0; k < marks; k++) {
-        unsigned int hsh = LockNoiseAt(k * 37 + 11, k * 911 + 5);
-        int x = b.x0 + (int)(hsh % (unsigned int)w);
-        int y = b.y0 + (int)((hsh >> 10) % (unsigned int)h);
-        int dark = (hsh >> 20) & 1u;
-        unsigned int c = dark ? 0x00000000u : 0x00686058u;
-        float a = (dark ? 0.30f : 0.12f) * amount;
-        BlendRectWin(x, y, x + sz, y + sz, c, a);
-    }
-}
-
-/* ② 锈斑：几处固定的暖褐色块，边缘用两层不同透明度做毛边 */
-static void LockRust(LockBox b, float amount) {
-    if (amount <= 0.0f) return;
-    int w = b.x1 - b.x0, h = b.y1 - b.y0;
-    if (w < 40 || h < 40) return;
-    for (int k = 0; k < 5; k++) {
-        unsigned int seed = LockNoiseAt(k * 131 + 7, k * 977 + 3);
-        int cx = b.x0 + (int)(seed % (unsigned int)w);
-        int cy = b.y0 + (int)((seed >> 8) % (unsigned int)h);
-        int rw = LUIS(10 + (int)((seed >> 16) % 22u));
-        int rh = LUIS(6 + (int)((seed >> 20) % 14u));
-        BlendRectWin(cx - rw, cy - rh, cx + rw, cy + rh, 0x00703A18u, 0.10f * amount);
-        BlendRectWin(cx - rw / 2, cy - rh / 2,
-                     cx + rw / 2, cy + rh / 2, 0x00884A20u, 0.12f * amount);
-    }
-}
-
-/* ③ 铆钉：实心小圆 + 左上高光，让边框有厚度 */
-static void LockRivet(int cx, int cy, int r) {
-    if (r < 2) r = 2;
-    if (r > 24) r = 24;   /* v3.0：异常窗口尺寸下别让铆钉铺满屏幕 */
-    /* v3.0：原来每个像素调一次 BlendRectWin，4 个铆钉 = 300+ 次调用/帧。
-       改成 3 个矩形近似一个带高光的圆盘，调用次数降到 12。 */
-    BlendRectWin(cx - r, cy - r, cx + r + 1, cy + r + 1, 0x00383028u, 0.85f);      /* 本体 */
-    BlendRectWin(cx - r, cy - r, cx + r + 1, cy - r + 2, 0x00A09888u, 0.75f);      /* 上高光 */
-    BlendRectWin(cx - r, cy - r, cx - r + 2, cy + r + 1, 0x00807868u, 0.55f);      /* 左高光 */
-    BlendRectWin(cx + r - 1, cy - r, cx + r + 1, cy + r + 1, 0x00000000u, 0.45f);  /* 右暗边 */
-}
-
-/* 一条「脏面板」：外框阴影 → 底漆 → 噪点 → 锈 → 内凹高光 → 铆钉 */
-static void LockPanelDirty(LockBox b, float grime) {
-    /* v3.0：**矩形倒挂直接退出** —— 窗口极小时 LUIS 可能算出 x1<=x0。 */
-    if (b.x1 <= b.x0 || b.y1 <= b.y0) return;
-    /* v3.0：**面板超出窗口就不画脏污** ——
-       脏污层有一百多次 BlendRectWin，一旦矩形被夹成整屏，
-       每帧就是几千万次像素运算，界面会卡死（用户实测「未响应」）。
-       正常面板只占窗口一半左右，这条保护平时不会触发。 */
-    if (b.x0 < 0 || b.y0 < 0 || b.x1 > winW || b.y1 > winH) {
-        if ((b.x1 - b.x0) > winW * 3 / 4 || (b.y1 - b.y0) > winH * 3 / 4) return;
-    }
-    /* 投影 */
-    BlendRectWin(b.x0 + LUIS(3), b.y0 + LUIS(3),
-                 b.x1 + LUIS(3), b.y1 + LUIS(3), 0x00000000u, 0.55f);
-    /* 底漆：偏冷的深灰绿，比原来的纯黑更像铁皮 */
-    BlendRectWin(b.x0, b.y0, b.x1, b.y1, 0x0015191Cu, 0.99f);
-    /* 脏污 */
-    LockRust(b, grime);
-    LockGrain(b, grime);
-    /* 外框：上/左偏亮，下/右偏暗 = 内凹 */
-    FrameRectWin(b.x0, b.y0, b.x1, b.y1, 0x00484034u, 0.95f, LUIS(2));
-    BlendRectWin(b.x0, b.y0, b.x1, b.y0 + LUIS(1), 0x00706858u, 0.55f);
-    BlendRectWin(b.x0, b.y0, b.x0 + LUIS(1), b.y1, 0x00706858u, 0.45f);
-    BlendRectWin(b.x0, b.y1 - LUIS(1), b.x1, b.y1, 0x00000000u, 0.55f);
-    BlendRectWin(b.x1 - LUIS(1), b.y0, b.x1, b.y1, 0x00000000u, 0.45f);
-    /* 四角铆钉 */
-    int rr = LUIS(4);
-    int inset = LUIS(10);
-    LockRivet(b.x0 + inset, b.y0 + inset, rr);
-    LockRivet(b.x1 - inset, b.y0 + inset, rr);
-    LockRivet(b.x0 + inset, b.y1 - inset, rr);
-    LockRivet(b.x1 - inset, b.y1 - inset, rr);
-}
-
 void DrawLockOverlay(void) {
     if (!lockActive) return;   /* v3.0：没开锁盘就什么都不画 */
     /* v3.0：**面板尺寸兜底** ——
@@ -863,22 +759,17 @@ void DrawLockOverlay(void) {
     int ha = -1;
     int hit = LockHitTest(mx, my, &ha);
 
-    BlendRectWin(0, 0, winW, winH, 0x00000000u, 0.62f);
+    BlendRectWin(0, 0, winW, winH, 0x00000000u, 0.55f);
 
-    /* v3.0：换成脏面板 —— 投影 + 铁皮底 + 锈 + 噪点 + 内凹 + 铆钉 */
-    LockPanelDirty(p, 1.0f);
+    /* v3.0：**恢复上游的朴素画法** ——
+       我上一轮加的脏污层（噪点/锈斑/铆钉）虽然把绘制调用降到了百来次，
+       但实测仍会让界面卡死到「未响应」。
+       用户判断是渲染负担过高，要求换回原版 UI。
+       这里完全回到上游：两层矩形 + 一个标题，五次调用，不可能卡。 */
+    BlendRectWin(p.x0, p.y0, p.x1, p.y1, 0x000A0E12u, 0.97f);
+    FrameRectWin(p.x0, p.y0, p.x1, p.y1, 0x00C8A040u, 0.85f, LUIS(2));
 
-    /* 顶部铭牌：一小条深色底 + 蚀刻字，比裸字更像机器上的标签 */
-    {
-        int tw = TextWidthWin("LOCKED") + LUIS(28);
-        int tx = (p.x0 + p.x1) / 2 - tw / 2;
-        int ty = p.y0 + LUIS(18);
-        BlendRectWin(tx, ty - LUIS(3), tx + tw, ty + TextHeightWin() + LUIS(3),
-                     0x00201814u, 0.90f);
-        FrameRectWin(tx, ty - LUIS(3), tx + tw, ty + TextHeightWin() + LUIS(3),
-                     0x00805030u, 0.80f, 1);
-        DrawTextCenterWin(winW / 2, ty, "LOCKED", 0x00FF6050u);
-    }
+    DrawTextCenterWin(winW / 2, p.y0 + LUIS(24), "LOCKED", 0x00E05050u);
 
     if (lockType == LOCK_TYPE_DIAL) {
         DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "TURN THE DIALS UNTIL EVERY ONE CLICKS", 0x0090A0A8u);
