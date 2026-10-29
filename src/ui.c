@@ -3330,29 +3330,30 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         DrawTextCenterWin(winW / 2, by + barH + UIS(6), pct, 0x00FFFFFFu);
     }
 
-    /* v3.0：**摇电提示画在手电条内部** ——
-       前几版分别用大板 / 底部细条 / 条右侧文字，都有遮挡或重叠（用户三次截图）。
-       这一版把「CRANK 41%」直接居中画在 LIGHT 条里面：
-       横向位置被条本身限死，不可能再和任何其它 HUD 元素重叠。
-       同时条本身按进度填充，一眼能看出还差多少。 */
+    /* v3.0：**摇电进度改用「换标签」表达，不在条里写字** ——
+       第五版。前四版都有问题：
+         ① 大板挡视野  ② 贴底条压 RUN  ③ 右侧文字横向撞
+         ④ 条内写字 → 文字 24px 而条只有十几 px，上下全被切掉（用户截图）
+       这一版把 LIGHT 那两个字直接换成「CRANK 10%」，
+       条本身按进度填充 —— 完全不需要在条内或条外新开一块文字区。 */
     if (cranking) {
         float cc = crankTimer / 2.4f;
         if (cc > 1.0f) cc = 1.0f;
-        unsigned int ccol = (cc >= 1.0f) ? 0x00FFFFFFu : 0x00000000u;
+        int done = (cc >= 1.0f);
+        unsigned int ccol = done ? 0x0060FF90u : 0x00E8C040u;
 
-        /* 用进度覆盖手电条（黄色 → 满时转绿） */
-        BlendRectWin(barX, y1, barX + barW, y1 + barH,
-                     (cc >= 1.0f) ? 0x0060FF90u : 0x00E8C040u, 0.95f);
+        /* 用进度覆盖手电条 */
+        BlendRectWin(barX, y1, barX + barW, y1 + barH, ccol, 0.95f);
 
-        char cbuf[32];
-        if (cc >= 1.0f) sprintf(cbuf, "CRANK OK");
-        else            sprintf(cbuf, "CRANK %d%%", (int)(cc * 100.0f + 0.5f));
+        /* 覆盖掉左边的 LIGHT 标签 */
         {
-            int tw = TextWidthWin(cbuf);
-            int tx = barX + (barW - tw) / 2;
-            int ty = y1 + (barH - TextHeightWin()) / 2;
-            if (ty < y1) ty = y1;
-            DrawTextWin(tx, ty, cbuf, ccol);
+            char lbuf[32];
+            if (done) sprintf(lbuf, "CRANK OK");
+            else      sprintf(lbuf, "CRANK %d%%", (int)(cc * 100.0f + 0.5f));
+            BlendRectWin(labelX - UIS(2), y1 - UIS(3),
+                         labelX + TextWidthWin("LIGHT") + UIS(2),
+                         y1 - UIS(3) + TextHeightWin(), 0x000A0E12u, 0.92f);
+            DrawTextWin(labelX, y1 - UIS(3), lbuf, ccol);
         }
     }
 
