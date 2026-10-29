@@ -79,7 +79,7 @@ typedef enum {
 #define LEVEL_CLEAR_SANITY 12.0f   /* 过关回智（原 30） */
 #define CATCH_SANITY_BASE 18.0f    /* 被抓扣智基础值 */
 #define CATCH_SANITY_STEP 0.015f   /* 每层额外 +1.5% */
-#define MOUSE_BASE_SENS 0.002 /* 弧度/像素（1.0x） */
+#define MOUSE_BASE_SENS 0.0035   /* v3.0：0.002→0.0035（玩家实测转身太慢） */ /* 弧度/像素（1.0x） */
 
 /* 无尽模式：首通后解锁，独立存档、独立难度曲线 */
 extern int isEndlessRun;

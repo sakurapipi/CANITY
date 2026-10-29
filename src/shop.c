@@ -168,7 +168,7 @@ const char* ShopRowText(int row) {
 
 void ShopMoveSel(int delta) {
     int n = ShopRowCount();
-    shopRow = (shopRow + delta + n) % n;
+    shopRow = n > 0 ? ((shopRow + delta + n) % n) : 0;
     uiDirty = 1;
 }
 

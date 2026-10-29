@@ -155,9 +155,10 @@ static void test_stable_visuals_and_input(void) {
     const char* game = read_file("src/game.c");
     const char* ui = read_file("src/ui.c");
     const char* render = read_file("src/render.c");
-    check(contains(game, "if (lockActive) {\n                CloseLockOverlay();"),
-          "lock overlay key guard missing");
-    check(contains(ui, "BlendRectWin(0, 0, winW, bandH"),
+      /* v3.0：锁盘改成只认 Esc / M 关闭（原来任意键都关，解题时误按就没了）。 */
+  check(contains(game, "wParam == VK_ESCAPE || wParam == 'M'"),
+  "lock overlay key guard missing");
+    check(contains(ui, "int bandT = winH * 37 / 100;"),
           "hide mask is not using stable bands");
     check(contains(render, "int frameSeed = 17;"),
           "low-sanity vignette still uses animated full-screen noise");
