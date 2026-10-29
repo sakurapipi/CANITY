@@ -105,21 +105,27 @@ const char* ShopRowText(int row) {
     }
 
     if (shopPage == SHP_SHOP) {
+        /* v3.0：**商店从「武器配件」改成「消耗品补给」** ——
+           原来卖的是 attachDefs 里的 D+0% C+0% 武器配件，
+           无战斗后这些数字全无意义，而且价格 150 起，买来等于扔钱。
+           现在卖逃生真正缺的四样东西。 */
         if (row >= SHOP_OFFERS) {
             return Tr("LEAVE  (ESC)", "离开  (ESC)");
         }
-        int id = shopOffer[row];
-        if (id < 0) return Tr("SOLD OUT", "已售出");
-        if (attachOwned[id] > 0) return Tr("OWNED", "已拥有");
-        const AttachDef* a = &attachDefs[id];
-        /* v2.0：把配件数值写出来（原来只有名字，玩家花 260 碎片全靠猜） */
-        sprintf(sbuf, "%s  [%s]  D%+.0f%%  C%+.0f%%  %d",
-                Tr(a->nameKey, a->nameZh),
-                (a->slot == 0) ? Tr("CORE", "核心") : Tr("MOD", "词条"),
-                (a->dmgMul - 1.0f) * 100.0f,
-                (a->costMul - 1.0f) * 100.0f,
-                shopPrice[row]);
-        return sbuf;
+        static const char* en[4] = {
+            "BATTERY PACK   +35 battery   25",
+            "MED KIT        +25 sanity    40",
+            "FLARE x1                      30",
+            "BOTTLES x2                    20",
+        };
+        static const char* zh[4] = {
+            "电池包   +35 电量   25",
+            "急救包   +25 理智   40",
+            "照明弹 x1           30",
+            "瓶子   x2           20",
+        };
+        int idx = row & 3;
+        return (g_lang == LANG_ZH) ? zh[idx] : en[idx];
     }
 
     if (shopPage == SHP_BENCH) {
@@ -244,23 +250,26 @@ void ShopActivate(void) {
     }
     if (shopPage == SHP_SHOP) {
         if (shopRow >= SHOP_OFFERS) return;      /* LEAVE 由 Esc 处理 */
-        int id = shopOffer[shopRow];
-        if (id < 0) return;
-        if (attachOwned[id] > 0) {          /* v2.0：非消耗品不重复卖 */
-            pickupMsg = Tr("ALREADY OWNED", "已拥有");
-            pickupMsgTimer = 1.2f;
-            return;
-        }
-        if (shards < shopPrice[shopRow]) {
+        /* v3.0：**消耗品商店** —— 四种补给，价格与行文本一一对应 */
+        static const int price[4] = { 25, 40, 30, 20 };
+        int idx = shopRow & 3;
+        if (shards < price[idx]) {
             pickupMsg = Tr("NOT ENOUGH SHARDS", "碎片不够");
             pickupMsgTimer = 1.2f;
             return;
         }
-        shards -= shopPrice[shopRow];
-        attachOwned[id]++;
-        shopOffer[shopRow] = -1;
+        shards -= price[idx];
+        switch (idx) {
+        case 0: battery += 35.0f; if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
+                pickupMsg = Tr("+35 BATTERY", "+35 电量"); break;
+        case 1: sanity += 25.0f;  if (sanity > SanityMax()) sanity = SanityMax();
+                pickupMsg = Tr("+25 SANITY", "+25 理智"); break;
+        case 2: flares++;
+                pickupMsg = Tr("+1 FLARE", "+1 照明弹"); break;
+        default: bottles += 2;
+                pickupMsg = Tr("+2 BOTTLES", "+2 瓶子"); break;
+        }
         PlaySfx(SFX_POWER, 0.8f);
-        pickupMsg = Tr("PURCHASED", "已购买");
         pickupMsgTimer = 1.2f;
         uiDirty = 1;
         return;
