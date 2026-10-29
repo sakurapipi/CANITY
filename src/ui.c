@@ -2601,16 +2601,10 @@ void DrawHUD(void) {
     {
         int hy = UIS(18);
         if (showFps) hy += TextHeightWin() + UIS(6);
-        if (pendingShards > 0) {
-            /* v1.14：PENDING 从右上角挪到左上角 FUSES 同一行的右侧 ——
-               右上角现在是滚动道具栏，迟早滚到一起。 */
-            char fbuf[48];
-            if (breakerOpen) sprintf(fbuf, "POWER ON");
-            else sprintf(fbuf, Tr("FUSES %d/%d", "保险丝 %d/%d"), fusesHeld, fusesNeeded);
-            int fx2 = UIS(20) + TextWidthWin(fbuf) + UIS(18);
-            sprintf(buf, "PENDING %d", pendingShards);
-            DrawTextWin(fx2, UIS(18) + TextHeightWin() * 3 + UIS(8), buf, 0x00FFC040u);
-        }
+        /* v3.0：**删掉 HUD 上的 PENDING N** ——
+       玩家实测「一整个小时都是 PENDING 12」，既看不懂又永远不变。
+       待上缴碎片只在安全屋/结算页显示就够了。 */
+
 
 
 
@@ -3004,9 +2998,8 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
 
         /* ① 藏身提示 */
         if (hiddenIn >= 0) {
-            DrawTextCenterWin(winW / 2, winH / 2 + UIS(70),
-                              Tr("HIDDEN  -  E TO LEAVE", "已藏身  -  按 E 出来"),
-                              0x0060FF90u);
+            /* v3.0：**只保留左下角那一条** ——
+               玩家实测中间和左下各有一条 HIDDEN，重复且抢画面中央。 */
         } else if (hideSpotNear >= 0 && currentState == STATE_PLAYING) {
             DrawTextWin(UIS(20), winH - UIS(150),
                         Tr("PRESS E  -  HIDE", "按 E 躲进去"), 0x0090D0F0u);
@@ -3028,10 +3021,14 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
                 if (!mm->active) continue;
                 const char* st = NULL;
                 unsigned int sc = 0x0080FF80u;
-                if (mm->state == 1)      { st = Tr("HUNTING", "追捕中"); sc = 0x00FF3020u; }
-                else if (mm->state == 2) { st = Tr("SEARCHING", "搜寻中"); sc = 0x00E0A020u; }
-                else                      { st = Tr("WANDERING", "游荡"); sc = 0x0080C080u; }
+                /* v3.0：**不播报 AI 状态** ——
+                   玩家实测「HUNTING/SEARCHING 等于把怪的 AI 明着播报，恐怖感直接归零」。
+                   改成只有「有威胁 / 没威胁」两档氛围提示，不告诉玩家它在干嘛。 */
+                if (mm->state == 1)      { st = Tr("!!", "!!");  sc = 0x00FF3020u; }
+                else if (mm->state == 2) { st = Tr("?", "?");    sc = 0x00E0A020u; }
+                else                      { st = "";             sc = 0x0080C080u; }
                 char rb[48];
+                if (!st[0]) continue;                  /* 游荡时不显示任何东西 */
                 if (radar[ri2].tag) sprintf(rb, "%s [%s]", st, radar[ri2].tag);
                 else                sprintf(rb, "%s", st);
                 int tw3 = TextWidthWin(rb);
@@ -3429,13 +3426,21 @@ void RenderFrame(void) {
     {
         extern int hiddenIn;
         if (hiddenIn >= 0) {
-            int bandH = winH / 5;
-            /* 藏身遮罩只保留稳定的四块暗边。旧版逐扫描线改变 alpha，
-               每帧要做数百次小矩形混合，边缘会产生类似抽搐的视觉噪声。 */
-            BlendRectWin(0, 0, winW, bandH, 0x00000000u, 0.70f);
-            BlendRectWin(0, winH - bandH, winW, winH, 0x00000000u, 0.70f);
-            BlendRectWin(0, 0, winW / 8, winH, 0x00000000u, 0.75f);
-            BlendRectWin(winW - winW / 8, 0, winW, winH, 0x00000000u, 0.75f);
+            /* v3.0：**藏进去要看不出外面** ——
+               玩家实测原来的 winH/5 上下边太薄，"走廊、怪、墙全都看得见"，
+               只像盖了块棕色矩形。改成上下各 37%（只留一条 26% 高的横缝），
+               左右各 18%，模拟从柜门缝往外看。 */
+            int bandT = winH * 37 / 100;
+            int bandS = winW * 18 / 100;
+            BlendRectWin(0, 0, winW, bandT, 0x00000000u, 0.96f);
+            BlendRectWin(0, winH - bandT, winW, winH, 0x00000000u, 0.96f);
+            BlendRectWin(0, 0, bandS, winH, 0x00000000u, 0.90f);
+            BlendRectWin(winW - bandS, 0, winW, winH, 0x00000000u, 0.90f);
+            /* 四角再压一层，避免从对角溜出去 */
+            BlendRectWin(0, 0, bandS, bandT, 0x00000000u, 1.0f);
+            BlendRectWin(winW - bandS, 0, winW, bandT, 0x00000000u, 1.0f);
+            BlendRectWin(0, winH - bandT, bandS, winH, 0x00000000u, 1.0f);
+            BlendRectWin(winW - bandS, winH - bandT, winW, winH, 0x00000000u, 1.0f);
         }
     }
 
