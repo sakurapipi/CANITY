@@ -3315,44 +3315,24 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         DrawTextCenterWin(winW / 2, by + barH + UIS(6), pct, 0x00FFFFFFu);
     }
 
+    /* v3.0：**摇电不再单独占一块面板** ——
+       前两版分别在画面中下方画大板和贴底细条，用户两次反馈「遮挡视野」。
+       最后改成完全并入 LIGHT 那一行：把状态文字换成 CRANK 28%，
+       再在手电条下方压一条 4px 的进度线。零额外占用。 */
     if (cranking) {
-        /* v3.0：**给摇电一个看得懂的反馈** ——
-           玩家实测：「只有一条极细黄条和 CRANKING，没有刻度，
-           也不知道摇到哪算够」。改成粗条 + 百分比 + 完成闪绿。 */
-        /* v3.0：**摇电面板不能挡视野** ——
-           用户截图：「充电遮视野」。原来 300 宽 + 上下各垫 48/34，
-           一块深色板子横在画面中下方，把整个走廊都挡住了。
-           改成细长条贴屏幕底边，只留一条 22px 高的提示带。 */
-        int barW = UIS(260), barH = UIS(10);
-        int bx = (winW - barW) / 2;
-        int by = winH - UIS(46);
         float cc = crankTimer / 2.4f;
         if (cc > 1.0f) cc = 1.0f;
-
-        /* 只垫一层很薄的底，不画大框 */
-        BlendRectWin(bx - UIS(6), by - UIS(22), bx + barW + UIS(52), by + barH + UIS(6),
-                     0x000A0E12u, 0.62f);
-
-        DrawTextWin(bx, by - UIS(20),
-                    cc >= 1.0f ? Tr("CHARGED", "充满") : Tr("CRANKING", "摇电中"),
-                    cc >= 1.0f ? 0x0060FF90u : 0x00E8C040u);
-
-        /* 底槽 + 填充 + 25/50/75% 刻度 */
-        BlendRectWin(bx, by, bx + barW, by + barH, 0x00202020u, 0.85f);
-        BlendRectWin(bx, by, bx + (int)(barW * cc), by + barH,
-                     cc >= 1.0f ? 0x0060FF90u : 0x00E8C040u, 0.95f);
-        for (int t = 1; t <= 3; t++) {
-            int tx = bx + barW * t / 4;
-            BlendRectWin(tx, by, tx + 1, by + barH, 0x00FFFFFFu, 0.28f);
-        }
-        FrameRectWin(bx, by, bx + barW, by + barH, 0x00C8B060u, 0.85f, 1);
-
-        {
-            char cbuf[16];
-            sprintf(cbuf, "%d%%", (int)(cc * 100.0f + 0.5f));
-            DrawTextWin(bx + barW + UIS(8), by - UIS(4), cbuf,
-                        cc >= 1.0f ? 0x0060FF90u : 0x00C8C4BCu);
-        }
+        char cbuf[24];
+        sprintf(cbuf, cc >= 1.0f ? "CRANK OK" : "CRANK %d%%",
+                (int)(cc * 100.0f + 0.5f));
+        unsigned int ccol = cc >= 1.0f ? 0x0060FF90u : 0x00E8C040u;
+        /* 覆盖掉原来的 ON/OFF 文字 */
+        DrawTextWin(barX + barW + UIS(12), y1 - UIS(3), cbuf, ccol);
+        /* 手电条正下方 4px 的细进度线 */
+        BlendRectWin(barX, y1 + barH + UIS(2), barX + barW, y1 + barH + UIS(6),
+                     0x00101010u, 0.75f);
+        BlendRectWin(barX, y1 + barH + UIS(2),
+                     barX + (int)(barW * cc), y1 + barH + UIS(6), ccol, 0.95f);
     }
 
     /* 碎片（SHARDS）是大厅货币，游戏过程中用不到 —— 不放进 HUD。
