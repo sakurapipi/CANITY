@@ -3238,12 +3238,12 @@ static void ApplyCampaignRules(int stage) {
 }
 
 void StartGame(void) {
-    /* v3.0：**每局重置改造树 + 强化** ——
-       之前这两个 Reset 一个调用点都没有（全项目 grep 为 0），
-       导致买过的节点跨局累积，第二局开局就满级。 */
-    BenchResetRun();
+    /* v3.0：**改造树 / 强化都不重置** ——
+       它们花的是 shards（跨局持久的元货币），重置等于把玩家买的东西吞掉：
+       买一个 620 的星节点，下一局归零，碎片永久损失。
+       benchOwned / runUpg 都已进存档（benchOwnedSave / runUpgSave），
+       本来就是元进度。每局该清的只有「假死」这类局内一次性状态。 */
     playDeadUsed = 0;   /* v3.0 假死每局重置 */
-    RunUpgReset();
 
 
     int startMode = pendingStartMode;
