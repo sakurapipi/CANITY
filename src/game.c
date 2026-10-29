@@ -2226,6 +2226,19 @@ void Update(float dt) {
     holdingNow = (hoverKind != 0 && IsActionDown(ACT_INTERACT));
     }
 
+    /* v3.0：**周期自动存档** ——
+       原来 SaveGame() 只在「解锁成就 / 换层 / 安全屋操作 / 退出」时调用，
+       中途强退或崩溃等于整局白玩（验证报告 BUG1：保存后重启 benchOwned 变 0）。
+       这里在游戏中/安全屋每 20 秒存一次，代价是一次 6KB 的写盘。 */
+    if ((currentState == STATE_PLAYING || currentState == STATE_SAFEHOUSE) && !trainingMode) {
+        static float autoSaveTimer = 0.0f;
+        autoSaveTimer += dt;
+        if (autoSaveTimer >= 20.0f) {
+            autoSaveTimer = 0.0f;
+            SaveGame();
+        }
+    }
+
     /* 冲刺与体力 */
 
     /* v3.0 改造树「消失」：脱离视线 3 秒后完全隐身。
