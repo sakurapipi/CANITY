@@ -10,6 +10,7 @@
 #include "common.h"
 #include "game.h"
 #include "skills.h"
+#include "upgrade_run.h"
 
 /* ------------------------------------------------------------------ */
 /* 局外表                                                            */
@@ -280,35 +281,35 @@ float SkillScavengerShardMul(void) {
 /* ------------------------------------------------------------------ */
 const InRunDef inRunDefs[INRUN_COUNT] = {
     /* 即时（5） */
-    {"SPARE CELL",    "+45 battery now",              IRK_INSTANT, 0},
-    {"GLASS SUPPLY",  "+1 bottle",                    IRK_INSTANT, 0},
-    {"FLARE SUPPLY",  "+1 flare",                     IRK_INSTANT, 0},
-    {"MED KIT",       "+25 sanity now",               IRK_INSTANT, 0},
-    {"SHARD BAG",     "+40 shards",                   IRK_INSTANT, 0},
+    {"SPARE CELL", "+45 battery now", IRK_INSTANT, 0, "备用电池", "立即 +45 电量"},
+    {"GLASS SUPPLY", "+1 bottle", IRK_INSTANT, 0, "玻璃补给", "立即 +1 瓶子"},
+    {"FLARE SUPPLY", "+1 flare", IRK_INSTANT, 0, "照明补给", "立即 +1 照明弹"},
+    {"MED KIT", "+25 sanity now", IRK_INSTANT, 0, "急救包", "立即 +25 理智"},
+    {"SHARD BAG", "+40 shards", IRK_INSTANT, 0, "碎片袋", "立即 +40 碎片"},
     /* 被动（7，均带轻代价） */
-    {"LIGHT FOOT",    "Noise -20%, speed -3%",        IRK_PASSIVE, 0},
-    {"FAST CRANK",    "Crank -25% time, noise +15%",  IRK_PASSIVE, 0},
-    {"FAST SEARCH",   "Search -25% time, noise +10%", IRK_PASSIVE, 0},
-    {"SAVER",         "Drain -15%, cap -5",           IRK_PASSIVE, 0},
-    {"LONG WIND",     "Stamina +25, heal -10%",       IRK_PASSIVE, 0},
-    {"IRON SKIN",     "Damage -30%, speed -4%",       IRK_PASSIVE, 1},
+    {"LIGHT FOOT", "Noise -20%, speed -3%", IRK_PASSIVE, 0, "轻步", "噪声 -20%，移速 -3%"},
+    {"FAST CRANK", "Crank -25% time, noise +15%", IRK_PASSIVE, 0, "快摇", "摇电时间 -25%，噪声 +15%"},
+    {"FAST SEARCH", "Search -25% time, noise +10%", IRK_PASSIVE, 0, "快手", "翻找时间 -25%，噪声 +10%"},
+    {"SAVER", "Drain -15%, cap -5", IRK_PASSIVE, 0, "节能", "耗电 -15%，电量上限 -5"},
+    {"LONG WIND", "Stamina +25, heal -10%", IRK_PASSIVE, 0, "长气", "体力 +25，治疗 -10%"},
+    {"IRON SKIN", "Damage -30%, speed -4%", IRK_PASSIVE, 1, "铁皮", "受伤 -30%，移速 -4%"},
     /* 规则（3，稀有） */
-    {"SILENT BOTTLE", "Silent breaks, dmg -10%",      IRK_RULE, 1},
-    {"DARK WALK",     "Off-light +12%, drain +10%",   IRK_RULE, 1},
-    {"LIGHT FUSES",   "Fuse need -1, shards -10%",    IRK_RULE, 1},
+    {"SILENT BOTTLE", "Silent breaks, dmg -10%", IRK_RULE, 1, "静音瓶", "瓶子不发声，伤害 -10%"},
+    {"DARK WALK", "Off-light +12%, drain +10%", IRK_RULE, 1, "暗行", "关灯移速 +12%，流失 +10%"},
+    {"LIGHT FUSES", "Fuse need -1, shards -10%", IRK_RULE, 1, "省保险丝", "所需保险丝 -1，碎片 -10%"},
     /* 大招（2，一局一个，第 5 层后进池） */
-    {"STATIC FIELD",  "Stun all monsters 6s",         IRK_ULTIMATE, 1},
-    {"MISDIRECT",     "Teleport nearest monster away", IRK_ULTIMATE, 1},
+    {"STATIC FIELD", "Stun all monsters 6s", IRK_ULTIMATE, 1, "静电场", "全场怪物定身 6 秒"},
+    {"MISDIRECT", "Teleport nearest monster away", IRK_ULTIMATE, 1, "误导", "把最近的怪物传送走"},
 
     /* ---- v2.0 新增 8 张（16 -> 24） ---- */
-    {"FIELD REPAIR",  "+35 battery, -5 sanity",        IRK_INSTANT, 0},
-    {"NERVE SHOT",    "+15 sanity, -10 battery",       IRK_INSTANT, 0},
-    {"PACK RAT",      "+2 bottles +30 shards",         IRK_INSTANT, 0},
-    {"OIL CAN",       "+25 battery, +20 stamina",      IRK_INSTANT, 0},
-    {"LUCKY FUSE",    "+1 fuse held",                  IRK_INSTANT, 0},
-    {"STEADY HAND",   "Weapon damage +20%",            IRK_PASSIVE, 0},
-    {"SWIFT RELOAD",  "Weapon cooldown -25%",          IRK_PASSIVE, 0},
-    {"TIME STOP",     "Freeze monsters 8s",            IRK_ULTIMATE, 1},
+    {"FIELD REPAIR", "+35 battery, -5 sanity", IRK_INSTANT, 0, "现场维修", "+35 电量，-5 理智"},
+    {"NERVE SHOT", "+15 sanity, -10 battery", IRK_INSTANT, 0, "镇定剂", "+15 理智，-10 电量"},
+    {"PACK RAT", "+2 bottles +30 shards", IRK_INSTANT, 0, "囤积者", "+2 瓶子，+30 碎片"},
+    {"OIL CAN", "+25 battery, +20 stamina", IRK_INSTANT, 0, "油壶", "+25 电量，+20 体力"},
+    {"LUCKY FUSE", "+1 fuse held", IRK_INSTANT, 0, "幸运保险丝", "+1 持有保险丝"},
+    {"STEADY HAND", "Weapon damage +20%", IRK_PASSIVE, 0, "稳手", "武器伤害 +20%"},
+    {"SWIFT RELOAD", "Weapon cooldown -25%", IRK_PASSIVE, 0, "快速装填", "武器冷却 -25%"},
+    {"TIME STOP", "Freeze monsters 8s", IRK_ULTIMATE, 1, "时间停止", "全场怪物冻结 8 秒"},
 };
 
 unsigned int runSkillMask = 0u;
@@ -397,7 +398,8 @@ int RunStaminaAdd(void) {
     return RunSkillOwned(IR_LONGWIND) ? 25 : 0;
 }
 float RunDamageTakenMul(void) {
-    return RunSkillOwned(IR_ARMOR) ? 0.70f : 1.0f;
+    /* v3.0：再乘上局内「角色抗性」强化（每级 -10%） */
+    return (RunSkillOwned(IR_ARMOR) ? 0.70f : 1.0f) * RunUpgResistMul();
 }
 float RunSanityGainMul(void) {
     return RunSkillOwned(IR_LONGWIND) ? 0.90f : 1.0f;

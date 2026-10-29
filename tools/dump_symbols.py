@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 
@@ -70,6 +71,62 @@ def parse(lines):
     return syms
 
 
+def parse_coff_symbols(path):
+    """直接读取 PE 中的 COFF 符号表。
+
+    w64devkit 的 nm 在 PE 可执行文件上有时只输出重复的 `.bss` 行，
+    但链接器保留的 COFF 表仍然完整。调试注入工具本来就按这个格式
+    读取，这里复用同一套 RVA 计算，避免把未 strip 的 exe 误判为空。
+    """
+    try:
+        data = open(path, "rb").read()
+        if data[:2] != b"MZ":
+            return {}
+        pe = struct.unpack_from("<I", data, 0x3C)[0]
+        if data[pe:pe + 4] != b"PE\0\0":
+            return {}
+        _, nsec, _, symptr, nsyms, optsz, _ = struct.unpack_from(
+            "<HHIIIHH", data, pe + 4)
+        if not symptr or not nsyms:
+            return {}
+        opt = pe + 24
+        if struct.unpack_from("<H", data, opt)[0] not in (0x10B, 0x20B):
+            return {}
+
+        section_rvas = []
+        section_base = opt + optsz
+        for i in range(nsec):
+            off = section_base + i * 40
+            _, vaddr = struct.unpack_from("<II", data, off + 8)
+            section_rvas.append(vaddr)
+
+        string_table = symptr + nsyms * 18
+        symbols = {}
+        index = 0
+        while index < nsyms:
+            off = symptr + index * 18
+            raw_name = data[off:off + 8]
+            value, section, _, _, aux_count = struct.unpack_from(
+                "<IhHBB", data, off + 8)
+            if raw_name[:4] == b"\0\0\0\0":
+                name_off = struct.unpack_from("<I", raw_name, 4)[0]
+                start = string_table + name_off
+                end = data.find(b"\0", start)
+                name = data[start:end].decode("latin-1", "replace") if end > start else ""
+            else:
+                name = raw_name.rstrip(b"\0").decode("latin-1", "replace")
+            if 0 < section <= nsec and name and not name.startswith(".refptr"):
+                symbols[name] = {
+                    "rva": section_rvas[section - 1] + value,
+                    "size": 0,
+                    "kind": "?",
+                }
+            index += 1 + aux_count
+        return symbols
+    except (OSError, IndexError, struct.error, UnicodeError):
+        return {}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-e", "--exe", default=None)
@@ -91,6 +148,8 @@ def main():
         return 1
 
     syms = parse(run_nm(exe))
+    if not syms:
+        syms = parse_coff_symbols(exe)
     if not syms:
         print("符号表是空的 —— exe 被 strip 过了？")
         return 2

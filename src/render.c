@@ -74,7 +74,23 @@ void InitPixels(void) {
     if (aspect < 0.6f) aspect = 0.6f;
     if (aspect > 3.2f) aspect = 3.2f;
 
-    float baseH = (float)winH * s;
+    /* v2.9：**渲染高度必须来自真实客户区，不能用 winH**。
+       原来 baseH = winH*s，而 SyncWindowSize() 又把 winH 设成 renderH ——
+       两个函数互相喂，形成反馈环：
+           renderH = winH*s        （InitPixels）
+           winH    = renderH       （SyncWindowSize，下一帧）
+       窗口尺寸一变（比如按 F11 全屏），像素预算每次都会把 renderH 再砍一点，
+       而文字永远是 24 个渲染像素 → 占屏比例越来越大，
+       表现就是「整个 UI 一帧比一帧更大」。
+       现在只读 GetClientRect，renderH 不再依赖它自己写出去的值。 */
+    float baseH;
+    {
+        RECT cbase;
+        if (g_hwnd && GetClientRect(g_hwnd, &cbase) && cbase.bottom > 0)
+            baseH = (float)cbase.bottom * s;
+        else
+            baseH = (float)winH * s;      /* 没有窗口时才退回 winH */
+    }
     renderH = (int)baseH;
     renderW = (int)(baseH * aspect);
     if (renderW < 160) renderW = 160;
@@ -543,6 +559,18 @@ static void DrawCrateSprite(int i) {
 }
 
 
+
+/* v3.0：藏身点渲染。
+   原来全项目 render.c/ui.c 对 hideSpots 零引用 —— 玩家根本看不见
+   衣柜/床底/桌下，只有按下 E 之后闪 1.6 秒的一行字。
+   这里复用箱子的精灵，缩小 + 压暗，和真箱子区分开。 */
+static void DrawHideSpotSprite(int i) {
+    if (i < 0 || i >= hideSpotCount) return;
+    HideSpot* h = &hideSpots[i];
+    if (!h->active) return;
+    float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.78f : 0.62f);
+    DrawBakedProp(SPR_PROP_CRATE, h->x, h->y, 0.30f, 0.55f * k);
+}
 static void DrawBreakerSprite(void) {
     if (!breaker.active) return;
     float k = breakerOpen ? 1.15f : 0.95f;
@@ -574,19 +602,27 @@ static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK
    算「玩家 → 怪」的角度与怪朝向的差，落到 4 个扇区；
    侧面用水平镜像覆盖另一侧 —— 只烘 2 个朝向就能覆盖 4 个视角。 */
 static int a_back_light = 0;   /* v2.2：本次绘制是否背向镜头 */
-static void MonsterSpriteSelect(int base, float wx, float wy,
+static void MonsterSpriteSelect(int base, float wx, float wy, const Monster* m,
                                 int* outSpr, int* outFlip, int* outFrame) {
     float dx = wx - posX, dy = wy - posY;
+    /* v3.0：**朝向判据换掉**。
+       原来用「怪在屏幕上的方位角」，但默认 16:9 + FOV85 的可视半角只有 50.7°，
+       永远进不了 60° 的侧面扇区 → dir 恒为 0，6 张侧面帧全是白烘的图。
+       现在用「玩家→怪 的射线」与「怪自己面朝的方向」之间的夹角：
+       怪正对着你 = 正面，背对着你 = 背面，侧身 = 侧面。 */
     float ang = atan2f(dy, dx);
-    /* 相对玩家视线的角度：正前方 0，左右各 90°，背后 180° */
-    float viewAng = atan2f(dirY, dirX);
-    float rel = ang - viewAng;
+    float rel = ang - m->facing;          /* 怪朝向与「怪→玩家」方向的差 */
+    /* rel≈π 表示怪正面朝着玩家 */
+    rel = rel - 3.14159265f;
+    while (rel > 3.14159265f) rel -= 6.2831853f;
+    while (rel < -3.14159265f) rel += 6.2831853f;
     while (rel > 3.14159265f) rel -= 6.2831853f;
     while (rel < -3.14159265f) rel += 6.2831853f;
     float a = fabsf(rel);
 
     int dir;      /* 0 正面 / 1 侧面 */
     int flip = 0;
+    a_back_light = 0;   /* v3.0：每次进来先复位，否则上一只怪的背光压暗会漏到下一只 */
     if (a < 1.047f) {            /* ±60°：正面 */
         dir = 0;
     } else if (a < 2.094f) {     /* 60~120°：侧面 */
@@ -598,8 +634,9 @@ static void MonsterSpriteSelect(int base, float wx, float wy,
         a_back_light = 1;
     }
 
-    /* 走路相位：用全局时间，四帧循环（站/走） */
-    int frame = ((int)(g_timeSec * 3.0f)) & 1;
+    /* v3.0：走路帧用**每只怪自己的相位**（建模审查 #3）。
+       静止/硬直时相位不动，所以不会再原地踏步，多只怪也不会同相。 */
+    int frame = ((int)(m->walkPhase * 3.0f)) & 1;
 
     if (dir == 0 && a < 1.047f) a_back_light = 0;
     *outSpr = base + dir * 2 + frame;
@@ -608,7 +645,7 @@ static void MonsterSpriteSelect(int base, float wx, float wy,
 }
 
 static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
-                             float lightK, int zTest) {
+                             float lightK, int zTest, float facing, float walkPhase) {
     SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
     if (!s.ok) return;
     int w = s.x1 - s.x0;
@@ -629,7 +666,17 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
     int isMain = (spr == SPR_MON_HUNTER || spr == SPR_MON_LIGHT || spr == SPR_MON_LEECH);
     if (isMain) {
         int useSpr, flip, frame;
-        MonsterSpriteSelect(spr, wx, wy, &useSpr, &flip, &frame);
+        /* v3.0：朝向/相位由**调用方传进来** ——
+       原来写死 &monster，追光鬼拿到的是寻声鬼的数据。 */
+        {
+            Monster tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.active = 1;
+            tmp.x = wx; tmp.y = wy;
+            tmp.facing = facing;
+            tmp.walkPhase = walkPhase;
+            MonsterSpriteSelect(spr, wx, wy, &tmp, &useSpr, &flip, &frame);
+        }
         float dim = (a_back_light ? 0.72f : 1.0f);   /* 背向镜头时压暗 */
         if (flip) DrawSpriteFlip(useSpr, x, y, size, size, light * dim, 1.0f, zTest, s.ty);
         else      DrawSprite(useSpr, x, y, size, size, light * dim, 1.0f, zTest, s.ty);
@@ -697,7 +744,7 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
     }
 
     if (!tintMix) {
-        DrawBakedMonster(spr, m->x, m->y, halfH, lightK, 1);
+        DrawBakedMonster(spr, m->x, m->y, halfH, lightK, 1, m->facing, m->walkPhase);
     } else {
         SpriteBox s = ProjectSprite(m->x, m->y, 0.0f, halfH);
         if (!s.ok) return;
@@ -1144,10 +1191,9 @@ static void DrawFlareSprite(int idx) {
    玻璃瓶沿用小球（它本来就是飞行的碎玻璃反光）。 */
 static void DrawShotModel(int idx) {
     float wx = shot[idx].x, wy = shot[idx].y, z = shot[idx].z;
-    int cx, cy, cyFloor;
+    int cx, cy;
     float unit, ty;
     if (!ProjectPoint(wx, wy, z, &cx, &cy, &unit, &ty)) return;
-    cyFloor = (int)((float)renderH * 0.5f + (float)horizon + unit * 0.5f);
     int occ = cx < 0 ? 0 : (cx >= renderW ? renderW - 1 : cx);
     if (ty * 0.85f >= zBuffer[occ]) return;
 
@@ -1233,7 +1279,7 @@ static void DrawExtraSprite(int idx) {
     if (e->kind == 0) spr = SPR_MON_SHADE;
     else if (e->kind == 1) spr = SPR_MON_SPIDER;
     float halfH = (e->kind == 0) ? 1.05f : (e->kind == 1 ? 0.42f : 0.95f);
-    DrawBakedMonster(spr, e->x, e->y, halfH, 0.85f, 1);
+    DrawBakedMonster(spr, e->x, e->y, halfH, 0.85f, 1, 0.0f, (float)g_timeSec * 2.0f);
 }
 
 static void DrawSlashBlade(float wx, float wy, float scale, float alpha) {
@@ -1477,7 +1523,7 @@ void RenderSprites(void) {
         if (e->kind == 0 && flashlightOn && battery > 0.0f) continue;
         if (n >= MAX_SPRITES) break;
         list[n].d2 = Dist2(e->x, e->y, posX, posY);
-        list[n].kind = 11;
+        list[n].kind = 12;
         list[n].idx = i;
         n++;
     }
@@ -1524,6 +1570,7 @@ void RenderSprites(void) {
             case 6: DrawFlareSprite(list[i].idx); break;
             case 8: DrawShotSprite(list[i].idx); break;
             case 10: DrawSlashSprite(); break;
+            case 12: DrawHideSpotSprite(list[i].idx); break;   /* v3.0 藏身点 */
             case 11: DrawExtraSprite(list[i].idx); break;
             case 7: DrawFlowerSprite(); break;
             default: DrawExitBeamSprite(); break;
@@ -2150,7 +2197,10 @@ static void DrawViewModel(void) {
 
     /* 走路摆动 + 开火后坐 */
     float sway = sinf(bobPhase) * (float)renderW * 0.006f;
-    float lift = fabsf(sinf(bobPhase * 0.5f)) * (float)renderH * 0.007f;
+    /* v3.0：lift 原来用 |sin(φ/2)|，纵向频率只有横向的 1/2 ——
+       手持模型会「横着摆两下、竖向才起一下」，而且 |sin| 谷底有速度拐点。
+       改成 |sin(φ)|，两轴同频，走路手感一致（建模审查 #5）。 */
+    float lift = fabsf(sinf(bobPhase)) * (float)renderH * 0.007f;
     float kick = weaponAtkCharge * (float)renderH * 0.010f
                + muzzleFlash * (float)renderH * 0.016f;
 
@@ -2195,12 +2245,20 @@ static void DrawViewModel(void) {
                                         firePots, gluePots, mirrors };
         int sel = throwSelected;
         if (sel >= 0 && sel < ITEM_SLOT_COUNT && counts[sel] > 0) {
-            int isize = (int)((float)renderH * 0.26f);
+            /* v2.9：按报告重算 —— 原来 100px 大、落进枪模框内、亮度 0.55，
+               结果是"更近的左手物体反而更小更暗"，而且底边被屏幕裁掉 9px。
+               现在：69px、x=0.40、y=0.95，落在资源条右边、枪模左边。 */
+            int isize = (int)((float)renderH * 0.15f);
             if (isize < 24) isize = 24;
-            int ix = (int)((float)renderW * 0.10f - sway * 0.6f);
-            int iy = (int)((float)renderH * 1.00f + lift * 0.7f);
+            /* v2.6：原来在 renderW*0.10（最左边），被 ENERGY/LIGHT/RUN
+               三条资源条整个压住。挪到中间偏右、手电筒 ON 文字的右边。 */
+            int ix = (int)((float)renderW * 0.40f - sway);
+            int iy = (int)((float)renderH * 0.95f + lift - kick * 0.6f);
+            /* v3.0：亮度 0.75 → 0.92（枪是 0.85~1.0），alpha 0.95 → 1.0。
+               注释写着"亮一点"但实际比枪暗，同一只手的两个物体不该有明暗断层
+               （建模审查 #12）。 */
             DrawSprite(SPR_ITEM_FLARE + sel, ix, iy - isize, isize, isize,
-                       0.55f, 0.85f, 0, 0.0f);
+                       0.92f, 1.0f, 0, 0.0f);
         }
     }
 }

@@ -239,10 +239,26 @@ static void cvFinish(Sprite* s) {
                 }
             }
             int n = SUP * SUP;
-            s->px[(size_t)y * SPR_W + x] = ((unsigned int)(a / n) << 24) |
-                                           (unsigned int)(r / n) << 16 |
-                                           (unsigned int)(g / n) << 8 |
-                                           (unsigned int)(b / n);
+            /* v3.0：**alpha 归一化**（建模审查 #6）。
+               原来颜色是先乘 alpha 再除以 n，没有除回 alpha 总和 ——
+               半透明边缘的颜色被 alpha 拉黑，每张精灵因此有一圈黑晕，
+               细轮廓光最脏。正确做法：颜色 = Σ(c·a) / Σa。 */
+            int outA = a / n;
+            int rr, gg, bb;
+            if (a > 0) {
+                rr = r * 255 / a;
+                gg = g * 255 / a;
+                bb = b * 255 / a;
+            } else {
+                rr = gg = bb = 0;
+            }
+            if (rr > 255) rr = 255;
+            if (gg > 255) gg = 255;
+            if (bb > 255) bb = 255;
+            s->px[(size_t)y * SPR_W + x] = ((unsigned int)outA << 24) |
+                                           (unsigned int)rr << 16 |
+                                           (unsigned int)gg << 8 |
+                                           (unsigned int)bb;
         }
     }
     for (int i = 0; i < SPR_SHADES; i++) {
@@ -297,9 +313,9 @@ static void BakeWrench(void) {
         hx -  26, hy + 26,     /* 下颚外角 */
         hx -  40, hy + 2,      /* 左侧 */
         hx -  34, hy - 22,     /* 左上 */
-        hx -  36, hy - 40,
-        hx -  34, hy - 6,
-        hx -  36, hy - 40
+        hx - 30, hy - 34,      /* v3.0：上颚内凹（原来这点和末点重复） */
+        hx - 34, hy - 6,
+        hx - 38, hy - 26
     };
     /* 先把外框放大 8% 当描边 */
     float outline[20];
@@ -454,7 +470,7 @@ static void BakePistol(void) {
 
     /* ---- 扳机护圈 + 扳机 ---- */
     {
-        cvEllipse(bx - 6, hingeY + 34, 13.0f, 11.0f, 0x00080A0Eu, 0.0f);
+    /* v3.0：cvEllipse(..., 0.0f) 是空调用（alpha=0 直接 return），删掉 */
         for (int a = 20; a <= 160; a += 8) {
             float rad = (float)a * 3.14159f / 180.0f;
             float ax = bx - 6 + cosf(rad) * 13.0f;
@@ -628,7 +644,8 @@ static void BakeMonster(int id, int kind, int pose) {
     int side = (pose >= 2) ? 1 : 0;
     int walk = (pose == 1 || pose == 3) ? 1 : 0;
 
-    float baseY = 244.0f + (walk ? 4.0f : 0.0f);
+    /* v3.0：走路时**不再整体下沉** —— 原来 baseY+4 让脚每次迈步都往地里踩 */
+    float baseY = 244.0f;
     float lean  = walk ? 3.0f : 0.0f;
 
     /* 每个物种的调色板：暗边 / 中间调 / 受光 */
@@ -668,15 +685,23 @@ static void BakeMonster(int id, int kind, int pose) {
         float pelvisY   = headY + H * 0.66f;
 
         /* --- 腿：大腿 + 小腿 + 脚，两段各带一点弯 --- */
-        float legOff = walk ? 7.0f : 0.0f;
+        /* v3.0：**迈步**而不是「两腿对称外张」（建模审查 #2）。
+           原来走路帧两腿同时外张（膝 ±5.8px、踝 ±0.1px），
+           看起来是蹲一下，脚还随 baseY 往地里沉 4px。
+           现在：一条腿往前伸、另一条往后蹬，髋部抬高、身体微倾。
+           walkDir 让 pose1 和 pose3 的迈步方向相反，两个走路帧才不一样。 */
+        int walkDir = (pose == 3) ? -1 : 1;
+        float stepAmt = walk ? 9.0f : 0.0f;
         for (int s2 = -1; s2 <= 1; s2 += 2) {
             float hx = cx + (float)s2 * shoulderW * 0.34f;
-            float kneeX = hx + (float)s2 * (3.0f + legOff * 0.4f);
-            float kneeY = (pelvisY + footY) * 0.5f;
-            float ankleX = hx + (float)s2 * (2.0f - legOff * 0.3f);
+            /* s2 * walkDir = +1 的那条腿在前，-1 的在后 */
+            float ph = (float)(s2 * walkDir);
+            float kneeX = hx + ph * stepAmt * 0.55f;
+            float kneeY = (pelvisY + footY) * 0.5f - ph * stepAmt * 0.20f;
+            float ankleX = hx + ph * stepAmt * 0.95f;
             Limb(hx, pelvisY, kneeX, kneeY, 13.0f, 10.0f, edge, body, hi);
             Limb(kneeX, kneeY, ankleX, footY - 4.0f, 10.0f, 7.0f, edge, body, hi);
-            cvEllipse(ankleX, footY - 3.0f, 7.0f, 3.4f, edge, 1.0f);
+            cvEllipse(ankleX, footY - 3.0f - (walk ? ph * 2.0f : 0.0f), 7.0f, 3.4f, edge, 1.0f);
         }
 
         /* --- 骨盆 --- */
@@ -1067,6 +1092,7 @@ static void BakeUiPanel(int id, int hot) {
 
     cvFinish(&g_sprites[id]);
 }
+
 
 static void BakeUiCursor(void) {
     cvClear();

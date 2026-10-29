@@ -26,6 +26,7 @@ extern Extra extras[EXTRA_MAX];
 
 void ExtrasReset(void);
 void ExtrasSpawnForLevel(int level);
+void ExtrasSpawnOne(int idx);
 void UpdateExtras(float dt);
 
 /* v2.2：对指定位置附近的游荡怪造成伤害，返回打中的只数 */

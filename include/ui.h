@@ -36,3 +36,12 @@ int  UIS(int v);
 int RebindConsumeKey(int vk);
 
 #endif /* CANITY_UI_H */
+void PageTabRect(int idx, int* x0, int* y0, int* x1, int* y1);   /* v2.8 */
+
+/* v3.0：绘制原语对外暴露（锁箱 / 其它模块要用） */
+void BlendRectWin(int x0, int y0, int x1, int y1, unsigned int color, float alpha);
+void FrameRectWin(int x0, int y0, int x1, int y1, unsigned int color, float alpha, int thick);
+void DrawTextWin(int x, int y, const char* t, unsigned int color);
+void DrawTextCenterWin(int cx, int y, const char* t, unsigned int color);
+int  TextHeightWin(void);
+int  TextWidthWin(const char* t);

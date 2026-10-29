@@ -5,6 +5,8 @@
  */
 #include "common.h"
 #include "entity.h"
+#include "upgrade_run.h"
+#include "bench.h"
 #include "relics.h"
 #include "weapons.h"
 #include "game.h"
@@ -235,7 +237,30 @@ int HasLOS(float x0, float y0, float x1, float y1) {
 }
 
 /* 玩家制造声音：只有跑步、翻找、手摇会调用 */
+/* v3.0：藏身判定 —— 很多 AI 分支都要问「玩家是不是藏着」 */
+extern int hiddenIn;
+
 void MakeNoise(float x, float y, float radius) {
+    /* v3.0：**噪音要通知所有追捕者** ——
+       原来只写 monster，于是扔瓶子引开对追光鬼/影子/蜘蛛完全无效，
+       「用噪音控制敌人」这个逃生核心手法只对三分之一的怪成立。 */
+    {
+        extern Monster lightBeast;
+        Monster* all[2] = { &monster, &lightBeast };
+        for (int mi = 0; mi < 2; mi++) {
+            Monster* mm = all[mi];
+            if (!mm->active) continue;
+            float r2 = radius;
+            extern float modNoiseMul;
+            r2 *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;
+            if (Dist2(x, y, mm->x, mm->y) > r2 * r2) continue;
+            mm->state = 1;
+            mm->tx = x;
+            mm->ty = y;
+            mm->repath = 0.0f;
+            mm->stateTimer = 0.0f;
+        }
+    }
     if (!monster.active) return;
     extern float modNoiseMul;
     radius *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;   /* QUIET LID + 遗物 + 事件 */
@@ -349,7 +374,9 @@ void UpdateLightBeast(float dt) {
 
     float pd2 = Dist2(lightBeast.x, lightBeast.y, posX, posY);
     if (lightBeast.hitCooldown <= 0.0f && pd2 < 0.55f) {
+            if (hiddenIn < 0) {   /* v3.0：藏起来抓不到 */
         sanity -= 14.0f;
+            }
         if (sanity < 0.0f) sanity = 0.0f;
         extern int tookDamage;
         tookDamage = 1;
@@ -529,6 +556,15 @@ static void MonsterWander(void) {
 }
 
 void UpdateMonster(float dt) {
+    /* v3.0：进入函数时先把**上一帧位置**推进 —— 函数末尾用它算位移，
+       从而得到「怪自己面朝哪」和「走了多远」。
+       原来朝向用的是屏幕方位角（16:9 下恒为正面，6 张侧面帧全废），
+       走路帧用的是全局时钟（静止也踏步、所有怪同相）。 */
+    {
+        extern Monster monster;
+        monster.prevX = monster.x;
+        monster.prevY = monster.y;
+    }
     if (!monster.active) return;
     /* v1.8：玩家进安全屋 → 怪物立刻丢目标 */
     if (playerInSafe && monster.state != 0) { monster.state = 0; monster.pathLen = 0; monster.pathIdx = 0; }
@@ -600,7 +636,13 @@ void UpdateMonster(float dt) {
         /* v1.8：被抓的惩罚随层数增长，且受局内"铁皮"减免 */
         float catchLoss = CATCH_SANITY_BASE *
                           (1.0f + CATCH_SANITY_STEP * (float)(currentLevel > 0 ? currentLevel - 1 : 0));
-        sanity -= catchLoss * RunDamageTakenMul();
+        /* v3.0：**藏在柜子里 = 完全抓不到**。
+           原来只包住了扣理智那一行，后面的红屏/尖叫/tookDamage/
+           怪物重生全在 if 外照跑 —— 怪贴到 0.55 格内照样红屏，
+           而且 tookDamage=1 会让 PERFECT ESCAPE 成就失效。 */
+        if (hiddenIn < 0) {
+            sanity -= catchLoss * RunDamageTakenMul() * BenchFearDamageMul();
+
     AddHitFlash(0.85f);          /* v2.1：被抓的红闪 */
     AddShake(0.30f, 0.22f);
     PlaySfx(SFX_HEART, 0.95f);
@@ -610,6 +652,20 @@ void UpdateMonster(float dt) {
         healFlash = 0.18f;
         if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
         SpawnMonster();
+        }
+    }
+    /* v3.0：用实际位移更新朝向和走路相位（全局 monster 单例） */
+    {
+        float mdx = monster.x - monster.prevX;
+        float mdy = monster.y - monster.prevY;
+        float d2 = mdx * mdx + mdy * mdy;
+        if (d2 > 1e-7f) {
+            monster.facing = atan2f(mdy, mdx);
+            monster.walkPhase += sqrtf(d2) * 1.2f;   /* v3.0：9 → 1.2，原来每米换 27 次帧，像频闪 */
+            if (monster.walkPhase > 1000.0f) monster.walkPhase -= 1000.0f;
+        }
+        monster.prevX = monster.x;
+        monster.prevY = monster.y;
     }
 }
 
@@ -651,12 +707,28 @@ extern int g_dmgIgnoreArmor;   /* v1.16：1 = 本次伤害无视护甲（酸瓶�
 /* v2.1：怪物血量随层成长。第 1 层 60，第 10 层 240。
    武器满蓄力 59/39/72 → 开局 1~2 击，第 10 层 3~6 击，
    熟练度（+24%）和配件（×1.5）第一次有了可观察的效果。 */
+
 int MonsterHpFor(int level) {
     if (level < 1) level = 1;
     return MONSTER_HP + MONSTER_HP_STEP * (level - 1);
 }
 
+#if NO_COMBAT
+/* v3.0 逃生试炼：**攻击不再造成伤害**。
+   打中怪物只制造噪音（把附近的追捕者引过来）+ 短暂硬直。
+   玩家永远不会「打死」任何东西 —— 这是逃生类的核心前提。 */
 int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
+    (void)base; (void)type; (void)sx; (void)sy;
+    if (!m || !m->active) return 0;
+    MakeNoise(m->x, m->y, 14.0f);
+    m->stun = 0.35f;
+    PlaySfx(SFX_GLASS, 0.5f);
+    SpawnParticles(m->x, m->y, 2);
+    return 0;
+}
+#else
+int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
+
     if (!m->active) return 0;
     if (base <= 0) return 0;
     if (type < 0 || type >= DT_COUNT) type = DT_SLASH;
@@ -704,8 +776,19 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
     }
 
     /* ④ 减法段：护甲 */
-    int finalDmg = g_dmgIgnoreArmor ? afterRes : (afterRes - m->armor);
-    finalDmg = (int)((float)finalDmg * RelicDamageMul() + 0.5f);   /* v2.0 遗物 */
+    /* v3.0：穿甲的「无视 5 护甲」必须叠进这里 ——
+   原来 BenchArmorIgnore() 全项目 0 调用，280 碎片买了空气（数值审查 #3）。 */
+    int effArmor = m->armor - BenchArmorIgnore();
+    if (effArmor < 0) effArmor = 0;
+    int finalDmg = g_dmgIgnoreArmor ? afterRes : (afterRes - effArmor);
+    /* v3.0：**总倍率封顶** ——
+       数值审查算过：满配叠满能达到 60 倍（裸扳手 36 → 单刀 2156），
+       而 L24 怪只有 254 血，溢出 8.5 倍。这里把「来自倍率的部分」夹到 8 倍。 */
+    {
+        float mul = RelicDamageMul() * RunUpgDamageMul() * BenchDamageMul();
+        if (mul > 8.0f) mul = 8.0f;
+        finalDmg = (int)((float)finalDmg * mul + 0.5f);
+    }
     if (m->glued) finalDmg = (int)((float)finalDmg * 1.5f + 0.5f);   /* v2.2 胶水 */
     /* v2.0 EXECUTIONER：目标 <25% 血时 +80% */
     {
@@ -750,6 +833,9 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
         }
     }
 
+    /* v3.0：逃生试炼下怪物永不死亡 —— 即使血量被别处扣到 0 也钳住 */
+    if (m->hp < 1) m->hp = 1;
+
     if (m->hp <= 0) {
         /* v2.1：死亡要有尸体消失的交代 —— 撒一把血 */
         SpawnParticles(m->x, m->y, 1);
@@ -771,6 +857,8 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
             /* v2.2：分武器计数（KNIFE ONLY / BOTTLE RAIN 成就） */
             {
                 extern int totalKills, killsWrench, killsBottle, floorKills;
+                extern int benchKills;
+                benchKills++;   /* v2.7 嗜血 */
                 extern int curWeapon;
                 (void)totalKills;
                 floorKills++;
@@ -790,6 +878,7 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
     if (!RunBottleSilent()) MakeNoise(m->x, m->y, 9.0f);
     return finalDmg;
 }
+#endif  /* NO_COMBAT */
 
 int HitMonster(Monster* m, int dmg) {
     if (!m->active) return 0;

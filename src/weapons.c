@@ -9,9 +9,9 @@
 
 const WeaponDef weaponDefs[WPN_COUNT] = {
     /* nameKey        descKey         kind         res          cost  dmg  range  cd    noise speed pierce */
-    { "WPN_WRENCH", "CRANKWRENCH",  "摇把扳手", "WPN_WRENCH_D",  WPN_MELEE,  WRES_STAMINA, 12.0f, 36, 2.4f, 0.55f, 9.0f,  0.0f, 0 },
-    { "WPN_FLARE",  "FLARE PISTOL", "信号枪",   "WPN_FLARE_D",   WPN_RANGED, WRES_BATTERY,  4.0f, 32, 0.0f, 0.85f, 12.0f, 15.0f, 0 },
-    { "WPN_SIGIL",  "SIGIL",        "符印",     "WPN_SIGIL_D",   WPN_SPELL,  WRES_SANITY,   2.0f, 44, 12.0f, 1.05f, 4.0f,  22.0f, 1 },
+    { "WPN_WRENCH", "CRANKWRENCH",  "摇把扳手", "WPN_WRENCH_D",  WPN_MELEE,  WRES_ENERGY,  14.0f, 36, 2.4f, 0.55f, 9.0f,  0.0f, 0 },
+    { "WPN_FLARE",  "FLARE PISTOL", "信号枪",   "WPN_FLARE_D",   WPN_RANGED, WRES_ENERGY,  11.0f, 32, 15.0f, 0.85f, 12.0f, 15.0f, 0 },
+    { "WPN_SIGIL",  "SIGIL",        "符印",     "WPN_SIGIL_D",   WPN_SPELL,  WRES_ENERGY,  16.0f, 44, 12.0f, 1.05f, 4.0f,  22.0f, 1 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -72,6 +72,7 @@ int WeaponResourceAmount(int res) {
     case WRES_STAMINA: return (int)stamina;
     case WRES_BATTERY: return (int)battery;
     case WRES_SANITY:  return (int)sanity;
+    case WRES_ENERGY:  return (int)energy;      /* v2.3 */
     default:          return 0;
     }
 }
@@ -91,6 +92,10 @@ void WeaponSpend(int res, float amount) {
     case WRES_SANITY:
         sanity -= amount;
         if (sanity < 0.0f) sanity = 0.0f;
+        break;
+    case WRES_ENERGY:
+        energy -= amount;
+        if (energy < 0.0f) energy = 0.0f;
         break;
     default: break;
     }

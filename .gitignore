@@ -1,6 +1,6 @@
-# —— 构建产物 ——
+# 构建产物
 *.exe
-!tools/release.exe
+!/release.exe
 *.o
 *.obj
 *.dll
@@ -9,19 +9,19 @@
 dist/
 build/
 
-# —— 存档与备份 ——
+# 存档与备份
 *.sav
 *.bak
 
-# —— 临时分析与调试（下划线前缀 / 日志 / 截图）——
+# 临时分析与调试（下划线前缀、日志）
 _*
 debug.log
 *.log
 
-# —— 本地暂存目录（lockbox 的移植中间件，已验证后并入 src/）——
+# 本地移植暂存（lockbox 已验证并并入 src/）
 port_staging/
 
-# —— 系统与编辑器 ——
+# 系统与编辑器
 .DS_Store
 Thumbs.db
 *.swp

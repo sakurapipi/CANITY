@@ -5,6 +5,8 @@
  */
 #include "common.h"
 #include "save.h"
+#include "bench.h"
+#include "upgrade_run.h"
 #include "lang.h"
 #include "weapons.h"
 #include "shop.h"
@@ -167,6 +169,12 @@ void SaveGame(void) {
     g_save.sanity = sanity;
     g_save.battery = battery;
     g_save.stamina = stamina;
+    g_save.energy = energy;
+    g_save.benchOwnedSave = benchOwned;
+    g_save.hideSpotSaveCount = hideSpotCount;
+    for (int i = 0; i < 6; i++) g_save.hideSpotSave[i] = hideSpots[i];
+    g_save.hiddenInSave = hiddenIn;
+    for (int i = 0; i < 4; i++) g_save.runUpgSave[i] = RunUpgLevel(i);   /* v2.3 */
     g_save.flashlightOn = flashlightOn;
     g_save.posX = posX; g_save.posY = posY;
     g_save.dirX = dirX; g_save.dirY = dirY;
@@ -457,6 +465,15 @@ void ContinueRun(void) {
     sanity = g_save.sanity;
     battery = g_save.battery;
     stamina = g_save.stamina;
+    energy = g_save.energy;
+    benchOwned = g_save.benchOwnedSave;
+    hideSpotCount = g_save.hideSpotSaveCount;
+    if (hideSpotCount > 6) hideSpotCount = 6;
+    for (int i = 0; i < 6; i++) hideSpots[i] = g_save.hideSpotSave[i];
+    hiddenIn = g_save.hiddenInSave;
+    if (hiddenIn >= hideSpotCount) hiddenIn = -1;
+    RunUpgLoadFromSave(g_save.runUpgSave);   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
+    if (!(energy > 0.0f)) energy = ENERGY_MAX;
     flashlightOn = g_save.flashlightOn;
     posX = g_save.posX; posY = g_save.posY;
     dirX = g_save.dirX; dirY = g_save.dirY;

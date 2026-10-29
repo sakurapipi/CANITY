@@ -105,6 +105,8 @@ typedef struct {
     const char* desc;
     int kind;          /* IRK_* */
     int rarity;        /* 0=普通 1=稀有 */
+    const char* nameZh;   /* v2.9：中文名（原来只有英文，三选一整页是英文） */
+    const char* descZh;   /* v2.9：中文描述 */
 } InRunDef;
 
 extern const InRunDef inRunDefs[INRUN_COUNT];

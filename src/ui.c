@@ -8,6 +8,8 @@
 #include "lang.h"
 #include "weapons.h"
 #include "shop.h"
+#include "bench.h"
+#include "lockbox.h"   /* v3.0 锁盘 */   /* v2.7 改造树 */
 #include "ui_theme.h"
 #include "sprites.h"
 #include "relics.h"
@@ -156,20 +158,41 @@ static int TextScale(void) {
 }
 
 static int TextAdvWin(void) {
-    return FONT_W * TextScale() * winW / renderW;
+    /* v3.0：同 TextHeightWin —— 用高度基准，保证字符宽高比不变 */
+    return FONT_W * TextScale() * renderH / 458;
 }
 
-static int TextWidthWin(const char* t) {
+int TextWidthWin(const char* t) {
     /* v2.0：先过一遍翻译表，再按是否含中文选字形 */
     t = Transl(t);
     if (CjkHasNonAscii(t))
-        return CjkTextWidth(t) * winW / renderW;
+        return CjkTextWidth(t) * renderH / 458;   /* v3.0：同一基准 */
     return (int)strlen(t) * TextAdvWin();
 }
 
 /* v1.8：行文本按可用宽度截断。
    字号会随窗口尺寸变化（TextAdvWin），固定字符串在窄窗口/非 16:9 下会撑出面板，
    所以统一在绘制前剪一次，末尾用 ".." 表示省略。 */
+
+/* v2.9：技能树节点名的中文并列表（SkillDef 没中文字段，这里按英文名查） */
+static const char* SkillNameZh(const char* en) {
+    static const char* tbl[][2] = {
+        { "TYPE WORK",       "熟能生巧" },
+        { "RELOAD RHYTHM",   "换弹节奏" },
+        { "CARTOGRAPHER",    "制图师" },
+        { "BREAKER HAND",    "配电手" },
+        { "FUSE SMITH",      "保险丝匠" },
+        { "SHORTCUT",        "捷径" },
+        { "EXECUTIONER",     "处刑人" },
+        { "WEATHERMAN",      "观测者" },
+        { "LAST RESORT",     "绝境反击" },
+        { "SALVAGE",         "打捞" },
+    };
+    for (int i = 0; i < (int)(sizeof(tbl) / sizeof(tbl[0])); i++)
+        if (strcmp(tbl[i][0], en) == 0) return tbl[i][1];
+    return en;
+}
+
 static void ClampRowText(char* buf, int availPx) {
     int adv = TextAdvWin();
     if (adv <= 0) return;
@@ -191,8 +214,14 @@ static void ClampRowText(char* buf, int availPx) {
             buf[k] = 0;
             if (k == 0) break;
         }
-        size_t n2 = strlen(buf);
-        if (n2 + 2 < 128) { buf[n2] = '.'; buf[n2 + 1] = '.'; buf[n2 + 2] = 0; }
+        /* v2.9：**只有真的截断了才补 ".."**。
+           原来无条件补，导致没超宽的每一行中文都以 ".." 结尾
+           （改造台描述、遗物三选一都是这样）。 */
+        {
+            int truncated = (CjkTextWidth(buf) * winW / renderW > limit);
+            size_t n2 = strlen(buf);
+            if (truncated && n2 + 2 < 128) { buf[n2] = '.'; buf[n2 + 1] = '.'; buf[n2 + 2] = 0; }
+        }
         return;
     }
     int maxc = availPx / adv;
@@ -205,8 +234,16 @@ static void ClampRowText(char* buf, int availPx) {
     }
 }
 
-static int TextHeightWin(void) {
-    return FONT_H * TextScale() * winH / renderH;
+int TextHeightWin(void) {
+    /* v3.0：**字号必须和 UIS() 站在同一基准**。
+       原来返回 FONT_H*TextScale() *winH/renderH，而 SyncWindowSize
+       每帧把 winW/winH 覆盖成 renderW/renderH → 那个比值恒为 1，
+       于是字高恒定 24px；但 UIS() 跟 renderH 缩放。
+       两者只在 renderH=458（旧的 28 万像素预算）时相等 ——
+       现在预算是 90 万（renderH≈711），UIS 系统性大 1.55 倍，
+       表现就是「框越大、字相对越小」，高分辨率像空面板。
+       改成跟 renderH 比 458 的设计基准，两套比例就永远一致。 */
+    return FONT_H * TextScale() * renderH / 458;
 }
 
 /* xWin/yWin 用窗口坐标，内部换算到渲染坐标 */
@@ -259,7 +296,7 @@ void DumpUILayout(const char* path) {
     fclose(f);
 }
 
-static void DrawTextWin(int xWin, int yWin, const char* t, unsigned int color) {
+void DrawTextWin(int xWin, int yWin, const char* t, unsigned int color) {
     t = Transl(t);          /* v2.0：绘制层统一翻译 */
     UiTrack(xWin, yWin, TextWidthWin(t), TextHeightWin(), t);
     if (CjkHasNonAscii(t)) {
@@ -294,7 +331,7 @@ static void DrawTextWin(int xWin, int yWin, const char* t, unsigned int color) {
     }
 }
 
-static void DrawTextCenterWin(int cxWin, int yWin, const char* t, unsigned int color) {
+void DrawTextCenterWin(int cxWin, int yWin, const char* t, unsigned int color) {
     DrawTextWin(cxWin - TextWidthWin(t) / 2, yWin, t, color);
 }
 
@@ -379,7 +416,9 @@ static const unsigned int kBranchColor[4] = {
     0x00FF6050u,   /* C 反击 红 */
     0x00B080FFu,   /* 跨支   紫 */
 };
+/* v2.9：分支名走翻译（原来只有英文） */
 static const char* kBranchName[4] = { "SILENCE", "ECONOMY", "DELIVERY", "SHAPE" };
+static const char* kBranchNameZh[4] = { "沉寂", "节流", "投放", "塑形" };
 ;
 
 /* 面板内竖向预算，单位 = TH/10。
@@ -656,7 +695,16 @@ static MenuGeo MakeGeo(const char* title, int count, int rowH, int pad, int widt
     g.rowH = rowH;
 
     int titleH = titlePx;
+    /* v2.9：**行高兜底** —— 原来 rowH 用 UIS 缩、文字高用 TH 缩，
+       两套比例反向，窗口一大行就压字（报告 严重 #1）。
+       这里保证行高至少容得下一行文字。 */
+    {
+        int minRow = TextHeightWin() + UIS(4);
+        if (rowH < minRow) rowH = minRow;
+    }
     int innerH = titleH + UIS(24) + count * rowH;
+    /* v2.4：安全屋多留一条校准条的位置（画在面板底部空白区） */
+    if (stateIndex == STATE_SAFEHOUSE) innerH += TextHeightWin() + UIS(40);
     int panelH = pad * 2 + innerH;
     /* v1.8：行数多时面板会长过窗口（技能树 16 行在 640px 窗口里就溢出了）。
        这里把高度夹到窗口内，再按夹后的高度重算可见行数 —— 剩下的靠滚动。 */
@@ -735,7 +783,10 @@ MenuGeo GetMenuGeo(void) {
                                          : Tr("CHOOSE ONE", "三选一"),
                            INRUN_CHOICES, UIS(48), UIS(30), UIS(780), UIS(56), STATE_SKILL_PICK);
         case STATE_WEAPON_PICK: return MakeGeo(Tr("CHOOSE WEAPON", "选择初始武器"), WPN_COUNT, UIS(52), UIS(32), UIS(760), UIS(60), STATE_WEAPON_PICK);
-        case STATE_SAFEHOUSE: return MakeGeo(ShopPageTitle(), ShopRowCount(), UIS(50), UIS(32), UIS(720), UIS(58), STATE_SAFEHOUSE);
+        /* v2.9：安全屋不画大红标题 —— 顶部页签已经说清是哪个页面，
+           那行「SAFE HOUSE - SHOP」横在中间会把改造树整个遮住（用户截图）。
+           传空串让 MakeGeo 跳过标题绘制。 */
+        case STATE_SAFEHOUSE: return MakeGeo("", ShopRowCount(), UIS(50), UIS(32), UIS(720), UIS(58), STATE_SAFEHOUSE);   /* 高度在 MakeGeo 里另算 */
         case STATE_BESTIARY:  return MakeGeo("BESTIARY", BESTIARY_COUNT + 1, UIS(38), UIS(26), UIS(900), UIS(46), STATE_BESTIARY);
         case STATE_HELP:      return MakeGeo(helpPage == 1 ? Tr("HELP  -  RULES", "帮助  -  规则") : Tr("HELP  -  CONTROLS", "帮助  -  按键"),
                                             HELP_PAGE_ROWS, UIS(29), UIS(22), UIS(1000), UIS(30), STATE_HELP);
@@ -829,9 +880,20 @@ float SliderXToValue(MenuGeo g, int x, float lo, float hi, float step) {
     return v;
 }
 
+extern int safehouseHoverRow;   /* v3.0：鼠标悬停行（定义在 game.c） */
+extern int safehouseHoverTab;   /* v3.0：悬停页签 */
+
 RECT RowRect(MenuGeo g, int i) {
     RECT r;
-    r.left = g.panel.left + UIS(18);
+    /* v3.0：安全屋的页签挪到了左侧竖排，内容行必须让开那一条 ——
+       否则第一列文字会被 sidebar 盖住。 */
+    int leftPad = UIS(18);
+    if (currentState == STATE_SAFEHOUSE) {
+        int tx0, ty0, tx1, ty1;
+        PageTabRect(0, &tx0, &ty0, &tx1, &ty1);
+        leftPad = (tx1 - g.panel.left) + UIS(30);
+    }
+    r.left = g.panel.left + leftPad;
     r.right = g.panel.right - UIS(18);
     /* 应用滚动偏移：只绘制可见范围内的行 */
     int visibleIndex = i - g.scrollOffset;
@@ -908,21 +970,21 @@ static const char* MenuLabel(int i) {
             int ridx = i + (helpPage == 1 ? HELP_PAGE_ROWS : 0);   /* v2.2：分页 */
             if (ridx >= 0 && ridx < HELP_KEY_ROWS) {
                 switch (ridx) {
-                case 0: sprintf(kb, "MOVE:  %s %s %s %s",
+                case 0: sprintf(kb, "%s:  %s %s %s %s", Tr("MOVE","移动"),
                                 VkName(g_bindings[ACT_MOVE_FWD]), VkName(g_bindings[ACT_MOVE_LEFT]),
                                 VkName(g_bindings[ACT_MOVE_BACK]), VkName(g_bindings[ACT_MOVE_RIGHT])); break;
-                case 1: sprintf(kb, "SPRINT: %s  (NOISE)", VkName(g_bindings[ACT_SPRINT])); break;
-                case 2: sprintf(kb, "SEARCH: HOLD %s  (NOISE)", VkName(g_bindings[ACT_INTERACT])); break;
-                case 3: sprintf(kb, "CRANK: HOLD %s  (+32)", VkName(g_bindings[ACT_CRANK])); break;
-                case 4: sprintf(kb, "LIGHT: %s", VkName(g_bindings[ACT_FLASHLIGHT])); break;
-                case 5: sprintf(kb, "MAP: %s (FULL)  HOLD TAB (MINI)  -10/S", VkName(g_bindings[ACT_MAP])); break;
-                case 6: sprintf(kb, "THROW: %s", VkName(g_bindings[ACT_THROW])); break;
-                case 7: sprintf(kb, "SLOT: %s %s %s  (WHEEL: ALL)",
+                case 1: sprintf(kb, "%s: %%s  (噪声)", Tr("SPRINT","冲刺"), VkName(g_bindings[ACT_SPRINT])); break;
+                case 2: sprintf(kb, "%s: 长按 %%s  (噪声)", Tr("SEARCH","翻找"), VkName(g_bindings[ACT_INTERACT])); break;
+                case 3: sprintf(kb, "%s: 长按 %%s  (+32)", Tr("CRANK","摇电"), VkName(g_bindings[ACT_CRANK])); break;
+                case 4: sprintf(kb, "%s: %s", Tr("LIGHT","手电"), VkName(g_bindings[ACT_FLASHLIGHT])); break;
+                case 5: sprintf(kb, "%s: %%s (全图)  长按 TAB (小图)  -10/秒", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
+                case 6: sprintf(kb, "%s: %s", Tr("THROW","投掷"), VkName(g_bindings[ACT_THROW])); break;
+                case 7: sprintf(kb, "%s: %%s %%s %%s  (滚轮: 全部)", Tr("SLOT","选槽"),
                                 VkName(g_bindings[ACT_SELECT_1]), VkName(g_bindings[ACT_SELECT_2]),
                                 VkName(g_bindings[ACT_SELECT_3])); break;
-                case 8: sprintf(kb, "ATTACK: HOLD %s  (CHARGE)",
+                case 8: sprintf(kb, "%s: 长按 %%s  (蓄力)", Tr("ATTACK","攻击"),
                                 VkName(g_bindings[ACT_CANCEL_CHARGE])); break;
-                default: sprintf(kb, "PAUSE: %s  DODGE: %s",
+                default: sprintf(kb, "%s: %%s  闪避: %%s", Tr("PAUSE","暂停"),
                                 VkName(g_bindings[ACT_PAUSE]), VkName(g_bindings[ACT_DODGE])); break;
                 }
                 {
@@ -932,7 +994,8 @@ static const char* MenuLabel(int i) {
                 return kb;
             }
             static const char* helps[] = {
-                "SEARCH CONTAINERS FOR FUSES, THEN POWER THE BREAKER.",
+                "SEARCH CONTAINERS FOR FUSES,",   /* v2.9：拆两行，原来后半句被截掉 */
+    "THEN POWER THE BREAKER.",
                 "",
                 "RUNNING AND SEARCHING MAKE NOISE.",
                 "WALKING IS QUIET, BUT 5S OF IT STARTS TO WHISPER.",
@@ -963,7 +1026,7 @@ static const char* MenuLabel(int i) {
         }
         case STATE_WEAPON_PICK: {
             static char wb[128];
-            static const char* resName[3] = { "STAMINA", "BATTERY", "SANITY" };
+            static const char* resName[WRES_COUNT] = { "STAMINA", "BATTERY", "SANITY", "ENERGY" };   /* v2.3：三把武器都烧能量 */
             if (i < 0 || i >= WPN_COUNT) return "";
             sprintf(wb, "%s   %s -%.0f   LV%d", Tr(weaponDefs[i].dispName, weaponDefs[i].nameZh),
                     resName[weaponDefs[i].resource], weaponDefs[i].cost,
@@ -979,7 +1042,9 @@ static const char* MenuLabel(int i) {
                 sprintf(pb, "%s: %s", Tr(rd->nameEn, rd->nameZh),
                         Tr(rd->descEn, rd->descZh));
             } else {
-                sprintf(pb, "%s: %s", inRunDefs[id].name, inRunDefs[id].desc);
+                /* v2.9：三选一用中文（原来 24 条技能整页英文） */
+        sprintf(pb, "%s: %s", Tr(inRunDefs[id].name, inRunDefs[id].nameZh),
+                Tr(inRunDefs[id].desc, inRunDefs[id].descZh));
             }
             {
                 MenuGeo g = GetMenuGeo();
@@ -1063,9 +1128,12 @@ static const char* MenuLabel(int i) {
             } else {
                 int dispVal = *it->value;
                 if (dispVal >= 0 && dispVal < it->count) {
-                    sprintf(buf, "%s: %s", it->name, it->options[dispVal]);
+                    /* v2.9：选项值也走翻译（原来 LOW/MEDIUM/HIGH 全英文） */
+                    sprintf(buf, "%s: %s", it->name,
+                            Tr(it->options[dispVal], it->options[dispVal]));
                 } else {
-                    sprintf(buf, "%s: %s", it->name, it->options[0]);
+                    sprintf(buf, "%s: %s", it->name,
+                            Tr(it->options[0], it->options[0]));
                 }
             }
             return buf;
@@ -1075,7 +1143,7 @@ static const char* MenuLabel(int i) {
 }
 
 /* 窗口坐标 -> 渲染坐标的矩形填充（半透明） */
-static void BlendRectWin(int x0, int y0, int x1, int y1, unsigned int color, float alpha) {
+void BlendRectWin(int x0, int y0, int x1, int y1, unsigned int color, float alpha) {
     int rx0 = x0 * renderW / winW, rx1 = x1 * renderW / winW;
     /* v2.1：窗口像素折回渲染缓冲时，1px 的线在 1080p/1440p 会算成 0 宽直接消失。
        兜底保证至少 1 个渲染像素。 */
@@ -1104,7 +1172,7 @@ static void BlendRectWin(int x0, int y0, int x1, int y1, unsigned int color, flo
     }
 }
 
-static void FrameRectWin(int x0, int y0, int x1, int y1, unsigned int color, float alpha, int thick) {
+void FrameRectWin(int x0, int y0, int x1, int y1, unsigned int color, float alpha, int thick) {
     BlendRectWin(x0, y0, x1, y0 + thick, color, alpha);
     BlendRectWin(x0, y1 - thick, x1, y1, color, alpha);
     BlendRectWin(x0, y0, x0 + thick, y1, color, alpha);
@@ -1112,14 +1180,331 @@ static void FrameRectWin(int x0, int y0, int x1, int y1, unsigned int color, flo
 }
 
 /* 主面板（不含弹窗）：弹窗必须画在列表文字之上，否则文字会压在弹窗上 */
+
+/* v2.4：安全屋的校准条。
+   一根横条，滑块左右扫，按空格锁定；中间亮区是普通区，更窄的白色是完美区。 */
+
+/* v2.5：校准条本体（位置由调用方给）。
+   拆出来是因为「游戏内按空格开始小游戏」时，安全屋面板根本没画，
+   原来画在面板里的条就永远看不到。 */
+static void DrawCalibBar(int bx, int by, int barW, int barH) {
+    if (barW < UIS(120)) return;
+    BlendRectWin(bx, by, bx + barW, by + barH, 0x00101418, 0.92f);
+    {
+        float zsc = CalibZoneScale();   /* v2.6：随层数缩小 */
+        int zx0 = bx + (int)((calibZoneC - CALIB_ZONE_W * zsc) * barW);
+        int zx1 = bx + (int)((calibZoneC + CALIB_ZONE_W * zsc) * barW);
+        BlendRectWin(zx0, by, zx1, by + barH, 0x00307A4A, 0.85f);
+        int px0 = bx + (int)((calibZoneC - CALIB_PERFECT_W * zsc) * barW);
+        int px1 = bx + (int)((calibZoneC + CALIB_PERFECT_W * zsc) * barW);
+        BlendRectWin(px0, by, px1, by + barH, 0x00E8F0A0, 0.95f);
+    }
+    {
+        int mx = bx + (int)(calibPos * barW);
+        int mw = UIS(4);
+        BlendRectWin(mx - mw / 2, by - UIS(3), mx + mw / 2, by + barH + UIS(3),
+                     calibActive ? 0x00FFFFFFu : 0x00606060u, 0.98f);
+    }
+    FrameRectWin(bx, by, bx + barW, by + barH, 0x00708090u, 0.8f, 1);
+}
+
+static void DrawCalibStrip(MenuGeo g) {
+    /* v2.4：画在面板内部的**底部空白区**（面板已为它加高）。
+       画在面板里才能保证每帧被不透明面板盖住，不会留残影。 */
+    int pad = UIS(34);
+    int barW = (g.panel.right - g.panel.left) - pad * 2;
+    if (barW < UIS(160)) return;
+    int bx = g.panel.left + pad;
+    int barH = UIS(16);
+    int by = g.panel.bottom - UIS(30) - barH;
+    char line[128];
+
+    /* 标题行：剩余次数 / 冷却 */
+    if (calibActive) {
+        sprintf(line, "%s", Tr("CALIBRATION - PRESS SPACE TO LOCK", "校准中 - 按空格锁定"));
+    } else if (calibCooldown > 0.0f) {
+        sprintf(line, "%s   %.0fs", Tr("CALIBRATION   COOLING", "校准   冷却中"), calibCooldown);
+    } else {
+        sprintf(line, "%s   [SPACE]", Tr("CALIBRATION", "校准"));
+    }
+    /* v2.4：先铺一层不透明底 —— 否则每帧重画会在同一位置叠字（残影） */
+    BlendRectWin(bx - UIS(8), by - TextHeightWin() - UIS(8),
+                 bx + barW + UIS(8), by + barH + UIS(6), 0x000A0E14, 0.96f);
+
+    DrawTextWin(bx, by - TextHeightWin() - UIS(4), line,
+                calibActive ? 0x00FFE060u : (calibAttempts > 0 && calibCooldown <= 0.0f ? 0x00A0D0F0u : 0x00808080u));
+
+    DrawCalibBar(bx, by, barW, barH);   /* v2.5：条本体抽成共用函数 */
+
+    /* 结果提示 */
+    if (calibResultTimer > 0.0f && calibResult) {
+        const char* msg = "";
+        unsigned int col = 0x00808080u;
+        if (calibResult == 1) { msg = Tr("PERFECT", "完美"); col = 0x00FFE060u; }
+        else if (calibResult == 2) { msg = Tr("CALIBRATED", "成功"); col = 0x0080E080u; }
+        else { msg = Tr("MISSED", "失手"); col = 0x00FF6040u; }
+        DrawTextWin(bx + barW - TextWidthWin(msg), by - TextHeightWin() - UIS(4), msg, col);
+    }
+}
+
+
+/* v2.8：局内改造树 —— **可平移缩放的画布**（思维导图式）。
+   节点用世界坐标，绘制时统一变换：
+       sx = (worldX - treeVX) * treeVK + winW/2
+   好处：窗口多小都不会崩，节点数量可以无限加。
+
+   顶部一排按钮 = 原来的四页（商店/改装/改造树/休息），
+   点一下或按左右键切页，不用记 TAB。 */
+
+/* 页签按钮：几何由 DrawPageTabs 计算，ClickPageTabs 复用同一套 */
+void PageTabRect(int idx, int* x0, int* y0, int* x1, int* y1) {
+    /* v3.0：页签改成**左侧竖排**。
+       调研结论：横向 5 个页签在窄面板里必然挤（要么截字、要么压余额），
+       商店类 UI 的通用解法是竖排 sidebar —— 宽度压力归零，
+       页签再多也只是往下排，不需要改布局。
+
+       布局：
+          面板左边 26% 宽的一列放 5 个页签
+          右边 74% 是内容区 */
+    int th = TextHeightWin();
+    int panelW = winW - UIS(32);
+    int sideW  = panelW * 26 / 100;
+    if (sideW < UIS(140)) sideW = UIS(140);
+    if (sideW > UIS(220)) sideW = UIS(220);
+
+    /* v3.0：**必须贴着面板左边界** ——
+       原来用 UIS(16)+UIS(10) 这种绝对定位，而安全屋面板是居中的，
+       1280x720 / 1080p 下整列 5 个页签挂在面板框外 32px（兼容性审查 #2）。 */
+    int bx0;
+    {
+        MenuGeo pg = GetMenuGeo();
+        bx0 = pg.panel.left + UIS(14);
+    }
+    int tabH = th + UIS(14);
+    int gap  = UIS(8);
+    int by0 = UIS(16) + th + UIS(28) + idx * (tabH + gap);
+
+    *x0 = bx0;
+    *y0 = by0;
+    *x1 = bx0 + sideW;
+    *y1 = by0 + tabH;
+}
+
+
+
+static void DrawPageTabs(void) {
+    static const char* names[SAFEHOUSE_PAGES] = { "SHOP", "BENCH", "TREE", "REST", "UPGRADE" };
+    static const char* namesZh[SAFEHOUSE_PAGES] = { "商店", "改装", "改造树", "休息", "强化" };
+
+    int th = TextHeightWin();
+    int x0, y0, x1, y1;
+    PageTabRect(0, &x0, &y0, &x1, &y1);
+
+    /* 左侧竖分隔线：把 sidebar 和内容区切开 */
+    int sepX = x1 + UIS(10);
+    BlendRectWin(sepX, y0 - UIS(8), sepX + 1, winH - UIS(40), 0x00C8B060u, 0.45f);
+
+    for (int i = 0; i < SAFEHOUSE_PAGES; i++) {
+        PageTabRect(i, &x0, &y0, &x1, &y1);
+        int active = (shopPage == i);
+        int hover  = (safehouseHoverTab == i);
+
+        BlendRectWin(x0, y0, x1, y1,
+                     active ? 0x00C8A040 : (hover ? 0x00303838 : 0x00161C1C),
+                     active ? 0.95f : 0.85f);
+        FrameRectWin(x0, y0, x1, y1,
+                     active ? 0x00FFE070u : (hover ? 0x00A0C0C0u : 0x00505858u),
+                     0.9f, active ? 2 : 1);
+
+        /* 选中时左侧加一根粗竖条，扫一眼就知道在哪一页 */
+        if (active) {
+            BlendRectWin(x0 - UIS(6), y0, x0 - UIS(1), y1, 0x00FFE070u, 0.95f);
+        }
+
+        const char* t = Tr(names[i], namesZh[i]);
+        DrawTextWin(x0 + UIS(12), y0 + (y1 - y0 - th) / 2, t,
+                    active ? 0x00100C08u : 0x0090A0A0u);
+    }
+}
+
+
+static void DrawBenchTree(MenuGeo g) {
+    (void)g;
+    int th = TextHeightWin();
+
+    /* v2.9：第一次进树页自动居中 —— 原来 treeVX/VY 默认 0，
+       第一列框 -35..115，左半截在屏外（截图可见）。 */
+    {
+        static int treeCentred = 0;
+        if (!treeCentred) {
+            treeCentred = 1;
+            BenchFocusNode(shopNodeSel);
+        }
+        if (currentState != STATE_SAFEHOUSE) treeCentred = 0;
+    }
+    int M = UIS(16);
+
+    /* ---- 背景 ---- */
+    BlendRectWin(M, M, winW - M, winH - M, 0x000A0E14, 0.97f);
+    FrameRectWin(M, M, winW - M, winH - M, 0x00C8B060u, 0.9f, 1);
+
+    /* ---- 顶部：页签 + 余额 ---- */
+    DrawPageTabs();
+    {
+        static char sb[64];
+        sprintf(sb, "SHARDS %d", shards);
+        DrawTextWin(winW - M - UIS(16) - TextWidthWin(sb), UIS(14), sb, 0x00E8C040u);
+        /* 缩放指示 */
+        sprintf(sb, "%.1fx", treeVK);
+        DrawTextWin(winW - M - UIS(16) - TextWidthWin(sb), UIS(14) + th + UIS(6), sb, 0x009AA8A8u);
+    }
+
+    /* ---- 节点（世界坐标 -> 屏幕） ---- */
+    /* v2.9：框宽**从世界间距推**，不再从文字高推 ——
+       从文字高推的话，窗口一大 TH 变大，框也跟着变宽，
+       最后宽到和列间距一样，相邻节点就贴在一起（截图里 MAGAZI|HIDE）。
+       现在：框宽 = 列间距 - 固定缝隙，永远留得住缝。 */
+    int boxW = (int)((BENCH_NODE_WX - 46.0f) * treeVK);
+    int boxH = (int)((BENCH_NODE_WY - 52.0f) * treeVK);
+    if (boxW < 26) boxW = 26;
+    if (boxH < 16) boxH = 16;
+    /* 但高度至少要放得下一行字 */
+    if (boxH < th / 2) boxH = th / 2;
+
+    for (int id = 0; id < BENCH_COUNT; id++) {
+        float wx = BenchNodeWorldX(id);
+        float wy = BenchNodeWorldY(id);
+        /* v2.9：screen = world * k + v（和思维导图一致） */
+        int cx = (int)(wx * treeVK + treeVX);
+        int cy = (int)(wy * treeVK + treeVY);
+        int bx = cx - boxW / 2, by = cy - boxH / 2;
+
+        /* 屏幕外的直接跳过（节点多了也不掉帧） */
+        if (bx > winW || by > winH || bx + boxW < 0 || by + boxH < 0) continue;
+
+        int owned = BenchHas(id);
+        int prereq = BenchPrereqOk(id);
+        int affordable = (shards >= benchNodes[id].cost);
+        int sel = (id == shopNodeSel);
+
+        /* 同列竖连线（画在节点下面） */
+        if (id % BENCH_ROWS > 0) {
+            int pid = id - 1;
+            int pcx = (int)(BenchNodeWorldX(pid) * treeVK + treeVX);
+            int pcy = (int)(BenchNodeWorldY(pid) * treeVK + treeVY);
+            int upOwned = BenchHas(pid);
+            int y0 = pcy + boxH / 2, y1 = cy - boxH / 2;
+            int steps = (y1 - y0) / 6;
+            for (int s = 0; s <= steps; s++) {
+                int yy = y0 + s * 6;
+                if (!upOwned && (s % 2)) continue;      /* 未解锁 = 虚线 */
+                BlendRectWin(pcx - 1, yy, pcx + 2, yy + 4,
+                             upOwned ? 0x00C8A040u : 0x00404040u, upOwned ? 0.95f : 0.7f);
+            }
+        }
+
+        unsigned int fill, frame, textc;
+        if (owned)           { fill = 0x00C8A040u; frame = 0x00FFE070u; textc = 0x00100C08u; }
+        else if (!prereq)    { fill = 0x00161412u; frame = 0x00383028u; textc = 0x00504840u; }
+        else if (affordable) { fill = 0x00202828u; frame = 0x00A0C0C0u; textc = 0x00E8F0F0u; }
+        else                 { fill = 0x00201818u; frame = 0x00704040u; textc = 0x00C08080u; }
+
+        BlendRectWin(bx, by, bx + boxW, by + boxH, fill, owned ? 0.95f : 0.88f);
+        FrameRectWin(bx, by, bx + boxW, by + boxH,
+                     sel ? 0x00FFFFFFu : frame, 0.95f, sel ? 3 : 1);
+
+        if (treeVK > 0.35f) {
+            /* v2.9：**名字独占框内一行，价格画在框下方**。
+               之前挤同一行，800x600 下框内只有 138px，
+               "MAGAZINE"(160px) 截断后价格还叠上去 → 糊成一坨。 */
+            char nb[48];
+            /* v2.9：框内也用中文名（原来只有底部详情是中文，同屏一中一英） */
+            sprintf(nb, "%s%s", benchNodes[id].star ? "* " : "",
+                    Tr(benchNodes[id].name, benchNodes[id].nameZh));
+            ClampRowText(nb, boxW - UIS(10));
+            DrawTextWin(bx + UIS(5), by + (boxH - th) / 2, nb, textc);
+
+            if (treeVK > 0.55f) {
+                char pb[24];
+                sprintf(pb, "%d", benchNodes[id].cost);
+                DrawTextWin(bx + UIS(5), by + boxH + UIS(2), pb,
+                            owned ? 0x00807850u : (affordable ? 0x00A0E0A0u : 0x00C06060u));
+            }
+        }
+    }
+
+    /* ---- 底部详情 ---- */
+    {
+        /* v2.9：原来 dy=winH-96，三行累加后第三行 570 撞提示行 574。
+           现在从下往上倒推：留出提示行 + 三行正文。 */
+        int lineH = th + UIS(4);
+        int dy = winH - UIS(10) - th - 3 * lineH;
+        int id = shopNodeSel;
+        if (id < 0 || id >= BENCH_COUNT) id = 0;
+        static char l2[128];
+
+        DrawTextWin(UIS(28), dy, Tr(benchNodes[id].name, benchNodes[id].nameZh), 0x00FFFFFFu);
+        sprintf(l2, "%d %s", benchNodes[id].cost, Tr("SHARDS", "碎片"));
+        DrawTextWin(UIS(240), dy, l2, shards >= benchNodes[id].cost ? 0x00A0E0A0u : 0x00E06060u);
+
+        dy += lineH;
+        {
+            static char db[128];
+            sprintf(db, "%s", Tr(benchNodes[id].desc, benchNodes[id].descZh));
+            ClampRowText(db, winW - UIS(56));
+            DrawTextWin(UIS(28), dy, db, 0x00C8D0D0u);
+        }
+
+        dy += lineH;
+        if (BenchHas(id)) {
+            DrawTextWin(UIS(28), dy, Tr("OWNED", "已拥有"), 0x00C8A040u);
+        } else if (!BenchPrereqOk(id)) {
+            DrawTextWin(UIS(28), dy, Tr("REQUIRES THE NODE ABOVE IT", "需要先买同一列的上一层"), 0x00E0A040u);
+        } else if (shards < benchNodes[id].cost) {
+            sprintf(l2, "%s %d", Tr("SHORT BY", "还差"), benchNodes[id].cost - shards);
+            DrawTextWin(UIS(28), dy, l2, 0x00E06060u);
+        } else {
+            DrawTextWin(UIS(28), dy, Tr("ENTER TO BUY", "回车购买"), 0x0060FF90u);
+        }
+
+        {
+            const char* kh = Tr("WHEEL ZOOM  DRAG PAN  HOME  ESC",
+                                "滚轮缩放  拖拽平移  HOME  ESC");
+            DrawTextWin(winW - UIS(24) - TextWidthWin(kh), winH - UIS(16) - th - UIS(6), kh, 0x009AA8A8u);
+        }
+    }
+}
+
+
 void DrawMenuPanels(void) {
     MenuGeo g = GetMenuGeo();
+    /* v2.7：改造树是**整屏**页面，不走下面的通用面板 ——
+       否则旧面板和标题会画在树底下（截图里能看到 SAFE HOUSE - SHOP 残留）。 */
+    if (currentState == STATE_SAFEHOUSE && shopPage == SHP_TREE) {
+        DrawBenchTree(g);
+        return;
+    }
     /* v2.2：9-slice 铆接金属板（四角螺丝 + 双线边 + 底部警示条） */
     if (SpritesReady()) {
         UiPanel9(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, 0);
     } else {
         BlendRectWin(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, 0x000a1016, 0.94f);
         FrameRectWin(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, 0x00801818, 0.85f, UIS(2));
+    }
+
+    /* v2.8：安全屋的**所有**页都要显示页签（不只改造树那一页） */
+    if (currentState == STATE_SAFEHOUSE) {
+        DrawPageTabs();
+        /* v3.0：余额移到**页签下面**独立一行 ——
+           5 个页签变宽后右端会压到余额（截图里 SHARDS 被 UPGRADE 盖住）。 */
+        {
+            static char sb2[64];
+            sprintf(sb2, "SHARDS %d", shards);
+            int bx0, by0, bx1, by1;
+            PageTabRect(0, &bx0, &by0, &bx1, &by1);
+            DrawTextWin(winW - UIS(20) - TextWidthWin(sb2),
+                        by1 + UIS(6), sb2, 0x00E8C040u);
+        }
     }
 
     /* ===== v2.2 统一装饰：所有界面共用，不再各写各的 ===== */
@@ -1141,9 +1526,18 @@ void DrawMenuPanels(void) {
         /* 页脚横线 + 操作提示：只在有行列表的界面画 */
         if (currentState != STATE_MAIN_MENU) {
             int fy = B2 - UIS(26);
-            UiFooterRule(L2 + inner, R2 - inner, fy - TextHeightWin() / 2);
+            /* v2.9：**线要画在最后一行文字下面**。
+               原来 y - TH/2，主菜单第 10 行「Quit」正好被这条线横切
+               （用户截图：Quit 上有条小横线）。
+               现在先算出最后一行的底边，线放它下面 4px。 */
+            int lastRowBottom = g.firstY + (g.count - 1) * g.rowH + TextHeightWin();
+            int lineY = lastRowBottom + UIS(4);
+            if (lineY > fy) lineY = fy;          /* 不越过面板底 */
+            UiFooterRule(L2 + inner, R2 - inner, lineY);
         }
     }
+
+    if (currentState == STATE_SAFEHOUSE) DrawCalibStrip(g);
 
     /* v1.22b：Hub 分页指示**挪到面板外**（屏幕右下角），
        原来画在面板里会和最后一行 Back 的高亮条重叠。 */
@@ -1171,6 +1565,15 @@ void DrawMenuPanels(void) {
         RECT r = RowRect(g, sel);
         /* v2.2：底纹 + 左竖线 + 三角光标（不再是纯绿条） */
         UiRowSel(r.left, r.top, r.right, r.bottom, 0.85f);
+    }
+
+    /* v3.0：**鼠标悬停高亮** —— 鼠标移到哪一行，哪一行就亮起来。
+       没有这个的话玩家得靠猜才知道能点哪（用户反馈不想按回车）。 */
+    if (currentState == STATE_SAFEHOUSE && safehouseHoverRow >= 0 &&
+        safehouseHoverRow != sel && safehouseHoverRow < g.count) {
+        RECT hr = RowRect(g, safehouseHoverRow);
+        BlendRectWin(hr.left, hr.top, hr.right, hr.bottom, 0x00405060u, 0.55f);
+        FrameRectWin(hr.left, hr.top, hr.right, hr.bottom, 0x0080A0B0u, 0.7f, 1);
     }
 }
 
@@ -1338,7 +1741,7 @@ static void SkillDrawNode(const SkillTreeLayout* L, int id, int isSel) {
 
     /* 名字 */
     char nm[40];
-    sprintf(nm, "%s", skillDefs[id].name);
+    sprintf(nm, "%s", Tr(skillDefs[id].name, SkillNameZh(skillDefs[id].name)));
     ClampRowText(nm, (r.right - r.left) - (TH * 2) / 5);
     int nameY = r.top + ((r.bottom - r.top) - TH) * 38 / 100;
     DrawTextCenterWin((r.left + r.right) / 2, nameY, nm, text);
@@ -1419,7 +1822,7 @@ void DrawSkillTree(void) {
     for (int c = 0; c < SKILL_GRID_COLS; c++) {
         char hb[40];
         /* v2.0：4 列之后列宽只有 ~180px，再拼上前缀字母会互相压字 —— 只画名字 */
-        sprintf(hb, "%s", kBranchName[c]);
+        sprintf(hb, "%s", Tr(kBranchName[c], kBranchNameZh[c]));
         DrawTextCenterWin(L.colCX[c], L.hdrY, hb, kBranchColor[c]);
 
         int pts = SkillBranchPoints(c);
@@ -1566,7 +1969,7 @@ static void DrawMainMenu(const MainMenuLayout* M) {
 
         char num[12];   /* v2.2：sprintf %d 最多 11 字节 */
         sprintf(num, "%d", i + 1);
-        DrawTextWin(left, y, num, isSel ? 0x00FFE080u : 0x004C4C56u);
+        DrawTextWin(left, y, num, isSel ? 0x00FFE080u : 0x00969AA6u);
 
         DrawTextWin(left + TH * 2, y, MenuLabel(i),
                     isSel ? UI_ACCENT : UI_INK);
@@ -1598,7 +2001,7 @@ static void DrawMainMenu(const MainMenuLayout* M) {
     DrawTextWin(rx - wr, M->footY, rstr, 0x00808088u);
 
     DrawTextWin(winW - TextWidthWin(CANITY_VERSION_STR) - UIS(8),
-                winH - TextHeightWin() - UIS(4), CANITY_VERSION_STR, 0x0052525Au);
+                winH - TextHeightWin() - UIS(4), CANITY_VERSION_STR, 0x007C8088u);
 }
 
 static void DrawMenuText(void) {
@@ -1662,7 +2065,9 @@ static void DrawMenuText(void) {
         DrawTextWin(winW - TextWidthWin(CANITY_VERSION_STR) - UIS(14),
                     y2, CANITY_VERSION_STR, 0x00585858u);
     }
-    DrawTitleWin(g.title, g.titleY, titleColor);
+    /* v2.9：标题为空就不画 —— 安全屋靠顶部页签表明位置，
+       那行大红「SAFE HOUSE - SHOP」会把改造树整个盖住（用户要求去掉）。 */
+    if (g.title && g.title[0]) DrawTitleWin(g.title, g.titleY, titleColor);
 
     int sel = MenuItemIndex();
     int idx[SETTING_COUNT];
@@ -1808,7 +2213,7 @@ static void DrawMenuText(void) {
                 priceCol = 0x00E8C040u;
             } else {
                 sprintf(price, "%d SHARDS", cost);
-                priceCol = (shards >= cost) ? 0x0060D0FFu : 0x00A05050u;
+                priceCol = (shards >= cost) ? 0x0060D0FFu : 0x00C86868u;
             }
             int pw = TextWidthWin(price);
             DrawTextWin(x1 - pw, y, price, priceCol);
@@ -2204,7 +2609,7 @@ void DrawHUD(void) {
             else sprintf(fbuf, Tr("FUSES %d/%d", "保险丝 %d/%d"), fusesHeld, fusesNeeded);
             int fx2 = UIS(20) + TextWidthWin(fbuf) + UIS(18);
             sprintf(buf, "PENDING %d", pendingShards);
-            DrawTextWin(fx2, UIS(86), buf, 0x00FFC040u);
+            DrawTextWin(fx2, UIS(18) + TextHeightWin() * 3 + UIS(8), buf, 0x00FFC040u);
         }
         if (0) {   /* v2.0：剑气已移除 */
             /* v2.9：剑气冷却 —— 文字 + 一条从空到满的倒计时条 */
@@ -2239,12 +2644,20 @@ void DrawHUD(void) {
         if (dg) DrawTextCenterWin(winW / 2, UIS(18), "DRAIN", 0x00FF3030u);
     }
 
+    /* v2.9：左列改用文字高累加，不再写死 18/52/86 ——
+       1080p 下原来 LEVEL 15..80 和 SANITY 44..109 压 36px（报告 严重 #3）。 */
+    int hudTH = TextHeightWin();
+    /* v2.9：**左上角暗底已彻底删除**（用户要求）。
+       那块半透明黑边界很硬，在左上角看起来像一块阴影/渲染错误。
+       对比度已由文字颜色本身解决（都提到 4.8:1 以上），不再需要底衬。 */
+    int hudY1 = UIS(18) + hudTH + UIS(4);
     sprintf(buf, "SANITY: %.0f%%", sanity);
-    DrawTextWin(UIS(20), UIS(52), buf, (sanity < 30.0f) ? 0x00FF3C3Cu : 0x0000FFFFu);
+    DrawTextWin(UIS(20), hudY1, buf, (sanity < 30.0f) ? 0x00FF3C3Cu : 0x0000FFFFu);
+    int hudY2 = hudY1 + hudTH + UIS(4);
 
     if (breakerOpen) sprintf(buf, "POWER ON");
     else sprintf(buf, "FUSES %d/%d", fusesHeld, fusesNeeded);
-    DrawTextWin(UIS(20), UIS(86), buf, breakerOpen ? 0x0030FF60u : 0x00E8C040u);
+    DrawTextWin(UIS(20), hudY2, buf, breakerOpen ? 0x0030FF60u : 0x00E8C040u);
 
     /* 状态效果：常驻显示在 FUSES 下面。
        玩家必须知道自己被怎么了 —— 否则「视野突然变窄」会被当成 bug。
@@ -2254,13 +2667,13 @@ void DrawHUD(void) {
          196 FLARE / BOTTLE */
     {
         static const char* fxName[FX_COUNT] = { "BLINDED", "SLOWED", "DRAINING" };
-        int fy = UIS(116);
+        int fy = UIS(18) + TextHeightWin() * 3 + UIS(8);   /* v2.9：跟 FUSES 累加 */
         for (int i = 0; i < FX_COUNT; i++) {
             float s = FxStrength(i);
             if (s <= 0.0f) continue;
             sprintf(buf, "%s %d%%", fxName[i], (int)(s * 100.0f + 0.5f));
             DrawTextWin(UIS(20), fy, buf, 0x00FF6060u);
-            fy += UIS(26);
+            fy += hudTH + UIS(4);
         }
     }
 
@@ -2271,6 +2684,9 @@ void DrawHUD(void) {
     {
         static const char* slotName[ITEM_SLOT_COUNT] = { "FLARE", "BOTTLE", "BRICK", "ACID", "SMOKE",
                                                   "FIREPOT", "GLUE", "MIRROR" };
+static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖头", "酸液", "烟雾弹",
+                                                    "燃烧瓶", "胶瓶", "镜面弹" };
+
         static float scroll = 0.0f;
         static double lastT = 0.0;
 
@@ -2306,54 +2722,55 @@ void DrawHUD(void) {
                    smokeBombs > 0 || firePots > 0 || gluePots > 0 || mirrors > 0);
     int showList = (hudDetail >= 2) || (hudDetail >= 1 && anyItem);
         if (showList) {
+            /* v2.6：**只显示三行** —— 上一件 / 当前 / 下一件。
+               原来是有几种就铺几行，训练营里 8 种全有时铺满右半边屏幕，
+               和最上面那行提示、右边的 WORD 全都压在一起。
+               现在固定三行：中间是当前选中的（带高亮），上下各露出一部分。 */
             int rowH = TextHeightWin() + UIS(8);
             int margin = UIS(20);
-            /* v1.14d：起点 = PENDING 基线 + 一行文字高 + 12 间距。
-               TextHeightWin() 返回的就是 UIS（逻辑）单位，直接相加即可。 */
-            /* v1.14f：选中行固定在锚点上，其余行绕它上下排 ——
-               这样只会往两边展开，滚到哪里都不会被顶出屏幕。 */
-            int y0 = UIS(96);
 
-            int visSeen = 0;
+            /* 收集"有货"的槽 */
+            int vis[ITEM_SLOT_COUNT], nvis = 0, curVis = -1;
             for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
-                if (counts[i] <= 0) continue;    /* v1.17：放不出来的不显示 */
-                float off = ((float)visSeen - scroll) * (float)rowH;
-                visSeen++;
-                int y = y0 + (int)off;   /* 选中行 ≈ y0，其余绕它展开 */
+                if (counts[i] <= 0) continue;
+                if (i == throwSelected) curVis = nvis;
+                vis[nvis++] = i;
+            }
+            if (nvis > 0) {
+                if (curVis < 0) curVis = 0;
+                /* 锚点：当前行固定在 y0，上面一行露一点，下面一行露一点 */
+                int y0 = UIS(44);   /* v2.6：18 太靠边会被切掉顶行，下移到 44 */
 
-                float dist = off < 0 ? -off : off;
-                float fade = 1.0f - dist / (float)(rowH * 2);
-                if (fade < 0.25f) fade = 0.25f;
+                for (int k = -1; k <= 1; k++) {
+                    int idx = curVis + k;
+                    /* 循环取，首尾不会出现空位 */
+                    while (idx < 0) idx += nvis;
+                    while (idx >= nvis) idx -= nvis;
+                    if (nvis == 1 && k != 0) continue;      /* 只有一件时只画中间 */
 
-                char line[48];
-                /* 前 3 行标序号 —— 键盘 1/2/3 选的就是"第几个有货的槽" */
-        if (visSeen < 3) sprintf(line, "%d %s x%d", visSeen + 1, slotName[i], counts[i]);
-        else            sprintf(line, "  %s x%d", slotName[i], counts[i]);
-                int tw = TextWidthWin(line);
-                int x = winW - margin - tw;
-                int selected = (i == throwSelected);
+                    int i = vis[idx];
+                    int y = y0 + k * rowH;
+                    char line[48];
+                    int slotNo = idx + 1;
+                    if (slotNo <= 3) sprintf(line, "%d %s x%d", slotNo, Tr(slotName[i], slotNameZh[i]), counts[i]);
+                    else             sprintf(line, "  %s x%d", Tr(slotName[i], slotNameZh[i]), counts[i]);
 
-                if (selected) {
-                    /* 高亮：底条 + 右侧竖条 */
+                    int tw = TextWidthWin(line);
+                    int x = winW - margin - tw;
+                    int selected = (k == 0);
+                    if (!selected) {
+                        /* 上下两行压暗，表示"还能切过去" */
+                        DrawTextWin(x, y, line, 0x00606C6C);
+                        continue;
+                    }
                     BlendRectWin(x - UIS(6), y - UIS(3),
                                  x + tw + UIS(8), y + TextHeightWin() + UIS(1),
                                  0x00205030u, 0.55f);
                     BlendRectWin(x + tw + UIS(4), y - UIS(3),
                                  x + tw + UIS(7), y + TextHeightWin() + UIS(1),
                                  0x0060FF90u, 0.85f);
+                    DrawTextWin(x, y, line, 0x00E8FFE0u);
                 }
-
-                unsigned int col;
-                if (counts[i] <= 0) col = 0x00484848u;
-                else if (selected) col = 0x00E8FFE0u;
-                else col = 0x0090A0A0u;
-
-                int r = (int)(((col >> 16) & 0xFF) * fade);
-                int g = (int)(((col >> 8) & 0xFF) * fade);
-                int b = (int)((col & 0xFF) * fade);
-                col = (unsigned int)((r << 16) | (g << 8) | b);
-
-                DrawTextWin(x, y, line, col);
             }
         }
     }
@@ -2446,11 +2863,11 @@ void DrawHUD(void) {
        词条**名**已经常驻在 LEVEL 那一行右边了，所以这里只重复「说明」——
        玩家刚进关时需要知道这一层的规则具体是什么。 */
     if (levelBanner > 0.0f) {
-        int y = UIS(258);
+        int y = UIS(204);   /* v2.6：左列固定带（状态效果之下） */
         if (levelMod >= 0) {
             DrawTextWin(UIS(20), y, modDesc[levelMod], 0x00C08050u);
         }
-        DrawTextWin(UIS(20), y + UIS(30), themeNames[(themeId >= 0 && themeId < THEME_COUNT) ? themeId : 0], 0x00B08040u);
+        DrawTextWin(UIS(20), y + TextHeightWin() + UIS(6), themeNames[(themeId >= 0 && themeId < THEME_COUNT) ? themeId : 0], 0x00B08040u);
     }
 
     if (showFps) {
@@ -2463,7 +2880,7 @@ void DrawHUD(void) {
         /* 提示文本统一走窗口内绘制，长文本会被 ClampRowText 之外的地方撑出屏幕 */
         int tw = TextWidthWin(pickupMsg);
         int tx = (winW - tw) / 2;
-        int ty = UIS(80);
+        int ty = UIS(278);   /* v2.6：固定带（在武器行上方） */
         float alpha = pickupMsgTimer / 2.0f;
         if (alpha > 1.0f) alpha = 1.0f;
         DrawTextWin(tx, ty, pickupMsg, 0x00E8E060u);
@@ -2472,13 +2889,98 @@ void DrawHUD(void) {
     /* 手电电量 / 体力：左下两条细条，标签按实际文字宽度排版 */
     int barW = UIS(180), barH = UIS(12);
     int labelX = UIS(20);
-    int barX = labelX + TextWidthWin("LIGHT") + UIS(12);
+    /* v3.0：能量条已删，只剩 LIGHT / RUN 两条，按最宽标签算起点 */
+    int barX = labelX + TextWidthWin("LIGHT") + UIS(14);
     /* v1.9：两行标签原来固定差 UIS(22)，而一行文字就有 30 逻辑像素高，
        于是 LIGHT 和 RUN 叠在一起（截图里能看到两个词压成一团）。
        现在行距 = 实际文字高度 + 一点间隙，任何窗口尺寸都不会重叠。 */
     int rowGap = TextHeightWin() + UIS(8);
     int y1 = winH - UIS(60) - rowGap;
     int y2 = y1 + rowGap;
+    int y0 = y1 - rowGap;         /* v2.3：能量条在手电条**上方** */
+
+    /* v2.5：**游戏内**正在进行校准 → 把条画在屏幕底部中央。
+       原来只有安全屋面板里画，而小游戏是从游戏内按空格开的，
+       面板根本没画，所以条永远看不见。 */
+    if (currentState == STATE_PLAYING && calibActive) {
+        /* v2.5：放在屏幕**中上方**的空白带 —— 原来在 winH-150，
+           正好和武器行 / ENERGY 那一带重叠，被压住看不见。 */
+        /* v2.6：收窄 —— 原来 winW-200 太宽，左端会压到状态效果那几行 */
+        int bw2 = winW - UIS(320);
+        if (bw2 < UIS(180)) bw2 = winW - UIS(120);
+        int bx2 = (winW - bw2) / 2;
+        int bh2 = UIS(20);
+        int by2 = UIS(146);   /* v2.6：跟着提示上移 */
+        /* 明显的外框 + 不透明底，保证一眼能看到 */
+        BlendRectWin(bx2 - UIS(10), by2 - UIS(8), bx2 + bw2 + UIS(10), by2 + bh2 + UIS(8),
+                     0x000A0E14, 0.94f);
+        FrameRectWin(bx2 - UIS(10), by2 - UIS(8), bx2 + bw2 + UIS(10), by2 + bh2 + UIS(8),
+                     0x00C8B060u, 0.95f, 1);
+        DrawCalibBar(bx2, by2, bw2, bh2);
+    }
+
+    /* v2.5：站在安全区里 → 屏幕下方给一行提示（用户要求的那行字） */
+    if (playerInSafe && currentState == STATE_PLAYING) {
+        const char* hint = NULL;
+        unsigned int hcol = 0x00E8E060u;
+        static char cool[96];
+        if (calibActive) {
+            hint = Tr("SPACE: LOCK CALIBRATION", "空格：锁定校准");
+            hcol = 0x00FFFFFFu;
+        } else if (calibCooldown > 0.0f) {
+            sprintf(cool, "%s %.0fs", Tr("CALIB COOLING", "校准冷却"), calibCooldown);
+            hint = cool;
+            hcol = 0x00C08040u;
+        } else {
+            hint = Tr("SPACE: START CALIBRATION", "空格：开始校准");
+        }
+        /* v2.6：安全区里的操作提醒放到**左下角**（RUN 条下面）——
+           原来挂在屏幕中间，直接压在校准条上。 */
+        {
+            const char* shopHint = Tr("T: SHOP    SPACE: CALIBRATE", "T：商店    空格：校准");
+            int sx = UIS(20);
+            int sy = UIS(424);
+            int sw = TextWidthWin(shopHint);
+            BlendRectWin(sx - UIS(6), sy - UIS(3), sx + sw + UIS(6),
+                         sy + TextHeightWin() + UIS(3), 0x000A0E14, 0.90f);
+            DrawTextWin(sx, sy, shopHint, 0x00C8B060u);
+        }
+
+        if (hint) {
+            /* v2.5：挪到屏幕**最顶端居中** —— 原来在 3/4 高处会和武器行、
+               道具栏、建议提示叠在一起。顶上先铺一条暗底防残影。 */
+            int tw3 = TextWidthWin(hint);
+            /* v2.6：限宽 —— 右侧还有道具栏，长句会横着压过去 */
+            int maxW = winW - UIS(180) * 2;
+            if (maxW < UIS(200)) maxW = winW - UIS(80);
+            if (tw3 > maxW) { hint = Tr("SPACE: CALIBRATE", "空格：校准"); tw3 = TextWidthWin(hint); }
+            int hx = (winW - tw3) / 2;
+            /* v2.6：固定在**校准条正上方**那一条带里 */
+            int hy = UIS(146) - TextHeightWin() - UIS(8);   /* v2.9：贴着条顶往上排 */
+            BlendRectWin(hx - UIS(10), hy - UIS(4), hx + tw3 + UIS(10),
+                         hy + TextHeightWin() + UIS(4), 0x000A0E14, 0.94f);
+            DrawTextWin(hx, hy, hint, hcol);
+        }
+    }
+
+    /* v2.5：站在安全屋里时把「回智封顶」写出来，否则玩家会以为安全屋坏了 */
+    /* v2.6：这段原来画在 winH-60-2*rowGap-TH（≈310），正好压在武器行上。
+       现在合并进 SAFE ZONE 那一行（262），不再单独占一条带。 */
+
+    /* v3.0：**能量条已删除** —— 武器取消后这一整套都没意义了 */
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     DrawTextWin(labelX, y1 - UIS(3), "LIGHT", 0x00A0A0A0u);
     /* 手电条颜色：开启=黄绿，关闭但有电=暗黄，无电=暗红 */
@@ -2505,18 +3007,18 @@ void DrawHUD(void) {
     DrawBar(barX, y2, barW, barH, stamina / StaminaMax(),
             (stamina < 25.0f) ? 0x00FF6A3Cu : 0x0040C060u);
 
-    /* v2.0：当前武器 + 每次攻击的资源消耗 */
-    {
-        const WeaponDef* wd = WeaponGet(curWeapon);
-        static const char* resShort[3] = { "STA", "BAT", "SAN" };
-        char wbuf[64];
-        sprintf(wbuf, "%s  %s -%.0f  LV%d", Tr(wd->dispName, wd->nameZh),
-                resShort[wd->resource], WeaponCostNow(curWeapon), WeaponRankOf(curWeapon));
-        /* v2.0 修复：原来画在 RUN 条下面，1080p 时 y2+TH 已经超出屏幕，
-           整行只露出上半截。改到 LIGHT 条**上方**（永远在屏幕内）。 */
-        DrawTextWin(labelX, y1 - TextHeightWin() - UIS(6), wbuf,
-                    weaponCd > 0.0f ? 0x00707070u : 0x00C8E0FFu);
-    }
+    /* v3.0：**武器行已删除** */
+
+
+
+
+
+
+
+
+
+
+
 
     /* v1.15：命中伤害数字（屏幕中央偏下，向上浮 + 淡出） */
     if (lastHitTimer > 0.0f && lastHitDamage > 0) {
@@ -2538,6 +3040,10 @@ void DrawHUD(void) {
         }
     }
 
+    /* v2.6：训练场右侧的「SPECIMEN DMG」绿色面板**已停用**（用户要求）——
+       现在命中时屏幕上会直接跳伤害数字，这块面板重复且挡视线。
+       代码保留，需要时把 #if 0 改成 #if 1 就能恢复。 */
+#if 0
     /* v1.20：训练场右侧伤害面板（布局按文字高度算，杜绝重叠） */
     if (trainingMode) {
         int th = TextHeightWin();
@@ -2582,6 +3088,8 @@ void DrawHUD(void) {
                          px2 + pad + i * UIS(13) + UIS(9), by, 0x0060FFB0u, 0.85f);
         }
     }
+#endif
+
 
     /* 交互提示 + 长按进度 */
     if (hoverKind != 0) {
@@ -2610,38 +3118,10 @@ void DrawHUD(void) {
         FrameRectWin(bx, by, bx + barW, by + barH, 0x00808080, 0.7f, 1);
     }
 
-    /* SAFE ZONE：画在**屏幕中央下方**，不占用左侧信息列。
-       之前它画在 (20, 190)，跟 FLARE/BOTTLE（也是 196 附近）重叠，
-       玩家反馈过字叠在一起。
-       Normal 档是「闪一下就消失」：进入安全屋时 safeZoneMsg 置 2 秒，
-       之后不再显示 —— 常驻在安全屋里其实没什么用（你知道自己在哪）。 */
-    if (safeRoom.active && Dist2(posX, posY, safeRoom.x, safeRoom.y) < SAFE_ZONE_RADIUS * SAFE_ZONE_RADIUS) {
-        int show = (hudDetail >= 2) || (hudDetail >= 1 && safeZoneMsg > 0.0f);
-        if (show) {
-            /* v1.8：安全区标签做成"护盾条"样式 ——
-               中间文字 + 两侧渐隐引导线 + 缓慢呼吸的亮度，
-               比原来一行纯青色文字更像"这里是安全的"。 */
-            const char* lbl = "SAFE ZONE";
-            int tw = TextWidthWin(lbl);
-            int ty = winH - UIS(196);
-            float breathe = 0.55f + 0.45f * sinf((float)g_timeSec * 2.2f);
-            unsigned int base = (unsigned int)(0x0000A0A0u | ((unsigned int)(0x30 * breathe) << 8));
-            unsigned int lineC = (unsigned int)(0x00206060u | ((unsigned int)(0x40 * breathe) << 8));
-            int cx = winW / 2;
+    /* v2.6：SAFE ZONE 原来单独占一条带（winH/2+40），会和主题名/武器行抢位置。
+       现在并进 FUSES 那一行（见上方的 FUSES 绘制），不再单独画。 */
 
-            DrawTextCenterWin(cx, ty, lbl, base);
 
-            int gap = UIS(14), arm = UIS(46);
-            int lx0 = cx - tw / 2 - gap - arm;
-            int rx1 = cx + tw / 2 + gap + arm;
-            int yy = ty + TextHeightWin() / 2;
-            for (int i = 0; i < arm; i++) {
-                float al = 1.0f - (float)i / (float)arm;     /* 由内向外渐隐 */
-                BlendRectWin(lx0 + i, yy, lx0 + i + 1, yy + 1, lineC, al * 0.9f);
-                BlendRectWin(rx1 - i - 1, yy, rx1 - i, yy + 1, lineC, al * 0.9f);
-            }
-        }
-    }
 
     /* 蓄力投掷进度条：按住鼠标左键时显示 */
     int mouseFree = (currentState != STATE_PLAYING) || (isMapOpen && mapFullScreen);
@@ -2650,7 +3130,9 @@ void DrawHUD(void) {
     if (isCharging && mouseCharge > 0.0f && !mouseFree && hasItem) {
         int barW = UIS(280), barH = UIS(14);
         int bx = (winW - barW) / 2;
-        int by = winH / 2 + UIS(100);  /* 更靠下，避开 QTE 倒计时条 */
+        /* v2.9：上移到 winH/2+48 —— 原来 +100 让百分比落在 420..451，
+           正好压住 y=425..456 的武器行（报告 严重 #5）。 */
+        int by = winH / 2 + UIS(48);
         /* 背景：深色半透明，带明显边框 */
         BlendRectWin(bx - 2, by - 2, bx + barW + 2, by + barH + 2, 0x00000000, 0.9f);
         BlendRectWin(bx, by, bx + barW, by + barH, 0x00101020, 0.95f);
@@ -2704,18 +3186,19 @@ static void DrawSaveStatusBanner(void) {
             (g_saveError == 0) ? "UNKNOWN" : (const char*)"SEE CODE");
     ClampRowText(msg, winW - UIS(20));
 
-    /* 不透明暗红，压住下面任何东西 —— 这是错误，必须看见 */
-    BlendRectWin(0, 0, winW, h, 0x00240000u, 1.0f);
-    BlendRectWin(0, h - UIS(2), winW, h, 0x00C03030u, 0.95f);
-    DrawTextCenterWin(winW / 2, (h - th) / 2, msg, 0x00FF9090u);
+    /* v2.9：挪到屏幕**底部** —— 原来钉在最顶上，把安全屋的页签整行盖住了
+       （用户截图：SAVE FAILED 压在 SHOP/BENCH/TREE/REST 上）。 */
+    int by0 = winH - h - th - UIS(4);
+    BlendRectWin(0, by0, winW, by0 + h, 0x00240000u, 1.0f);
+    BlendRectWin(0, by0, winW, by0 + UIS(2), 0x00C03030u, 0.95f);
+    DrawTextCenterWin(winW / 2, by0 + (h - th) / 2, msg, 0x00FF9090u);
 
     /* 第二行小字：试过的第一个位置，方便玩家/我定位是哪个目录 */
     char pathLine[MAX_PATH + 8];
     sprintf(pathLine, "TRIED: %s", g_savePath[0] ? g_savePath : "(none)");
     ClampRowText(pathLine, winW - UIS(20));
     /* 只在上方还有点空间时才画，小窗口里不硬塞 */
-    if (h + th < winH / 3)
-        DrawTextCenterWin(winW / 2, h + UIS(2), pathLine, 0x00B06060u);
+    DrawTextCenterWin(winW / 2, by0 - th - UIS(2), pathLine, 0x00B06060u);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2805,6 +3288,7 @@ void RenderFrame(void) {
             DrawPopupText();
         }
         /* 改绑提示框：最顶层，盖住所有菜单 */
+        /* 改绑提示框：最顶层，盖住所有菜单 */
         DrawRebindOverlay();
         /* 存档写不进去必须吼出来（见 save.c 的说明） */
         DrawSaveStatusBanner();
@@ -2814,6 +3298,26 @@ void RenderFrame(void) {
     } else {
         DrawHUD();
     }
+
+    /* v3.0：**帧末覆盖层** —— 不管什么状态都要画
+       （锁盘只在游戏中打开；藏身遮罩也只在游戏中生效）。
+       原来这两块写在 if (currentState != STATE_PLAYING) 分支里，
+       结果玩游戏时锁盘一帧都不显示、藏身也没有任何视觉反馈。 */
+    DrawLockOverlay();
+    {
+        extern int hiddenIn;
+        if (hiddenIn >= 0) {
+            int bandH = winH / 5;
+            for (int i = 0; i < bandH; i++) {
+                float a = 0.75f * (1.0f - (float)i / (float)bandH);
+                BlendRectWin(0, i, winW, i + 1, 0x00000000u, a);
+                BlendRectWin(0, winH - 1 - i, winW, winH - i, 0x00000000u, a);
+            }
+            BlendRectWin(0, 0, winW / 8, winH, 0x00000000u, 0.75f);
+            BlendRectWin(winW - winW / 8, 0, winW, winH, 0x00000000u, 0.75f);
+        }
+    }
+
 
     /* v1.8：等比呈现 + 黑边（letterbox）。
        原来把图直接拉满客户区，在 21:9 / 16:9 宽屏上文字会被横向拉胖。
@@ -2852,6 +3356,15 @@ void RenderFrame(void) {
            直接画到窗口 DC。只有真出现黑边（未来若恢复等比缩放）才走离屏路径。 */
         int fullBleed = (dx == 0 && dy == 0 && dw == cw && dh == ch);
         if (fullBleed) {
+            /* v2.9：HALFTONE 双线性缩放。
+               原来用默认 BLACKONWHITE（块复制），16x24 的字按 1.31/1.82/2.73
+               非整数放大时，2px 笔画会变 2/3px 或 5/6px 交替 → 字发毛
+               （清晰度审查 #7）。 */
+            /* v2.9：**COLORONCOLOR（近邻）**，不再用 HALFTONE。
+               HALFTONE 在 GDI 里是 4x4 抖动，1080p 全屏每帧要 10~20ms ——
+               这就是「全屏帧数严重下降」的原因。近邻缩放快 30 倍，
+               而且点阵字保持硬边，符合像素风。 */
+            SetStretchBltMode(hdc, COLORONCOLOR);
             if (g_useDIB)
                 StretchBlt(hdc, 0, 0, cw, ch, g_memDC, 0, 0, renderW, renderH, SRCCOPY);
             else

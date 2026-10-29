@@ -34,7 +34,7 @@ static int findSpot(float* ox, float* oy, float minD, float maxD) {
 }
 
 /* v2.2：补一只游荡怪到指定槽位（EV_MIRROR 用） */
-void extras_spawnOne(int idx) {
+void ExtrasSpawnOne(int idx) {
     if (idx < 0 || idx >= EXTRA_MAX) return;
     float x, y;
     if (!findSpot(&x, &y, 4.0f, 9.0f)) return;
@@ -80,9 +80,9 @@ void ExtrasSpawnForLevel(int level) {
         extras[i].x = x;
         extras[i].y = y;
         extras[i].active = 1;
-        /* 影 20 / 盲螨 15 / 回响 10 —— 蜘蛛号称\\"血少\\"，之前根本没有 hp */
-        extras[i].hp = (extras[i].kind == 0) ? 20 : (extras[i].kind == 1 ? 15 : 10);
         extras[i].kind = rand() % 3;
+        /* 影 20 / 盲螨 15 / 回响 10 —— 先决定种类再赋血量。 */
+        extras[i].hp = (extras[i].kind == 0) ? 20 : (extras[i].kind == 1 ? 15 : 10);
         extras[i].timer = 1.0f + (float)(rand() % 200) / 100.0f;
         extras[i].cool = 0;
     }

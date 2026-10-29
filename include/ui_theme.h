@@ -13,7 +13,7 @@
 /* ------------------------------------------------------------------ */
 
 #define UI_INK        0x00C8C4BCu   /* 正文 */
-#define UI_INK_DIM    0x00605E5Au   /* 提示 */
+#define UI_INK_DIM    0x008E897Fu   /* 提示：2.73:1 → 4.8:1（对比度审查 #1） */
 #define UI_INK_TITLE  0x00E8D8B0u   /* 标题 */
 #define UI_ACCENT     0x00FFB040u   /* 强调（琥珀）—— 全局唯一主色 */
 #define UI_DANGER     0x00D04030u   /* 危险 */

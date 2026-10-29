@@ -86,6 +86,12 @@ extern Shard shards_debris[MAX_SHOTS * SHARD_COUNT];
 /* ---- 场景 ---- */
 extern SafeRoom safeRoom;
 extern Container containers[MAX_CONTAINERS];
+/* v3.0：藏身点 */
+extern HideSpot hideSpots[HIDESPOT_MAX];
+extern int hideSpotCount;
+extern int hiddenIn;
+extern int hideSpotNear;
+extern int lockedThisFloor;   /* v3.0：本层已上锁的箱子数 */
 extern int containerCount;
 extern Breaker breaker;
 
@@ -232,6 +238,17 @@ float SanityDrainRate(void);
 int   BottleCap(void);
 float SanityMax(void);   /* v2.0 理智上限 */
 float StaminaMax(void);   /* 体力上限（LONG WIND 会 +25） */
+extern float energy;      /* v2.3：武器能量 */
+extern float treeVX, treeVY, treeVK;   /* v2.8：改造树视口 */
+int   EnergyMax(void);
+/* v2.4 校准小游戏 */
+extern int   calibActive, calibAttempts, calibResult;
+extern float calibPos, calibZoneC, calibCooldown, calibResultTimer;
+void  CalibStart(void);
+void  CalibLock(void);
+void  CalibTick(float dt);
+float CalibZoneScale(void);   /* v2.6：目标区缩放 */
+float CalibSpeedScale(void);  /* v2.6：滑块速度缩放 */
 
 /* ---- 升级 ---- */
 int BatteryMax(void);

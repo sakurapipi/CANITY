@@ -7,6 +7,9 @@
 #include "game.h"
 #include "weapons.h"
 #include "shop.h"
+#include "bench.h"
+#include "lockbox.h"   /* v2.7 改造树 */
+#include "upgrade_run.h"
 #include "relics.h"
 #include "sprites.h"
 #include "extras.h"
@@ -118,6 +121,13 @@ Shot shot[MAX_SHOTS];
 Shard shards_debris[MAX_SHOTS * SHARD_COUNT];
 SafeRoom safeRoom;
 Container containers[MAX_CONTAINERS];
+
+/* v3.0：藏身点 */
+HideSpot hideSpots[HIDESPOT_MAX];
+int hideSpotCount = 0;
+int hiddenIn = -1;          /* >=0 表示藏在第几个点里 */
+int hideSpotNear = -1;      /* 当前离得最近、可以钻的点 */
+int lockedThisFloor = 0;   /* v3.0：本层已上锁的箱子数 */
 int containerCount = 0;
 Breaker breaker;
 int fusesHeld = 0;        /* 手上已有保险丝 */
@@ -219,6 +229,8 @@ int lastHitDamage = 0;
 float lastHitTimer = 0.0f;
 int lastHitBackstab = 0;
 int pixelBudget = PIXEL_BUDGET;   /* v1.9：运行时可变 */
+int safehouseHoverRow = -1;       /* v3.0：鼠标悬停在安全屋第几行（-1=没有） */
+int safehouseHoverTab = -1;       /* v3.0：悬停的页签 */
 int dynamicRes = 1;               /* v1.9：自动画质开关 */
 int forceFrame = 0;          /* v1.8：窗口变化后立刻出一帧，减少还原/缩放延迟 */          /* v1.8：因失焦自动暂停（回前台自动恢复） */         /* v1.8：玩家是否在安全屋里（怪物丢目标、不抓人） */
 ScoreBreakdown lastScore;     /* 上一次结算的分项 */
@@ -244,6 +256,12 @@ int dailySeed = 0;
 int dailyClearedToday = 0;   /* v2.2：今天是否已通 */
 int campaignMode = 0;
 int campaignStage = 0;
+/* StartGame() 统一清理模式标志；菜单入口先把要启动的模式排队，
+   这样清理不会把 Endless / Daily / Campaign / Training 自己也清掉。 */
+enum { START_NORMAL = 0, START_ENDLESS, START_DAILY, START_CAMPAIGN, START_TRAINING };
+static int pendingStartMode = START_NORMAL;
+static int pendingCampaignStage = 0;
+static void ApplyCampaignRules(int stage);
 
 /* v2.0 战役：5 个手工场景，固定种子 + 各自的规则 */
 static const char* kCampaignName[5] = {
@@ -426,6 +444,13 @@ void UpdateDynamicRes(double renderMs) {
     static int samples = 0;
     static double lastAdjust = -10.0;
 
+    /* v2.9：**动态分辨率已禁用**。
+       它每 2 秒按 ±12% 调 pixelBudget 并调 InitPixels()，
+       而 renderW/renderH 一变，winW/winH 跟着变（SyncWindowSize），
+       整个 UI 的尺度和间距全部重排 —— 玩家看到的就是「UI 在逐渐放大」。
+       渲染尺寸必须在一局里保持稳定，宁可掉几帧也别让它漂。
+       需要恢复时把 dynamicRes 设成 1 即可。 */
+    if (1) return;              /* 强制关闭 */
     if (!dynamicRes) return;
     if (renderMs <= 0.0) return;
     acc += renderMs;
@@ -494,6 +519,22 @@ void PollInput(void) {
         }
         keys[vk] = down;
         prevDown[vk] = down;
+    }
+
+    /* v2.9：**不在游戏中就清空所有绑定键**。
+       这是「面板里按 A/D 会漂移」的终极修法：
+       之前只清 W/A/S/D 四个字面量，一旦按键绑到别的动作、
+       或大小写不同（'a' vs 'A'）就漏掉，所以一直修不干净。
+       现在直接遍历 g_bindings[]，凡是绑过的键全清。
+       菜单导航走的是 WM_KEYDOWN 里的 wParam 比较，不依赖 keys[]。 */
+    if (currentState != STATE_PLAYING) {
+        for (int a = 0; a < ACT_COUNT; a++) {
+            int vk = g_bindings[a];
+            if (vk > 0 && vk < 256) keys[vk] = 0;
+        }
+        keys[VK_SHIFT] = 0;
+        keys[VK_SPACE] = 0;
+        keys[VK_LBUTTON] = keys[VK_RBUTTON] = 0;
     }
 
     /* v2.0：手柄（没有手柄时什么也不做） */
@@ -778,7 +819,13 @@ static void BuildTrainingArena(void) {
     for (int i = 0; i < LEECH_MAX; i++) leeches[i].active = 0;
     containerCount = 0;
     breaker.active = 0;
-    safeRoom.active = 0;
+
+    /* v2.5：训练营里也放一个安全区 —— 用来试「校准小游戏」。
+       原来这里 safeRoom.active = 0，训练营里根本没有安全区。 */
+    safeRoom.x = 7.5f;
+    safeRoom.y = (float)(MAP_HEIGHT / 2) + 0.5f;
+    safeRoom.active = 1;
+
     ApplyFov();
 }
 
@@ -914,7 +961,19 @@ void GenerateLevel(void) {
     breakerOpen = 0;  /* 出口门锁死，需通电开启 */
 
     /* 容器 / 保险丝 / 配电箱 */
-    for (int i = 0; i < MAX_CONTAINERS; i++) containers[i].active = 0;
+    /* v3.0：每层生成 3~5 个藏身点 */
+    hideSpotCount = 0;
+    hiddenIn = -1;
+    hideSpotNear = -1;
+    for (int i = 0; i < HIDESPOT_MAX; i++) hideSpots[i].active = 0;
+
+    if (lockActive) CloseLockOverlay();   /* v3.0：换层时别把锁盘带进新关 */
+    for (int i = 0; i < MAX_CONTAINERS; i++) {
+        containers[i].active = 0;
+        containers[i].locked = 0;      /* v3.0：换层清锁 */
+        containers[i].searched = 0;
+    }
+    lockedThisFloor = 0;   /* v3.0：每层重新计数 */
     containerCount = 0;
     fusesHeld = 0;
     breakerOpen = 0;
@@ -943,6 +1002,9 @@ void GenerateLevel(void) {
             RollLevelMod(roll100, pick);
         }
     }
+    /* 词条倍率已在上面重置并抽取；战役规则现在叠加到本层基础倍率上，
+       这样首层和后续层都会生效，同时不会覆盖随机词条。 */
+    if (campaignMode) ApplyCampaignRules(campaignStage);
     levelBanner = 5.0f;
 
     /* DARK：手电起始电量只有 55%。必须放在掷词条之后，
@@ -990,8 +1052,61 @@ void GenerateLevel(void) {
         containers[containerCount].searched = 0;
         containers[containerCount].content = 0;  /* 先占位，后面再分发内容 */
         containers[containerCount].active = 1;
+        /* v3.0：上锁箱子（移植自上游 v2.2.0）——
+           第 2 层起 18% 概率，每层最多 2 个。 */
+        containers[containerCount].locked = 0;
+        containers[containerCount].lockType = 0;
+        containers[containerCount].lockCode = 0;
+        if (currentLevel >= 2 && lockedThisFloor < 2 && (rand() % 100) < 18) {
+            lockedThisFloor++;
+            containers[containerCount].locked = 1;
+            containers[containerCount].lockType = rand() % LOCK_TYPE_COUNT;
+            containers[containerCount].lockCode = rand() & 0x7FF;
+        }
         containerCount++;
     }
+    /* v3.0：藏身点 —— 两轮放置：
+       第一轮按正常约束挑（避开出口/容器/配电箱/彼此）
+       第二轮**放宽**（只要求不是墙），保证一定生得出来。
+       之前只做第一轮，结果 SpotClear 把候选全拒了 → 一个都没有
+       （用户实测 hideSpotCount=0）。 */
+    hideSpotCount = 0;
+    {
+        int want = 3 + (rand() % 3);          /* 3~5 个 */
+
+        /* ---- 第一轮：严格 ---- */
+        for (int tries = 0; tries < 300 && hideSpotCount < want && emptyCount > 0; tries++) {
+            int idx = rand() % emptyCount;
+            float hx2 = cells[idx][0] + 0.5f, hy2 = cells[idx][1] + 0.5f;
+            if (Dist2(hx2, hy2, exitX, exitY) < 6.0f) continue;
+            if (!SpotClear(hx2, hy2, 1.4f, 1, -1)) continue;
+            int bad = 0;
+            for (int k = 0; k < hideSpotCount; k++)
+                if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < 4.0f) { bad = 1; break; }
+            if (bad) continue;
+            hideSpots[hideSpotCount].x = hx2;
+            hideSpots[hideSpotCount].y = hy2;
+            hideSpots[hideSpotCount].kind = rand() % 3;
+            hideSpots[hideSpotCount].active = 1;
+            hideSpotCount++;
+        }
+
+        /* ---- 第二轮：兜底，只要求脚下不是墙 ---- */
+        for (int tries = 0; tries < 400 && hideSpotCount < want && emptyCount > 0; tries++) {
+            int idx = rand() % emptyCount;
+            float hx2 = cells[idx][0] + 0.5f, hy2 = cells[idx][1] + 0.5f;
+            int bad = 0;
+            for (int k = 0; k < hideSpotCount; k++)
+                if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < 1.5f) { bad = 1; break; }
+            if (bad) continue;
+            hideSpots[hideSpotCount].x = hx2;
+            hideSpots[hideSpotCount].y = hy2;
+            hideSpots[hideSpotCount].kind = rand() % 3;
+            hideSpots[hideSpotCount].active = 1;
+            hideSpotCount++;
+        }
+    }
+
 
     /* 阶段2：继续填充到 contCap（受词条影响） */
     attempts = 0;
@@ -1023,6 +1138,15 @@ void GenerateLevel(void) {
         }
         for (int guard = 0; guard < 64 && need > 0 && containerCount > 0; guard++) {
             int k = rand() % containerCount;
+        /* v3.0：**保险丝不能落在上锁的箱子里** ——
+           否则打不开锁就拿不到保险丝，整层死锁（玩法审查）。 */
+        {
+            int tries = 0;
+            while (tries++ < 32 && containers[k].locked) {
+                k = rand() % containerCount;
+            }
+        }
+
             if (containers[k].content == 0) {
                 containers[k].content = 1;
                 need--;
@@ -1058,6 +1182,9 @@ void GenerateLevel(void) {
         for (int i = 0; i < n; i++) SpawnLeech(i);
     }
     /* v1.8：随机事件（第 2 层起，按概率） */
+    /* 先生成基础游荡怪，再应用 MIRROR 的额外刷怪；否则事件刚加的怪会被
+       后面的 ExtrasSpawnForLevel() 清空，玩家只能看到速度/理智修正。 */
+    ExtrasSpawnForLevel(currentLevel);
     levelEvent = -1;
     if (currentLevel >= 2 && (rand() % 100) < EVENT_CHANCE)
         levelEvent = rand() % EVENT_COUNT;
@@ -1091,16 +1218,19 @@ void GenerateLevel(void) {
            玩家完全感知不到。现在真的多放 3 只游荡怪（它们已经可杀）。 */
         modSpeedMul *= 1.10f;
         modSanityMul *= 1.10f;
-        for (int i = 0; i < EXTRA_MAX; i++) {
+        int added = 0;
+        for (int i = 0; i < EXTRA_MAX && added < 3; i++) {
             if (extras[i].active) continue;
-            extern void extras_spawnOne(int);
-            extras_spawnOne(i);
-            if (++i >= 3) break;
+            ExtrasSpawnOne(i);
+            if (extras[i].active) added++;
         }
     }
 
     /* v1.8：图鉴解锁 —— 本层出现的怪记一笔 */
-    ExtrasSpawnForLevel(currentLevel);   /* v2.0：额外威胁（影子/盲螨/回响） */
+    for (int i = 0; i < EXTRA_MAX; i++) {
+        if (extras[i].active) BestiaryMarkSeen(4 + extras[i].kind);
+    }
+    if (bossLevel) BestiaryMarkSeen(7);
 
     /* v2.0 CARTOGRAPHER：开局就把安全屋和配电箱的位置标在小地图上 */
     if (SkillCartoUnlock()) {
@@ -1286,7 +1416,7 @@ int BatteryMax(void) {
 }
 
 /* 手电每秒耗电：ECO 升级每级 -12% */
-float BatteryDrainRate(void) { return BATTERY_DRAIN * SkillEcoMul() * RelicBatteryMul() * modBatteryMul; }
+float BatteryDrainRate(void) { return BATTERY_DRAIN * SkillEcoMul() * RelicBatteryMul() * modBatteryMul * BenchFlashDrainMul() * RunUpgFlashMul(); }   /* v2.7 省电 */
 
 /* 安全屋回智速度：REST 升级每级 +25% */
 float SafeHealRate(void) {
@@ -1312,6 +1442,28 @@ int BottleCap(void) {
 /* v2.7：体力上限以前写死 100，局内技能 LONG WIND 的「+25 体力」白给。
    上限统一走这里，HUD 的分母也跟着用。 */
 /* v2.0：理智上限（遗物 WAR PAINT 会削） */
+/* v2.3：武器能量 —— 三把武器共用，**不会自然恢复**。
+   一局的总输出因此有上限，投掷物（不吃能量）才有存在意义。 */
+float energy = 120.0f;
+
+/* v2.8：改造树是一个**可平移缩放的画布**（参考思维导图）。
+   节点用世界坐标，画的时候统一变换 —— 这样窗口多小都不会崩，
+   节点数量也能无限加。 */
+/* v2.9：treeVX/treeVY/treeVK 已搬到 bench.c（画布视口），这里只留鼠标位置 */
+
+
+/* v2.4 校准小游戏状态 */
+int   calibActive = 0;        /* 正在进行 */
+float calibPos = 0.5f;
+int calibUsedLevel = -1;   /* v3.0：本层已校准过的层数（每层限 1 次） */        /* 滑块位置 0..1 */
+float calibDir = 1.0f;        /* 扫动方向 */
+float calibZoneC = 0.5f;      /* 目标区中心 */
+int   calibAttempts = CALIB_ATTEMPTS;
+int   calibLevel = -1;        /* v2.4：这一层是否已经发过次数（防「出门再进来」刷满） */
+float calibCooldown = 0.0f;
+int   calibResult = 0;        /* 0 无 / 1 完美 / 2 普通 / 3 失手 */
+float calibResultTimer = 0.0f;
+
 float SanityMax(void) {
     float m = 100.0f + RelicMaxSanAdd();
     if (m < 25.0f) m = 25.0f;
@@ -1319,8 +1471,12 @@ float SanityMax(void) {
 }
 
 float StaminaMax(void) {
-    return 100.0f + (float)RunStaminaAdd();
+    /* v3.0：改造树「耐力」+30 */
+    return 100.0f + (float)RunStaminaAdd() + (float)BenchStaminaBonus();
 }
+
+/* v2.3：武器能量上限 */
+int EnergyMax(void) { return BenchEnergyMax((int)ENERGY_MAX); }   /* v2.7：弹匣/电池库/嗜血 */
 
 int UpgradeLevel(int kind) {
     switch (kind) {
@@ -1406,6 +1562,11 @@ static void ThrowItem(int type, float charge) {
             shot[i].age = 0.0f;
             shot[i].charge = charge;
             shot[i].kind = 1;
+            shot[i].dmg = 0;
+            shot[i].pierce = 0;
+            shot[i].mirrorRebounded = 0;
+            shot[i].ignoreTarget = -1;
+            shot[i].ignoreTargetTime = 0.0f;
             shot[i].active = 1; g_throwOk = 1;
             break;
         }
@@ -1419,18 +1580,36 @@ static void ThrowItem(int type, float charge) {
         /* v2.0：2 砖 / 3 酸 / 4 烟 / 5 火 / 6 胶 / 7 镜 */
         kind = (type == 2) ? 2 : (type == 3) ? 3 :
                (type == 4) ? 4 : (type == 5) ? 7 : (type == 6) ? 8 : 9;
+        /* 砖头更重、飞得低且慢；酸瓶更轻、抛物线更高，避免只是换一张贴图。 */
+        float itemSpeed = speed;
+        float itemAngle = angle;
+        float itemHeight = 1.0f;
+        if (type == 2) {
+            itemSpeed *= 0.82f;
+            itemAngle *= 0.65f;
+            itemHeight = 0.90f;
+        } else if (type == 3) {
+            itemSpeed *= 1.08f;
+            itemAngle = angle * 1.35f + 0.08f;
+            itemHeight = 1.08f;
+        }
         for (int i = 0; i < MAX_SHOTS; i++) {
             if (shot[i].active) continue;
             shot[i].x = posX + dirX * 0.35f;
             shot[i].y = posY + dirY * 0.35f;
-            shot[i].z = SHOT_HEIGHT * (type == 4 ? 0.9f : 1.0f);
-            shot[i].vx = dirX * speed * cosf(angle);
-            shot[i].vy = dirY * speed * cosf(angle);
-            shot[i].vz = speed * sinf(angle);
+            shot[i].z = SHOT_HEIGHT * (type == 4 ? 0.9f : itemHeight);
+            shot[i].vx = dirX * itemSpeed * cosf(itemAngle);
+            shot[i].vy = dirY * itemSpeed * cosf(itemAngle);
+            shot[i].vz = itemSpeed * sinf(itemAngle);
             shot[i].life = (type == 4) ? 1.6f : 2.0f;
             shot[i].age = 0.0f;
             shot[i].charge = charge;
             shot[i].kind = kind;
+            shot[i].dmg = 0;
+            shot[i].pierce = (kind == 9) ? 1 : 0;
+            shot[i].mirrorRebounded = 0;
+            shot[i].ignoreTarget = -1;
+            shot[i].ignoreTargetTime = 0.0f;
             shot[i].active = 1; g_throwOk = 1;
             break;
         }
@@ -1470,6 +1649,13 @@ static void UpdateShots(float dt) {
         if (!shot[i].active) continue;
         shot[i].life -= dt;
         shot[i].age += dt;
+        if (shot[i].ignoreTargetTime > 0.0f) {
+            shot[i].ignoreTargetTime -= dt;
+            if (shot[i].ignoreTargetTime <= 0.0f) {
+                shot[i].ignoreTargetTime = 0.0f;
+                shot[i].ignoreTarget = -1;
+            }
+        }
 
         /* v1.18：重力 + 落地。
            之前 shot 完全没有 z 积分 —— 砖头/酸瓶/烟雾弹都是
@@ -1512,7 +1698,9 @@ static void UpdateShots(float dt) {
                 shot[i].z = 0.0f;
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 PlaySfx(SFX_GLASS, 0.7f);
-                MakeNoise(shot[i].x, shot[i].y, 14.0f);
+                /* v3.0 逃生试炼：**扔东西制造噪音把追捕者引开**是核心手法，
+                   落地的动静要够大，半径 14 → 22 格。 */
+                MakeNoise(shot[i].x, shot[i].y, 22.0f);
                 shot[i].active = 0;
                 break;
             }
@@ -1521,7 +1709,7 @@ static void UpdateShots(float dt) {
             if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 PlaySfx(SFX_GLASS, 0.7f);
-                MakeNoise(shot[i].x, shot[i].y, 14.0f);
+                MakeNoise(shot[i].x, shot[i].y, 22.0f);   /* v3.0：撞墙也要够响 */
                 shot[i].active = 0;
                 break;
             }
@@ -1535,6 +1723,7 @@ static void UpdateShots(float dt) {
                 if (lightBeast.active) targets[nTargets++] = &lightBeast;
                 for (int t = 0; t < nTargets; t++) {
                     Monster* m = targets[t];
+                    if (shot[i].ignoreTargetTime > 0.0f && shot[i].ignoreTarget == t) continue;
                     if (Dist2(shot[i].x, shot[i].y, m->x, m->y) >= r * r) continue;
 
                     int base = 1, type = DT_SHARD;
@@ -1558,10 +1747,28 @@ static void UpdateShots(float dt) {
                         PlaySfx(SFX_GLASS, 0.6f);
                         break;
                     } else if (shot[i].kind == 9) {    /* v2.0 镜片：反弹一次 */
-                        if (shot[i].charge > 0.5f) {
-                            shot[i].vx = -shot[i].vx * 0.8f;
-                            shot[i].vy = -shot[i].vy * 0.8f;
+                        if (shot[i].charge > 0.5f && !shot[i].mirrorRebounded) {
+                            /* 不再严格 180°折返：那会把弹片立刻送回原目标/玩家。
+                               加一点侧向偏转，并短暂忽略被反弹的目标。 */
+                            float oldVx = shot[i].vx, oldVy = shot[i].vy;
+                            float side = 0.22f;
+                            float rvx = -oldVx - oldVy * side;
+                            float rvy = -oldVy + oldVx * side;
+                            float rlen = sqrtf(rvx * rvx + rvy * rvy);
+                            float olen = sqrtf(oldVx * oldVx + oldVy * oldVy);
+                            if (rlen > 0.001f && olen > 0.001f) {
+                                shot[i].vx = rvx * olen / rlen * 0.8f;
+                                shot[i].vy = rvy * olen / rlen * 0.8f;
+                            } else {
+                                shot[i].vx = -oldVx * 0.8f;
+                                shot[i].vy = -oldVy * 0.8f;
+                            }
+                            shot[i].x += shot[i].vx * 0.08f;
+                            shot[i].y += shot[i].vy * 0.08f;
                             shot[i].charge = 0.0f;
+                            shot[i].mirrorRebounded = 1;
+                            shot[i].ignoreTarget = t;
+                            shot[i].ignoreTargetTime = 0.18f;
                             break;                     /* 保留飞行 */
                         }
                         base = 1; type = DT_SHARD;
@@ -1645,6 +1852,20 @@ static int WeaponHitTick(void) {
 }
 
 void WeaponTryAttack(float charge) {
+#if NO_COMBAT
+    /* v3.0 逃生试炼：**左键不再是攻击，是敲击**。
+       朝前方敲一下（墙/管道/门），制造噪音把追捕者引过去 ——
+       这是逃生类的经典操作：用声音控制敌人的位置。
+       不消耗能量、不判定伤害、不产生子弹。 */
+    MakeNoise(posX + dirX * 2.0f, posY + dirY * 2.0f, 18.0f);
+    PlaySfx(SFX_GLASS, 0.55f);
+    pickupMsg = g_lang == LANG_ZH ? "敲击  制造噪音" : "KNOCK  NOISE";
+    pickupMsgTimer = 0.8f;
+    uiDirty = 1;
+    (void)charge;
+    return;
+#endif
+
     if (weaponCd > 0.0f) return;
     const WeaponDef* w = WeaponGet(curWeapon);
     float cost = WeaponCostNow(curWeapon);
@@ -1661,12 +1882,12 @@ void WeaponTryAttack(float charge) {
     AddShake(w->kind == WPN_MELEE ? 0.16f : 0.11f, w->kind == WPN_MELEE ? 0.10f : 0.055f);
     /* v2.0：体力是唯一会自然回复的资源，攻击后压住回复 0.7 秒，
        否则 20/s 的回复会把 18 点的消耗在两秒内吃掉，「烧体力」就没有意义了。 */
-    if (w->resource == WRES_STAMINA) staminaIdle = 0.7f;
+    /* v2.3：三把武器都烧能量，体力不再被攻击压住恢复 */
     weaponCd = WeaponCdNow(curWeapon);
 
     int dmg = WeaponDamageNow(curWeapon, charge);
     int silent = WeaponSilentNow(curWeapon);
-    MakeNoise(posX, posY, w->noise * (silent ? 0.5f : 1.0f));
+    MakeNoise(posX, posY, w->noise * (silent ? 0.5f : 1.0f) * BenchWalkNoiseMul());   /* v3.0 轻步 */
 
     if (w->kind == WPN_MELEE) {
         /* 近战：沿视线扫 6 段，命中就停（除非有穿透） */
@@ -1721,12 +1942,16 @@ void WeaponTryAttack(float charge) {
             shot[i].vx = dirX * w->speed;
             shot[i].vy = dirY * w->speed;
             shot[i].vz = 0.6f;
-            shot[i].life = 2.0f;
+            shot[i].life = WeaponRangeNow(curWeapon) / (w->speed > 0.01f ? w->speed : 1.0f);
+            if (shot[i].life < 0.10f) shot[i].life = 0.10f;
             shot[i].age = 0.0f;
             shot[i].charge = charge;
             shot[i].kind = 6;
             shot[i].dmg = dmg;
             shot[i].pierce = WeaponPierceNow(curWeapon);   /* v2.0：穿透配件对远程生效 */
+            shot[i].mirrorRebounded = 0;
+            shot[i].ignoreTarget = -1;
+            shot[i].ignoreTargetTime = 0.0f;
             shot[i].active = 1;
             break;
         }
@@ -1777,6 +2002,7 @@ static void SpawnShards(float x, float y, float vx, float vy, float charge) {
     }
 }
 void Update(float dt) {
+    CalibTick(dt);   /* v2.4：校准小游戏计时（冷却与滑块） */
     /* v2.1 屏幕特效推进：抖动 / 红闪 / 枪口闪 */
     if (hitFlash > 0.0f) { hitFlash -= dt * 3.2f; if (hitFlash < 0.0f) hitFlash = 0.0f; }
     if (muzzleFlash > 0.0f) { muzzleFlash -= dt * 9.0f; if (muzzleFlash < 0.0f) muzzleFlash = 0.0f; }
@@ -1829,9 +2055,15 @@ void Update(float dt) {
     /* 状态效果计时。强度变化时重算 FOV（视野收窄要立刻生效） */
     if (UpdateFx(dt)) ApplyFov();
 
+    /* v2.5：安全屋判定必须**在理智流失之前**算出来。
+       原来这段在后面，于是安全屋里的基础流失照扣，而回智又被
+       SAFE_HEAL_CAP(60) 挡住 —— 理智 70 走进安全屋会看到理智继续下降。 */
+    int inSafe = (safeRoom.active &&
+                  Dist2(posX, posY, safeRoom.x, safeRoom.y) < SAFE_ZONE_RADIUS * SAFE_ZONE_RADIUS);
+
     /* 理智流失：随层数增长（v1.8），代谢 keystone 把它换成电量消耗 */
     float drainMul = 1.0f + FxStrength(FX_DRAIN) * 1.5f;
-    float drain = SanityDrainRate() * SkillCalmMul() * modSanityMul * drainMul * RelicSanityMul();
+    float drain = SanityDrainRate() * SkillCalmMul() * modSanityMul * drainMul * RelicSanityMul() * BenchSanityDrainMul();   /* v2.7 */
     if (HasKeystone(SK_METAB)) {
         battery -= drain * META_COST * dt;
         if (battery <= 0.0f) {          /* 断电：理智开始双倍流失 */
@@ -1852,7 +2084,8 @@ void Update(float dt) {
             uiDirty = 1;
             return;
         }
-        sanity -= drain * siphonSan * dt;
+        /* v2.5：安全屋里不流失 —— 这是"安全"二字的承诺 */
+        if (!inSafe) sanity -= drain * siphonSan * dt;
     }
     lowSanitySeconds += (sanity <= 1.0f) ? dt : 0.0f;   /* v2.2：LAST BREATH */
     if (sanity <= 0.0f) {
@@ -1919,12 +2152,60 @@ void Update(float dt) {
     }
 
 
+    /* v3.0：上锁的箱子**按一下 E 就弹锁盘**，不走长按翻箱；
+       没锁的仍然长按搜索。 */
+    if (hoverKind == 1 && hoverIndex >= 0 && hoverIndex < MAX_CONTAINERS &&
+        containers[hoverIndex].active && !containers[hoverIndex].searched &&
+        containers[hoverIndex].locked && !lockActive) {
+        if (IsActionPressed(ACT_INTERACT)) {
+            LockOpenFor(hoverIndex, containers[hoverIndex].lockType);
+            keyPressed[g_bindings[ACT_INTERACT]] = 0;
+            return;
+        }
+        holdingNow = 0;      /* 上锁时按住 E 不翻箱 */
+    } else {
+        /* v3.0：藏身点 —— 找最近的一个，按 E 进出 */
+    {
+        hideSpotNear = -1;
+        float bestHD = 2.6f * 2.6f;
+        for (int i = 0; i < hideSpotCount; i++) {
+            if (!hideSpots[i].active) continue;
+            float d = Dist2(posX, posY, hideSpots[i].x, hideSpots[i].y);
+            if (d < bestHD) { bestHD = d; hideSpotNear = i; }
+        }
+        /* 在藏身点里再按 E → 出来 */
+        if (hiddenIn >= 0) {
+            if (IsActionPressed(ACT_INTERACT)) {
+                hiddenIn = -1;
+                pickupMsg = g_lang == LANG_ZH ? "出来了" : "LEFT COVER";
+                pickupMsgTimer = 1.0f;
+                keyPressed[g_bindings[ACT_INTERACT]] = 0;
+                uiDirty = 1;
+            }
+        } else if (hideSpotNear >= 0) {
+            if (IsActionPressed(ACT_INTERACT)) {
+                hiddenIn = hideSpotNear;
+                posX = hideSpots[hiddenIn].x;
+                posY = hideSpots[hiddenIn].y;
+                /* 钻进去 → 全场追捕者立刻失去目标 */
+                if (monster.active) { monster.state = 0; monster.pathLen = 0; monster.pathIdx = 0; }
+                pickupMsg = g_lang == LANG_ZH ? "藏好了  （再按 E 出来）" : "HIDDEN  (E TO LEAVE)";
+                pickupMsgTimer = 1.6f;
+                keyPressed[g_bindings[ACT_INTERACT]] = 0;
+                uiDirty = 1;
+            }
+        }
+    }
+
     holdingNow = (hoverKind != 0 && IsActionDown(ACT_INTERACT));
+    }
 
     /* 冲刺与体力 */
     int wantSprint = IsActionDown(ACT_SPRINT);
     int inF = IsActionDown(ACT_MOVE_FWD) - IsActionDown(ACT_MOVE_BACK);
     int inS = IsActionDown(ACT_MOVE_RIGHT) - IsActionDown(ACT_MOVE_LEFT);
+    /* v3.0：藏在柜子里不能动（但可以转头偷看） */
+    if (hiddenIn >= 0) { inF = 0; inS = 0; }
     int moving = (inF != 0 || inS != 0);
     /* v2.1：走路相位，手持模型和准星都跟着动 */
     bobPhase += dt * (sprinting ? 11.0f : (moving ? 7.0f : 1.6f));
@@ -1933,7 +2214,7 @@ void Update(float dt) {
     sprinting = (wantSprint && moving && stamina > 1.0f);
     if (sprinting) {
         sprintedThisLevel = 1;  /* 标记本局冲刺过 */
-        stamina -= STAMINA_DRAIN * dt;
+        stamina -= STAMINA_DRAIN * RunUpgStaminaMul() * dt;   /* v3.0 体能强化 */
         if (stamina < 0.0f) stamina = 0.0f;
         staminaIdle = 0.5f;
     } else if (staminaIdle > 0.0f) {
@@ -1945,12 +2226,27 @@ void Update(float dt) {
 
     /* 带半径的碰撞：不再用「点」判定，避免贴墙时半个身子钻进墙里 */
     /* 安全屋：站在里面回理智 */
-    int inSafe = (safeRoom.active && Dist2(posX, posY, safeRoom.x, safeRoom.y) < SAFE_ZONE_RADIUS * SAFE_ZONE_RADIUS);
-    playerInSafe = inSafe;
-    /* v2.0：站在安全屋里按互动键打开面板（商店/改装台/休息） */
-    if (inSafe && IsActionPressed(ACT_INTERACT) && currentState == STATE_PLAYING) {
+    playerInSafe = inSafe;   /* v2.5：inSafe 已在前面算过 */
+    /* v2.5：站在安全区里按**空格**直接玩校准小游戏。
+       原来必须先按 E 开面板、再在面板里按空格，多绕一步；
+       用户要求"进安全区屏幕上出现一行字，按空格开始小游戏"。 */
+    if (inSafe && currentState == STATE_PLAYING) {
+        if (keyPressed[VK_SPACE]) {
+            if (calibActive) CalibLock();
+            else             CalibStart();
+            keyPressed[VK_SPACE] = 0;   /* 吃掉这一次，别再触发闪避 */
+        }
+    }
+
+    /* v2.6：**进安全屋商店的热键改成 T**（用户要求）。
+       原来用的是 ACT_INTERACT（默认 E），但 E 同时是「翻箱搜索」，
+       站在安全屋里按 E 会让人搞不清是要搜箱子还是开店。
+       E 保留给搜索，安全屋专用 T。 */
+    if (inSafe && currentState == STATE_PLAYING && keyPressed['T']) {
+        keyPressed['T'] = 0;
         ShopOpen(currentLevel);
         currentState = STATE_SAFEHOUSE;
+        /* v2.4：次数改由 CalibTick 按层发放，这里不再重置 */
         shopPage = 0;
         shopRow = 0;
         ForceCursor(1);
@@ -2095,7 +2391,7 @@ void Update(float dt) {
     float crankMul = cranking ? (1.0f - SkillCrankWalkPenalty()) : 1.0f;
     if (cranking) sprinting = 0;            /* 边摇边冲刺太离谱 */
     float sp = MOVE_SPEED * (1.0f + SkillSpeedAdd() + darkAdd) * slowMul * RelicSpeedMul() * dt
-             * (sprinting ? SPRINT_MULT : 1.0f) * crankMul;
+             * (sprinting ? SPRINT_MULT * BenchSprintMul() : 1.0f)   /* v3.0 爆发 */ * crankMul;
     float perpX = -dirY, perpY = dirX;      /* 单位侧向，与 FOV 无关 */
     float dx = 0.0f, dy = 0.0f;
     if (!holdingNow && (!cranking || SkillCrankWalkPenalty() > 0.0f)) {          /* 翻找/摇电时不接受移动输入 */
@@ -2155,7 +2451,9 @@ void Update(float dt) {
                 else                { mirrors++;   pickupMsg = "+MIRROR"; }
             }
                 else if (c->content == 2) {
-                    battery += BATTERY_PICKUP;
+                    battery += BATTERY_PICKUP * BenchBatteryPickupMul();   /* v2.7 电池库 */
+                    energy += ENERGY_FROM_BATTERY;   /* v2.3：电池顺带补武器能量 */
+                    if (energy > ENERGY_MAX) energy = ENERGY_MAX;
                     if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
                     healFlash = 0.06f;
                     pickupMsg = "+BATTERY";
@@ -2374,6 +2672,7 @@ void Update(float dt) {
     /* v1.17 训练场：无限道具、不掉理智、标本固定不动 */
     if (trainingMode) {
         flares = bottles = bricks = acids = smokeBombs = 99;
+        firePots = gluePots = mirrors = 99;
         sanity = 100.0f;
         battery = (float)BatteryMax();
         stamina = StaminaMax();
@@ -2492,10 +2791,26 @@ void Update(float dt) {
         AddAchievementProgress(3, 15);  /* SHARD HUNTER */
         if (currentLevel > bestLevel) bestLevel = currentLevel;
         if (currentLevel == 1) UnlockAchievement(0);  /* FIRST STEPS */
-        /* v2.0：战役模式 —— 过关直接进下一关，5 关打完算通关 */
+        /* 战役模式：每段连续 3 层；段内换层不重置资源，段间才切规则/重开资源。 */
         if (campaignMode) {
-            cores += 1;   /* v2.2：每通过一段给 1 核心（原来战役 0 收益） */
-            if (campaignStage < 4) {
+            int stageFloor = (currentLevel - 1) % CAMPAIGN_LEVELS_PER_STAGE;
+            if (stageFloor + 1 < CAMPAIGN_LEVELS_PER_STAGE) {
+                currentLevel++;
+                energy += ENERGY_PER_FLOOR;                      /* v2.3：每层唯一补给 */
+        /* v2.4：过关奖励立刻到账，给玩家一个明确的反馈 */
+        pickupMsg = (g_lang == LANG_ZH) ? "过关奖励  +能量 +理智" : "LEVEL CLEAR  +ENERGY +SANITY";
+        pickupMsgTimer = 2.2f;
+                if (energy > ENERGY_MAX) energy = ENERGY_MAX;
+                GenerateLevel();
+                RunSkillsReset();
+                ClearFx();
+                for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
+                flashTime = 0.15f;
+                UpdateExplored();
+                return;
+            }
+            cores += 1;   /* 每完成一段给 1 核心 */
+            if (campaignStage < CAMPAIGN_STAGE_COUNT - 1) {
                 StartCampaign(campaignStage + 1);
                 return;
             }
@@ -2508,7 +2823,6 @@ void Update(float dt) {
                                   runTime, modsSeenCount };
                 ComputeScore(&si, &lastScore);
                 lastScore.score += 5000;      /* 战役通关固定加成 */
-                cores += 1;
             }
             campaignMode = 0;
             currentState = STATE_GAMEOVER;
@@ -2574,6 +2888,11 @@ void Update(float dt) {
             }
             if (currentLevel == 20 || currentLevel == 40 ||
                 currentLevel == 60 || currentLevel == 80) cores += 1;
+            /* v3.0：**每层 +35 能量**（数值审查 #1 的核心修复）——
+               原来这行只写在战役分支里，主线/无尽从不补给，
+               一局只有 19 刀的能量，第 2 层就开始「打不起」。 */
+            energy += ENERGY_PER_FLOOR;
+            if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
             currentLevel++;
             GenerateLevel();
         } else {
@@ -2581,6 +2900,8 @@ void Update(float dt) {
             bankStreak++;
             shards += pendingShards;
             pendingShards = 0;
+            energy += ENERGY_PER_FLOOR;                        /* v3.0：主线每层补给 */
+            if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
             currentLevel++;
             GenerateLevel();
         }
@@ -2629,11 +2950,9 @@ void StartDailyRun(void) {
     if (!tm) return;
     dailySeed = (tm->tm_year + 1900) * 10000 + (tm->tm_mon + 1) * 100 + tm->tm_mday;
     srand((unsigned)dailySeed);
-    dailyMode = 1;
-    isEndlessRun = 0;
-    trainingMode = 0;
     curWeapon = dailySeed % WPN_COUNT;
     DeleteSave();
+    pendingStartMode = START_DAILY;
     StartGame();
     /* 强制机制：每日挑战理智流失 +25%，碎片 +25%。
        v2.0 修复：原来直接乘在当前层的乘子上，下一层 GenerateLevel 就重置了，
@@ -2643,24 +2962,13 @@ void StartDailyRun(void) {
 /* v2.0：战役第 stage 关。固定种子保证每次进同一关看到的是同一张图。 */
 void StartCampaign(int stage) {
     if (stage < 0) stage = 0;
-    if (stage > 4) stage = 4;
-    campaignMode = 1;
-    campaignStage = stage;
-    dailyMode = 0;
-    isEndlessRun = 0;
-    trainingMode = 0;
+    if (stage >= CAMPAIGN_STAGE_COUNT) stage = CAMPAIGN_STAGE_COUNT - 1;
     srand((unsigned)(9000 + stage * 733));
     curWeapon = stage % WPN_COUNT;
     DeleteSave();
+    pendingStartMode = START_CAMPAIGN;
+    pendingCampaignStage = stage;
     StartGame();
-    /* 每关一条规则 */
-    switch (stage) {
-    case 0: modSanityMul = 0.55f; break;                       /* 热身：理智流失减半 */
-    case 1: modSpeedMul = 1.18f; break;                        /* 猎杀：怪更快 */
-    case 2: modShardMul = 0.5f; modBatteryMul = 0.7f; break;    /* 干旱：没碎片，省电 */
-    case 3: modBatteryMul = 2.0f; modSanityMul = 1.15f; break;  /* 洪水：耗电翻倍 */
-    default: modSpeedMul = 1.30f; modSanityMul = 1.25f; break;  /* 终章：全上 */
-    }
 }
 
 /* v2.0 SHORTCUT：跳过当前层，直接生成下一层。
@@ -2693,6 +3001,126 @@ void SkipOneLevel(void) {
  * 任何窗口尺寸下比例都恒定。 */
 int clientW = 800, clientH = 600;
 
+
+/* ===== v2.4 校准小游戏 ===== */
+
+
+/* v2.6：校准难度随层数成长 —— 返回目标区缩放（1.0 = 第 1 层） */
+float CalibZoneScale(void) {
+    float t = (float)(currentLevel - 1);
+    if (t < 0.0f) t = 0.0f;
+    float k = 1.0f - t * CALIB_ZONE_SHRINK;
+    if (k < CALIB_ZONE_MIN) k = CALIB_ZONE_MIN;   /* 下限 */
+    return k;
+}
+
+/* v2.6：区域缩到下限之后，多出来的难度转到滑块速度（1.0 = 正常） */
+float CalibSpeedScale(void) {
+    float t = (float)(currentLevel - 1);
+    if (t < 0.0f) t = 0.0f;
+    /* 区域开始触底的那一层：1 - t*shrink = MIN  →  t = (1-MIN)/shrink */
+    float tFloor = (1.0f - CALIB_ZONE_MIN) / CALIB_ZONE_SHRINK;
+    if (t <= tFloor) return 1.0f;
+    float extra = (t - tFloor) * CALIB_SPEED_GROW;
+    float s = 1.0f + extra;
+    if (s > CALIB_SPEED_MAX) s = CALIB_SPEED_MAX;  /* 上限 */
+    return s;
+}
+
+void CalibStart(void) {
+    if (calibActive) return;
+    /* v3.0：每层只能校准一次 */
+    if (calibUsedLevel == currentLevel) {
+        pickupMsg = g_lang == LANG_ZH ? "本层已校准过" : "ALREADY CALIBRATED THIS LEVEL";
+        pickupMsgTimer = 1.2f;
+        return;
+    }
+    /* v2.6：**取消次数限制** —— 只靠 60 秒冷却控制节奏 */
+    if (calibCooldown > 0.0f) {
+        char* m = (char*)(g_lang == LANG_ZH ? "校准冷却中" : "CALIBRATION COOLING");
+        pickupMsg = m;
+        pickupMsgTimer = 1.2f;
+        return;
+    }
+    calibActive = 1;
+    calibPos = 0.0f;
+    calibDir = 1.0f;
+    /* 目标区随机，但不贴着两端（否则没得玩） */
+    calibZoneC = 0.22f + (float)(rand() % 57) / 100.0f;   /* 0.22 ~ 0.78 */
+    calibResult = 0;
+    uiDirty = 1;
+}
+
+void CalibLock(void) {
+    if (!calibActive) return;
+    calibActive = 0;
+    calibCooldown = CALIB_COOLDOWN;   /* v2.6：只上冷却 */
+    calibUsedLevel = currentLevel;    /* v3.0：记下本层用过了 */
+
+    float d = calibPos - calibZoneC;
+    if (d < 0.0f) d = -d;
+    float zs = CalibZoneScale();          /* v2.6：目标区随层数缩小 */
+    float perfW = CALIB_PERFECT_W * zs;
+    float zoneW = CALIB_ZONE_W * zs;
+
+    if (d <= perfW) {
+        /* v2.9：黄区（完美）= 能量上限的 70% */
+        float gain = (float)EnergyMax() * CALIB_PERFECT_ENERGY_PCT;
+        calibResult = 1;
+        energy += gain;
+        sanity += CALIB_PERFECT_SANITY;
+        if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
+        if (sanity > SanityMax()) sanity = SanityMax();
+        pickupMsg = g_lang == LANG_ZH ? "完美校准  +70% 能量  +理智" : "PERFECT  +70% ENERGY +SANITY";
+        PlaySfx(SFX_POWER, 1.0f);
+    } else if (d <= zoneW) {
+        /* v2.9：绿区（命中）= 能量上限的 40% */
+        float gain = (float)EnergyMax() * CALIB_GOOD_ENERGY_PCT;
+        calibResult = 2;
+        energy += gain;
+        sanity += CALIB_GOOD_SANITY;
+        if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
+        if (sanity > SanityMax()) sanity = SanityMax();
+        pickupMsg = g_lang == LANG_ZH ? "校准成功  +40% 能量  +理智" : "CALIBRATED  +40% ENERGY +SANITY";
+        PlaySfx(SFX_POWER, 0.7f);
+    } else {
+        /* v2.9：**失手不给任何能量**（原来也是 0，这里写明防以后改坏） */
+        calibResult = 3;
+        pickupMsg = g_lang == LANG_ZH ? "校准失手  无能量" : "MISSED  NO ENERGY";
+        PlaySfx(SFX_GLASS, 0.6f);
+    }
+    calibResultTimer = 1.6f;
+    pickupMsgTimer = 1.6f;
+    uiDirty = 1;
+}
+
+void CalibTick(float dt) {
+    if (calibCooldown > 0.0f) {
+        calibCooldown -= dt;
+        if (calibCooldown < 0.0f) calibCooldown = 0.0f;
+    }
+    if (calibResultTimer > 0.0f) {
+        calibResultTimer -= dt;
+        if (calibResultTimer < 0.0f) calibResultTimer = 0.0f;
+    }
+    /* v2.4：次数**按层发放**。
+       原来是在「进店」那一刻重置，于是出门再进来就又满 3 次 ——
+       而安全屋会回理智，站够冷却就能无限刷能量和理智。 */
+    /* v2.6：取消次数限制后，这里只需要保证「每层进来时不要残留上一次的滑块状态」 */
+    if (currentState == STATE_SAFEHOUSE && calibLevel != currentLevel) {
+        calibLevel = currentLevel;
+        calibActive = 0;
+        uiDirty = 1;
+    }
+
+    if (!calibActive) return;
+    /* 滑块每帧都在动，必须每帧重画界面（否则会留下残影） */
+    uiDirty = 1;
+    calibPos += calibDir * dt / (CALIB_SWEEP / CalibSpeedScale());   /* v2.6：深层更快 */
+    if (calibPos >= 1.0f) { calibPos = 1.0f; calibDir = -1.0f; }
+    if (calibPos <= 0.0f) { calibPos = 0.0f; calibDir = 1.0f; }
+}
+
 void SyncWindowSize(void) {
     if (!g_hwnd) return;
     RECT cr;
@@ -2721,10 +3149,44 @@ static void ResetModeFlags(void) {
     campaignStage = 0;
 }
 
+static void ApplyCampaignRules(int stage) {
+    /* 在 GenerateLevel() 完成本层基础词条后叠加，避免被随机倍率重置。 */
+    switch (stage) {
+    case 0: modSanityMul *= 0.55f; break;                       /* 热身：理智流失减半 */
+    case 1: modSpeedMul *= 1.18f; break;                        /* 猎杀：怪更快 */
+    case 2: modShardMul *= 0.5f; modBatteryMul *= 0.7f; break;   /* 干旱：没碎片，省电 */
+    case 3: modBatteryMul *= 2.0f; modSanityMul *= 1.15f; break; /* 洪水：耗电翻倍 */
+    default: modSpeedMul *= 1.30f; modSanityMul *= 1.25f; break;/* 终章：全上 */
+    }
+}
+
 void StartGame(void) {
+    /* v3.0：**每局重置改造树 + 强化** ——
+       之前这两个 Reset 一个调用点都没有（全项目 grep 为 0），
+       导致买过的节点跨局累积，第二局开局就满级。 */
+    BenchResetRun();
+    RunUpgReset();
+
+
+    int startMode = pendingStartMode;
+    int startStage = pendingCampaignStage;
+    pendingStartMode = START_NORMAL;
+    pendingCampaignStage = 0;
+
     ResetModeFlags();   /* v2.2：先清模式标志 */
+    if (startMode == START_ENDLESS) {
+        isEndlessRun = 1;
+    } else if (startMode == START_DAILY) {
+        dailyMode = 1;
+    } else if (startMode == START_CAMPAIGN) {
+        campaignMode = 1;
+        campaignStage = startStage;
+    } else if (startMode == START_TRAINING) {
+        trainingMode = 1;
+    }
+
     currentState = STATE_PLAYING;
-    currentLevel = 1;
+    currentLevel = campaignMode ? campaignStage * CAMPAIGN_LEVELS_PER_STAGE + 1 : 1;
     gameWon = 0;
     flares = 1;
     bottles = 1;
@@ -2995,6 +3457,13 @@ void ApplyDisplayMode(void) {
     if (isFullscreen) {
         SetWindowLongPtr(g_hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
         SetWindowPos(g_hwnd, HWND_TOP, 0, 0, winW, winH, SWP_FRAMECHANGED);
+        /* v2.9：**窗口真的变成全屏尺寸之后**再算一次渲染分辨率。
+           原来 InitPixels() 在 SetWindowPos 之前调用，那时候 GetClientRect
+           还是旧的 800x600 → 全屏后渲染分辨率停在 800x600 不涨，
+           既糊又让 HALFTONE 把 800x600 放大到 1080p（那一步特别慢）。 */
+        InitPixels();
+        SyncWindowSize();
+        uiDirty = 1;
     } else {
         /* 保留 WS_VISIBLE：否则切分辨率后窗口会消失 */
         SetWindowLongPtr(g_hwnd, GWL_STYLE, style | WS_VISIBLE);
@@ -3077,9 +3546,8 @@ void ActivateMenuItem(void) {
             uiDirty = 1;
         } else if (endlessUnlocked && sel == base + 1) {
             /* Endless 模式 */
-            isEndlessRun = 1;
-            trainingMode = 0;      /* v2.7：模式标记互斥，别继承上一次的训练场 */
             DeleteSave();
+            pendingStartMode = START_ENDLESS;
             StartGame();
         } else if ((endlessUnlocked && sel == base + 2) || (!endlessUnlocked && sel == base + 1)) {
             /* v2.8：HUB = 技能树，一进来光标就在第一个节点上 */
@@ -3123,13 +3591,13 @@ void ActivateMenuItem(void) {
             StartDailyRun();
         } else if (sel == MainMenuCount() - 2) {
             /* v1.17：训练营 —— 无限道具 + 标本 + 右侧伤害屏 */
-            trainingMode = 1;
-            isEndlessRun = 0;      /* v2.7：同上，两个标记互斥 */
             DeleteSave();
+            pendingStartMode = START_TRAINING;
             StartGame();
             trainingTotal = trainingCount = trainingLast = trainingDps = 0;
             for (int i = 0; i < 6; i++) trainingHist[i] = 0;
             flares = bottles = bricks = acids = smokeBombs = 99;
+            firePots = gluePots = mirrors = 99;
             uiDirty = 1;
         } else {
             SaveGame();
@@ -3775,6 +4243,35 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             break;
 
         case WM_MOUSEMOVE: {
+            /* v3.0：安全屋行悬停 —— 记录鼠标落在第几行，供绘制高亮 */
+            if (currentState == STATE_SAFEHOUSE) {
+                int hx = (short)LOWORD(lParam), hy = (short)HIWORD(lParam);
+                MouseToLogical(&hx, &hy);
+                MenuGeo hg = GetMenuGeo();
+                int f = -1;
+                for (int i = 0; i < hg.count; i++) {
+                    RECT r = RowRect(hg, i);
+                    if (hx >= r.left && hx <= r.right && hy >= r.top && hy <= r.bottom) { f = i; break; }
+                }
+                if (f != safehouseHoverRow) { safehouseHoverRow = f; uiDirty = 1; }
+                /* v3.0：页签悬停也一起算（原来这个变量全工程无人赋值） */
+                {
+                    int ht = -1;
+                    for (int t = 0; t < SAFEHOUSE_PAGES; t++) {
+                        int tx0, ty0, tx1, ty1;
+                        PageTabRect(t, &tx0, &ty0, &tx1, &ty1);
+                        if (hx >= tx0 && hx <= tx1 && hy >= ty0 && hy <= ty1) { ht = t; break; }
+                    }
+                    if (ht != safehouseHoverTab) { safehouseHoverTab = ht; uiDirty = 1; }
+                }
+            }
+
+            /* v2.9：改造树画布拖拽（自绘光标已删除，这里只服务拖拽） */
+            if (currentState == STATE_SAFEHOUSE && shopPage == SHP_TREE) {
+                int rx = (short)LOWORD(lParam), ry = (short)HIWORD(lParam);
+                MouseToLogical(&rx, &ry);
+                BenchDragMove(rx, ry);
+            }
             int mx = (short)LOWORD(lParam), my = (short)HIWORD(lParam);
             /* v1.8：三选一面板支持鼠标悬停选中 */
             if (currentState == STATE_SKILL_PICK) {
@@ -3865,6 +4362,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
 
         case WM_MOUSEWHEEL: {
+            /* v2.8：改造树页用滚轮缩放（以鼠标为锚点） */
+            if (currentState == STATE_SAFEHOUSE && shopPage == SHP_TREE) {
+                int wx = (short)LOWORD(lParam), wy = (short)HIWORD(lParam);
+                POINT pt = { wx, wy };
+                ScreenToClient(g_hwnd, &pt);
+                int lx2 = pt.x, ly2 = pt.y;
+                MouseToLogical(&lx2, &ly2);
+                float f = (GET_WHEEL_DELTA_WPARAM(wParam) > 0) ? 1.12f : (1.0f / 1.12f);
+                BenchZoomAt(f, lx2, ly2);
+                return 0;
+            }
             /* v1.8：游玩中用滚轮切换投掷物（1/2/3 仍然可用） */
             if (currentState == STATE_PLAYING) {
                 /* v1.14：滚轮阻尼。
@@ -3910,6 +4418,47 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
 
         case WM_LBUTTONDOWN: {
+            /* v3.0：锁盘打开时，鼠标全部归锁盘 */
+            if (lockActive) {
+                int lx = (short)LOWORD(lParam), ly = (short)HIWORD(lParam);
+                MouseToLogical(&lx, &ly);
+                LockClick(lx, ly);
+                uiDirty = 1;
+                return 0;
+            }
+            /* v2.8：安全屋页签 + 改造树节点点击 */
+            if (currentState == STATE_SAFEHOUSE) {
+                int mx0 = (short)LOWORD(lParam), my0 = (short)HIWORD(lParam);
+                MouseToLogical(&mx0, &my0);
+                /* 页签 */
+                for (int t = 0; t < SAFEHOUSE_PAGES; t++) {
+                    int x0, y0, x1, y1;
+                    PageTabRect(t, &x0, &y0, &x1, &y1);
+                    if (mx0 >= x0 && mx0 <= x1 && my0 >= y0 && my0 <= y1) {
+                        shopPage = t;
+                        shopRow = 0;
+                        uiDirty = 1;
+                        return 0;
+                    }
+                }
+                /* 空白处按住 → 开始拖拽画布（v2.9，和思维导图一致） */
+                if (shopPage == SHP_TREE) {
+                    BenchDragStart(mx0, my0);
+                }
+                /* 树节点 */
+                if (shopPage == SHP_TREE) {
+                    for (int id = 0; id < BENCH_COUNT; id++) {
+                        int cx = (int)(BenchNodeWorldX(id) * treeVK + treeVX);
+                        int cy = (int)(BenchNodeWorldY(id) * treeVK + treeVY);
+                        int hw = (int)(75.0f * treeVK), hh = (int)(27.0f * treeVK);
+                        if (mx0 >= cx - hw && mx0 <= cx + hw && my0 >= cy - hh && my0 <= cy + hh) {
+                            shopNodeSel = id;
+                            uiDirty = 1;
+                            return 0;
+                        }
+                    }
+                }
+            }
             int mx = (short)LOWORD(lParam), my = (short)HIWORD(lParam);
 
             /* v2.2 修复：原来这里无条件 CloseSkillPick() ——
@@ -3943,6 +4492,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_LBUTTONUP:
+            BenchDragEnd();   /* v2.9：结束画布拖拽 */
             if (sliderDragging) ReleaseCapture();
             sliderDragging = 0;
             return 0;
@@ -3977,11 +4527,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 RebindConsumeKey((int)wParam);
                 return 0;
             }
+            /* v2.9：**只在游戏中才写 keys[]**。
+               这是「面板里按 A/D 会漂移」的真正根因：
+               按住 A/D 时 Windows 会以每秒几十次重发 WM_KEYDOWN（键盘自动重复），
+               这里每次都把 keys['A'] 设回 1，而 PollInput 每帧清零一次 ——
+               两条路径打架，结果就是玩家被推着走。
+               菜单导航靠的是下面那些 wParam 比较，不需要 keys[]。 */
             if (wParam < 256) {
-                keys[wParam] = 1;
-                /* 记下「刚按下」的边沿，供 QTE 消费。
-                   只在游戏进行中记 —— 菜单里按的键不该触发 QTE。 */
-                if (currentState == STATE_PLAYING) keyPressed[wParam] = 1;
+                if (currentState == STATE_PLAYING) {
+                    keys[wParam] = 1;
+                    keyPressed[wParam] = 1;   /* 边沿，供 QTE 消费 */
+                }
             }
 
             /* 切投掷槽位：在消息里即时处理，后按的键立即生效。
@@ -4008,17 +4564,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
        再按 E 进来光标又回到第 1 行，永远够不到第 2/3 行。
        现在只在玩家**同时按住方向无关的移动键组合**（A/D 横移）时才关门，
        W/S 留给导航；想退出请按 ESC 或选 LEAVE。 */
-    if (currentState == STATE_SAFEHOUSE && (wParam == 'A' || wParam == 'D')) {
-        currentState = STATE_PLAYING;
-        resetInputState = 1;
-        ForceCursor(0);
-        uiDirty = 1;
-        return 0;
-    }
+    /* v2.9：**真的删掉了**「A/D 关门」。
+       上一版我以为删了，其实补丁打到了同文案的另一处，块还在 4345 行 ——
+       结果按住 A/D 面板直接被关掉，state 从 11 跳回 1，玩家立刻被推着走。
+       这就是「A/D 漂移」纠缠了这么多轮的真相。 */
     int menuUp    = (wParam == (WPARAM)g_bindings[ACT_MENU_UP])   || wParam == 'W';
             int menuDown  = (wParam == (WPARAM)g_bindings[ACT_MENU_DOWN]) || wParam == 'S';
-            int menuLeft  = (wParam == (WPARAM)g_bindings[ACT_MENU_LEFT]);
-            int menuRight = (wParam == (WPARAM)g_bindings[ACT_MENU_RIGHT]);
+            int menuLeft  = (wParam == (WPARAM)g_bindings[ACT_MENU_LEFT])  || wParam == 'A';   /* v2.8 */
+            int menuRight = (wParam == (WPARAM)g_bindings[ACT_MENU_RIGHT]) || wParam == 'D';   /* v2.8 */
             /* v1.8：空格也能确认（很多人不习惯按回车）。
                游戏里空格仍是跳脸虫的躲避键，两者不冲突。 */
             int menuConfirm = (wParam == (WPARAM)g_bindings[ACT_MENU_CONFIRM]) || wParam == VK_SPACE;
@@ -4112,9 +4665,29 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (dn) { skillPickSel = (skillPickSel + 1) % INRUN_CHOICES; uiDirty = 1; }
                 if (menuConfirm) CloseSkillPick();
             } else if (currentState == STATE_SAFEHOUSE) {
+                /* v2.4：空格 = 校准（开始 / 锁定） */
+                if (wParam == VK_SPACE && !(lParam & 0x40000000)) {
+                    if (calibActive) CalibLock();
+                    else             CalibStart();
+                    return 0;
+                }
                 if (wParam == VK_TAB) ShopNextPage();
-                if (menuUp)      ShopMoveSel(-1);
-                if (menuDown)    ShopMoveSel(1);
+                /* v2.9：切到树页时把选中节点居中（原来 treeVX=0，第一列半截在屏外） */
+                if (shopPage == SHP_TREE) BenchFocusNode(shopNodeSel);
+                if (wParam == VK_HOME && shopPage == SHP_TREE) BenchResetView();   /* v2.8 */
+                if (shopPage == SHP_TREE) {
+                    /* v2.8：树页四向移动 + 画布自动跟随 */
+                    if (menuUp)    { ShopTreeMove(0, -1); BenchFocusNode(shopNodeSel); }
+                    if (menuDown)  { ShopTreeMove(0, 1);  BenchFocusNode(shopNodeSel); }
+                    if (menuLeft)  { ShopTreeMove(-1, 0); BenchFocusNode(shopNodeSel); }
+                    if (menuRight) { ShopTreeMove(1, 0);  BenchFocusNode(shopNodeSel); }
+                } else {
+                    if (menuUp)      ShopMoveSel(-1);
+                    if (menuDown)    ShopMoveSel(1);
+                    /* v2.8：非树页时左右键切页（和顶部按钮一致，不用记 TAB） */
+                    if (menuLeft)    ShopPrevPage();
+                    if (menuRight)   ShopNextPage();
+                }
                 if (menuConfirm) ShopActivate();
                 if (menuCancel) {
                     currentState = STATE_PLAYING;

@@ -29,7 +29,12 @@
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
 #define CANITY_VERSION_NUM 22         /* 整数版本，进存档做记录 */
-#define CANITY_VERSION_STR "2.0.0"    /* 显示版本，窗口标题 / 主菜单 */
+/* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
+   置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
+   置 0 = 回到旧的战斗版本。 */
+#define NO_COMBAT 1
+
+#define CANITY_VERSION_STR "2.2.1"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -122,13 +127,18 @@ extern int bestEndlessScore;
    28 万（约 640x360）→ 14ms，60fps 稳。
    注意：bench_canity.c 复刻了同一套分辨率计算，用的是这里的常量，
    不要在两处各写一份数字（上一轮就因为这里漏改，基准一直在测已废弃的配置）。 */
-#define PIXEL_BUDGET 280000
+/* v2.9：28 万（≈705x396）在高分屏上糊得厉害 —— 用户实测「分辨率严重下降」。
+   默认抬到 90 万（≈1265x712），自适应逻辑仍会在帧时间 >12ms 时自动往回收
+   （PIXEL_BUDGET_MIN 12 万），所以慢机器不会卡死。 */
+#define PIXEL_BUDGET 900000
 /* v1.9：动态像素预算 —— 帧时间富裕就提分辨率，吃紧就降 */
 #define PIXEL_BUDGET_MIN  120000
 #define PIXEL_BUDGET_MAX  900000
 
 /* 到达这一层并进出口 = 通关 */
 #define WIN_LEVEL 24     /* v2.1：主线 10 → 24 层（4 个区段） */
+#define CAMPAIGN_STAGE_COUNT 5
+#define CAMPAIGN_LEVELS_PER_STAGE 3  /* 每段连续 3 层，再切换下一段规则 */
 
 /* 字库尺寸（RenderMap 与 UI 共用） */
 #define FONT_H 12
@@ -201,6 +211,10 @@ typedef struct {
     float ramp;                /* 附着深度 0..1，1 = 效果拉满 */
     float attachTimer;         /* 在范围内待了多久（累计），用于「缠上来」的进度 */
     float offX, offY;          /* 附着时趴在玩家背后的世界坐标偏移 */
+    /* ---- v3.0 朝向与走路相位（建模审查 #1/#3） ---- */
+    float facing;              /* 怪自己面朝的角度（弧度），由移动方向更新 */
+    float walkPhase;           /* 走路相位，按**位移积分**而不是全局时钟 */
+    float prevX, prevY;        /* 上一帧位置，用来算位移 */
 } Monster;
 
 /* v1.16 烟幕云：落到地面后持续一段时间，双向遮蔽 */
@@ -294,6 +308,9 @@ typedef struct {
     int kind;            /* 1=瓶 2=砖 3=酸 4=烟 6=信号枪弹（v2.0） */
     int dmg;             /* v2.0：武器子弹的伤害（其它 kind 用不到） */
     int pierce;          /* v2.0：1 = 命中后继续飞 */
+    int mirrorRebounded; /* 镜片只反弹一次，避免高蓄力命中后立刻回撞原目标 */
+    int ignoreTarget;    /* 镜片反弹后的短暂免碰撞目标：0=寻声鬼，1=追光鬼 */
+    float ignoreTargetTime;
 } Shot;
 
 /* 玻璃碎片：撞击时生成，带重力、随机扩散、逐渐变暗 */
@@ -318,11 +335,25 @@ typedef struct { float x, y; int active; } SafeRoom;
 /* 可搜索容器 / 保险丝 / 配电箱
    MAX_CONTAINERS 见文件顶部：数组按 RICH 词条的上限留足余量，
    常规关卡用 CONTAINERS_BASE 个。 */
+/* v3.0 逃生试炼：**藏身点**（衣柜 / 床底 / 桌下）。
+   按 E 钻进去，追捕者会失去目标；钻着的时候不能动。
+   没有藏身点，逃生类就会退化成「绕圈跑」，两分钟就腻。 */
+#define HIDESPOT_MAX 6
+typedef struct {
+    float x, y;
+    int active;
+    int kind;         /* 0=衣柜 1=床底 2=桌下 */
+} HideSpot;
+
 typedef struct {
     float x, y;
     int active;
     int searched;
     int content;      /* 1 = 保险丝  2 = 电池  0 = 空 */
+    /* v3.0：上锁箱子（移植自上游 v2.2.0） */
+    int locked;       /* 1 = 上了锁，按 E 会弹锁盘而不是直接翻 */
+    int lockType;     /* LOCK_TYPE_* */
+    int lockCode;     /* 密码（按锁型解释） */
 } Container;
 
 typedef struct { float x, y; int active; } Breaker;
@@ -339,7 +370,45 @@ typedef struct { float x, y; int active; } Breaker;
 #define MAP_BATTERY_DRAIN 10.0f
 #define BATTERY_PICKUP 60.0f    /* v2.2：45→60（原来第 8 层就开始发黑） */     /* 电池补给量 */
 #define STAMINA_DRAIN 26.0f      /* 冲刺每秒消耗 */
-#define STAMINA_REGEN 24.0f     /* v2.2：20→24（扳手是伤害预算） */      /* 恢复每秒 */
+#define STAMINA_REGEN 24.0f
+/* v2.3 新机制：武器能量。
+   三把武器原来各烧一条资源（体力/电量/理智），结果是「体力自己会回」+
+   「电量能摇回来」+「符印只烧 2 点」，一层里可以无限挥 —— 投掷物就没人用了。
+   现在统一烧这一条**不会自然恢复**的能量：一局的总输出有上限，
+   想省就得用投掷物（投掷物不吃能量）。 */
+#define ENERGY_MAX          120.0f   /* 上限 */
+#define ENERGY_PER_FLOOR     35.0f   /* 每过一层补这么多 */
+#define ENERGY_FROM_BATTERY  12.0f   /* 捡到电池顺带补一点 */
+#define ENERGY_SAFE_REFILL   60.0f
+
+/* v2.4 校准小游戏（参考第五人格的校准）：
+   安全屋里按空格开一次，滑块左右扫，再按空格锁定。
+   完美区命中给得多，普通区给得少，失手什么都没有。 */
+#define CALIB_ATTEMPTS       2        /* v2.6：**已取消次数限制**，这个常量不再参与判定 */
+#define CALIB_COOLDOWN      45.0f     /* v2.9：60 → 45（用户要求） */
+#define CALIB_PER_LEVEL      1        /* v3.0：**每层只能校准 1 次** ——
+                                         原来无次数限制 + 安全屋不掉理智，
+                                         站 3 分钟能刷 190 能量，能量经济直接失效
+                                         （数值审查 #2）。 */
+#define CALIB_SWEEP         1.25f     /* 单程扫完用多久（秒），越小越难 */
+#define CALIB_ZONE_W        0.20f     /* 普通区半宽（0..1 的比例） */
+#define CALIB_PERFECT_W     0.055f    /* 完美区半宽 */
+/* v2.9：能量奖励改成**按能量上限的百分比**（用户要求）
+   完美（黄区）70%、命中（绿区）40%、失手 0%。
+   原来固定 +28/+14，在高上限 build 里收益反而缩水。 */
+#define CALIB_PERFECT_ENERGY_PCT 0.70f
+#define CALIB_GOOD_ENERGY_PCT    0.40f
+#define CALIB_PERFECT_SANITY 18.0f
+#define CALIB_GOOD_SANITY     9.0f
+
+/* v2.6 校准难度成长：
+   · 每层把目标区缩 2.5%，缩到基准的 45% 就停（CALIB_ZONE_MIN）
+   · 停住之后多出来的难度转到**滑块速度**上，最快 2.2 倍（CALIB_SPEED_MAX）
+   两个都有硬上限，深层不会变成不可能。 */
+#define CALIB_ZONE_SHRINK    0.045f   /* 每层缩小比例（第 13 层触底） */
+#define CALIB_ZONE_MIN       0.45f    /* 区域最小 = 基准的 45% */
+#define CALIB_SPEED_MAX      2.20f    /* 滑块最多快 2.2 倍 */
+#define CALIB_SPEED_GROW     0.09f    /* 触底后每层再快 9% */   /* 安全屋充电补这么多 */     /* v2.2：20→24（扳手是伤害预算） */      /* 恢复每秒 */
 
 /* 每关随机词条：给每层一点变化 */
 #define MOD_COUNT 6

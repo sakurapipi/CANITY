@@ -6,9 +6,12 @@
 #include "skills.h"
 #include "lang.h"
 #include "audio.h"
+#include "bench.h"
+#include "upgrade_run.h"
 
 int shopPage = SHP_SHOP;
 int shopRow = 0;
+int shopNodeSel = 0;   /* v2.7：改造树光标 */
 int shopOffer[SHOP_OFFERS] = {-1, -1, -1};
 int shopPrice[SHOP_OFFERS] = {0, 0, 0};
 int attachOwned[ATTACH_COUNT];
@@ -68,20 +71,38 @@ const char* ShopPageTitle(void) {
     switch (shopPage) {
     case SHP_BENCH: return Tr("SAFE HOUSE  -  BENCH", "安全屋  -  改装台");
     case SHP_REST:  return Tr("SAFE HOUSE  -  REST",  "安全屋  -  休息");
+    case SHP_TREE:  return "THE BENCH";
+    case SHP_UPGRADE: return "CRYSTAL UPGRADE";
     default:        return Tr("SAFE HOUSE  -  SHOP",  "安全屋  -  商店");
-    }
+}
 }
 
 int ShopRowCount(void) {
+    if (shopPage == SHP_TREE) return 0;   /* v2.7：树自己画，不用列表行 */
     switch (shopPage) {
     case SHP_BENCH: return 4;     /* CORE / MOD / CLEAR / LEAVE */
     case SHP_REST:  return 4;     /* REST / CHARGE / SWITCH / LEAVE */
+    case SHP_UPGRADE: return RUN_UPG_COUNT + 1;   /* 4 条线 + LEAVE */
     default:        return SHOP_OFFERS + 1;
     }
 }
 
 const char* ShopRowText(int row) {
     if (row < 0) row = 0;
+
+    /* v3.0：局内强化页 —— 4 条线，显示等级和价格 */
+    if (shopPage == SHP_UPGRADE) {
+        if (row >= RUN_UPG_COUNT) return Tr("LEAVE  (ESC)", "离开  (ESC)");
+        int lv = RunUpgLevel(row);
+        int cost = RunUpgCost(row);
+        if (cost < 0)
+            sprintf(sbuf, "%s  LV%d/%d  MAX",
+                    Tr(RunUpgName(row), RunUpgNameZh(row)), lv, RUN_UPG_MAX);
+        else
+            sprintf(sbuf, "%s  LV%d/%d  %d",
+                    Tr(RunUpgName(row), RunUpgNameZh(row)), lv, RUN_UPG_MAX, cost);
+        return sbuf;
+    }
 
     if (shopPage == SHP_SHOP) {
         if (row >= SHOP_OFFERS) {
@@ -130,7 +151,8 @@ const char* ShopRowText(int row) {
         /* v2.0：换武器。原来武器开局选完就锁死 24 层。 */
         extern int curWeapon;
         static const char* wname[WPN_COUNT] = { "CRANKWRENCH", "FLARE PISTOL", "SIGIL" };
-        sprintf(sbuf, "%s  [%s]", Tr("SWITCH WEAPON", "换武器"), wname[curWeapon % WPN_COUNT]);
+        /* v3.0：武器取消 → 这一行改成「静步开关」提示（占位，不消耗） */
+        sprintf(sbuf, "%s", Tr("REST HERE", "在这里休息"));
         return sbuf;
     }
     if (row == 3) {
@@ -150,6 +172,26 @@ void ShopMoveSel(int delta) {
     uiDirty = 1;
 }
 
+/* v2.7：改造树的四向移动（4 列 × 3 行） */
+void ShopPrevPage(void) {
+    shopPage = (shopPage + SAFEHOUSE_PAGES - 1) % SAFEHOUSE_PAGES;
+    shopRow = 0;
+    uiDirty = 1;
+}
+
+void ShopTreeMove(int dx, int dy) {
+    int col = shopNodeSel / BENCH_ROWS;
+    int row = shopNodeSel % BENCH_ROWS;
+    col += dx;
+    row += dy;
+    if (col < 0) col = 0;
+    if (col >= BENCH_COLS) col = BENCH_COLS - 1;
+    if (row < 0) row = 0;
+    if (row >= BENCH_ROWS) row = BENCH_ROWS - 1;
+    shopNodeSel = col * BENCH_ROWS + row;
+    uiDirty = 1;
+}
+
 void ShopNextPage(void) {
     shopPage = (shopPage + 1) % SAFEHOUSE_PAGES;
     shopRow = 0;
@@ -160,6 +202,33 @@ void ShopNextPage(void) {
 
 
 void ShopActivate(void) {
+    /* v3.0：碎片强化 */
+    if (shopPage == SHP_UPGRADE) {
+        if (shopRow >= RUN_UPG_COUNT) return;      /* LEAVE 由 Esc 处理 */
+        int r = RunUpgTryBuy(shopRow);
+        if (r == 0)            { pickupMsg = Tr("UPGRADED", "已强化"); }
+        else if (r == 2)       { pickupMsg = Tr("MAX LEVEL", "已满级"); }
+        else if (r == 4)       { pickupMsg = Tr("NOT ENOUGH", "碎片不够"); }
+        pickupMsgTimer = 1.4f;
+        uiDirty = 1;
+        return;
+    }
+    if (shopPage == SHP_TREE) {
+        int r = BenchTryBuy(shopNodeSel);
+        if (r == 0) {
+            pickupMsg = Tr("INSTALLED", "已安装");
+            PlaySfx(SFX_POWER, 0.9f);
+        } else if (r == 2) {
+            pickupMsg = Tr("ALREADY OWNED", "已拥有");
+        } else if (r == 3) {
+            pickupMsg = Tr("NEED PREVIOUS NODE", "需要先买上一层");
+        } else if (r == 4) {
+            pickupMsg = Tr("NOT ENOUGH SHARDS", "碎片不够");
+        }
+        pickupMsgTimer = 1.4f;
+        uiDirty = 1;
+        return;
+    }
     if (shopPage == SHP_SHOP) {
         if (shopRow >= SHOP_OFFERS) return;      /* LEAVE 由 Esc 处理 */
         int id = shopOffer[shopRow];
@@ -268,8 +337,9 @@ void ShopActivate(void) {
     }
     if (shopRow == 2) {
         extern int curWeapon;
-        curWeapon = (curWeapon + 1) % WPN_COUNT;
-        pickupMsg = Tr("WEAPON SWAPPED", "已换武器");
+        /* v3.0：武器取消，这个槽改成「恢复体力」 */
+        stamina = StaminaMax();
+        pickupMsg = Tr("STAMINA RESTORED", "体力已恢复");
         pickupMsgTimer = 1.2f;
         PlaySfx(SFX_POWER, 0.8f);
         uiDirty = 1;

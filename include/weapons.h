@@ -24,6 +24,7 @@ typedef enum {
     WRES_STAMINA = 0,      /* 注意：不能叫 RES_*，common.h 里 RES_COUNT 是分辨率档位数 */
     WRES_BATTERY,
     WRES_SANITY,
+    WRES_ENERGY,      /* v2.3：三把武器统一烧这一条 */
     WRES_COUNT
 } WeaponResource;
 
