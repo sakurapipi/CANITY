@@ -3003,7 +3003,7 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
                               0x0060FF90u);
         } else if (hideSpotNear >= 0 && currentState == STATE_PLAYING) {
             DrawTextWin(UIS(20), winH - UIS(150),
-                        Tr("HOLD E  -  HIDE", "长按 E 躲进去"), 0x0090D0F0u);
+                        Tr("PRESS E  -  HIDE", "按 E 躲进去"), 0x0090D0F0u);
         }
 
         /* ② 敌人状态（三态雷达）—— 怪不可杀后这是唯一的威胁指标 */
@@ -3068,9 +3068,20 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
             if (BenchInnerEye() && hiddenIn >= 0 && monster.active) {
                 float dx = monster.x - posX, dy = monster.y - posY;
                 float dm = sqrtf(dx * dx + dy * dy);
-                static char ibuf[48];
+                char ibuf[64];
+                /* v3.0：挪到**顶部固定带**并加底色 ——
+                   原来画在 winH/2+100，被场景/其他覆盖层吃掉，
+                   验证报告实测像素差 0/2048（完全没画出来）。 */
                 sprintf(ibuf, "%s %.1f", Tr("DIST", "距离"), (double)dm);
-                DrawTextCenterWin(winW / 2, winH / 2 + UIS(100), ibuf, 0x0090D0F0u);
+                {
+                    int tw4 = TextWidthWin(ibuf);
+                    int tx4 = (winW - tw4) / 2;
+                    int ty4 = UIS(112);
+                    BlendRectWin(tx4 - UIS(10), ty4 - UIS(6),
+                                 tx4 + tw4 + UIS(10), ty4 + TextHeightWin() + UIS(6),
+                                 0x00081018u, 0.88f);
+                    DrawTextWin(tx4, ty4, ibuf, 0x0090D0F0u);
+                }
             }
         }
     }

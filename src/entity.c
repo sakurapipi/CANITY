@@ -249,6 +249,21 @@ float noiseDisplayTimer = 0.0f;
 float noiseSrcX = 0.0f, noiseSrcY = 0.0f;   /* v3.0：听觉用 */
 
 void MakeNoise(float x, float y, float radius) {
+    /* v3.0：**先记录再判距离** ——
+       原来这段在主循环之后，而前面有 `if (Dist2 > radius) return;`，
+       于是「没有怪听见就零反馈」：玩家在空地扔石头，HUD 一点反应都没有。 */
+    {
+        extern float noiseDisplay, noiseDisplayTimer, noiseSrcX, noiseSrcY;
+        extern int vanished;
+        if (!vanished) {
+            float k = radius / 15.0f;
+            if (k > 1.0f) k = 1.0f;
+            if (k > noiseDisplay) noiseDisplay = k;
+            noiseDisplayTimer = 2.2f;
+            noiseSrcX = x; noiseSrcY = y;
+        }
+    }
+
     /* v3.0 消失：隐身时噪音也不会暴露位置 */
     {
         extern int vanished;
@@ -272,27 +287,26 @@ void MakeNoise(float x, float y, float radius) {
             mm->ty = y;
             mm->repath = 0.0f;
             mm->stateTimer = 0.0f;
+            /* v3.0 改造树「屏息」：玩家藏着时，追捕者更快放弃搜寻。
+               之前这条补丁没落地（验证报告：BenchHideStealth 在 exe 里 0 个调用点）。 */
+            if (hiddenIn >= 0 && BenchHideStealth() < 1.0f) mm->stateTimer = 1.2f;
 
         }
     }
     if (!monster.active) return;
     extern float modNoiseMul;
-    radius *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;   /* QUIET LID + 遗物 + 事件 */
+    /* v3.0：**引怪工具不吃「安静」倍率** ——
+       玩家买 QUIET LID 是想走路更安静，如果连敲击/投掷的声音一起缩小，
+       等于「越升级，越没法用声音控制敌人」，和核心玩法直接冲突。
+       这里只让「被动噪音」（脚步等）受 quiet 影响。 */
+    if (radius <= 14.0f) radius *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;
     if (Dist2(x, y, monster.x, monster.y) > radius * radius) return;
     monster.state = 1;
     monster.tx = x;
     monster.ty = y;
     monster.repath = 0.0f;
     monster.stateTimer = 0.0f;
-    /* v3.0：记录一次噪音事件，供 HUD 显示 */
-    {
-        extern float noiseDisplay, noiseDisplayTimer;
-        float k = radius / 22.0f;
-        if (k > 1.0f) k = 1.0f;
-        if (k > noiseDisplay) noiseDisplay = k;
-        noiseDisplayTimer = 2.2f;
-        noiseSrcX = x; noiseSrcY = y;
-    }
+    /* v3.0：噪音记录已挪到函数开头（见下） */
 }
 
 void SpawnLightBeast(void) {

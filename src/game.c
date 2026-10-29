@@ -1017,10 +1017,10 @@ void GenerateLevel(void) {
 
     /* 本关需要的保险丝：2 根起，每 3 关 +1，最多 4（主线）；无尽模式封顶到 MAX_CONTAINERS */
     if (isEndlessRun) {
-        fusesNeeded = 2 + currentLevel / 3;
+        fusesNeeded = 2 + currentLevel / 3;   /* 见下方与箱子数联动的夹取 */
         if (fusesNeeded > MAX_CONTAINERS) fusesNeeded = MAX_CONTAINERS; /* 新增限制 */
     } else {
-        fusesNeeded = 2 + currentLevel / 3;
+        fusesNeeded = 2 + currentLevel / 3;   /* 见下方与箱子数联动的夹取 */
         if (fusesNeeded > 4) fusesNeeded = 4;
         fusesNeeded -= (HasKeystone(SK_FUSE_LESS) ? 1 : 0) + RunFuseLess();
         if (fusesNeeded < 2) fusesNeeded = 2;
@@ -2269,7 +2269,11 @@ void Update(float dt) {
     /* v3.0 改造树「二次呼吸」：体力归零后还能再冲 3 秒 */
     if (BenchSecondWind()) {
         if (stamina <= 0.0f && secondWindTimer <= 0.0f && wantSprint && secondWindTimer > -99.0f) {
-            static int swUsed = 0;   /* 0=还没用，1=本层用过了 */
+            /* v3.0：**体力回满就恢复一次** ——
+               原来 static swUsed 从不重置，整局只能用一次
+               （验证报告：第二次起 secondWindTimer 恒 0）。 */
+            static int swUsed = 0;
+            if (stamina > StaminaMax() * 0.5f) swUsed = 0;
             if (!swUsed) { secondWindTimer = 3.0f; swUsed = 1; }
         }
         if (stamina <= 0.0f && secondWindTimer > 0.0f) {
@@ -2554,8 +2558,15 @@ void Update(float dt) {
         }
         if (pickupMsg) pickupMsgTimer = 2.0f;
             } else if (hoverKind == 2) {
-                /* v2.0：Boss 层必须先杀 Boss —— 原来 Boss 可以整局跳过 */
-                if (bossLevel && !bossDefeated) {
+                /* v3.0：**NO_COMBAT 下没有 BOSS 可打** ——
+                   bossDefeated 只在 #else 分支赋值（怪不可杀），
+                   这里永远为 0，于是第 6/12/18 层「BOSS STILL ALIVE」
+                   把一局钉死（体验评审实测：bossLevel=1 时通电恒失败）。 */
+                int bossBlocked = 0;
+#if !NO_COMBAT
+                bossBlocked = (bossLevel && !bossDefeated);
+#endif
+                if (bossBlocked) {
                     pickupMsg = "BOSS STILL ALIVE";
                     pickupMsgTimer = 1.5f;
                 } else if (fusesHeld >= fusesNeeded) {
@@ -4311,7 +4322,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (LOWORD(lParam) == HTCLIENT) {
                 /* 游戏中（含小窗地图）隐藏光标 —— 鼠标是锁定的。
                    只有全屏地图才显示箭头光标。 */
-                int mouseFree = (currentState != STATE_PLAYING) || (isMapOpen && mapFullScreen);
+                /* v3.0：**锁盘开着也算"鼠标自由"** ——
+       原来漏了 lockActive，开锁后用 ForceCursor(1) 显示出来的指针，
+       只要一动鼠标就被 WM_SETCURSOR 的 SetCursor(NULL) 又藏回去
+       （验证报告：CURSOR_SHOWING 由 1 变 0）。 */
+    int mouseFree = (currentState != STATE_PLAYING) || (isMapOpen && mapFullScreen) || lockActive;
                 if (!mouseFree) SetCursor(NULL);
                 else SetCursor(LoadCursor(NULL, IDC_ARROW));
                 return TRUE;

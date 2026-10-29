@@ -2209,6 +2209,17 @@ static void DrawGroundShadow(int cx, int cyFloor, int halfW, float ty) {
 /* 运行时只做「双线性 blit + 亮度查表」。                                */
 /* ------------------------------------------------------------------ */
 static void DrawViewModel(void) {
+    /* v3.0：**藏进柜子还举着扳手**是最出戏的一处 ——
+       无战斗改造后第一人称模型不该再出现，藏身时更要藏起来。 */
+    {
+        extern int hiddenIn;
+#if NO_COMBAT
+        if (hiddenIn >= 0 || 1) return;   /* 无战斗：彻底不画手持模型 */
+#else
+        if (hiddenIn >= 0) return;
+#endif
+    }
+
     if (!pixels || !SpritesReady()) return;
 
     /* 走路摆动 + 开火后坐 */
