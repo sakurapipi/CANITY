@@ -4755,9 +4755,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                但排在锁盘之后（锁盘优先，不能抢它的按键）。 */
             {
                 extern int tutorialOff;
-                if (!tutorialOff && currentState == STATE_PLAYING && runTime < 25.0f) {
+                /* v3.0：**只有空格能关掉引导** ——
+                   用户要求「开局的引导需要按空格来取消」。
+                   原来任意键都关，导致按 W 想走路也会顺手把说明关掉。 */
+                if (!tutorialOff && currentState == STATE_PLAYING && runTime < 25.0f
+                    && wParam == VK_SPACE) {
                     tutorialOff = 1;
-                    resetInputState = 1;   /* 这一下按键只用来关引导 */
+                    resetInputState = 1;
                     uiDirty = 1;
                     return 0;
                 }

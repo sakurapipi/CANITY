@@ -3047,7 +3047,7 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         /* v3.0：告诉玩家怎么关 —— 原来只能等 25 秒自动消失，
            玩家反馈「不知道怎么关闭新手指引」。 */
         DrawTextCenterWin(winW / 2, by0 + boxH + UIS(8),
-                          Tr("PRESS ANY KEY TO DISMISS", "按任意键关闭"),
+                          Tr("PRESS SPACE TO DISMISS", "按空格关闭"),
                           0x0090A0A8u);
         }
     }
