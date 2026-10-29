@@ -1,4 +1,5 @@
-# 鈥斺€?鏋勫缓浜х墿 鈥斺€?*.exe
+# 构建产物
+*.exe
 !/release.exe
 *.o
 *.obj
@@ -8,15 +9,19 @@
 dist/
 build/
 
-# 鈥斺€?瀛樻。涓庡浠?鈥斺€?*.sav
+# 存档与备份
+*.sav
 *.bak
 
-# 鈥斺€?涓存椂鍒嗘瀽涓庤皟璇曪紙涓嬪垝绾垮墠缂€ / 鏃ュ織 / 鎴浘锛夆€斺€?_*
+# 临时分析与调试（下划线前缀、日志）
+_*
 debug.log
 *.log
 
-# 鈥斺€?鏈湴鏆傚瓨鐩綍锛坙ockbox 鐨勭Щ妞嶄腑闂翠欢锛屽凡楠岃瘉鍚庡苟鍏?src/锛夆€斺€?port_staging/
+# 本地移植暂存（lockbox 已验证并并入 src/）
+port_staging/
 
-# 鈥斺€?绯荤粺涓庣紪杈戝櫒 鈥斺€?.DS_Store
+# 系统与编辑器
+.DS_Store
 Thumbs.db
 *.swp
