@@ -3316,15 +3316,40 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
     }
 
     if (cranking) {
-        int barW = UIS(240), barH = UIS(8);
+        /* v3.0：**给摇电一个看得懂的反馈** ——
+           玩家实测：「只有一条极细黄条和 CRANKING，没有刻度，
+           也不知道摇到哪算够」。改成粗条 + 百分比 + 完成闪绿。 */
+        int barW = UIS(300), barH = UIS(16);
         int bx = (winW - barW) / 2;
-        int by = winH - UIS(120);
-        DrawTextCenterWin(winW / 2, by - UIS(34), "CRANKING", 0x00E8C040u);
-        BlendRectWin(bx, by, bx + barW, by + barH, 0x00202020, 0.8f);
+        int by = winH - UIS(130);
         float cc = crankTimer / 2.4f;
         if (cc > 1.0f) cc = 1.0f;
-        BlendRectWin(bx, by, bx + (int)(barW * cc), by + barH, 0x00E8C040, 0.95f);
-        FrameRectWin(bx, by, bx + barW, by + barH, 0x00808080, 0.7f, 1);
+
+        BlendRectWin(bx - UIS(10), by - UIS(48), bx + barW + UIS(10), by + barH + UIS(34),
+                     0x000A0E12u, 0.88f);
+        FrameRectWin(bx - UIS(10), by - UIS(48), bx + barW + UIS(10), by + barH + UIS(34),
+                     0x00C8B060u, 0.8f, 1);
+
+        DrawTextCenterWin(winW / 2, by - UIS(42),
+                          cc >= 1.0f ? Tr("CHARGED", "充满") : Tr("CRANKING", "摇电中"),
+                          cc >= 1.0f ? 0x0060FF90u : 0x00E8C040u);
+
+        /* 底槽 + 填充 + 25/50/75% 刻度 */
+        BlendRectWin(bx, by, bx + barW, by + barH, 0x00202020u, 0.85f);
+        BlendRectWin(bx, by, bx + (int)(barW * cc), by + barH,
+                     cc >= 1.0f ? 0x0060FF90u : 0x00E8C040u, 0.95f);
+        for (int t = 1; t <= 3; t++) {
+            int tx = bx + barW * t / 4;
+            BlendRectWin(tx, by, tx + 1, by + barH, 0x00FFFFFFu, 0.28f);
+        }
+        FrameRectWin(bx, by, bx + barW, by + barH, 0x00C8B060u, 0.85f, 1);
+
+        {
+            char cbuf[16];
+            sprintf(cbuf, "%d%%", (int)(cc * 100.0f + 0.5f));
+            DrawTextCenterWin(winW / 2, by + barH + UIS(6), cbuf,
+                              cc >= 1.0f ? 0x0060FF90u : 0x00C8C4BCu);
+        }
     }
 
     /* 碎片（SHARDS）是大厅货币，游戏过程中用不到 —— 不放进 HUD。
