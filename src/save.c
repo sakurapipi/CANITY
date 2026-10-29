@@ -15,6 +15,7 @@
 #include "render.h"
 #include "skills.h"
 #include "bestiary.h"
+#include "lockbox.h"   /* v3.0：读档要关锁盘 */
 
 
 static SaveBlob g_save;
@@ -491,12 +492,28 @@ int LoadSettings(void) {
 /* 把存档里的进度灌回运行时 */
 void ContinueRun(void) {
     currentLevel = g_save.level;
+    /* v3.0：**读档必须夹取** ——
+       外部改过的档可能带 NaN：sanity=NaN 时 `sanity <= 0` 永不成立（死不掉），
+       pos=NaN 时 Blocked() 失效（可以穿墙）。 */
+    if (currentLevel < 1) currentLevel = 1;
+    if (currentLevel > 999) currentLevel = 999;
     sanity = g_save.sanity;
+    /* v3.0：NaN / 越界一律拉回合法区间 */
+    if (!(sanity == sanity)) sanity = 100.0f;
+    if (sanity < 0.0f) sanity = 0.0f;
+    if (sanity > 100.0f) sanity = 100.0f;
     battery = g_save.battery;
+    if (!(battery == battery)) battery = 100.0f;
+    if (battery < 0.0f) battery = 0.0f;
+    if (battery > 100.0f) battery = 100.0f;
     stamina = g_save.stamina;
+    if (!(stamina == stamina)) stamina = 100.0f;
+    if (stamina < 0.0f) stamina = 0.0f;
+    if (stamina > 130.0f) stamina = 130.0f;
     energy = g_save.energy;
     benchOwned = g_save.benchOwnedSave;
     hideSpotCount = g_save.hideSpotSaveCount;
+    if (hideSpotCount < 0) hideSpotCount = 0;
     if (hideSpotCount > 6) hideSpotCount = 6;
     for (int i = 0; i < 6; i++) hideSpots[i] = g_save.hideSpotSave[i];
     hiddenIn = g_save.hiddenInSave;
@@ -504,7 +521,17 @@ void ContinueRun(void) {
     RunUpgLoadFromSave(g_save.runUpgSave);   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
     if (!(energy > 0.0f)) energy = ENERGY_MAX;
     flashlightOn = g_save.flashlightOn;
+    /* v3.0：坐标必须夹在地图内且非 NaN */
+    #define CLAMP_POS(v, wrap) do { \
+        if (!((v) == (v)) || (v) < 1.0f || (v) > (float)(wrap) - 1.0f) (v) = 1.5f; \
+    } while (0)
     posX = g_save.posX; posY = g_save.posY;
+    CLAMP_POS(posX, MAP_WIDTH);
+    CLAMP_POS(posY, MAP_HEIGHT);
+    exitX = g_save.exitX; exitY = g_save.exitY;
+    CLAMP_POS(exitX, MAP_WIDTH);
+    CLAMP_POS(exitY, MAP_HEIGHT);
+    #undef CLAMP_POS
     dirX = g_save.dirX; dirY = g_save.dirY;
     exitX = g_save.exitX; exitY = g_save.exitY;
     fusesHeld = g_save.fusesHeld;
@@ -543,8 +570,11 @@ void ContinueRun(void) {
     mirrors = g_save.mirrors;
     bankStreak = g_save.bankStreak;
     modBatteryMul = g_save.modBatteryMul;
+    if (!(modBatteryMul > 0.0f)) modBatteryMul = 1.0f;
     modShardMul = g_save.modShardMul;
+    if (!(modShardMul > 0.0f)) modShardMul = 1.0f;
     modNoiseMul = g_save.modNoiseMul;
+    if (!(modNoiseMul > 0.0f)) modNoiseMul = 1.0f;
     /* 读档后 Boss 状态要重建：已清的 Boss 不能再站起来 */
     if (bossDefeated) monster.active = 0;
     else if (bossLevel && monster.active) monster.hp = bossMaxHp;
@@ -572,6 +602,11 @@ void ContinueRun(void) {
     pendingShards = g_save.pendingShards < 0 ? 0 : g_save.pendingShards;
     if (pendingShards > 999999) pendingShards = 0;      /* 明显是坏档 */
     runSkillMask = g_save.runSkillMask;
+    /* v3.0：**存档槽必须读回来** ——
+       原来 g_saveSlot 只在启动时置 0，LoadSettings 只按 0 号槽找文件，
+       于是「在 2 号槽玩的档」重启后被静默切回 0 号槽，
+       下一次自动存档就把 0 号槽覆盖掉。 */
+    if (g_save.saveSlot >= 0 && g_save.saveSlot < 8) g_saveSlot = g_save.saveSlot;
     g_lang = (g_save.lang >= 0 && g_save.lang < LANG_COUNT) ? g_save.lang : LANG_EN;
     /* v11：恢复武器局外成长 */
     for (int i = 0; i < 3; i++) {
@@ -603,6 +638,9 @@ void ContinueRun(void) {
     jumperTimer = 0.0f;
     parasite.active = 0;
     runInProgress = 1;
+    /* v3.0：读档前先关掉锁盘 —— 否则 lockActive 残留，
+       ui.c 无条件画锁盘会盖住游戏画面，且 WM_LBUTTONDOWN 先把点击全吞掉。 */
+    if (lockActive) CloseLockOverlay();
     currentState = STATE_PLAYING;
     isMapOpen = 0;
     mapFullScreen = 0;
