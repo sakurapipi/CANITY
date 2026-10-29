@@ -364,13 +364,36 @@ static LockBox LockPanelBox(void) {
     /* 调波器要放下示波器 + 三个旋钮，面板比别的锁高一点 */
     int ph = (lockType == LOCK_TYPE_TUNE) ? LUIS(540) : LUIS(440);
 
-    /* v3.0：**面板不能超出窗口** ——
-       LUIS 跟 winH 缩放，但窗口可能是宽扁的（1280×960 实测溢出右边，
-       第 3 个拨盘与 BACK 出屏）。这里按 winW/winH 双向夹取。 */
-    if (pw > winW - LUIS(40)) pw = winW - LUIS(40);
-    if (ph > winH - LUIS(40)) ph = winH - LUIS(40);
-    if (pw < LUIS(360)) pw = LUIS(360);
-    if (ph < LUIS(320)) ph = LUIS(320);
+    /* ===== v3.0：**这里原来会把程序卡死** =====
+       上一版是「先夹上限、再抬下限」：
+           if (pw > winW - LUIS(40)) pw = winW - LUIS(40);   // 窗口小时压到很小
+           if (pw < LUIS(360))       pw = LUIS(360);         // ← 又抬回去
+       窗口窄的时候两条互相打架，最终 pw 恒等于 LUIS(360)，
+   **比窗口还宽**。于是 p.x0 变成负数、p.x1 远超 winW，
+       面板里每一次 BlendRectWin 都被夹取成「覆盖整个屏幕」——
+       一次调用就是 800x600 = 48 万次像素混合。
+       我的脏污层有 130 多次调用，一帧就是 6000 万次像素操作，
+       界面直接卡死、系统报「未响应」。
+
+       正确做法：**上限永远优先**，下限不得超过上限。 */
+    {
+        int maxW = winW - LUIS(40), maxH = winH - LUIS(40);
+        if (maxW < 60) maxW = winW;          /* 极窄窗口就别留边了 */
+        if (maxH < 60) maxH = winH;
+        if (pw > maxW) pw = maxW;
+        if (ph > maxH) ph = maxH;
+        /* 下限只在「上限允许」的前提下抬起来 */
+        {
+            int minW = LUIS(360), minH = LUIS(320);
+            if (minW < pw) minW = pw;        /* 不强行放大 */
+            else if (minW > maxW) minW = maxW;
+            if (minH < ph) minH = ph;
+            else if (minH > maxH) minH = maxH;
+            pw = minW; ph = minH;
+        }
+        if (pw < 8) pw = 8;
+        if (ph < 8) ph = 8;
+    }
     LockBox p;
     p.x0 = (winW - pw) / 2;
     p.y0 = (winH - ph) / 2;
@@ -797,6 +820,13 @@ static void LockRivet(int cx, int cy, int r) {
 static void LockPanelDirty(LockBox b, float grime) {
     /* v3.0：**矩形倒挂直接退出** —— 窗口极小时 LUIS 可能算出 x1<=x0。 */
     if (b.x1 <= b.x0 || b.y1 <= b.y0) return;
+    /* v3.0：**面板超出窗口就不画脏污** ——
+       脏污层有一百多次 BlendRectWin，一旦矩形被夹成整屏，
+       每帧就是几千万次像素运算，界面会卡死（用户实测「未响应」）。
+       正常面板只占窗口一半左右，这条保护平时不会触发。 */
+    if (b.x0 < 0 || b.y0 < 0 || b.x1 > winW || b.y1 > winH) {
+        if ((b.x1 - b.x0) > winW * 3 / 4 || (b.y1 - b.y0) > winH * 3 / 4) return;
+    }
     /* 投影 */
     BlendRectWin(b.x0 + LUIS(3), b.y0 + LUIS(3),
                  b.x1 + LUIS(3), b.y1 + LUIS(3), 0x00000000u, 0.55f);
