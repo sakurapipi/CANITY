@@ -2365,6 +2365,35 @@ void Render3D(void) {
    失去了「导航」的意义。 */
 #define MAP_CORNER_CELL 8
 
+/* v3.0：**全屏地图的图例** ——
+   玩家实测：「绿点是我吗？中间青点是谁？两个黄点是什么？出口在哪？」
+   原来一个标注都没有，只能靠猜。 */
+static void DrawMapLegend(void) {
+    extern int winW, winH;
+    struct { unsigned int col; const char* zh; const char* en; } items[5] = {
+        { 0x0030FF60u, "你",      "YOU"    },
+        { 0x00E8C040u, "出口",    "EXIT"   },
+        { 0x0030D0D0u, "保险丝箱","FUSE"   },
+        { 0x00B0C0D0u, "配电箱",  "BREAKER"},
+        { 0x0060FF90u, "安全屋",  "SAFE"   },
+    };
+    extern int g_lang;
+    int rowH = TextHeightWin() + UIS(6);
+    int boxW = UIS(150);
+    int boxH = rowH * 5 + UIS(16);
+    int bx0 = winW - boxW - UIS(24);
+    int by0 = winH - boxH - UIS(24);
+    BlendRectWin(bx0, by0, bx0 + boxW, by0 + boxH, 0x000A0E12u, 0.86f);
+    FrameRectWin(bx0, by0, bx0 + boxW, by0 + boxH, 0x00C8B060u, 0.7f, 1);
+    for (int k = 0; k < 5; k++) {
+        int cy = by0 + UIS(8) + k * rowH + TextHeightWin() / 2;
+        BlendRectWin(bx0 + UIS(10), cy - UIS(5),
+                     bx0 + UIS(20), cy + UIS(5), items[k].col, 1.0f);
+        DrawTextWin(bx0 + UIS(28), by0 + UIS(8) + k * rowH,
+                    (g_lang == 1) ? items[k].zh : items[k].en, 0x00C8C4BCu);
+    }
+}
+
 void RenderMap(void) {
     int cellSize, mapW, mapH, mapStartX, mapStartY;
     if (mapFullScreen) {
@@ -2501,6 +2530,8 @@ void RenderMap(void) {
         }
         PutTextRaw(tx, ty, label, 0x00B0C0D0u);
     }
+    if (mapFullScreen) DrawMapLegend();   /* v3.0：全屏才画图例 */
+
 }
 
 /* ------------------------------------------------------------------ */
