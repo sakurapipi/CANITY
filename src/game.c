@@ -2140,6 +2140,14 @@ void Update(float dt) {
     int inSafe = (safeRoom.active &&
                   Dist2(posX, posY, safeRoom.x, safeRoom.y) < SAFE_ZONE_RADIUS * SAFE_ZONE_RADIUS);
 
+    /* v3.0：**开锁盘时暂停理智流失** ——
+       用户实测「开锁装置导致精神崩溃」：
+       锁盘是模态层，玩家不能动也不能跑，理智却照扣。
+       解一把弦线锁要 30~60 秒，按第 1 层 0.5/秒算是 15~30 点理智，
+       到了第 10 层就是 30~60 点 —— 解谜变成自杀。
+       现在把开锁当作和暂停同等的状态：理智冻结。 */
+    if (lockActive) return;
+
     /* 理智流失：随层数增长（v1.8），代谢 keystone 把它换成电量消耗 */
     float drainMul = 1.0f + FxStrength(FX_DRAIN) * 1.5f;
     float drain = SanityDrainRate() * SkillCalmMul() * modSanityMul * drainMul * RelicSanityMul() * BenchSanityDrainMul();

@@ -740,20 +740,27 @@ static unsigned int LockNoiseAt(int x, int y) {
     return h ^ (h >> 16);
 }
 
-/* ① 细噪点：稀疏的暗点 + 亮点，让平涂的表面「起毛」 */
+/* ① 细噪点：稀疏的暗点 + 亮点，让平涂的表面「起毛」
+   v3.0 修正：**第一版会崩**。
+   原写法按 3px 步长扫满整个面板 —— 700x680 的面板就是
+   233 x 226 = 5.2 万次 BlendRectWin/帧，每帧还要各自跑一遍像素循环，
+   直接把渲染线程拖死（用户实测「开锁时程序崩溃」）。
+   现在改成**固定上限的稀疏采样**：最多 320 个点，一个点一次 2x2 填充。 */
 static void LockGrain(LockBox b, float amount) {
     if (amount <= 0.0f) return;
-    int step = LUIS(3);
-    if (step < 2) step = 2;
-    for (int y = b.y0; y < b.y1; y += step) {
-        for (int x = b.x0; x < b.x1; x += step) {
-            unsigned int h = LockNoiseAt(x / step, y / step);
-            if ((h & 7u) != 0u) continue;              /* 只画 1/8 的格子 */
-            int dark = (h & 8u) != 0u;
-            unsigned int c = dark ? 0x00000000u : 0x00606058u;
-            float a = (dark ? 0.28f : 0.10f) * amount;
-            BlendRectWin(x, y, x + step - 1, y + step - 1, c, a);
-        }
+    int w = b.x1 - b.x0, h = b.y1 - b.y0;
+    if (w < 8 || h < 8) return;
+    int marks = 320;
+    int sz = LUIS(2);
+    if (sz < 1) sz = 1;
+    for (int k = 0; k < marks; k++) {
+        unsigned int hsh = LockNoiseAt(k * 37 + 11, k * 911 + 5);
+        int x = b.x0 + (int)(hsh % (unsigned int)w);
+        int y = b.y0 + (int)((hsh >> 10) % (unsigned int)h);
+        int dark = (hsh >> 20) & 1u;
+        unsigned int c = dark ? 0x00000000u : 0x00686058u;
+        float a = (dark ? 0.30f : 0.12f) * amount;
+        BlendRectWin(x, y, x + sz, y + sz, c, a);
     }
 }
 
@@ -777,14 +784,12 @@ static void LockRust(LockBox b, float amount) {
 /* ③ 铆钉：实心小圆 + 左上高光，让边框有厚度 */
 static void LockRivet(int cx, int cy, int r) {
     if (r < 2) r = 2;
-    for (int dy = -r; dy <= r; dy++) {
-        for (int dx = -r; dx <= r; dx++) {
-            if (dx * dx + dy * dy > r * r) continue;
-            int lit = (dx + dy) < 0;
-            BlendRectWin(cx + dx, cy + dy, cx + dx + 1, cy + dy + 1,
-                         lit ? 0x00A09888u : 0x00383028u, 0.85f);
-        }
-    }
+    /* v3.0：原来每个像素调一次 BlendRectWin，4 个铆钉 = 300+ 次调用/帧。
+       改成 3 个矩形近似一个带高光的圆盘，调用次数降到 12。 */
+    BlendRectWin(cx - r, cy - r, cx + r + 1, cy + r + 1, 0x00383028u, 0.85f);      /* 本体 */
+    BlendRectWin(cx - r, cy - r, cx + r + 1, cy - r + 2, 0x00A09888u, 0.75f);      /* 上高光 */
+    BlendRectWin(cx - r, cy - r, cx - r + 2, cy + r + 1, 0x00807868u, 0.55f);      /* 左高光 */
+    BlendRectWin(cx + r - 1, cy - r, cx + r + 1, cy + r + 1, 0x00000000u, 0.45f);  /* 右暗边 */
 }
 
 /* 一条「脏面板」：外框阴影 → 底漆 → 噪点 → 锈 → 内凹高光 → 铆钉 */
