@@ -2664,7 +2664,14 @@ void Update(float dt) {
              * (sprinting ? SPRINT_MULT * BenchSprintMul() : 1.0f)   /* v3.0 爆发 */ * crankMul;
     float perpX = -dirY, perpY = dirX;      /* 单位侧向，与 FOV 无关 */
     float dx = 0.0f, dy = 0.0f;
-    if (!holdingNow && (!cranking || SkillCrankWalkPenalty() > 0.0f)) {          /* 翻找/摇电时不接受移动输入 */
+    /* v3.0：**锁盘打开时角色不能移动** ——
+       用户实测「解锁的时候角色会乱动，导致这个功能失效」：
+       移动条件里根本没检查 lockActive，锁盘开着 WASD 照样走，
+       一走开箱子就失去目标，锁盘直接失效。 */
+    if (lockActive) {
+        dx = 0.0f; dy = 0.0f; sprinting = 0;
+    }
+    if (!lockActive && !holdingNow && (!cranking || SkillCrankWalkPenalty() > 0.0f)) {          /* 翻找/摇电时不接受移动输入 */
         if (inF > 0) { dx += dirX * sp;  dy += dirY * sp; }
         if (inF < 0) { dx -= dirX * sp;  dy -= dirY * sp; }
         if (inS > 0) { dx += perpX * sp; dy += perpY * sp; }
@@ -4574,6 +4581,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 MouseToLogical(&lmx, &lmy);
                 g_mousePos.x = lmx;
                 g_mousePos.y = lmy;
+                /* v3.0：**锁盘打开时立刻返回，别走下面的视角代码** ——
+                   用户实测「解锁时角色乱动、鼠标不能动」。
+                   原因：下面的视角代码每帧 SetCursorPos(center) 把光标拉回屏幕中心，
+                   同时按位移旋转相机。于是：
+                     · 光标被强制回中 → 鼠标「不能动」
+                     · 相机被旋转     → 画面「乱动」
+                   锁盘是鼠标操作的模态层，绝不能让它跑视角逻辑。 */
+                firstMouseMove = 1;
+                return 0;
             }
 
             /* v3.0：安全屋行悬停 —— 记录鼠标落在第几行，供绘制高亮 */
