@@ -264,10 +264,12 @@ void MakeNoise(float x, float y, float radius) {
         }
     }
 
-    /* v3.0 消失：隐身时噪音也不会暴露位置 */
+    /* v3.0 修正：隐身时**只屏蔽远处的噪音，近身噪音仍然生效** ——
+       原来隐身时无条件 return，配上 state 自锁就成了永久隐身。
+       现在 4 格内的噪音照常传出去，玩家不能贴脸敲墙还安全。 */
     {
         extern int vanished;
-        if (vanished) return;
+        if (vanished && radius < 4.0f) return;
     }
     /* v3.0：**噪音要通知所有追捕者** ——
        原来只写 monster，于是扔瓶子引开对追光鬼/影子/蜘蛛完全无效，
@@ -280,7 +282,11 @@ void MakeNoise(float x, float y, float radius) {
             if (!mm->active) continue;
             float r2 = radius;
             extern float modNoiseMul;
-            r2 *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;
+            /* v3.0：**引怪工具不吃「安静」倍率** ——
+               玩家买 QUIET LID 是想走路更安静；如果敲击/投掷的声音也跟着缩小，
+               等于「越升级越没法用声音控制敌人」，和核心玩法直接冲突。
+               15 以上的是敲击/投掷，14 以下的是脚步等被动噪音。 */
+            if (r2 <= 14.0f) r2 *= SkillQuietMul();
             if (Dist2(x, y, mm->x, mm->y) > r2 * r2) continue;
             mm->state = 1;
             mm->tx = x;
@@ -293,21 +299,9 @@ void MakeNoise(float x, float y, float radius) {
 
         }
     }
-    if (!monster.active) return;
-    extern float modNoiseMul;
-    /* v3.0：**引怪工具不吃「安静」倍率** ——
-       玩家买 QUIET LID 是想走路更安静，如果连敲击/投掷的声音一起缩小，
-       等于「越升级，越没法用声音控制敌人」，和核心玩法直接冲突。
-       这里只让「被动噪音」（脚步等）受 quiet 影响。 */
-    if (radius <= 14.0f) radius *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;
-    if (Dist2(x, y, monster.x, monster.y) > radius * radius) return;
-    monster.state = 1;
-    monster.tx = x;
-    monster.ty = y;
-    monster.repath = 0.0f;
-    monster.stateTimer = 0.0f;
-    /* v3.0：噪音记录已挪到函数开头（见下） */
+    (void)0;
 }
+
 
 void SpawnLightBeast(void) {
     /* 注意：不要整体拷贝 monster —— 那会把寻声怪的旧路径、旧命中冷却
@@ -347,6 +341,21 @@ void SpawnLightBeast(void) {
 }
 
 void UpdateLightBeast(float dt) {
+    /* v3.0：**光敏怪也要更新朝向和步频** ——
+       原来它从不更新 facing/walkPhase，画出来永远是朝 +X、双腿不动。 */
+    {
+        float ldx = lightBeast.x - lightBeast.prevX;
+        float ldy = lightBeast.y - lightBeast.prevY;
+        float ld2 = ldx * ldx + ldy * ldy;
+        if (ld2 > 1e-8f) {
+            lightBeast.facing = atan2f(ldy, ldx);
+            lightBeast.walkPhase += sqrtf(ld2) * 3.5f;
+            if (lightBeast.walkPhase > 1000.0f) lightBeast.walkPhase -= 1000.0f;
+        }
+        lightBeast.prevX = lightBeast.x;
+        lightBeast.prevY = lightBeast.y;
+    }
+
     if (!lightBeast.active) return;
 
     /* 硬直：被玻璃瓶砸中后短暂不能动 */
@@ -734,7 +743,7 @@ void UpdateMonster(float dt) {
         float d2 = mdx * mdx + mdy * mdy;
         if (d2 > 1e-7f) {
             monster.facing = atan2f(mdy, mdx);
-            monster.walkPhase += sqrtf(d2) * 1.2f;   /* v3.0：9 → 1.2，原来每米换 27 次帧，像频闪 */
+            monster.walkPhase += sqrtf(d2) * 3.5f;   /* v3.0：1.2 太慢，腿看起来是滑行；3.5 步频自然又不闪 */
             if (monster.walkPhase > 1000.0f) monster.walkPhase -= 1000.0f;
         }
         monster.prevX = monster.x;
