@@ -4711,6 +4711,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
                 return 0;      /* 其它键一律吞掉，不影响锁盘 */
             }
+
+            /* v3.0：**开局引导可以按键关掉** ——
+               玩家反馈「不知道怎么关闭新手指引」。任意键关闭，
+               但排在锁盘之后（锁盘优先，不能抢它的按键）。 */
+            {
+                extern int tutorialOff;
+                if (!tutorialOff && currentState == STATE_PLAYING && runTime < 25.0f) {
+                    tutorialOff = 1;
+                    resetInputState = 1;   /* 这一下按键只用来关引导 */
+                    uiDirty = 1;
+                    return 0;
+                }
+            }
             /* 小键盘数字（NumLock 开启时是 VK_NUMPAD0..9）统一折算成主键盘数字，
                这样 1/2/3 选投掷槽位、以及改绑数字键都不会因为按小键盘而失效。 */
             if (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9)
