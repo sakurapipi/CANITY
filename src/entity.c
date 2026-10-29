@@ -240,7 +240,20 @@ int HasLOS(float x0, float y0, float x1, float y1) {
 /* v3.0：藏身判定 —— 很多 AI 分支都要问「玩家是不是藏着」 */
 extern int hiddenIn;
 
+/* v3.0：**噪音可视化** —— 逃生类的第三块反馈。
+   玩家扔瓶子/敲墙之后必须看得见「声音传了多远、持续多久」，
+   否则这个核心手法是纯盲操作。
+   noiseDisplay 是 0..1 的衰减值，HUD 拿它画噪音环。 */
+float noiseDisplay = 0.0f;
+float noiseDisplayTimer = 0.0f;
+float noiseSrcX = 0.0f, noiseSrcY = 0.0f;   /* v3.0：听觉用 */
+
 void MakeNoise(float x, float y, float radius) {
+    /* v3.0 消失：隐身时噪音也不会暴露位置 */
+    {
+        extern int vanished;
+        if (vanished) return;
+    }
     /* v3.0：**噪音要通知所有追捕者** ——
        原来只写 monster，于是扔瓶子引开对追光鬼/影子/蜘蛛完全无效，
        「用噪音控制敌人」这个逃生核心手法只对三分之一的怪成立。 */
@@ -259,6 +272,7 @@ void MakeNoise(float x, float y, float radius) {
             mm->ty = y;
             mm->repath = 0.0f;
             mm->stateTimer = 0.0f;
+
         }
     }
     if (!monster.active) return;
@@ -270,6 +284,15 @@ void MakeNoise(float x, float y, float radius) {
     monster.ty = y;
     monster.repath = 0.0f;
     monster.stateTimer = 0.0f;
+    /* v3.0：记录一次噪音事件，供 HUD 显示 */
+    {
+        extern float noiseDisplay, noiseDisplayTimer;
+        float k = radius / 22.0f;
+        if (k > 1.0f) k = 1.0f;
+        if (k > noiseDisplay) noiseDisplay = k;
+        noiseDisplayTimer = 2.2f;
+        noiseSrcX = x; noiseSrcY = y;
+    }
 }
 
 void SpawnLightBeast(void) {
@@ -556,6 +579,24 @@ static void MonsterWander(void) {
 }
 
 void UpdateMonster(float dt) {
+    /* v3.0 消失：隐身时追捕者立刻丢失目标 */
+    {
+        extern int vanished;
+        if (vanished && monster.active) {
+            monster.state = 0;
+            monster.pathLen = 0;
+            monster.pathIdx = 0;
+        }
+    }
+
+    /* v3.0：噪音显示衰减 */
+    {
+        extern float noiseDisplay, noiseDisplayTimer;
+        if (noiseDisplayTimer > 0.0f) {
+            noiseDisplayTimer -= dt;
+            if (noiseDisplayTimer <= 0.0f) noiseDisplay = 0.0f;
+        }
+    }
     /* v3.0：进入函数时先把**上一帧位置**推进 —— 函数末尾用它算位移，
        从而得到「怪自己面朝哪」和「走了多远」。
        原来朝向用的是屏幕方位角（16:9 下恒为正面，6 张侧面帧全废），
@@ -640,6 +681,24 @@ void UpdateMonster(float dt) {
            原来只包住了扣理智那一行，后面的红屏/尖叫/tookDamage/
            怪物重生全在 if 外照跑 —— 怪贴到 0.55 格内照样红屏，
            而且 tookDamage=1 会让 PERFECT ESCAPE 成就失效。 */
+        /* v3.0 改造树「假死」：每局一次，被抓住时骗过怪物 */
+        {
+            extern int playDeadUsed;
+            extern int BenchPlayDead(void);
+            if (BenchPlayDead() && !playDeadUsed) {
+                playDeadUsed = 1;
+                monster.stun = 2.5f;
+                monster.state = 0;
+                monster.pathLen = 0;
+                monster.hitCooldown = 2.5f;
+                pickupMsg = "PLAYED DEAD";
+                pickupMsgTimer = 2.0f;
+                PlaySfx(SFX_HEART, 1.0f);
+                uiDirty = 1;
+                return;
+            }
+        }
+
         if (hiddenIn < 0) {
             sanity -= catchLoss * RunDamageTakenMul() * BenchFearDamageMul();
 

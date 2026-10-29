@@ -57,6 +57,9 @@ void UpdateParasite(float dt);
 /* ---- 感知 / 受击 ---- */
 int HasLOS(float x0, float y0, float x1, float y1);
 void MakeNoise(float x, float y, float radius);
+extern float noiseDisplay;        /* v3.0：HUD 噪音条 0..1 */
+extern float noiseDisplayTimer;
+extern float noiseSrcX, noiseSrcY;
 int HitMonster(Monster* m, int dmg);
 int ApplyDamage(Monster* m, int base, int type, float sx, float sy);
 

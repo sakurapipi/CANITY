@@ -306,7 +306,22 @@ int LoadSettings(void) {
     size_t fileSize = (size_t)fs;
     size_t want = (fileSize < sizeof(g_save)) ? fileSize : sizeof(g_save);
     size_t got = want;
-    if (!got || g_save.magic != SAVE_MAGIC) return 0;
+    /* v3.0：**magic 不对要换下一个候选** ——
+       原来直接 return 0，于是「路径 0 有个损坏文件」会把
+       「路径 1 有个好文件」整个挡住（验证报告 BUG7）。 */
+    if (!got || g_save.magic != SAVE_MAGIC) {
+        for (int i = 1; i < SAVE_CAND_COUNT; i++) {
+            const char* c2 = SavePathCand(i, p, sizeof(p));
+            long f2 = ReadWholeFile(c2, &g_save, sizeof(g_save));
+            if (f2 > 0 && g_save.magic == SAVE_MAGIC) { fs = f2; break; }
+            char b2[MAX_PATH];
+            snprintf(b2, sizeof(b2), "%s.bak", c2);
+            f2 = ReadWholeFile(b2, &g_save, sizeof(g_save));
+            if (f2 > 0 && g_save.magic == SAVE_MAGIC) { fs = f2; break; }
+        }
+        if (g_save.magic != SAVE_MAGIC) return 0;
+        fileSize = (size_t)fs;
+    }
 
     /* 存档**格式**版本：接受 v4 / v5（老结构）与 v6（当前结构）。
        老存档按文件长度就能认出来 —— 新增字段永远追加在结构末尾，

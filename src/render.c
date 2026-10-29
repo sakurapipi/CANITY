@@ -5,6 +5,7 @@
  */
 #include "common.h"
 #include "render.h"
+#include "bench.h"
 #include "weapons.h"
 #include "extras.h"
 #include "sprites.h"
@@ -1445,6 +1446,17 @@ static void DrawExitBeamSprite(void) {
 /* 所有 billboard 按距离从远到近画，近的盖住远的（画家算法）
    数组上界 MAX_SPRITES = 容器 + 投掷物 + 配电箱 + 两只怪 + 安全屋 + 出口光柱，
    写满时会被下面的断言拦下来，不会像以前那样悄悄越界。 */
+/* v3.0 改造树「听觉」：把最近的噪音源标成地面一点，玩家能"听"到方向 */
+static void DrawHearingMarker(void) {
+    if (!BenchHearing()) return;
+    extern float noiseDisplay, noiseSrcX, noiseSrcY;
+    if (noiseDisplay <= 0.01f) return;
+    float dx = noiseSrcX - posX, dy = noiseSrcY - posY;
+    if (dx * dx + dy * dy > 400.0f) return;   /* 20 格内才显示 */
+    /* 在地面投影一个闪烁的点（用 billboard 精灵代替） */
+    DrawBakedProp(SPR_PROP_CRATE, noiseSrcX, noiseSrcY, 0.18f, 0.45f + 0.3f * noiseDisplay);
+}
+
 void RenderSprites(void) {
     struct { float d2; int kind, idx; } list[MAX_SPRITES];
     int n = 0;
@@ -1577,6 +1589,7 @@ void RenderSprites(void) {
         }
     }
     /* v1.18：烟幕团（不参与深度排序，直接在最后叠加） */
+    DrawHearingMarker();   /* v3.0 听觉 */
     DrawSmokeCloud();
 
     /* 玻璃碎片：不在深度排序里，直接画在最后（覆盖在所有 billboard 之上） */
@@ -2094,7 +2107,10 @@ static void RenderPostBand(int y0, int y1) {
         if (intensity < 0) intensity = 0;
     }
     int heal = (healFlash > 0.0f);
-    int frameSeed = (int)(g_timeSec * 61.0f) * 17;
+    /* 低理智红边的噪点固定相位。旧版按 61Hz 改变整张噪点图，
+       会把本来应该是渐晕的效果看成全屏闪烁/抽搐；红边强度仍会
+       随理智变化，但纹理本身保持稳定。 */
+    int frameSeed = 17;
 
     /* 每帧一次的查表：alpha = mask*intensity>>8，nz = (noise-20)*intensity/300 */
     unsigned char alphaLut[256];

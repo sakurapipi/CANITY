@@ -199,6 +199,10 @@ float bobPhase = 0.0f;   /* v2.1：手持模型走路摆动相位 */
 int   slashDmg = 999;
 float slashMaxDist = 14.0f;   /* v2.0：法术吃武器射程/配件 */          /* 光束伤害：剑气固定秒杀，符印用武器表 */
 float weaponAtkCharge = 0.0f;  /* 武器蓄力 0..1 */
+float secondWindTimer = 0.0f;   /* v3.0 二次呼吸：体力归零后的宽限秒数 */
+float vanishTimer = 0.0f;       /* v3.0 消失：脱离视线累计秒数 */
+int   playDeadUsed = 0;         /* v3.0 假死：本局用过了吗 */
+int   vanished = 0;             /* v3.0 消失：1 = 已隐身 */
 float decoySelfTimer = 0.0f;  /* 投石后的自身噪声加成计时 */
 int hubPage = 1;              /* v2.8：属性面板已并入技能树，HUB 只有一页（保留变量给旧代码判断） */
 int levelEvent = -1;         /* 本层随机事件，-1 = 无 */
@@ -1095,6 +1099,9 @@ void GenerateLevel(void) {
         for (int tries = 0; tries < 400 && hideSpotCount < want && emptyCount > 0; tries++) {
             int idx = rand() % emptyCount;
             float hx2 = cells[idx][0] + 0.5f, hy2 = cells[idx][1] + 0.5f;
+            /* 兜底也不能贴着出口，否则藏身点会和离关目标重叠，
+               造成玩家按 E 后看似藏好、实际却站在出口触发区里的错觉。 */
+            if (Dist2(hx2, hy2, exitX, exitY) < 6.0f) continue;
             int bad = 0;
             for (int k = 0; k < hideSpotCount; k++)
                 if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < 1.5f) { bad = 1; break; }
@@ -1887,7 +1894,7 @@ void WeaponTryAttack(float charge) {
 
     int dmg = WeaponDamageNow(curWeapon, charge);
     int silent = WeaponSilentNow(curWeapon);
-    MakeNoise(posX, posY, w->noise * (silent ? 0.5f : 1.0f) * BenchWalkNoiseMul());   /* v3.0 轻步 */
+    MakeNoise(posX, posY, w->noise * (silent ? 0.5f : 1.0f));   /* v3.0：轻步已移到脚步噪音处 */
 
     if (w->kind == WPN_MELEE) {
         /* 近战：沿视线扫 6 段，命中就停（除非有穿透） */
@@ -2063,7 +2070,9 @@ void Update(float dt) {
 
     /* 理智流失：随层数增长（v1.8），代谢 keystone 把它换成电量消耗 */
     float drainMul = 1.0f + FxStrength(FX_DRAIN) * 1.5f;
-    float drain = SanityDrainRate() * SkillCalmMul() * modSanityMul * drainMul * RelicSanityMul() * BenchSanityDrainMul();   /* v2.7 */
+    float drain = SanityDrainRate() * SkillCalmMul() * modSanityMul * drainMul * RelicSanityMul() * BenchSanityDrainMul();
+    /* v3.0：改造树「镇定」—— 关灯时恐惧增长 -25% */
+    if (!flashlightOn) drain *= BenchDarkFearMul();
     if (HasKeystone(SK_METAB)) {
         battery -= drain * META_COST * dt;
         if (battery <= 0.0f) {          /* 断电：理智开始双倍流失 */
@@ -2173,9 +2182,23 @@ void Update(float dt) {
             float d = Dist2(posX, posY, hideSpots[i].x, hideSpots[i].y);
             if (d < bestHD) { bestHD = d; hideSpotNear = i; }
         }
+        /* v3.0：**E 必须松开再按才算下一次** ——
+           按住 0.5 秒时 WM_KEYDOWN 会自动重复，每次重复都置 keyPressed，
+           于是「出来」刚执行完又被「进去」接上，净效果是 hiddenIn 恒为 0
+           （验证报告 BUG2）。加一个锁存：只有键松开过才允许再次切换。 */
+        {
+            static int hideKeyLatch = 0;
+            if (!IsActionDown(ACT_INTERACT)) hideKeyLatch = 0;
+            if (IsActionPressed(ACT_INTERACT) && hideKeyLatch) {
+                keyPressed[g_bindings[ACT_INTERACT]] = 0;
+                /* 吞掉这次重复，不切换 */
+                goto hide_done;
+            }
+
         /* 在藏身点里再按 E → 出来 */
         if (hiddenIn >= 0) {
             if (IsActionPressed(ACT_INTERACT)) {
+                hideKeyLatch = 1;
                 hiddenIn = -1;
                 pickupMsg = g_lang == LANG_ZH ? "出来了" : "LEFT COVER";
                 pickupMsgTimer = 1.0f;
@@ -2184,6 +2207,7 @@ void Update(float dt) {
             }
         } else if (hideSpotNear >= 0) {
             if (IsActionPressed(ACT_INTERACT)) {
+                hideKeyLatch = 1;
                 hiddenIn = hideSpotNear;
                 posX = hideSpots[hiddenIn].x;
                 posY = hideSpots[hiddenIn].y;
@@ -2195,13 +2219,49 @@ void Update(float dt) {
                 uiDirty = 1;
             }
         }
+        hide_done: ;
+        }
     }
 
     holdingNow = (hoverKind != 0 && IsActionDown(ACT_INTERACT));
     }
 
     /* 冲刺与体力 */
+
+    /* v3.0 改造树「消失」：脱离视线 3 秒后完全隐身。
+       判据用「怪物是否在追捕状态」——它没在追（游荡/搜寻）就算脱离视线。 */
+    if (BenchVanish()) {
+        int seen = (monster.active && monster.state == 1);
+        if (seen) {
+            vanishTimer = 0.0f;
+            vanished = 0;
+        } else {
+            vanishTimer += dt;
+            if (vanishTimer >= 3.0f && !vanished) {
+                vanished = 1;
+                pickupMsg = g_lang == LANG_ZH ? "已隐身" : "VANISHED";
+                pickupMsgTimer = 1.4f;
+                uiDirty = 1;
+            }
+        }
+    } else {
+        vanishTimer = 0.0f;
+        vanished = 0;
+    }
+
     int wantSprint = IsActionDown(ACT_SPRINT);
+    /* v3.0 改造树「二次呼吸」：体力归零后还能再冲 3 秒 */
+    if (BenchSecondWind()) {
+        if (stamina <= 0.0f && secondWindTimer <= 0.0f && wantSprint && secondWindTimer > -99.0f) {
+            static int swUsed = 0;   /* 0=还没用，1=本层用过了 */
+            if (!swUsed) { secondWindTimer = 3.0f; swUsed = 1; }
+        }
+        if (stamina <= 0.0f && secondWindTimer > 0.0f) {
+            wantSprint = 1;          /* 宽限期内允许冲刺 */
+            secondWindTimer -= dt;
+        }
+        if (secondWindTimer < -98.0f) secondWindTimer = 0.0f;
+    }
     int inF = IsActionDown(ACT_MOVE_FWD) - IsActionDown(ACT_MOVE_BACK);
     int inS = IsActionDown(ACT_MOVE_RIGHT) - IsActionDown(ACT_MOVE_LEFT);
     /* v3.0：藏在柜子里不能动（但可以转头偷看） */
@@ -2211,7 +2271,8 @@ void Update(float dt) {
     bobPhase += dt * (sprinting ? 11.0f : (moving ? 7.0f : 1.6f));
     if (bobPhase > 6283.0f) bobPhase -= 6283.0f;
 
-    sprinting = (wantSprint && moving && stamina > 1.0f);
+    /* v3.0：二次呼吸宽限期内，体力为 0 也允许冲刺 */
+    sprinting = (wantSprint && moving && (stamina > 1.0f || secondWindTimer > 0.0f));
     if (sprinting) {
         sprintedThisLevel = 1;  /* 标记本局冲刺过 */
         stamina -= STAMINA_DRAIN * RunUpgStaminaMul() * dt;   /* v3.0 体能强化 */
@@ -2633,7 +2694,7 @@ void Update(float dt) {
             if (stepTimer >= 0.30f) {
                 stepTimer = 0.0f;
                 PlaySfx(SFX_STEP, 0.50f);
-                MakeNoise(posX, posY, 9.0f * noiseMul);
+                MakeNoise(posX, posY, 9.0f * noiseMul * BenchWalkNoiseMul());   /* v3.0 轻步：冲刺脚步 */
             }
         } else if (moving && !holdingNow && !cranking) {
             /* v2.6：走路本来完全无声，现在连续走 5 秒之后开始有细微噪声。
@@ -2645,7 +2706,7 @@ void Update(float dt) {
                 if (walkStepTimer >= WALK_NOISE_INTERVAL) {
                     walkStepTimer = 0.0f;
                     PlaySfx(SFX_STEP, 0.28f);          /* 比冲刺轻 */
-                    MakeNoise(posX, posY, WALK_NOISE_RADIUS * noiseMul);
+                    MakeNoise(posX, posY, WALK_NOISE_RADIUS * noiseMul * BenchWalkNoiseMul());   /* v3.0 轻步：走路脚步 */
                 }
             }
         } else {
@@ -3165,6 +3226,7 @@ void StartGame(void) {
        之前这两个 Reset 一个调用点都没有（全项目 grep 为 0），
        导致买过的节点跨局累积，第二局开局就满级。 */
     BenchResetRun();
+    playDeadUsed = 0;   /* v3.0 假死每局重置 */
     RunUpgReset();
 
 
@@ -3539,11 +3601,9 @@ void ActivateMenuItem(void) {
             dailyMode = 0;
             campaignMode = 0;
             DeleteSave();
-            /* v2.0：先选初始武器，再开局 */
+            /* v3.0：**武器取消 → 跳过选武器页，直接开局** */
             weaponPickSel = 0;
-            currentState = STATE_WEAPON_PICK;
-            ForceCursor(1);
-            uiDirty = 1;
+            StartGame();
         } else if (endlessUnlocked && sel == base + 1) {
             /* Endless 模式 */
             DeleteSave();
@@ -4243,6 +4303,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             break;
 
         case WM_MOUSEMOVE: {
+            /* v3.0：**锁盘打开时也必须更新鼠标位置**。
+               原来 g_mousePos 只在 currentState != STATE_PLAYING 时才写，
+               而锁盘是游戏中打开的 → 坐标永远是 {0,0}，
+               LockHitTest 全部落空，玩家点哪里都没反应。
+               这是「锁盘每一个效果都不行」的根因。 */
+            if (lockActive) {
+                int lmx = (short)LOWORD(lParam), lmy = (short)HIWORD(lParam);
+                MouseToLogical(&lmx, &lmy);
+                g_mousePos.x = lmx;
+                g_mousePos.y = lmy;
+            }
+
             /* v3.0：安全屋行悬停 —— 记录鼠标落在第几行，供绘制高亮 */
             if (currentState == STATE_SAFEHOUSE) {
                 int hx = (short)LOWORD(lParam), hy = (short)HIWORD(lParam);
@@ -4516,6 +4588,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 isFullscreen = isFullscreen ? 0 : 1;
                 ApplyDisplayMode();
                 uiDirty = 1;
+                return 0;
+            }
+            /* 锁盘是游戏内的模态层：底栏明确提示「任意键退出」。
+               必须在通用 Esc/菜单处理之前消费按键，否则 Esc 会误进暂停，
+               玩家看起来就像被锁盘卡住了。 */
+            if (lockActive) {
+                CloseLockOverlay();
                 return 0;
             }
             /* 小键盘数字（NumLock 开启时是 VK_NUMPAD0..9）统一折算成主键盘数字，

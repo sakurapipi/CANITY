@@ -973,18 +973,18 @@ static const char* MenuLabel(int i) {
                 case 0: sprintf(kb, "%s:  %s %s %s %s", Tr("MOVE","移动"),
                                 VkName(g_bindings[ACT_MOVE_FWD]), VkName(g_bindings[ACT_MOVE_LEFT]),
                                 VkName(g_bindings[ACT_MOVE_BACK]), VkName(g_bindings[ACT_MOVE_RIGHT])); break;
-                case 1: sprintf(kb, "%s: %%s  (噪声)", Tr("SPRINT","冲刺"), VkName(g_bindings[ACT_SPRINT])); break;
-                case 2: sprintf(kb, "%s: 长按 %%s  (噪声)", Tr("SEARCH","翻找"), VkName(g_bindings[ACT_INTERACT])); break;
-                case 3: sprintf(kb, "%s: 长按 %%s  (+32)", Tr("CRANK","摇电"), VkName(g_bindings[ACT_CRANK])); break;
+                case 1: sprintf(kb, "%s: %s  (噪声)", Tr("SPRINT","冲刺"), VkName(g_bindings[ACT_SPRINT])); break;
+                case 2: sprintf(kb, "%s: 长按 %s  (噪声)", Tr("SEARCH","翻找"), VkName(g_bindings[ACT_INTERACT])); break;
+                case 3: sprintf(kb, "%s: 长按 %s  (+32)", Tr("CRANK","摇电"), VkName(g_bindings[ACT_CRANK])); break;
                 case 4: sprintf(kb, "%s: %s", Tr("LIGHT","手电"), VkName(g_bindings[ACT_FLASHLIGHT])); break;
-                case 5: sprintf(kb, "%s: %%s (全图)  长按 TAB (小图)  -10/秒", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
+                case 5: sprintf(kb, "%s: %s (全图)  长按 TAB (小图)  -10/秒", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
                 case 6: sprintf(kb, "%s: %s", Tr("THROW","投掷"), VkName(g_bindings[ACT_THROW])); break;
-                case 7: sprintf(kb, "%s: %%s %%s %%s  (滚轮: 全部)", Tr("SLOT","选槽"),
+                case 7: sprintf(kb, "%s: %s %s %s  (滚轮: 全部)", Tr("SLOT","选槽"),
                                 VkName(g_bindings[ACT_SELECT_1]), VkName(g_bindings[ACT_SELECT_2]),
                                 VkName(g_bindings[ACT_SELECT_3])); break;
-                case 8: sprintf(kb, "%s: 长按 %%s  (蓄力)", Tr("ATTACK","攻击"),
+                case 8: sprintf(kb, "%s: %s  (敲击制造噪音)", Tr("KNOCK","敲击"),
                                 VkName(g_bindings[ACT_CANCEL_CHARGE])); break;
-                default: sprintf(kb, "%s: %%s  闪避: %%s", Tr("PAUSE","暂停"),
+                default: sprintf(kb, "%s: %s  闪避: %s", Tr("PAUSE","暂停"),
                                 VkName(g_bindings[ACT_PAUSE]), VkName(g_bindings[ACT_DODGE])); break;
                 }
                 {
@@ -1001,7 +1001,7 @@ static const char* MenuLabel(int i) {
                 "WALKING IS QUIET, BUT 5S OF IT STARTS TO WHISPER.",
                 "",
                 "BOTTLE: THROW IT AT A MONSTER TO HIT IT.",
-                "  3 BOTTLES DRIVE IT AWAY, BUT THE SOUND",
+                "  THROW A BOTTLE TO MAKE NOISE AND LURE IT AWAY.",
                 "  GIVES AWAY YOUR POSITION.",
                 "",
                 "FACE JUMPER: PRESS SPACE TO DODGE IT.",
@@ -2521,19 +2521,19 @@ static void DrawCrosshair(void) {
 void DrawHUD(void) {
     if (currentState == STATE_PLAYING && !isMapOpen) DrawCrosshair();
     /* v2.1：Boss 血条（屏幕上方居中） */
-    if (currentState == STATE_PLAYING && bossLevel && !bossDefeated && monster.active && bossMaxHp > 0) {
-        int bw = (int)(winW * 0.42f);
-        int bx = winW / 2 - bw / 2;
-        /* v2.0：原来贴在 UIS(40)，和 LEVEL / CAMPAIGN 那一行纵向重叠 */
-        int by = UIS(40) + TextHeightWin() + UIS(8);
-        float frac = (float)monster.hp / (float)bossMaxHp;
-        if (frac < 0.0f) frac = 0.0f;
-        if (frac > 1.0f) frac = 1.0f;
-        BlendRectWin(bx, by, bx + bw, by + UIS(10), 0x00201010u, 0.85f);
-        BlendRectWin(bx, by, bx + (int)(bw * frac), by + UIS(10), 0x00C02020u, 0.95f);
-        DrawTextCenterWin(winW / 2, by - TextHeightWin() - UIS(2),
-                          Tr("BOSS", "首领"), 0x00FF5050u);
-    }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     char buf[96];
 
@@ -2611,31 +2611,31 @@ void DrawHUD(void) {
             sprintf(buf, "PENDING %d", pendingShards);
             DrawTextWin(fx2, UIS(18) + TextHeightWin() * 3 + UIS(8), buf, 0x00FFC040u);
         }
-        if (0) {   /* v2.0：剑气已移除 */
-            /* v2.9：剑气冷却 —— 文字 + 一条从空到满的倒计时条 */
-            int ready = (knifeCd <= 0.0f);
-            if (ready) sprintf(buf, "RUST KNIFE  READY");
-            else       sprintf(buf, "RUST KNIFE  %.1fs", knifeCd);
-            int tw = TextWidthWin(buf);
-            int bx = winW - tw - UIS(20);
-            DrawTextWin(bx, hy, buf, ready ? 0x008CFF8Cu : 0x00B0B0B0u);
 
-            int bh = UIS(5); if (bh < 3) bh = 3;
-            int by = hy + TextHeightWin() + UIS(2);
-            BlendRectWin(bx, by, bx + tw, by + bh, 0x00242428u, 0.85f);
-            float frac = ready ? 1.0f : (1.0f - knifeCd / KNIFE_CD);
-            if (frac < 0.0f) frac = 0.0f;
-            if (frac > 1.0f) frac = 1.0f;
-            int fw = (int)(tw * frac);
-            if (ready) {
-                BlendRectWin(bx, by, bx + tw, by + bh, 0x008CFF8Cu, 0.95f);
-            } else {
-                BlendRectWin(bx, by, bx + fw, by + bh, 0x00D8A040u, 0.95f);
-                /* 快好了：闪白提示 */
-                if (knifeCd < 5.0f && ((int)(g_timeSec * 8.0f) & 1))
-                    BlendRectWin(bx, by, bx + tw, by + bh, 0x00FFFFFFu, 0.35f);
-            }
-        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     }
 
     {
@@ -2880,7 +2880,13 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         /* 提示文本统一走窗口内绘制，长文本会被 ClampRowText 之外的地方撑出屏幕 */
         int tw = TextWidthWin(pickupMsg);
         int tx = (winW - tw) / 2;
-        int ty = UIS(278);   /* v2.6：固定带（在武器行上方） */
+        /* v3.0：**用「屏幕高度的百分比」而不是 UIS 固定值** ——
+           UIS 会跟 renderH 缩放，小窗口时 150 换算出来仍会和藏身提示撞
+           （验证报告：800×600 下 "HOLD E - HIDE" 与 "NEED 2 MORE FUSE" 重叠 2408 px²）。
+           改成贴在 LEVEL/SANITY/FUSES 那几行下面，永远不碰下半屏。 */
+        int ty = UIS(150);
+        if (ty < TextHeightWin() * 5) ty = TextHeightWin() * 5;   /* 至少在第 5 行文字以下 */
+
         float alpha = pickupMsgTimer / 2.0f;
         if (alpha > 1.0f) alpha = 1.0f;
         DrawTextWin(tx, ty, pickupMsg, 0x00E8E060u);
@@ -2982,6 +2988,36 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
 
 
 
+    /* ===== v3.0 逃生向 HUD：藏身提示 + 被发现状态 =====
+       怪已经打不死了，「它现在有没有在追我」是唯一需要盯的信息。 */
+    {
+        extern int hideSpotNear, hiddenIn, hoverKind;
+        extern Monster monster;
+        int hudTH3 = TextHeightWin();
+        int hy3 = winH - UIS(60) - rowGap * 2 - hudTH3 - UIS(6);
+
+        /* ① 藏身提示 */
+        if (hiddenIn >= 0) {
+            DrawTextCenterWin(winW / 2, winH / 2 + UIS(70),
+                              Tr("HIDDEN  -  E TO LEAVE", "已藏身  -  按 E 出来"),
+                              0x0060FF90u);
+        } else if (hideSpotNear >= 0 && currentState == STATE_PLAYING) {
+            DrawTextWin(UIS(20), winH - UIS(150),
+                        Tr("HOLD E  -  HIDE", "长按 E 躲进去"), 0x0090D0F0u);
+        }
+
+        /* ② 敌人状态（三态雷达）—— 怪不可杀后这是唯一的威胁指标 */
+        if (monster.active && currentState == STATE_PLAYING) {
+            const char* st = NULL;
+            unsigned int sc = 0x0080FF80u;
+            if (monster.state == 1)      { st = Tr("HUNTING", "追捕中"); sc = 0x00FF3020u; }
+            else if (monster.state == 2) { st = Tr("SEARCHING", "搜寻中"); sc = 0x00E0A020u; }
+            else                          { st = Tr("WANDERING", "游荡"); sc = 0x0080C080u; }
+            int tw3 = TextWidthWin(st);
+            DrawTextWin(winW - UIS(24) - tw3, winH - UIS(150), st, sc);
+        }
+    }
+
     DrawTextWin(labelX, y1 - UIS(3), "LIGHT", 0x00A0A0A0u);
     /* 手电条颜色：开启=黄绿，关闭但有电=暗黄，无电=暗红 */
     unsigned int lightBarCol;
@@ -2989,7 +3025,8 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
     else if (!flashlightOn) lightBarCol = 0x00806030u;  /* 关闭暗黄 */
     else lightBarCol = 0x00E8E060u;  /* 开启亮黄绿 */
     float batMax = (float)BatteryMax();
-    DrawBar(barX, y1, barW, barH, battery / batMax, lightBarCol);
+    /* v3.0：改用统一 UiBar */
+    UiBar(barX, y1, barW, barH, battery / batMax, UI_BAR_NORMAL, lightBarCol);
     DrawTextWin(barX + barW + UIS(12), y1 - UIS(3), flashlightOn ? "ON" : "OFF",
                 flashlightOn ? 0x00E8E060u : 0x00A08080u);
 
@@ -3003,10 +3040,61 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         }
     }
 
-    DrawTextWin(labelX, y2 - UIS(3), "RUN", 0x00A0A0A0u);
-    DrawBar(barX, y2, barW, barH, stamina / StaminaMax(),
-            (stamina < 25.0f) ? 0x00FF6A3Cu : 0x0040C060u);
+    /* ===== v3.0 改造树感知系：预知 + 心眼 ===== */
+    {
+        extern int hiddenIn;
+        extern Monster monster;
+        extern float posX, posY;
+        if (currentState == STATE_PLAYING) {
+            /* ① 预知：怪物进 8 格 → 屏幕边缘泛红（不需要看见它） */
+            if (BenchPremonition() && monster.active) {
+                float dx = monster.x - posX, dy = monster.y - posY;
+                float d2 = dx * dx + dy * dy;
+                if (d2 < 64.0f) {
+                    /* 越近越红：边缘一圈渐变 */
+                    float k = 1.0f - d2 / 64.0f;
+                    if (k > 1.0f) k = 1.0f;
+                    int band = UIS(10);   /* v3.0：40 → 10，原来每帧 160 次半透明叠加，画面抽搐 */
+                    for (int i = 0; i < band; i++) {
+                        float a = 0.55f * k * (1.0f - (float)i / (float)band);
+                        BlendRectWin(0, i, winW, i + 1, 0x00FF0000u, a);
+                        BlendRectWin(0, winH - 1 - i, winW, winH - i, 0x00FF0000u, a);
+                        BlendRectWin(i, 0, i + 1, winH, 0x00FF0000u, a);
+                        BlendRectWin(winW - 1 - i, 0, winW - i, winH, 0x00FF0000u, a);
+                    }
+                }
+            }
+            /* ② 心眼：藏身时显示怪物距离 */
+            if (BenchInnerEye() && hiddenIn >= 0 && monster.active) {
+                float dx = monster.x - posX, dy = monster.y - posY;
+                float dm = sqrtf(dx * dx + dy * dy);
+                static char ibuf[48];
+                sprintf(ibuf, "%s %.1f", Tr("DIST", "距离"), (double)dm);
+                DrawTextCenterWin(winW / 2, winH / 2 + UIS(100), ibuf, 0x0090D0F0u);
+            }
+        }
+    }
 
+    /* v3.0：**噪音环** —— 扔瓶子/敲墙后显示声音强度，2.2 秒衰减 */
+    {
+        extern float noiseDisplay;
+        if (noiseDisplay > 0.01f && currentState == STATE_PLAYING) {
+            int nr = UIS(26);   /* v3.0：固定半径，只让亮度随强度变 —— 原来半径也变，四角乱跳 */
+            int ncx = winW / 2, ncy = winH / 2;
+            unsigned int nc = (noiseDisplay > 0.7f) ? UI_DANGER
+                            : (noiseDisplay > 0.4f) ? UI_WARN : UI_INFO;
+            /* 四个弧段（简单画法：四角的小方框，避免画圆的开销） */
+            for (int a = 0; a < 4; a++) {
+                int ax = ncx + ((a & 1) ? nr : -nr) - UIS(3);
+                int ay = ncy + ((a & 2) ? nr : -nr) - UIS(3);
+                BlendRectWin(ax, ay, ax + UIS(6), ay + UIS(6), nc, 0.85f * noiseDisplay);
+            }
+        }
+    }
+
+    DrawTextWin(labelX, y2 - UIS(3), "RUN", 0x00A0A0A0u);
+    UiBar(barX, y2, barW, barH, stamina / StaminaMax(),
+          (stamina < 25.0f) ? UI_BAR_WARN : UI_BAR_NORMAL, 0x0040C060u);
     /* v3.0：**武器行已删除** */
 
 
@@ -3021,7 +3109,7 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
 
 
     /* v1.15：命中伤害数字（屏幕中央偏下，向上浮 + 淡出） */
-    if (lastHitTimer > 0.0f && lastHitDamage > 0) {
+    if (0 && lastHitTimer > 0.0f && lastHitDamage > 0) {
         char dbuf[32];
         sprintf(dbuf, "-%d", lastHitDamage);
         float a = lastHitTimer / 0.7f;
@@ -3036,7 +3124,7 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         int bb = (int)((dc & 0xFF) * a);
         DrawTextWin(dx2, dy2, dbuf, (unsigned int)((rr << 16) | (gg << 8) | bb));
         if (lastHitBackstab) {
-            DrawTextWin(dx2, dy2 - TextHeightWin(), "SNEAK!", 0x00FFC040u);
+            /* v3.0：SNEAK! 已删 —— 怪不可杀，偷袭没有意义 */
         }
     }
 
@@ -3146,7 +3234,7 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         /* 发光边框 */
         FrameRectWin(bx, by, bx + barW, by + barH, chargeCol, 1.0f, 2);
         /* 标签带阴影 */
-        DrawTextCenterWin(winW / 2, by - UIS(24), "CHARGING THROW", chargeCol);
+        DrawTextCenterWin(winW / 2, by - UIS(24), Tr("CHARGING KNOCK", "敲击蓄力"), chargeCol);
         /* 百分比数值 */
         char pct[16];
         sprintf(pct, "%d%%", (int)(mouseCharge * 100));
@@ -3308,11 +3396,10 @@ void RenderFrame(void) {
         extern int hiddenIn;
         if (hiddenIn >= 0) {
             int bandH = winH / 5;
-            for (int i = 0; i < bandH; i++) {
-                float a = 0.75f * (1.0f - (float)i / (float)bandH);
-                BlendRectWin(0, i, winW, i + 1, 0x00000000u, a);
-                BlendRectWin(0, winH - 1 - i, winW, winH - i, 0x00000000u, a);
-            }
+            /* 藏身遮罩只保留稳定的四块暗边。旧版逐扫描线改变 alpha，
+               每帧要做数百次小矩形混合，边缘会产生类似抽搐的视觉噪声。 */
+            BlendRectWin(0, 0, winW, bandH, 0x00000000u, 0.70f);
+            BlendRectWin(0, winH - bandH, winW, winH, 0x00000000u, 0.70f);
             BlendRectWin(0, 0, winW / 8, winH, 0x00000000u, 0.75f);
             BlendRectWin(winW - winW / 8, 0, winW, winH, 0x00000000u, 0.75f);
         }
@@ -3436,6 +3523,57 @@ void UiRowSel(int x0, int y0, int x1, int y1, float alpha) {
 }
 
 /* v2.2：分组细线 —— 中间亮两头渐隐，用于把列表分成逻辑段 */
+
+/* ==================== v3.0 统一组件 ====================
+ * 勘查报告指出：6 套手写面板、3 套选中态、7 条手写进度条。
+ * 这三个函数把它们收编，新界面只允许调用这三个。
+ * ==================================================== */
+
+void UiPanel(int x0, int y0, int x1, int y1, int kind) {
+    if (kind == UI_PANEL_BARE) return;
+    unsigned int edge, fill;
+    switch (kind) {
+    case UI_PANEL_HOT:    edge = UI_EDGE_HOT;  fill = UI_BG_PANEL; break;
+    case UI_PANEL_DANGER: edge = UI_DANGER;    fill = 0x00240000u;  break;
+    default:              edge = UI_EDGE;      fill = UI_BG_PANEL;  break;
+    }
+    BlendRectWin(x0, y0, x1, y1, fill, 0.97f);
+    FrameRectWin(x0, y0, x1, y1, edge, 0.95f, 1);
+}
+
+void UiRow(int x0, int y0, int x1, int y1, int state, float alpha) {
+    switch (state) {
+    case UI_ROW_SEL:
+        BlendRectWin(x0, y0, x1, y1, UI_BG_SEL, 0.85f * alpha);
+        BlendRectWin(x0 - UIS(SP1), y0, x0 - UIS(SP1) + UIS(3), y1, UI_ACCENT, 0.95f);
+        break;
+    case UI_ROW_HOVER:
+        BlendRectWin(x0, y0, x1, y1, UI_BG_HOVER, 0.55f * alpha);
+        FrameRectWin(x0, y0, x1, y1, UI_INFO, 0.7f, 1);
+        break;
+    case UI_ROW_DISABLED:
+        BlendRectWin(x0, y0, x1, y1, UI_BG_LOCKED, 0.60f * alpha);
+        break;
+    case UI_ROW_LOCKED:
+        BlendRectWin(x0, y0, x1, y1, UI_BG_LOCKED, 0.85f * alpha);
+        break;
+    default:
+        BlendRectWin(x0, y0, x1, y1, UI_BG_ROW, 0.45f * alpha);
+        break;
+    }
+}
+
+void UiBar(int x, int y, int w, int h, float frac, int kind, unsigned int col) {
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+    unsigned int c = col;
+    if (kind == UI_BAR_DANGER) c = UI_DANGER;
+    else if (kind == UI_BAR_WARN) c = UI_WARN;
+    BlendRectWin(x, y, x + w, y + h, 0x00202020u, 0.80f);
+    if (frac > 0.0f) BlendRectWin(x, y, x + (int)((float)w * frac), y + h, c, 0.95f);
+    FrameRectWin(x, y, x + w, y + h, UI_EDGE_DIM, 0.7f, 1);
+}
+
 void UiSectionRule(int cx, int y, int w) {
     int th = TextHeightWin() / 10;
     if (th < 2) th = 2;
