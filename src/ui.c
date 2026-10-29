@@ -3047,8 +3047,17 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
     float batMax = (float)BatteryMax();
     /* v3.0：改用统一 UiBar */
     UiBar(barX, y1, barW, barH, battery / batMax, UI_BAR_NORMAL, lightBarCol);
-    DrawTextWin(barX + barW + UIS(12), y1 - UIS(3), flashlightOn ? "ON" : "OFF",
-                flashlightOn ? 0x00E8E060u : 0x00A08080u);
+    /* v3.0：**区分「没电」和「自己关了」** ——
+       玩家实测：「LIGHT OFF 时电池条还有四五成，我分不清是没电还是我自己关了」。
+       三态：DEAD（没电，暗红）/ OFF（关闭，暗黄）/ ON（开启，亮黄绿）。 */
+    {
+        const char* ls;
+        unsigned int lc;
+        if (battery <= 0.0f)      { ls = Tr("DEAD", "没电"); lc = 0x00FF4030u; }
+        else if (!flashlightOn)   { ls = Tr("OFF",  "关闭"); lc = 0x00C09040u; }
+        else                      { ls = Tr("ON",   "开启"); lc = 0x00E8E060u; }
+        DrawTextWin(barX + barW + UIS(12), y1 - UIS(3), ls, lc);
+    }
 
     /* v2.4：看图要花电 —— 开着图就在手电旁边挂一个持续的耗电提示，
        否则玩家只会觉得"电量掉得莫名其妙"。 */
