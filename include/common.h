@@ -423,7 +423,7 @@ typedef struct { float x, y; int active; } Breaker;
    安全屋里按空格开一次，滑块左右扫，再按空格锁定。
    完美区命中给得多，普通区给得少，失手什么都没有。 */
 #define CALIB_ATTEMPTS       2        /* v2.6：**已取消次数限制**，这个常量不再参与判定 */
-#define CALIB_COOLDOWN      60.0f     /* v3.0：改到藏身点里，60 秒冷却 */
+#define CALIB_COOLDOWN      30.0f     /* v3.0：用户要求改成 30 秒 */
 #define CALIB_PER_LEVEL      99      /* v3.0：藏身点里校准，不再按层限次，只靠 60 秒冷却 */        /* v3.0：**每层只能校准 1 次** ——
                                          原来无次数限制 + 安全屋不掉理智，
                                          站 3 分钟能刷 190 能量，能量经济直接失效

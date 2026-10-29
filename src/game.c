@@ -2511,7 +2511,8 @@ void Update(float dt) {
        原来用的是 ACT_INTERACT（默认 E），但 E 同时是「翻箱搜索」，
        站在安全屋里按 E 会让人搞不清是要搜箱子还是开店。
        E 保留给搜索，安全屋专用 T。 */
-    if (inSafe && currentState == STATE_PLAYING && keyPressed['T']) {
+    /* v3.0：**藏身点里也能开商店** —— 用户要求「同时也可以打开商店面板」 */
+    if ((inSafe || hiddenIn >= 0) && currentState == STATE_PLAYING && keyPressed['T']) {
         keyPressed['T'] = 0;
         ShopOpen(currentLevel);
         currentState = STATE_SAFEHOUSE;

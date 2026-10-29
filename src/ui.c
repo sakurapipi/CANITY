@@ -3046,17 +3046,26 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
             /* v3.0：**只保留左下角那一条** ——
                玩家实测中间和左下各有一条 HIDDEN，重复且抢画面中央。 */
         } else if (hiddenIn >= 0) {
-            /* v3.0：藏在藏身点里 —— 提示可以校准回理智 */
+            /* v3.0：藏在藏身点里 —— **两行提示**（用户要求）
+               第 1 行：空格开始校准小游戏（或显示冷却剩余）
+               第 2 行：T 打开商店面板 */
             extern float calibCooldown;
+            int hy = winH - UIS(150);
+            int lh = TextHeightWin() + UIS(4);
+
             if (calibCooldown > 0.0f) {
-                char cb[48];
-                sprintf(cb, Tr("CALIBRATE IN %ds", "校准冷却 %d 秒"),
+                char cb[64];
+                sprintf(cb, Tr("SPACE  -  CALIBRATE  (cooling %ds)",
+                               "按空格开始小游戏  (冷却 %d 秒)"),
                         (int)(calibCooldown + 0.5f));
-                DrawTextWin(UIS(20), winH - UIS(150), cb, 0x00808080u);
+                DrawTextWin(UIS(20), hy, cb, 0x00808080u);
             } else {
-                DrawTextWin(UIS(20), winH - UIS(150),
-                            Tr("SPACE  -  CALIBRATE", "按空格校准"), 0x0060FF90u);
+                DrawTextWin(UIS(20), hy,
+                            Tr("SPACE  -  START MINIGAME",
+                               "按空格开始小游戏"), 0x0060FF90u);
             }
+            DrawTextWin(UIS(20), hy + lh,
+                        Tr("T  -  OPEN SHOP", "T  -  打开商店"), 0x00E8C040u);
         } else if (hideSpotNear >= 0 && currentState == STATE_PLAYING) {
             DrawTextWin(UIS(20), winH - UIS(150),
                         Tr("PRESS E  -  HIDE", "按 E 躲进去"), 0x0090D0F0u);
