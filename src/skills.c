@@ -295,14 +295,14 @@ const InRunDef inRunDefs[INRUN_COUNT] = {
     {"FAST SEARCH", "Search -25% time, noise +10%", IRK_PASSIVE, 0, "快手", "翻找时间 -25%，噪声 +10%"},
     {"SAVER", "Drain -15%, cap -5", IRK_PASSIVE, 0, "节能", "耗电 -15%，电量上限 -5"},
     {"LONG WIND", "Stamina +25, heal -10%", IRK_PASSIVE, 0, "长气", "体力 +25，治疗 -10%"},
-    {"IRON SKIN", "Damage -30%, speed -4%", IRK_PASSIVE, 1, "铁皮", "受伤 -30%，移速 -4%"},
+    {"THICK HIDE", "Grab sanity loss -35%", IRK_PASSIVE, 1, "厚皮", "被抓扣理智 -35%"},
     /* 规则（3，稀有） */
     {"SILENT BOTTLE", "Silent breaks, dmg -10%", IRK_RULE, 1, "静音瓶", "瓶子不发声，伤害 -10%"},
     {"DARK WALK", "Off-light +12%, drain +10%", IRK_RULE, 1, "暗行", "关灯移速 +12%，流失 +10%"},
     {"LIGHT FUSES", "Fuse need -1, shards -10%", IRK_RULE, 1, "省保险丝", "所需保险丝 -1，碎片 -10%"},
     /* 大招（2，一局一个，第 5 层后进池） */
-    {"STATIC FIELD", "Stun all monsters 6s", IRK_ULTIMATE, 1, "静电场", "全场怪物定身 6 秒"},
-    {"MISDIRECT", "Teleport nearest monster away", IRK_ULTIMATE, 1, "误导", "把最近的怪物传送走"},
+    {"WHISTLE", "Lure every hunter far away", IRK_ULTIMATE, 1, "哨声", "把所有追捕者引向远处"},
+    {"SMOKE OUT", "Break line of sight instantly", IRK_ULTIMATE, 1, "烟幕", "立刻断开所有视线"},
 
     /* ---- v2.0 新增 8 张（16 -> 24） ---- */
     {"FIELD REPAIR", "+35 battery, -5 sanity", IRK_INSTANT, 0, "现场维修", "+35 电量，-5 理智"},
@@ -310,9 +310,9 @@ const InRunDef inRunDefs[INRUN_COUNT] = {
     {"PACK RAT", "+2 bottles +30 shards", IRK_INSTANT, 0, "囤积者", "+2 瓶子，+30 碎片"},
     {"OIL CAN", "+25 battery, +20 stamina", IRK_INSTANT, 0, "油壶", "+25 电量，+20 体力"},
     {"LUCKY FUSE", "+1 fuse held", IRK_INSTANT, 0, "幸运保险丝", "+1 持有保险丝"},
-    {"STEADY HAND", "Weapon damage +20%", IRK_PASSIVE, 0, "稳手", "武器伤害 +20%"},
-    {"SWIFT RELOAD", "Weapon cooldown -25%", IRK_PASSIVE, 0, "快速装填", "武器冷却 -25%"},
-    {"TIME STOP", "Freeze monsters 8s", IRK_ULTIMATE, 1, "时间停止", "全场怪物冻结 8 秒"},
+    {"QUIET SOLE", "Walk noise -25%", IRK_PASSIVE, 0, "静底", "走路噪音 -25%"},
+    {"COLD BLOOD", "Sanity drain -20%", IRK_PASSIVE, 0, "冷血", "理智流失 -20%"},
+    {"BLACKOUT", "All hunters blind for 10s", IRK_ULTIMATE, 1, "全黑", "全场追捕者失明 10 秒"},
 };
 
 unsigned int runSkillMask = 0u;
