@@ -210,6 +210,7 @@ typedef struct {
     int path[MON_MAXPATH][2];
     int pathLen, pathIdx;
     float repath, stateTimer, wanderTimer, hitCooldown, growlTimer;
+    float huntTimer;   /* v3.0：本次追捕已持续秒数（超时放弃用） */
     float speed;
     int hp;                    /* 剩余血量 */
     /* ---- v1.15 伤害系统 ---- */

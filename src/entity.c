@@ -676,7 +676,19 @@ void UpdateMonster(float dt) {
             monster.pathLen = 0;
             monster.pathIdx = 0;
         }
-    } else if (monster.state == 2) {
+            /* v3.0：**追捕要有超时** ——
+           用户实测「怪物不会离开」：只要视线通就一直贴着，
+           永远不放弃也永远抓不到（抓取要求 0.74 格内）。
+           追 8 秒还没抓到就降级为搜寻（3 秒），给玩家脱身窗口。 */
+        monster.huntTimer += dt;
+        if (monster.huntTimer > 8.0f) {
+            monster.state = 2;
+            monster.stateTimer = 3.0f;
+            monster.huntTimer = 0.0f;
+            monster.pathLen = 0;
+            monster.pathIdx = 0;
+        }
+} else if (monster.state == 2) {
         monster.stateTimer -= dt;
         if (monster.pathLen == 0 || monster.pathIdx >= monster.pathLen) {
             if (monster.stateTimer <= 0.0f) {

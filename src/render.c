@@ -2406,19 +2406,29 @@ void RenderMap(void) {
     } else {
         cellSize = MAP_CORNER_CELL;
         mapW = MAP_WIDTH * cellSize;
-        mapH = MAP_HEIGHT * cellSize;
-        /* v3.0：**小地图上移，别压住左下角的 LIGHT / RUN 两条** ——
-           玩家实测：「TAB 小地图盖住 LIGHT/RUN 条」。
-           原来贴右下角，而 LIGHT/RUN 标签 + 条正好横跨到右侧 2/3 屏宽。
-           抬高到 LIGHT 条上方（约屏高 78% 处起）。 */
-        mapStartX = renderW - mapW - UIS(10);
+        /* v3.0：**小地图必须同时避开道具栏和 LIGHT/RUN** ——
+           历史上踩了两次：
+             ① 贴右下角       → 压住 LIGHT/RUN 两条
+             ② 只抬不管上界   → 顶到右上角的道具栏（1 FLARE / 2 BOTTLE）
+           这次算清楚可用区间；塞不下就**缩小格子**，绝不叠 HUD。 */
         {
-            int safeBottom = renderH - UIS(120);   /* LIGHT/RUN 占的高度 */
-            if (mapStartY > safeBottom - mapH) mapStartY = safeBottom - mapH;
-            if (mapStartY < UIS(20)) mapStartY = UIS(20);
+            int barTop   = renderH - UIS(120);   /* LIGHT/RUN 上沿 */
+            int itemsBot = UIS(150);             /* 右上角道具栏下沿 */
+            int room = barTop - itemsBot;
+            if (room < UIS(60)) room = UIS(60);
+
+            /* 塞不下就缩格子（3px 是下限，再小就看不清了） */
+            while (mapH > room && cellSize > 3) {
+                cellSize--;
+                mapW = MAP_WIDTH * cellSize;
+                mapH = MAP_HEIGHT * cellSize;
+            }
+            mapStartX = renderW - mapW - UIS(10);
+            mapStartY = barTop - mapH;
+            if (mapStartY < itemsBot) mapStartY = itemsBot;
+            if (mapStartX < 0) mapStartX = 0;
+            if (mapStartY < 0) mapStartY = 0;
         }
-        if (mapStartX < 0) mapStartX = 0;
-        if (mapStartY < 0) mapStartY = 0;
     }
 
     if (mapFullScreen) {

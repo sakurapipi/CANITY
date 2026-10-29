@@ -557,7 +557,12 @@ void ContinueRun(void) {
        玩家实测「道具栏突然变成 MIRROR X99 / FLARE X99 / BOTTLE X99」，
        就是因为这里只有直接赋值：坏存档/越界写入的值会原样进 HUD。
        上限给 99（正常玩法永远到不了），下限 0。 */
-    #define CLAMP_ITEM(v) do { if ((v) < 0) (v) = 0; if ((v) > 99) (v) = 99; } while (0)
+    /* v3.0：上限取**实际玩法的容量**，不是 99 ——
+       上一版夹到 99，结果存档里的垃圾值被夹成 X99 直接显示出来，
+       玩家看到的就是「道具栏变成 X99」。
+       正常容量：瓶子/照明弹 8，其余稀有道具 4。 */
+    #define CLAMP_ITEM(v)     do { if ((v) < 0) (v) = 0; if ((v) > 8) (v) = 8; } while (0)
+    #define CLAMP_ITEM_RARE(v) do { if ((v) < 0) (v) = 0; if ((v) > 4) (v) = 4; } while (0)
     flares = g_save.flares;      CLAMP_ITEM(flares);
     bottles = g_save.bottles;    CLAMP_ITEM(bottles);
     /* v13：v2.0 新系统（不读回来 = 中途退出丢光遗物/Boss 状态/每日战役） */
@@ -570,9 +575,9 @@ void ContinueRun(void) {
     dailySeed = g_save.dailySeed;
     campaignMode = g_save.campaignMode;
     campaignStage = g_save.campaignStage;
-    firePots = g_save.firePots;   CLAMP_ITEM(firePots);
-    gluePots = g_save.gluePots;   CLAMP_ITEM(gluePots);
-    mirrors = g_save.mirrors;   CLAMP_ITEM(mirrors);
+    firePots = g_save.firePots;   CLAMP_ITEM_RARE(firePots);
+    gluePots = g_save.gluePots;   CLAMP_ITEM_RARE(gluePots);
+    mirrors = g_save.mirrors;   CLAMP_ITEM_RARE(mirrors);
     bankStreak = g_save.bankStreak;
     modBatteryMul = g_save.modBatteryMul;
     if (!(modBatteryMul > 0.0f)) modBatteryMul = 1.0f;
@@ -601,9 +606,9 @@ void ContinueRun(void) {
     for (int i = 0; i < MAX_THROWN; i++) thrown[i] = g_save.thr[i];
 
     /* v9：把新存的进度接回来（顺手夹一下，坏存档不至于把数量弄成负数） */
-    bricks      = g_save.bricks;      CLAMP_ITEM(bricks);
-    acids       = g_save.acids;       CLAMP_ITEM(acids);
-    smokeBombs  = g_save.smokeBombs;  CLAMP_ITEM(smokeBombs);
+    bricks      = g_save.bricks;      CLAMP_ITEM_RARE(bricks);
+    acids       = g_save.acids;       CLAMP_ITEM_RARE(acids);
+    smokeBombs  = g_save.smokeBombs;  CLAMP_ITEM_RARE(smokeBombs);
     pendingShards = g_save.pendingShards < 0 ? 0 : g_save.pendingShards;
     if (pendingShards > 999999) pendingShards = 0;      /* 明显是坏档 */
     runSkillMask = g_save.runSkillMask;
@@ -668,6 +673,7 @@ void ContinueRun(void) {
     flashlightOffLevel = 0;
     sprintedThisLevel = 0;
     #undef CLAMP_ITEM
+    #undef CLAMP_ITEM_RARE
 }
 
 void DeleteSave(void) {

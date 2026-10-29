@@ -3095,13 +3095,9 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
 
     /* v2.4：看图要花电 —— 开着图就在手电旁边挂一个持续的耗电提示，
        否则玩家只会觉得"电量掉得莫名其妙"。 */
-    if (isMapOpen) {
-        const char* tag = "MAP -10/s";
-        int tx = barX + barW + UIS(12) + TextWidthWin("OFF") + UIS(14);
-        if (tx + TextWidthWin(tag) < winW - UIS(8)) {
-            DrawTextWin(tx, y1 - UIS(3), tag, 0x00FF9060u);
-        }
-    }
+    /* v3.0：**删掉这条重复提示** ——
+       小地图自己的标题栏已经写着「MAP -10/S  HOLD TAB  M: FULL」，
+       这里再挂一条既重复，又正好压在小地图上（用户截图确认）。 */
 
     /* ===== v3.0 改造树感知系：预知 + 心眼 ===== */
     {
@@ -3319,20 +3315,23 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         /* v3.0：**给摇电一个看得懂的反馈** ——
            玩家实测：「只有一条极细黄条和 CRANKING，没有刻度，
            也不知道摇到哪算够」。改成粗条 + 百分比 + 完成闪绿。 */
-        int barW = UIS(300), barH = UIS(16);
+        /* v3.0：**摇电面板不能挡视野** ——
+           用户截图：「充电遮视野」。原来 300 宽 + 上下各垫 48/34，
+           一块深色板子横在画面中下方，把整个走廊都挡住了。
+           改成细长条贴屏幕底边，只留一条 22px 高的提示带。 */
+        int barW = UIS(260), barH = UIS(10);
         int bx = (winW - barW) / 2;
-        int by = winH - UIS(130);
+        int by = winH - UIS(46);
         float cc = crankTimer / 2.4f;
         if (cc > 1.0f) cc = 1.0f;
 
-        BlendRectWin(bx - UIS(10), by - UIS(48), bx + barW + UIS(10), by + barH + UIS(34),
-                     0x000A0E12u, 0.88f);
-        FrameRectWin(bx - UIS(10), by - UIS(48), bx + barW + UIS(10), by + barH + UIS(34),
-                     0x00C8B060u, 0.8f, 1);
+        /* 只垫一层很薄的底，不画大框 */
+        BlendRectWin(bx - UIS(6), by - UIS(22), bx + barW + UIS(52), by + barH + UIS(6),
+                     0x000A0E12u, 0.62f);
 
-        DrawTextCenterWin(winW / 2, by - UIS(42),
-                          cc >= 1.0f ? Tr("CHARGED", "充满") : Tr("CRANKING", "摇电中"),
-                          cc >= 1.0f ? 0x0060FF90u : 0x00E8C040u);
+        DrawTextWin(bx, by - UIS(20),
+                    cc >= 1.0f ? Tr("CHARGED", "充满") : Tr("CRANKING", "摇电中"),
+                    cc >= 1.0f ? 0x0060FF90u : 0x00E8C040u);
 
         /* 底槽 + 填充 + 25/50/75% 刻度 */
         BlendRectWin(bx, by, bx + barW, by + barH, 0x00202020u, 0.85f);
@@ -3347,8 +3346,8 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         {
             char cbuf[16];
             sprintf(cbuf, "%d%%", (int)(cc * 100.0f + 0.5f));
-            DrawTextCenterWin(winW / 2, by + barH + UIS(6), cbuf,
-                              cc >= 1.0f ? 0x0060FF90u : 0x00C8C4BCu);
+            DrawTextWin(bx + barW + UIS(8), by - UIS(4), cbuf,
+                        cc >= 1.0f ? 0x0060FF90u : 0x00C8C4BCu);
         }
     }
 
