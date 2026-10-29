@@ -402,8 +402,8 @@ typedef struct { float x, y; int active; } Breaker;
    安全屋里按空格开一次，滑块左右扫，再按空格锁定。
    完美区命中给得多，普通区给得少，失手什么都没有。 */
 #define CALIB_ATTEMPTS       2        /* v2.6：**已取消次数限制**，这个常量不再参与判定 */
-#define CALIB_COOLDOWN      45.0f     /* v2.9：60 → 45（用户要求） */
-#define CALIB_PER_LEVEL      1        /* v3.0：**每层只能校准 1 次** ——
+#define CALIB_COOLDOWN      60.0f     /* v3.0：改到藏身点里，60 秒冷却 */
+#define CALIB_PER_LEVEL      99      /* v3.0：藏身点里校准，不再按层限次，只靠 60 秒冷却 */        /* v3.0：**每层只能校准 1 次** ——
                                          原来无次数限制 + 安全屋不掉理智，
                                          站 3 分钟能刷 190 能量，能量经济直接失效
                                          （数值审查 #2）。 */
@@ -413,10 +413,18 @@ typedef struct { float x, y; int active; } Breaker;
 /* v2.9：能量奖励改成**按能量上限的百分比**（用户要求）
    完美（黄区）70%、命中（绿区）40%、失手 0%。
    原来固定 +28/+14，在高上限 build 里收益反而缩水。 */
-#define CALIB_PERFECT_ENERGY_PCT 0.70f
-#define CALIB_GOOD_ENERGY_PCT    0.40f
-#define CALIB_PERFECT_SANITY 18.0f
-#define CALIB_GOOD_SANITY     9.0f
+/* v3.0：**校准移进藏身点，主要奖励改成理智** ——
+   武器取消后能量已经没用了（只剩手电/投掷的小储备），
+   而逃生玩法里最缺的就是理智。
+   平衡依据：
+     · 理智流失第 1 层 0.5/秒、第 24 层 0.776/秒
+     · 60 秒冷却 ≈ 一层流失 30~47 点
+     · 完美 22 点 / 命中 11 点 —— 完美能抵掉大半层消耗，命中只抵 1/3
+   这样「躲进柜子里校准」是值得的，但不足以完全替代找安全屋。 */
+#define CALIB_PERFECT_ENERGY_PCT 0.00f   /* 不再给能量 */
+#define CALIB_GOOD_ENERGY_PCT    0.00f
+#define CALIB_PERFECT_SANITY 22.0f
+#define CALIB_GOOD_SANITY    11.0f
 
 /* v2.6 校准难度成长：
    · 每层把目标区缩 2.5%，缩到基准的 45% 就停（CALIB_ZONE_MIN）

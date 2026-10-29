@@ -2376,7 +2376,10 @@ void Update(float dt) {
     /* v2.5：站在安全区里按**空格**直接玩校准小游戏。
        原来必须先按 E 开面板、再在面板里按空格，多绕一步；
        用户要求"进安全区屏幕上出现一行字，按空格开始小游戏"。 */
-    if (inSafe && currentState == STATE_PLAYING) {
+    /* v3.0：**藏进藏身点也能校准** ——
+       用户要求把校准系统移进藏身点，冷却 60 秒，主要奖励改成理智。
+       这样柜子/床底从「单纯躲避」变成「喘息 + 回复」，才有存在感。 */
+    if ((inSafe || hiddenIn >= 0) && currentState == STATE_PLAYING) {
         if (keyPressed[VK_SPACE]) {
             if (calibActive) CalibLock();
             else             CalibStart();
@@ -3191,6 +3194,19 @@ float CalibSpeedScale(void) {
 void CalibStart(void) {
     if (calibActive) return;
     /* v3.0：每层只能校准一次 */
+    /* v3.0：**校准只能在藏身点里做** ——
+       原来在安全屋里按空格，现在改成「藏进柜子/床底/桌下之后按空格」。
+       理由：逃生玩法里藏身处本身就是「喘息点」，而校准是最贴合它的动作；
+       安全屋改成纯粹的补给站。 */
+    {
+        extern int hiddenIn;
+        if (hiddenIn < 0) {
+            pickupMsg = g_lang == LANG_ZH ? "要躲在藏身点里才能校准"
+                                          : "HIDE FIRST, THEN CALIBRATE";
+            pickupMsgTimer = 1.4f;
+            return;
+        }
+    }
     if (calibUsedLevel == currentLevel) {
         pickupMsg = g_lang == LANG_ZH ? "本层已校准过" : "ALREADY CALIBRATED THIS LEVEL";
         pickupMsgTimer = 1.2f;
@@ -3232,7 +3248,7 @@ void CalibLock(void) {
         sanity += CALIB_PERFECT_SANITY;
         if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
         if (sanity > SanityMax()) sanity = SanityMax();
-        pickupMsg = g_lang == LANG_ZH ? "完美校准  +70% 能量  +理智" : "PERFECT  +70% ENERGY +SANITY";
+        pickupMsg = g_lang == LANG_ZH ? "完美校准  +22 理智" : "PERFECT  +22 SANITY";
         PlaySfx(SFX_POWER, 1.0f);
     } else if (d <= zoneW) {
         /* v2.9：绿区（命中）= 能量上限的 40% */
@@ -3242,12 +3258,12 @@ void CalibLock(void) {
         sanity += CALIB_GOOD_SANITY;
         if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
         if (sanity > SanityMax()) sanity = SanityMax();
-        pickupMsg = g_lang == LANG_ZH ? "校准成功  +40% 能量  +理智" : "CALIBRATED  +40% ENERGY +SANITY";
+        pickupMsg = g_lang == LANG_ZH ? "校准成功  +11 理智" : "CALIBRATED  +11 SANITY";
         PlaySfx(SFX_POWER, 0.7f);
     } else {
         /* v2.9：**失手不给任何能量**（原来也是 0，这里写明防以后改坏） */
         calibResult = 3;
-        pickupMsg = g_lang == LANG_ZH ? "校准失手  无能量" : "MISSED  NO ENERGY";
+        pickupMsg = g_lang == LANG_ZH ? "校准失手" : "MISSED";
         PlaySfx(SFX_GLASS, 0.6f);
     }
     calibResultTimer = 1.6f;
