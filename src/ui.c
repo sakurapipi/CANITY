@@ -1219,22 +1219,22 @@ static void DrawCalibStrip(MenuGeo g) {
     int by = g.panel.bottom - UIS(30) - barH;
     char line[128];
 
-    /* 标题行：剩余次数 / 冷却 */
-    if (calibActive) {
-        sprintf(line, "%s", Tr("CALIBRATION - PRESS SPACE TO LOCK", "校准中 - 按空格锁定"));
-    } else if (calibCooldown > 0.0f) {
-        sprintf(line, "%s   %.0fs", Tr("CALIBRATION   COOLING", "校准   冷却中"), calibCooldown);
-    } else {
-        sprintf(line, "%s   [SPACE]", Tr("CALIBRATION", "校准"));
+
+    /* v3.0：**安全屋里不再画校准条** ——
+       用户截图：底部那条 "CALIBRATION [SPACE]" 和 SAVE FAILED 横幅叠在一起，
+       还压着页签。
+       校准已经搬到藏身点里（60 秒冷却，主要奖励改成理智），
+       安全屋这条纯属残留。这里整段留空，只在**校准进行中**画一条提示
+       （因为小游戏本身是从安全屋也能开的，得让玩家知道进度）。 */
+    if (!calibActive) return;
+    {
+        sprintf(line, "%s", Tr("CALIBRATION - PRESS SPACE TO LOCK",
+                               "校准中 - 按空格锁定"));
     }
-    /* v2.4：先铺一层不透明底 —— 否则每帧重画会在同一位置叠字（残影） */
     BlendRectWin(bx - UIS(8), by - TextHeightWin() - UIS(8),
                  bx + barW + UIS(8), by + barH + UIS(6), 0x000A0E14, 0.96f);
-
-    DrawTextWin(bx, by - TextHeightWin() - UIS(4), line,
-                calibActive ? 0x00FFE060u : (calibAttempts > 0 && calibCooldown <= 0.0f ? 0x00A0D0F0u : 0x00808080u));
-
-    DrawCalibBar(bx, by, barW, barH);   /* v2.5：条本体抽成共用函数 */
+    DrawTextWin(bx, by - TextHeightWin() - UIS(4), line, 0x00FFE060u);
+    DrawCalibBar(bx, by, barW, barH);
 
     /* 结果提示 */
     if (calibResultTimer > 0.0f && calibResult) {
@@ -3370,12 +3370,17 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
    把 Win32 错误码和实际尝试的路径一起写出来 —— 至少排查有据可查。 */
 static void DrawSaveStatusBanner(void) {
     if (g_saveState != 2) return;
+    /* v3.0：**不在菜单/安全屋里显示** ——
+       用户截图：这条红色横幅横穿 SHOP/BENCH/TREE/REST 四页底部，
+       还写着 "TRIED: <本机绝对路径>"，
+       第一眼让人以为存档废了。
+       现在只在游戏中（PLAYING/PAUSED）提示，且**不显示路径和错误码**。 */
+    if (currentState != STATE_PLAYING && currentState != STATE_PAUSED) return;
     int th = TextHeightWin();
     int h = th + th / 2;
-    char msg[160];
-    sprintf(msg, "SAVE FAILED  (ERR %d = %s)", g_saveError,
-            (g_saveError == 5) ? "ACCESS DENIED" :
-            (g_saveError == 0) ? "UNKNOWN" : (const char*)"SEE CODE");
+    const char* msg = (g_lang == LANG_ZH)
+        ? "存档写入失败  -  进度只在本次运行有效"
+        : "SAVE FAILED  -  PROGRESS ONLY LASTS THIS SESSION";
     ClampRowText(msg, winW - UIS(20));
 
     /* v2.9：挪到屏幕**底部** —— 原来钉在最顶上，把安全屋的页签整行盖住了
@@ -3385,12 +3390,8 @@ static void DrawSaveStatusBanner(void) {
     BlendRectWin(0, by0, winW, by0 + UIS(2), 0x00C03030u, 0.95f);
     DrawTextCenterWin(winW / 2, by0 + (h - th) / 2, msg, 0x00FF9090u);
 
-    /* 第二行小字：试过的第一个位置，方便玩家/我定位是哪个目录 */
-    char pathLine[MAX_PATH + 8];
-    sprintf(pathLine, "TRIED: %s", g_savePath[0] ? g_savePath : "(none)");
-    ClampRowText(pathLine, winW - UIS(20));
-    /* 只在上方还有点空间时才画，小窗口里不硬塞 */
-    DrawTextCenterWin(winW / 2, by0 - th - UIS(2), pathLine, 0x00B06060u);
+    /* v3.0：**删掉路径行** —— 玩家不需要看到本机路径这种调试信息。
+       要定位问题看 g_saveErrAll 就够了。 */
 }
 
 /* ------------------------------------------------------------------ */
