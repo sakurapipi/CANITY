@@ -148,27 +148,11 @@ void CloseLockOverlay(void) {
     uiDirty = 1;
 }
 
+/* v3.0：上游这个入口和我们的 LockOpenFor 是**两套重复逻辑**（死代码，零调用点）。
+   保留符号但改成委托，避免以后有人调它时拿到不一致的行为。 */
 void OpenLockOverlay(int index) {
-    if (index < 0 || index >= containerCount || index >= MAX_CONTAINERS) return;
-    if (!g_lockCont[index]) return;    /* 没锁的箱子走长按搜索，不弹锁盘 */
-    lockActive = 1;
-    lockTarget = index;
-    lockType = g_lockType_[index];
-    lockCursor = 0;
-    for (int d = 0; d < LOCK_DIALS; d++) lockDigits[d] = 0;
-    lockWireSel = -1;
-    for (int i = 0; i < LOCK_WIRES; i++) lockWireLink[i] = -1;
-    for (int b = 0; b < LOCK_EQ_BANDS; b++) lockEqVal[b] = 0;
-    for (int k = 0; k < LOCK_TUNE_KNOBS; k++) lockTuneVal[k] = 0;
-    isCharging = 0;       /* 打开锁盘时不能带着投掷蓄力 */
-    mouseCharge = 0.0f;
-    /* 鼠标要能点按钮：释放光标。小地图**不关** —— 它挂在右下角，
-       玩家开着地图开锁是合理需求（锁盘面板在中央，不冲突）。 */
-    ForceCursor(1);
-    SetCursor(LoadCursor(NULL, IDC_ARROW));
-    firstMouseMove = 1;
-    PlaySfx(SFX_SEARCH, 0.4f);
-    uiDirty = 1;
+    if (index < 0 || index >= MAX_CONTAINERS) return;
+    LockOpenFor(index, g_lockType_[index]);
 }
 
 /* 开锁成功：三种锁型共用这一段 */
@@ -370,7 +354,7 @@ static LockBox LockPanelBox(void) {
        其它锁型保留原尺寸，避免无关布局随调波器一起变形。 */
     int pw = (lockType == LOCK_TYPE_TUNE) ? LUIS(680) : LUIS(540);
     /* 调波器要放下示波器 + 三个旋钮，面板比别的锁高一点 */
-    int ph = (lockType == LOCK_TYPE_TUNE) ? LUIS(520) : LUIS(440);
+    int ph = (lockType == LOCK_TYPE_TUNE) ? LUIS(540) : LUIS(440);
     LockBox p;
     p.x0 = (winW - pw) / 2;
     p.y0 = (winH - ph) / 2;
