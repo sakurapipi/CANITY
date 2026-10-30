@@ -146,7 +146,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 38   /* v2.0：+Language +Save Slot（原来 36 会把最后两行丢掉） */
+#define SETTING_COUNT 37   /* v3.1：界面固定英文，移除 Language 项（原 38） */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 

@@ -572,7 +572,9 @@ void ContinueRun(void) {
     pendingShards = g_save.pendingShards < 0 ? 0 : g_save.pendingShards;
     if (pendingShards > 999999) pendingShards = 0;      /* 明显是坏档 */
     runSkillMask = g_save.runSkillMask;
-    g_lang = (g_save.lang >= 0 && g_save.lang < LANG_COUNT) ? g_save.lang : LANG_EN;
+    /* v3.1：界面固定英文。老存档里的 lang 字段仍保留，但不再覆盖运行时语言；
+       否则中文存档一进来整页菜单/提示还是中文。 */
+    g_lang = LANG_EN;
     /* v11：恢复武器局外成长 */
     for (int i = 0; i < 3; i++) {
         weaponRank[i] = (g_save.weaponRank[i] >= 0 && g_save.weaponRank[i] <= 3) ? g_save.weaponRank[i] : 0;

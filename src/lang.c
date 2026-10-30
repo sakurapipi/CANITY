@@ -32,7 +32,7 @@ static const TrEntry kTr[] = {
     /* 菜单项 */
     { "Back", "返回" }, { "Quit", "退出" }, { "Resume", "继续游戏" },
     { "Main Menu", "主菜单" }, { "Continue", "继续" }, { "New Run", "新游戏" },
-    { "Endless", "无尽" }, { "Hub", "大厅" }, { "Training", "训练营" },
+    { "Endless", "无尽" }, { "Hub", "大厅" }, { "Training", "训练营" }, { "Tutorial", "新手教程" },
     { "Settings", "设置" }, { "Bestiary", "图鉴" }, { "Help", "帮助" },
     { "Achievements", "成就" },
 

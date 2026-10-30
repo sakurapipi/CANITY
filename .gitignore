@@ -5,6 +5,8 @@
 *.dll
 *.pdb
 *.ilk
+*.sav
+*.bak
 dist/
 build/
 
@@ -19,6 +21,7 @@ release.exe
 _*
 debug.log
 *.log
+*.txt
 
 # 本地移植暂存（lockbox 已验证并并入 src/）
 port_staging/
@@ -27,3 +30,7 @@ port_staging/
 .DS_Store
 Thumbs.db
 *.swp
+
+
+tests/
+tools/

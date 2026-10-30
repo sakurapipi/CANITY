@@ -97,7 +97,8 @@ gcc src/main.c src/game.c src/entity.c src/render.c src/ui.c src/audio.c src/sav
 
 - `-O2` 必须保留 —— 没有优化时渲染核心慢 5 倍以上
 - `-lwinmm` 用于 `timeBeginPeriod(1)`，把 `Sleep` 精度从 ~15.6ms 提到 ~1ms
-- 当前 `-Wall -Wextra` 零警告
+- `-Wall -Wextra` 目前还会报一些「未使用变量/函数」和 `snprintf` 可能截断的警告，
+  这些是诊断信息，不影响生成 exe；看到警告不代表编译方式错了
 
 ## 开发背景
 

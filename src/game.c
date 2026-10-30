@@ -114,6 +114,29 @@ int trainingCount = 0;          /* 命中次数 */
 int trainingHist[6] = {0};      /* 最近 6 次 */
 float trainingDpsTimer = 0.0f;
 int trainingDps = 0;
+/* ---- v3.1 新手教程 ---- */
+int tutorialStep = 0;
+int tutorialDone = 0;
+enum {
+    TUT_MOVE = 0,
+    TUT_LOOK,
+    TUT_SPRINT,
+    TUT_LIGHT,
+    TUT_MAP,
+    TUT_SEARCH,
+    TUT_CRANK,
+    TUT_THROW,
+    TUT_KNOCK,
+    TUT_DONE
+};
+static float tutorialTimer = 0.0f;        /* 完成后的回菜单倒计时 */
+static float tutorialActionTimer = 0.0f;  /* 持续动作计时（冲刺/摇电） */
+static float tutorialStartX = 0.0f, tutorialStartY = 0.0f;
+static float tutorialStartDirX = 1.0f, tutorialStartDirY = 0.0f;
+static int   tutorialLightOff = 0;        /* 手电关过再开 */
+static int   tutorialThrown = 0;
+static int   tutorialKnocked = 0;
+static int   tutorialMapOpened = 0;       /* 地图至少打开过一次 */
 SmokeCloud smokes[MAX_SMOKE];
 int throwSelected = 0;        /* 0=荧光棒, 1=玻璃瓶, 2=预留 */
 Thrown thrown[MAX_THROWN];
@@ -624,7 +647,6 @@ static const char* optOnOff[2] = {"OFF", "ON"};
 static const char* optHud[3] = {"Minimal", "Normal", "Full"};
 /* QTE 提示详细度：Full = 带英文说明，Minimal = 只留大按键和倒计时条 */
 static const char* optQte[2] = {"Minimal", "Full"};
-static const char* optLang[LANG_COUNT] = {"ENGLISH", "中文"};
 static const char* optSlot[SAVE_SLOTS] = {"SLOT 1", "SLOT 2", "SLOT 3"};
 SettingItem settings[] = {
     /* ========== 分类 1: DISPLAY ========== */
@@ -635,7 +657,6 @@ SettingItem settings[] = {
     {"Dynamic Res",     SET_LIST,   optOnOff,   2, &dynamicRes,        NULL,      0,    0,    0, 1},
     {"Gamma",           SET_SLIDER, NULL,        0, NULL,               &gammaValue, 0.7f, 1.6f, 0.05f, 1},
     {"Field of View",   SET_LIST,   optFov,      5, &fovIndex,          NULL,      0,    0,    0, 1},
-    {"Language",        SET_LIST,   optLang, LANG_COUNT, &g_lang,      NULL,      0,    0,    0, 1},
     {"Save Slot",       SET_LIST,   optSlot, SAVE_SLOTS, &g_saveSlot,  NULL,      0,    0,    0, 6},
 
     /* ========== 分类: KEY BINDINGS / MOVEMENT ========== */
@@ -791,12 +812,13 @@ static int ContainerTargetCount(int mod, int base) {
    否则后续的地图/容器随机序列会错位，测试就没法做对照了。 */
 int g_forceMod = -1;
 
-/* v1.19 训练场：一条长方形长廊（不是迷宫），尽头站一个标靶 */
+/* v3.1 训练场改成新手教程：一条长廊 + 一个可翻的箱子 + 一个不会动的靶子。
+   不再摆安全屋/配电箱/出口 —— 教程只教「怎么操作」，不要求真的逃出去。 */
 static void BuildTrainingArena(void) {
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++) {
             worldMap[y][x] = 1;
-            explored[y][x] = 1;          /* 长廊全图可见，方便测试 */
+            explored[y][x] = 1;          /* 长廊全图可见，方便看提示 */
         }
 
     /* 一条 3 格高、从 x=2 到 x=21 的直走廊，y 中心 12 */
@@ -809,8 +831,8 @@ static void BuildTrainingArena(void) {
     posY = (float)(MAP_HEIGHT / 2) + 0.5f;
     dirX = 1.0f; dirY = 0.0f;
 
-    /* 标靶：走廊尽头，固定不动 */
-    monster.x = (float)(MAP_WIDTH - 4) + 0.5f;
+    /* 靶子：走廊靠后，固定不动，只用来试投掷/敲击 */
+    monster.x = 18.5f;
     monster.y = (float)(MAP_HEIGHT / 2) + 0.5f;
     monster.active = 1;
     monster.state = 2;
@@ -821,16 +843,195 @@ static void BuildTrainingArena(void) {
     lightBeast.active = 0;
     parasite.active = 0;
     for (int i = 0; i < LEECH_MAX; i++) leeches[i].active = 0;
-    containerCount = 0;
-    breaker.active = 0;
 
-    /* v2.5：训练营里也放一个安全区 —— 用来试「校准小游戏」。
-       原来这里 safeRoom.active = 0，训练营里根本没有安全区。 */
-    safeRoom.x = 7.5f;
-    safeRoom.y = (float)(MAP_HEIGHT / 2) + 0.5f;
-    safeRoom.active = 1;
+    /* 教程里没有藏身点；必须清掉上一局留下的 active 标记，
+       否则走廊里会凭空冒出「按 E 躲藏」提示。 */
+    hideSpotCount = 0;
+    hiddenIn = -1;
+    hideSpotNear = -1;
+    for (int i = 0; i < HIDESPOT_MAX; i++) hideSpots[i].active = 0;
+
+    /* 一个普通箱子，里面固定放一根保险丝 —— 教「长按 E 翻找」 */
+    containerCount = 1;
+    memset(&containers[0], 0, sizeof(containers[0]));
+    containers[0].x = 6.5f;
+    containers[0].y = (float)(MAP_HEIGHT / 2) + 0.5f;
+    containers[0].active = 1;
+    containers[0].searched = 0;
+    containers[0].locked = 0;
+    containers[0].content = 1;
+
+    /* 教程里不需要安全屋/配电箱/出口 */
+    safeRoom.active = 0;
+    breaker.active = 0;
+    breakerOpen = 0;
+    fusesHeld = 0;
+    fusesNeeded = 1;
+
+    /* 手电初始电量为 55%：这样「按住 R 摇电」真的有东西可充。 */
+    battery = (float)BatteryMax() * 0.55f;
 
     ApplyFov();
+}
+
+/* ------------------------------------------------------------------ */
+/* v3.1 新手教程：一步一步检测玩家真的做了动作                          */
+/* ------------------------------------------------------------------ */
+
+int TutorialStepTotal(void) { return TUT_DONE - TUT_MOVE; }
+int TutorialStepNumber(void) {
+    if (tutorialDone) return TutorialStepTotal();
+    return tutorialStep + 1;
+}
+
+const char* TutorialObjective(void) {
+    static char buf[160];
+    switch (tutorialStep) {
+    case TUT_MOVE:
+        snprintf(buf, sizeof(buf), "MOVE  -  %s %s %s %s",
+                 VkName(g_bindings[ACT_MOVE_FWD]), VkName(g_bindings[ACT_MOVE_LEFT]),
+                 VkName(g_bindings[ACT_MOVE_BACK]), VkName(g_bindings[ACT_MOVE_RIGHT]));
+        break;
+    case TUT_LOOK:   return "LOOK  -  MOUSE";
+    case TUT_SPRINT:
+        snprintf(buf, sizeof(buf), "SPRINT  -  HOLD %s", VkName(g_bindings[ACT_SPRINT]));
+        break;
+    case TUT_LIGHT:
+        snprintf(buf, sizeof(buf), "FLASHLIGHT  -  %s", VkName(g_bindings[ACT_FLASHLIGHT]));
+        break;
+    case TUT_MAP:
+        snprintf(buf, sizeof(buf), "MAP  -  %s", VkName(g_bindings[ACT_MAP]));
+        break;
+    case TUT_SEARCH:
+        snprintf(buf, sizeof(buf), "SEARCH  -  HOLD %s", VkName(g_bindings[ACT_INTERACT]));
+        break;
+    case TUT_CRANK:
+        snprintf(buf, sizeof(buf), "CRANK  -  HOLD %s", VkName(g_bindings[ACT_CRANK]));
+        break;
+    case TUT_THROW:
+        snprintf(buf, sizeof(buf), "THROW  -  HOLD %s", VkName(g_bindings[ACT_THROW]));
+        break;
+    case TUT_KNOCK:
+        snprintf(buf, sizeof(buf), "KNOCK  -  HOLD %s", VkName(g_bindings[ACT_CANCEL_CHARGE]));
+        break;
+    case TUT_DONE:
+    default:
+        return "TUTORIAL COMPLETE";
+    }
+    return buf;
+}
+
+const char* TutorialHint(void) {
+    switch (tutorialStep) {
+    case TUT_MOVE:   return "WALK A FEW STEPS DOWN THE HALL.";
+    case TUT_LOOK:   return "MOVE THE MOUSE TO LOOK AROUND.";
+    case TUT_SPRINT: return "HOLD SPRINT AND RUN FOR A MOMENT.";
+    case TUT_LIGHT:  return "TURN THE FLASHLIGHT OFF, THEN BACK ON.";
+    case TUT_MAP:    return "OPEN THE MAP, THEN CLOSE IT.";
+    case TUT_SEARCH: return "WALK TO THE CRATE AND HOLD SEARCH.";
+    case TUT_CRANK:  return "HOLD CRANK UNTIL THE BATTERY RISES.";
+    case TUT_THROW:  return "HOLD THROW, AIM AT THE TARGET, RELEASE.";
+    case TUT_KNOCK:  return "HOLD KNOCK, RELEASE TO MAKE NOISE.";
+    case TUT_DONE:
+    default:         return "NICE WORK. RETURNING TO THE MAIN MENU...";
+    }
+}
+
+void TutorialBegin(void) {
+    tutorialStep = TUT_MOVE;
+    tutorialDone = 0;
+    tutorialTimer = 0.0f;
+    tutorialActionTimer = 0.0f;
+    tutorialStartX = posX;
+    tutorialStartY = posY;
+    tutorialStartDirX = dirX;
+    tutorialStartDirY = dirY;
+    tutorialLightOff = 0;
+    tutorialThrown = 0;
+    tutorialKnocked = 0;
+    tutorialMapOpened = 0;
+    uiDirty = 1;
+}
+
+static void TutorialAdvance(void) {
+    if (tutorialStep >= TUT_DONE) return;
+    tutorialStep++;
+    tutorialTimer = 0.0f;
+    tutorialActionTimer = 0.0f;
+    tutorialStartX = posX;
+    tutorialStartY = posY;
+    tutorialStartDirX = dirX;
+    tutorialStartDirY = dirY;
+    tutorialLightOff = 0;
+    tutorialThrown = 0;
+    tutorialKnocked = 0;
+    tutorialMapOpened = 0;
+    if (tutorialStep >= TUT_DONE) {
+        tutorialStep = TUT_DONE;
+        tutorialDone = 1;
+        tutorialTimer = 0.0f;
+    }
+    uiDirty = 1;
+}
+
+static void TutorialUpdate(float dt) {
+    if (!trainingMode) return;
+
+    if (tutorialDone) {
+        tutorialTimer += dt;
+        if (tutorialTimer >= 3.5f) {
+            /* 教程不写存档，也不影响正式进度，直接回主菜单。 */
+            trainingMode = 0;
+            currentState = STATE_MAIN_MENU;
+            menuSelection = 0;
+            isMapOpen = 0;
+            mapFullScreen = 0;
+            ForceCursor(1);
+            uiDirty = 1;
+        }
+        return;
+    }
+
+    switch (tutorialStep) {
+    case TUT_MOVE:
+        /* 离开起点 1 格就算学会移动 */
+        if (Dist2(posX, posY, tutorialStartX, tutorialStartY) >= 1.0f) TutorialAdvance();
+        break;
+    case TUT_LOOK:
+        /* 视线方向转了约 10 度 */
+        if (dirX * tutorialStartDirX + dirY * tutorialStartDirY < 0.985f) TutorialAdvance();
+        break;
+    case TUT_SPRINT:
+        if (sprinting) tutorialActionTimer += dt;
+        else tutorialActionTimer = 0.0f;
+        if (tutorialActionTimer >= 0.5f) TutorialAdvance();
+        break;
+    case TUT_LIGHT:
+        if (!flashlightOn) tutorialLightOff = 1;
+        if (tutorialLightOff && flashlightOn) TutorialAdvance();
+        break;
+    case TUT_MAP:
+        /* 地图打开时 Update 会提前 return，所以这里不能只看 isMapOpen；
+           改由 WndProc 在真正打开地图时记一个 flag，玩家把地图关掉后再推进。 */
+        if (tutorialMapOpened && !isMapOpen) TutorialAdvance();
+        break;
+    case TUT_SEARCH:
+        if (containerCount > 0 && containers[0].searched) TutorialAdvance();
+        break;
+    case TUT_CRANK:
+        if (cranking || IsActionDown(ACT_CRANK)) tutorialActionTimer += dt;
+        else tutorialActionTimer = 0.0f;
+        if (tutorialActionTimer >= 0.5f) TutorialAdvance();
+        break;
+    case TUT_THROW:
+        if (tutorialThrown) TutorialAdvance();
+        break;
+    case TUT_KNOCK:
+        if (tutorialKnocked) TutorialAdvance();
+        break;
+    default:
+        break;
+    }
 }
 
 
@@ -1866,6 +2067,7 @@ void WeaponTryAttack(float charge) {
        不消耗能量、不判定伤害、不产生子弹。 */
     MakeNoise(posX + dirX * 2.0f, posY + dirY * 2.0f, 18.0f);
     PlaySfx(SFX_GLASS, 0.55f);
+    if (trainingMode) tutorialKnocked = 1;
     pickupMsg = g_lang == LANG_ZH ? "敲击  制造噪音" : "KNOCK  NOISE";
     pickupMsgTimer = 0.8f;
     uiDirty = 1;
@@ -2161,6 +2363,11 @@ void Update(float dt) {
     }
 
 
+    /* v3.1：藏身提示范围从 2.6 格收到 1.2 格。
+       原来是一个直径 5 格的圆，站在房间中间就提示「按 E 躲藏」，
+       玩家会以为整片空地都能藏；其实藏身点是一个具体位置。 */
+    hideSpotNear = -1;
+
     /* v3.0：上锁的箱子**按一下 E 就弹锁盘**，不走长按翻箱；
        没锁的仍然长按搜索。 */
     if (hoverKind == 1 && hoverIndex >= 0 && hoverIndex < MAX_CONTAINERS &&
@@ -2175,8 +2382,7 @@ void Update(float dt) {
     } else {
         /* v3.0：藏身点 —— 找最近的一个，按 E 进出 */
     {
-        hideSpotNear = -1;
-        float bestHD = 2.6f * 2.6f;
+        float bestHD = 1.2f * 1.2f;
         for (int i = 0; i < hideSpotCount; i++) {
             if (!hideSpots[i].active) continue;
             float d = Dist2(posX, posY, hideSpots[i].x, hideSpots[i].y);
@@ -2575,20 +2781,40 @@ void Update(float dt) {
         holdTimer = 0.0f;
     }
 
-    /* ---- v2.0 武器攻击（鼠标右键，蓄力 0.45 秒）----
-       三把武器各烧一条资源：扳手→体力、信号枪→电量、符印→理智。 */
+    /* ---- v2.0 武器攻击 / v3.0 敲击（按住蓄力 0.45 秒）----
+       三把武器各烧一条资源：扳手→体力、信号枪→电量、符印→理智。
+
+       v3.1：**严格的「未按下 -> 按下」边沿检测**。
+       以前只要这一帧按着就加蓄力，于是用鼠标点主菜单「新游戏」进入游戏时，
+       左键还物理按着，下一帧就成了攻击蓄力，松手直接敲一下 ——
+       玩家看到的就是「一进去就会敲」。现在：
+         - 只有 atkPrev == 0 && atkNow == 1 才允许开始蓄力；
+         - 刚进游戏（resetInputState）时把 atkPrev 同步成当前物理状态，
+           已经按着的键不算新按下，必须先松开再按才会敲。 */
     {
         static int atkPrev = -1;
         int atkNow = IsActionDown(ACT_CANCEL_CHARGE);
+        if (resetInputState) {
+            atkPrev = atkNow;
+            weaponAtkCharge = 0.0f;
+        }
         if (atkPrev < 0) atkPrev = atkNow;
+        int atkPressed = (atkNow && !atkPrev);
         if (weaponCd > 0.0f) {
             weaponCd -= dt;
             if (weaponCd < 0.0f) weaponCd = 0.0f;
         }
-        if (atkNow && !holdingNow && !cranking && !isCharging) {   /* v2.0：投掷蓄力中不抢右键 */
+        if (atkPressed && !holdingNow && !cranking && !isCharging) {
+            /* 未按下 -> 按下：开始蓄力（投掷蓄力中不抢键） */
+            weaponAtkCharge = dt / 0.45f;
+            if (weaponAtkCharge > 1.0f) weaponAtkCharge = 1.0f;
+        } else if (atkNow && weaponAtkCharge > 0.0f &&
+                   !holdingNow && !cranking && !isCharging) {
+            /* 持续按住：累积蓄力 */
             weaponAtkCharge += dt / 0.45f;
             if (weaponAtkCharge > 1.0f) weaponAtkCharge = 1.0f;
-        } else if (atkPrev && weaponAtkCharge > 0.10f) {
+        } else if (atkPrev && !atkNow && weaponAtkCharge > 0.10f) {
+            /* 松开：释放攻击 / 敲击 */
             WeaponTryAttack(weaponAtkCharge);
             weaponAtkCharge = 0.0f;
         } else {
@@ -2669,6 +2895,7 @@ void Update(float dt) {
                     else if (sel == 6) gluePots--;
                     else mirrors--;
                     throwCd = 0.45f;
+                    if (trainingMode) tutorialThrown = 1;
                 } else {
                     pickupMsg = "NO ROOM";
                     pickupMsgTimer = 1.0f;
@@ -2751,7 +2978,9 @@ void Update(float dt) {
         flares = bottles = bricks = acids = smokeBombs = 99;
         firePots = gluePots = mirrors = 99;
         sanity = 100.0f;
-        battery = (float)BatteryMax();
+        /* 教程里手电电量会正常消耗，这样「按住 R 摇电」才有可见效果；
+           只做上限夹取，不再每帧强行充满。 */
+        if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
         stamina = StaminaMax();
         monster.active = 1;
         monster.state = 2;              /* 原地不动，当标本 */
@@ -3014,6 +3243,9 @@ void Update(float dt) {
         flashTime = 0.15f;
         UpdateExplored();
     }
+
+    /* 新手教程：放在最后，保证所有交互/移动状态都已经更新完 */
+    if (trainingMode) TutorialUpdate(dt);
 }
 /* ------------------------------------------------------------------ */
 /* 菜单动作                                                            */
@@ -3335,6 +3567,7 @@ void StartGame(void) {
     /* 生成关卡后清除过关白屏时间，避免新游戏开局 0.15s 逻辑不跑 */
     flashTime = 0.0f;
     UpdateExplored();
+    if (trainingMode) TutorialBegin();
     ForceCursor(0);
     firstMouseMove = 1;
     uiDirty = 1;
@@ -3666,14 +3899,9 @@ void ActivateMenuItem(void) {
             SaveGame();
             StartDailyRun();
         } else if (sel == MainMenuCount() - 2) {
-            /* v1.17：训练营 —— 无限道具 + 标本 + 右侧伤害屏 */
-            DeleteSave();
+            /* v3.1：训练营改成新手教程 —— 不删档，不影响正式进度 */
             pendingStartMode = START_TRAINING;
             StartGame();
-            trainingTotal = trainingCount = trainingLast = trainingDps = 0;
-            for (int i = 0; i < 6; i++) trainingHist[i] = 0;
-            flares = bottles = bricks = acids = smokeBombs = 99;
-            firePots = gluePots = mirrors = 99;
             uiDirty = 1;
         } else {
             SaveGame();
@@ -4863,6 +5091,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     } else {
                         isMapOpen = 1;
                         mapFullScreen = 1;
+                        if (trainingMode && tutorialStep == TUT_MAP) tutorialMapOpened = 1;
                     }
                     MapCursorRefresh();
                 }
@@ -4874,6 +5103,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     isMapOpen = 1;
                     mapFullScreen = 0;
                     mapHeld = 1;
+                    if (trainingMode && tutorialStep == TUT_MAP) tutorialMapOpened = 1;
                     MapCursorRefresh();
                 }
                 if (wParam == (WPARAM)g_bindings[ACT_FLASHLIGHT]) {

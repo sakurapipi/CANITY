@@ -925,15 +925,15 @@ static const char* MenuLabel(int i) {
     static char buf[128];
     switch (currentState) {
         case STATE_MAIN_MENU: {
-            static const char* withSave[] = {"Continue", "New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
+            static const char* withSave[] = {"Continue", "New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
             /* v2.0 中文菜单 */
-            static const char* withSaveZh[] = {"继续", "新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
-            static const char* noSaveZh[]   = {"新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
-            static const char* withEndlessZh[]   = {"继续", "新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
-            static const char* noSaveEndlessZh[] = {"新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
-            static const char* noSave[] = {"New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
-            static const char* withEndless[] = {"Continue", "New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
-            static const char* noSaveEndless[] = {"New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
+            static const char* withSaveZh[] = {"继续", "新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
+            static const char* noSaveZh[]   = {"新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
+            static const char* withEndlessZh[]   = {"继续", "新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
+            static const char* noSaveEndlessZh[] = {"新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
+            static const char* noSave[] = {"New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
+            static const char* withEndless[] = {"Continue", "New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
+            static const char* noSaveEndless[] = {"New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
             /* Endless 解锁条件：通关过第 10 层 */
             int endlessUnlocked = (bestLevel >= 10) || gameWon;
             int zh = (g_lang == LANG_ZH);
@@ -973,18 +973,18 @@ static const char* MenuLabel(int i) {
                 case 0: sprintf(kb, "%s:  %s %s %s %s", Tr("MOVE","移动"),
                                 VkName(g_bindings[ACT_MOVE_FWD]), VkName(g_bindings[ACT_MOVE_LEFT]),
                                 VkName(g_bindings[ACT_MOVE_BACK]), VkName(g_bindings[ACT_MOVE_RIGHT])); break;
-                case 1: sprintf(kb, "%s: %s  (噪声)", Tr("SPRINT","冲刺"), VkName(g_bindings[ACT_SPRINT])); break;
-                case 2: sprintf(kb, "%s: 长按 %s  (噪声)", Tr("SEARCH","翻找"), VkName(g_bindings[ACT_INTERACT])); break;
-                case 3: sprintf(kb, "%s: 长按 %s  (+32)", Tr("CRANK","摇电"), VkName(g_bindings[ACT_CRANK])); break;
+                case 1: sprintf(kb, "%s: %s  (NOISE)", Tr("SPRINT","冲刺"), VkName(g_bindings[ACT_SPRINT])); break;
+                case 2: sprintf(kb, "%s: HOLD %s  (NOISE)", Tr("SEARCH","翻找"), VkName(g_bindings[ACT_INTERACT])); break;
+                case 3: sprintf(kb, "%s: HOLD %s  (+32)", Tr("CRANK","摇电"), VkName(g_bindings[ACT_CRANK])); break;
                 case 4: sprintf(kb, "%s: %s", Tr("LIGHT","手电"), VkName(g_bindings[ACT_FLASHLIGHT])); break;
-                case 5: sprintf(kb, "%s: %s (全图)  长按 TAB (小图)  -10/秒", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
+                case 5: sprintf(kb, "%s: %s (FULL)  TAB (MINI)  -10/S", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
                 case 6: sprintf(kb, "%s: %s", Tr("THROW","投掷"), VkName(g_bindings[ACT_THROW])); break;
-                case 7: sprintf(kb, "%s: %s %s %s  (滚轮: 全部)", Tr("SLOT","选槽"),
+                case 7: sprintf(kb, "%s: %s %s %s  (WHEEL: ALL)", Tr("SLOT","选槽"),
                                 VkName(g_bindings[ACT_SELECT_1]), VkName(g_bindings[ACT_SELECT_2]),
                                 VkName(g_bindings[ACT_SELECT_3])); break;
-                case 8: sprintf(kb, "%s: %s  (敲击制造噪音)", Tr("KNOCK","敲击"),
+                case 8: sprintf(kb, "%s: %s  (KNOCK: NOISE)", Tr("KNOCK","敲击"),
                                 VkName(g_bindings[ACT_CANCEL_CHARGE])); break;
-                default: sprintf(kb, "%s: %s  闪避: %s", Tr("PAUSE","暂停"),
+                default: sprintf(kb, "%s: %s  DODGE: %s", Tr("PAUSE","暂停"),
                                 VkName(g_bindings[ACT_PAUSE]), VkName(g_bindings[ACT_DODGE])); break;
                 }
                 {
@@ -3003,7 +3003,7 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
                               0x0060FF90u);
         } else if (hideSpotNear >= 0 && currentState == STATE_PLAYING) {
             DrawTextWin(UIS(20), winH - UIS(150),
-                        Tr("HOLD E  -  HIDE", "长按 E 躲进去"), 0x0090D0F0u);
+                        Tr("PRESS E  -  HIDE", "按 E 躲进去"), 0x0090D0F0u);
         }
 
         /* ② 敌人状态（三态雷达）—— 怪不可杀后这是唯一的威胁指标 */
@@ -3258,6 +3258,40 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
        「M: FULL  M: CLOSE」，再在底部挂一行是重复的。 */
 }
 
+/* v3.1：新手教程的顶部提示条。步骤文案和推进逻辑都在 game.c，
+   这里只负责画，避免两边各维护一套步骤。 */
+static void DrawTutorialPanel(void) {
+    if (!trainingMode) return;
+
+    int th = TextHeightWin();
+    int w = UIS(620);
+    if (w > winW - UIS(24)) w = winW - UIS(24);
+    int h = th * 3 + UIS(30);
+    int x = (winW - w) / 2;
+    int y = UIS(120);
+    if (y + h > winH * 2 / 3) y = UIS(56);
+
+    BlendRectWin(x, y, x + w, y + h, 0x00081018u, 0.90f);
+    FrameRectWin(x, y, x + w, y + h, 0x00C8A040u, 0.92f, UIS(2));
+
+    char line[160];
+
+    if (tutorialDone) {
+        DrawTextCenterWin(winW / 2, y + UIS(10), "TUTORIAL COMPLETE", 0x00FFE070u);
+    } else {
+        sprintf(line, "TUTORIAL  %d / %d", TutorialStepNumber(), TutorialStepTotal());
+        DrawTextCenterWin(winW / 2, y + UIS(10), line, 0x00FFE070u);
+    }
+
+    snprintf(line, sizeof(line), "%s", TutorialObjective());
+    ClampRowText(line, w - UIS(24));
+    DrawTextCenterWin(winW / 2, y + UIS(10) + th, line, 0x00FFFFFFu);
+
+    snprintf(line, sizeof(line), "%s", TutorialHint());
+    ClampRowText(line, w - UIS(24));
+    DrawTextCenterWin(winW / 2, y + UIS(10) + th * 2, line, 0x00A8B4B8u);
+}
+
 /* ------------------------------------------------------------------ */
 /* 存档失败横幅                                                        */
 /* ------------------------------------------------------------------ */
@@ -3385,6 +3419,7 @@ void RenderFrame(void) {
            小窗地图则照常画 HUD（它只是右下角一个叠加层）。 */
     } else {
         DrawHUD();
+        DrawTutorialPanel();
     }
 
     /* v3.0：**帧末覆盖层** —— 不管什么状态都要画
