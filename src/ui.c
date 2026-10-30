@@ -1532,9 +1532,21 @@ void DrawMenuPanels(void) {
                （用户截图：Quit 上有条小横线）。
                现在先算出最后一行的底边，线放它下面 4px。 */
             int lastRowBottom = g.firstY + (g.count - 1) * g.rowH + TextHeightWin();
-            int lineY = lastRowBottom + UIS(4);
-            if (lineY > fy) lineY = fy;          /* 不越过面板底 */
-            UiFooterRule(L2 + inner, R2 - inner, lineY);
+            /* v3.3：**间距从 4 加到 12** ——
+               TextHeightWin() 只算了字高，实际字形（尤其是带下伸笔画的字母）
+               会再往下多出几个像素，4 的间距不够，线会切到最后一行的字。
+               12 在 800x600 下相当于半个字高，足够。 */
+            int lineY = lastRowBottom + UIS(12);
+            /* v3.3：**空间不够就干脆不画** ——
+               原来写的是 if (lineY > fy) lineY = fy;
+               也就是把线**往上夹**到 fy = 面板底 - 26。
+               暂停菜单只有 3 行、行高又大，夹回来的位置正好横切
+               「Main Menu」这行文字（用户截图）。
+               现在改成：线必须落在最后一行下面且离面板底还有余量才画，
+               放不下就不画 —— 少一条装饰线，不压字。 */
+            if (lineY + UIS(2) <= fy) {
+                UiFooterRule(L2 + inner, R2 - inner, lineY);
+            }
         }
     }
 
