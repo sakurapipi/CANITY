@@ -1252,8 +1252,86 @@ static void DrawShotModel(int idx) {
         }
         return;
     }
+    /* ===== v3.3 新投掷物的飞行模型 =====
+       kind 1  投石：不规则灰石，带高光面
+       kind 3  胶水：矮胖圆罐 + 瓶颈，青绿色，看得出是「黏的」
+       kind 10 回声：细长的哨形，淡紫，尖端朝前
+       （kind 2 砖头 / kind 7 火瓶 / kind 9 镜片 已随系统删除） */
+
+    if (kind == 1) {
+        /* 投石：不规则多边形石块 */
+        int w = (int)(unit * 0.075f); if (w < 3) w = 3;
+        int h = (int)(unit * 0.065f); if (h < 3) h = 3;
+        for (int yy = -h; yy <= h; yy++) {
+            int py = cy + yy;
+            if (py < 0 || py >= renderH) continue;
+            /* 不规则边缘：宽度随行变化，看起来像块石头不是圆球 */
+            int wob = ((yy * 37) ^ 0x55) % 3 - 1;
+            int halfW = w + wob - (yy > h / 2 ? 1 : 0);
+            for (int xx = -halfW; xx <= halfW; xx++) {
+                int px = cx + xx;
+                if (px < 0 || px >= renderW) continue;
+                unsigned int c;
+                if (yy < 0 && xx < 0)      c = 0x00B4B0A8u;   /* 左上高光面 */
+                else if (yy > 0)           c = 0x0056504Au;   /* 下方阴影面 */
+                else                       c = 0x00888478u;   /* 中间 */
+                PutPixelBlend(px, py, c, 0.96f);
+            }
+        }
+        return;
+    }
+    if (kind == 8) {
+        /* 胶水瓶：矮胖罐 + 短瓶颈，青绿色，表面有湿滑高光 */
+        int w = (int)(unit * 0.085f); if (w < 3) w = 3;
+        int h = (int)(unit * 0.085f); if (h < 4) h = 4;
+        for (int yy = -h; yy <= h; yy++) {
+            int py = cy + yy;
+            if (py < 0 || py >= renderH) continue;
+            /* 上 1/3 收成瓶颈，下面是胖罐身 */
+            int halfW = (yy < -h * 2 / 3) ? (w / 2 + 1) : w;
+            for (int xx = -halfW; xx <= halfW; xx++) {
+                int px = cx + xx;
+                if (px < 0 || px >= renderW) continue;
+                unsigned int c;
+                if (yy < -h * 2 / 3)       c = 0x005A9A6Eu;   /* 瓶颈：深青 */
+                else if (xx > halfW - 2)   c = 0x0090F0B4u;   /* 右侧湿滑高光 */
+                else if (yy > h / 2)       c = 0x002A4A38u;   /* 罐底阴影 */
+                else                       c = 0x004C8A62u;   /* 罐身 */
+                PutPixelBlend(px, py, c, 0.96f);
+            }
+        }
+        return;
+    }
+    if (kind == 10) {
+        /* 回声弹：细长哨形，投掷方向拉长，淡紫色，尖端带一点亮 */
+        float vlen = sqrtf(shot[idx].vx * shot[idx].vx + shot[idx].vy * shot[idx].vy);
+        int len = (int)(unit * 0.11f); if (len < 4) len = 4;
+        int rad = (int)(unit * 0.032f); if (rad < 2) rad = 2;
+        /* 沿飞行方向画一条细长的锥形 */
+        for (int s2 = -len; s2 <= len; s2++) {
+            float t2 = (float)s2 / (float)len;          /* -1 尾  +1 尖 */
+            int rr = (int)(rad * (1.0f - t2 * 0.55f));
+            if (rr < 1) rr = 1;
+            for (int d = -rr; d <= rr; d++) {
+                int px, py;
+                if (vlen > 0.01f) {
+                    float ux = shot[idx].vx / vlen, uy = shot[idx].vy / vlen;
+                    /* 屏幕方向近似：用 unit 缩放，不做完整透视旋转 */
+                    px = cx + (int)(ux * (float)s2 * unit * 0.02f) + d;
+                    py = cy + (int)(uy * (float)s2 * unit * 0.02f);
+                } else {
+                    px = cx + d; py = cy + s2;
+                }
+                if (px < 0 || px >= renderW || py < 0 || py >= renderH) continue;
+                unsigned int c = (t2 > 0.55f) ? 0x00E8D0FFu : 0x009878C8u;
+                PutPixelBlend(px, py, c, 0.94f);
+            }
+        }
+        return;
+    }
+
     if (kind == 2) {
-        /* 砖头：0.34 格宽 × 0.16 格高的矩形 */
+        /* 砖头（已废弃，保留代码以防老存档里的 shot 还在飞） */
         int w = (int)(unit * 0.17f); if (w < 3) w = 3;
         int h = (int)(unit * 0.08f); if (h < 2) h = 2;
         for (int yy = -h; yy <= h; yy++) {
@@ -1377,6 +1455,54 @@ static void DrawShotSprite(int idx) {
 }
 
 /* v1.18：烟幕团 —— 地面上一团不断翻涌的灰烟 */
+/* v3.3 地面胶水：一滩青色黏液。
+   和烟团的关键区别：烟是**压暗**（遮蔽），胶水是**提亮**（反光湿滑），
+   所以这里用加法式的青绿高光，同时把底色往暗里压一点点做出对比。
+   画法照抄烟团的椭圆 + 圆心衰减，但颜色和遮罩相反。 */
+static void DrawGluePuddle(void) {
+    spriteLight = 1.0f;
+    extern GlueZone glues[MAX_GLUE];
+    for (int i = 0; i < MAX_GLUE; i++) {
+        if (!glues[i].active) continue;
+        float t = glues[i].life / GLUE_LIFE;         /* 1 → 0 */
+        if (t > 1.0f) t = 1.0f;
+        SpriteBox sb = ProjectSprite(glues[i].x, glues[i].y, 0.0f, GLUE_RADIUS * 1.15f);
+        if (!sb.ok) continue;
+        int cx = (sb.x0 + sb.x1) / 2, cyy = (sb.y0 + sb.y1) / 2;
+        int rx = (sb.x1 - sb.x0) / 2, ry = (sb.y1 - sb.y0) / 2;
+        if (rx < 3 || ry < 2) continue;
+        /* 快消失时整体变淡，玩家能看出「快干了」 */
+        float fade = 0.35f + 0.65f * t;
+        for (int y = -ry; y <= ry; y++) {
+            int py = cyy + y;
+            if (py < 0 || py >= renderH) continue;
+            for (int x = -rx; x <= rx; x++) {
+                int px = cx + x;
+                if (px < 0 || px >= renderW) continue;
+                if (sb.ty >= zBuffer[px]) continue;
+                float u = (float)(x * x) / (float)(rx * rx) +
+                          (float)(y * y) / (float)(ry * ry);
+                if (u > 1.0f) continue;
+                /* 形状：圆心最浓，边缘化开；再叠一点不规则感 */
+                float core = 1.0f - u;
+                float wob = 0.90f + 0.10f * sinf((float)x * 0.55f + (float)y * 0.9f);
+                float a = (0.30f + 0.45f * core) * fade * wob;
+                /* 边缘一圈更亮 = 湿滑反光 */
+                unsigned int col = 0x003a6b4au;          /* 底色：暗青绿 */
+                float aa = a * 0.75f;
+                if (core > 0.72f) {                       /* 中心高光 */
+                    col = 0x006fd08au;
+                    aa = (0.18f + 0.22f * core) * fade;
+                } else if (u > 0.80f) {                   /* 边缘反光 */
+                    col = 0x005cb87cu;
+                    aa = a * 1.15f;
+                }
+                PutPixelBlend(px, py, col, aa > 0.85f ? 0.85f : aa);
+            }
+        }
+    }
+}
+
 static void DrawSmokeCloud(void) {
     spriteLight = 1.0f;      /* v2.1：烟团不从精灵衰减继承 */
 
@@ -1658,6 +1784,7 @@ void RenderSprites(void) {
     DrawHideSpotHighlight();   /* v3.0 藏身点靠近提示 */
     DrawHearingMarker();   /* v3.0 听觉 */
     DrawSmokeCloud();
+    DrawGluePuddle();   /* v3.3 地面胶水 */
 
     /* 玻璃碎片：不在深度排序里，直接画在最后（覆盖在所有 billboard 之上） */
     DrawShardSprite();
