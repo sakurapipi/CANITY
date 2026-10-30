@@ -585,9 +585,17 @@ static void DrawBreakerSprite(void) {
 static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK) {
     SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
     if (!s.ok) return;
+    /* v3.2：贴脸时直接不画。箱子/配电箱没有碰撞，玩家可以站进模型里，
+       这时 billboard 的投影会被放大到几倍屏幕、看起来像视角畸变。
+       近平面裁掉比硬拉一个巨大精灵更干净；交互提示仍然保留。 */
+    if (s.ty < 0.55f) return;
     int w = s.x1 - s.x0, h = s.y1 - s.y0;
     if (w < 2 || h < 2) return;
-    int size = (w > h) ? w : h;
+    /* v3.2：道具按**投影高度**缩放，不再用 max(w,h)。
+       箱子的 halfH=0.34，但固定 half 宽是 0.56；
+       用 max 会把箱子按宽度放大 1.65 倍，贴脸时尤其像一个巨大的方块。
+       烘焙图的画布是正方形的，按高度画才能保持半高参数的真实含义。 */
+    int size = h;
     int x = (s.x0 + s.x1) / 2 - size / 2;
     int y = s.y1 - size;
     float light = SpriteShade(s.ty, 0.12f);
@@ -649,6 +657,8 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
                              float lightK, int zTest, float facing, float walkPhase) {
     SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
     if (!s.ok) return;
+    /* 同理：怪贴脸时 sprite 投影会铺满屏幕，先裁掉。 */
+    if (s.ty < 0.55f) return;
     int w = s.x1 - s.x0;
     int h = s.y1 - s.y0;
     if (w < 2 || h < 2) return;

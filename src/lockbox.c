@@ -54,6 +54,7 @@ int lockWireSel = -1;
 int lockWireLink[LOCK_WIRES] = {-1, -1, -1};
 int lockEqVal[LOCK_EQ_BANDS] = {0, 0, 0};
 int lockTuneVal[LOCK_TUNE_KNOBS] = {0, 0, 0};
+int lockIgnoreVK = 0;
 
 int locksOpened = 0;
 static float lockCooldown = 0.0f;
@@ -73,6 +74,10 @@ void LockOpenFor(int idx, int type) {
     lockTarget = idx;
     lockType = type;
     lockActive = 1;
+    /* 打开锁盘的就是交互键。它现在还是按下状态，WM_KEYDOWN 的自动重复
+       会立刻命中「任意键退出」，锁盘刚出现就被关掉。记录这个键，
+       等它松开之后才允许它再次关闭锁盘。 */
+    lockIgnoreVK = g_bindings[ACT_INTERACT];
     lockCursor = 0;
     lockWireSel = -1;
     for (int i = 0; i < LOCK_DIALS; i++) lockDigits[i] = 0;   /* v3.0：开新锁必须清空拨盘 */
@@ -100,6 +105,7 @@ void LockClose(void) {
     LockSyncToContainers();
     lockActive = 0;
     lockTarget = -1;
+    lockIgnoreVK = 0;
     uiDirty = 1;
 }
 int LockDigit(int code, int dial) {
@@ -137,6 +143,7 @@ void CloseLockOverlay(void) {
     LockSyncToContainers();   /* v3.0：关锁盘时统一同步 */
     lockActive = 0;
     lockTarget = -1;
+    lockIgnoreVK = 0;
     lockCooldown = 0.35f;
     if (wasActive) {
         /* 鼠标交还视角控制，并复位输入边沿 ——
@@ -540,10 +547,11 @@ static void LockDrawDialBody(int hit, int ha) {
                           dbuf, sel ? 0x00FFE080u : 0x00D0D8E0u);
     }
 
-    /* 解谜提示：声音是主反馈，绿色圈是视觉兜底 */
+    /* 解谜提示：声音是主反馈，绿色圈是视觉兜底。
+       拆成两行短句，避免在 800×600 下撑出 540px 面板。 */
     LockBox p = LockPanelBox();
-    DrawTextCenterWin(winW / 2, p.y0 + LUIS(286), "CLICK + GREEN RING = RIGHT DIGIT", 0x00B0B8C0u);
-    DrawTextCenterWin(winW / 2, p.y0 + LUIS(310), "THUD = WRONG", 0x00889098u);
+    DrawTextCenterWin(winW / 2, p.y0 + LUIS(274), "GREEN RING = RIGHT DIGIT", 0x00B0B8C0u);
+    DrawTextCenterWin(winW / 2, p.y0 + LUIS(302), "THUD = WRONG", 0x00889098u);
 }
 
 /* 端子颜色：0 红 / 1 绿 / 2 蓝 */
@@ -605,7 +613,6 @@ static void LockDrawWireBody(int hit, int ha) {
 }
 
 static void LockDrawEqBody(int hit, int ha) {
-    LockBox p = LockPanelBox();
     for (int band = 0; band < LOCK_EQ_BANDS; band++) {
         LockBox bar, up, dn;
         LockEqBarBox(band, &bar);
@@ -631,7 +638,6 @@ static void LockDrawEqBody(int hit, int ha) {
         int ty = bar.y1 - thgt;
         BlendRectWin(bar.x0 - LUIS(6), ty, bar.x1 + LUIS(6), ty + LUIS(3), 0x0040FF80u, 0.9f);
     }
-    DrawTextCenterWin(winW / 2, p.y0 + LUIS(96), "PUSH EACH BAR TO THE GREEN LINE", 0x00707880u);
 }
 
 /* 调波器：画一条正弦波。amp/freq/phase 都是 0..7 的整数档。 */
@@ -659,7 +665,6 @@ static void LockDrawTuneBody(int hit, int ha) {
     static const char* knobNames[LOCK_TUNE_KNOBS] = {
         "1.AMPLITUDE", "2.FREQUENCY", "3.PHASE"
     };
-    LockBox p = LockPanelBox();
     LockBox scope;
     LockTuneScopeBox(&scope);
 
@@ -701,8 +706,6 @@ static void LockDrawTuneBody(int hit, int ha) {
         DrawTextCenterWin((kn.x0 + kn.x1) / 2, kn.y1 + LUIS(10), knobNames[k],
                           onTarget ? 0x0080E0A0u : 0x00A8B0B8u);
     }
-
-    DrawTextCenterWin(winW / 2, p.y0 + LUIS(236), "MATCH THE BRIGHT WAVE TO THE DIM ONE", 0x00707880u);
 }
 
 /* 开锁覆盖层总入口：四种锁型共用同一块面板与底栏 */
@@ -721,21 +724,19 @@ void DrawLockOverlay(void) {
     DrawTextCenterWin(winW / 2, p.y0 + LUIS(24), "LOCKED", 0x00E05050u);
 
     if (lockType == LOCK_TYPE_DIAL) {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "TURN THE DIALS UNTIL EVERY ONE CLICKS", 0x0090A0A8u);
+        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "TURN EACH DIAL UNTIL IT CLICKS", 0x0090A0A8u);
         LockDrawDialBody(hit, ha);
     } else if (lockType == LOCK_TYPE_WIRE) {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "CONNECT EACH LEFT TERMINAL TO ITS COLOR", 0x0090A0A8u);
+        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH LEFT TERMINALS BY COLOR", 0x0090A0A8u);
         LockDrawWireBody(hit, ha);
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(336), "WRONG COLOR = THUD", 0x00889098u);
     } else if (lockType == LOCK_TYPE_EQ) {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH EVERY BAR TO ITS GREEN LINE", 0x0090A0A8u);
+        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "PUSH BARS TO THEIR GREEN LINES", 0x0090A0A8u);
         LockDrawEqBody(hit, ha);
-    } else {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "TUNE THE SCOPE UNTIL THE WAVES MATCH", 0x0090A0A8u);
+    } else {        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH THE BRIGHT WAVE TO THE DIM", 0x0090A0A8u);
         LockDrawTuneBody(hit, ha);
     }
 
     LockDrawButton(LockBackBox(), "BACK", hit == LOCK_HIT_BACK, 0x00C05050u);
 
-    DrawTextCenterWin(winW / 2, p.y1 - LUIS(32), "MOUSE ONLY    -    ANY KEY TO LEAVE", 0x00707880u);
+    DrawTextCenterWin(winW / 2, p.y1 - LUIS(32), "MOUSE   -   ANY KEY TO EXIT", 0x00707880u);
 }

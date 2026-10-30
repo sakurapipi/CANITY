@@ -147,25 +147,69 @@ static long ReadWholeFile(const char* path, void* buf, size_t cap) {
     return ok ? (long)got : -1;
 }
 
+/* 显示 / 音频 / 键位这些设置项是所有存档共用的，
+   单独抽出来，训练场里也能只写设置、不动正式进度。 */
+static void CopyDisplaySettings(SaveBlob* s) {
+    s->resIndex = resIndex;
+    s->fullscreen = isFullscreen;
+    s->fpsCap = fpsCapIndex;
+    s->scale = renderScaleIndex;
+    s->fov = fovIndex;
+    s->vignette = vignetteOn;
+    s->showFps = showFps;
+    s->hudDetail = hudDetail;
+    s->qteHint = qteHint;
+    s->gamma = gammaValue;
+    s->sens = mouseSens;
+    s->volume = volumeF;
+    for (int a = 0; a < BINDING_SLOTS; a++)
+        s->bindings[a] = (a < ACT_COUNT) ? g_bindings[a] : 0;
+    s->lang = g_lang;
+    s->saveSlot = g_saveSlot;
+}
+
+/* 训练场里 SaveGame 会整份跳过；但设置是在训练场里改的也得存。
+   把当前存档读出来（没有就新建一份空档），只覆盖设置字段。 */
+static void SaveSettingsOnly(void) {
+    SaveBlob tmp = g_save;
+    if (tmp.magic != SAVE_MAGIC || tmp.version != SAVE_VERSION ||
+        tmp.saveSlot != g_saveSlot) {
+        memset(&tmp, 0, sizeof(tmp));
+        tmp.magic = SAVE_MAGIC;
+        tmp.version = SAVE_VERSION;
+        tmp.gameVersion = CANITY_VERSION_NUM;
+        tmp.hasRun = 0;
+    }
+    CopyDisplaySettings(&tmp);
+
+    char p[MAX_PATH];
+    for (int i = 0; i < SAVE_CAND_COUNT; i++) {
+        SavePathCand(i, p, sizeof(p));
+        if (WriteWholeFile(p, &tmp, sizeof(tmp)) == 0) {
+            g_save = tmp;
+            g_saveState = 1;
+            g_saveError = 0;
+            strncpy(g_savePath, p, sizeof(g_savePath) - 1);
+            g_savePath[sizeof(g_savePath) - 1] = 0;
+            return;
+        }
+    }
+    g_saveState = 2;
+}
+
 void SaveGame(void) {
-    /* 训练场不是正式进度：写进去的话 Continue 会读出一张走廊图 */
-    if (trainingMode) return;
+    /* 训练场不是正式进度：写进去的话 Continue 会读出一张走廊图。
+       但设置项仍然要落盘，否则在教程里改完设置重开就白改了。 */
+    if (trainingMode) {
+        SaveSettingsOnly();
+        return;
+    }
     memset(&g_save, 0, sizeof(g_save));
     g_save.magic = SAVE_MAGIC;
     g_save.version = SAVE_VERSION;
     g_save.gameVersion = CANITY_VERSION_NUM;
 
-    g_save.resIndex = resIndex;
-    g_save.fullscreen = isFullscreen;
-    g_save.fpsCap = fpsCapIndex;
-    g_save.scale = renderScaleIndex;
-    g_save.fov = fovIndex;
-    g_save.vignette = vignetteOn;
-    g_save.showFps = showFps;
-    g_save.hudDetail = hudDetail;
-    g_save.qteHint = qteHint;
-    g_save.gamma = gammaValue;
-    g_save.sens = mouseSens;
+    CopyDisplaySettings(&g_save);
     g_save.shards = shards;
     g_save.upgBattery = upgBattery;
     g_save.upgSpeed = upgSpeed;
@@ -174,9 +218,6 @@ void SaveGame(void) {
     g_save.upgEco = upgEco;
     g_save.upgRest = upgRest;
     g_save.bestLevel = bestLevel;
-    g_save.volume = volumeF;
-    for (int a = 0; a < BINDING_SLOTS; a++)
-        g_save.bindings[a] = (a < ACT_COUNT) ? g_bindings[a] : 0;
 
     g_save.hasRun = runInProgress;
     g_save.level = currentLevel;
@@ -300,10 +341,52 @@ void SaveGame(void) {
     g_savePath[sizeof(g_savePath) - 1] = 0;
 }
 
+/* v3.2：选择「最近保存过」的存档槽。
+   原来 g_saveSlot 永远从 0 开始，玩家在槽 2 里改的设置/进度
+   重启后会去读槽 0，看起来就是「设置没保存」。
+   这里扫一遍 3 个槽的主档和 .bak，取修改时间最新的那个。 */
+static int PathWriteTime(const char* path, FILETIME* out) {
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &fa)) return 0;
+    *out = fa.ftLastWriteTime;
+    return 1;
+}
+
+static int FindNewestSaveSlot(void) {
+    int oldSlot = g_saveSlot;
+    int bestSlot = -1;
+    FILETIME bestTime;
+    memset(&bestTime, 0, sizeof(bestTime));
+
+    for (int slot = 0; slot < SAVE_SLOTS; slot++) {
+        g_saveSlot = slot;
+        for (int i = 0; i < SAVE_CAND_COUNT; i++) {
+            char p[MAX_PATH];
+            SavePathCand(i, p, sizeof(p));
+            for (int bak = 0; bak < 2; bak++) {
+                char path[MAX_PATH];
+                if (bak) snprintf(path, sizeof(path), "%s.bak", p);
+                else     snprintf(path, sizeof(path), "%s", p);
+                FILETIME ft;
+                if (!PathWriteTime(path, &ft)) continue;
+                if (bestSlot < 0 || CompareFileTime(&ft, &bestTime) > 0) {
+                    bestSlot = slot;
+                    bestTime = ft;
+                }
+            }
+        }
+    }
+
+    g_saveSlot = (bestSlot >= 0) ? bestSlot : oldSlot;
+    return bestSlot;
+}
+
 /* 只读设置（启动时），返回是否还有可继续的进度 */
 int LoadSettings(void) {
     char p[MAX_PATH];
     memset(&g_save, 0, sizeof(g_save));
+    /* 先定位最近使用的存档槽，再按槽读文件 */
+    FindNewestSaveSlot();
     /* 按文件的**实际字节数**读，比 sizeof(SaveBlob) 短的就是老存档 */
     long fs = -1;
     for (int i = 0; i < SAVE_CAND_COUNT && fs < 0; i++) {
@@ -484,6 +567,10 @@ int LoadSettings(void) {
         bestEndlessScore = 0;
         isEndlessRun = 0;
     }
+
+    /* 文件里也记了它属于哪个槽；以文件为准，防止扫描选错 */
+    if (g_save.saveSlot >= 0 && g_save.saveSlot < SAVE_SLOTS)
+        g_saveSlot = g_save.saveSlot;
 
     return g_save.hasRun;
 }

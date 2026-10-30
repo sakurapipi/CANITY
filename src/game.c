@@ -127,6 +127,8 @@ enum {
     TUT_CRANK,
     TUT_THROW,
     TUT_KNOCK,
+    TUT_BREAKER,
+    TUT_EXIT,
     TUT_DONE
 };
 static float tutorialTimer = 0.0f;        /* 完成后的回菜单倒计时 */
@@ -851,22 +853,40 @@ static void BuildTrainingArena(void) {
     hideSpotNear = -1;
     for (int i = 0; i < HIDESPOT_MAX; i++) hideSpots[i].active = 0;
 
-    /* 一个普通箱子，里面固定放一根保险丝 —— 教「长按 E 翻找」 */
-    containerCount = 1;
-    memset(&containers[0], 0, sizeof(containers[0]));
-    containers[0].x = 6.5f;
-    containers[0].y = (float)(MAP_HEIGHT / 2) + 0.5f;
-    containers[0].active = 1;
-    containers[0].searched = 0;
-    containers[0].locked = 0;
-    containers[0].content = 1;
+    /* v3.2：四个上锁的箱子，四种锁型各一个。
+       最近的一个（DIAL）里放本层唯一的一根保险丝；
+       另外三个是补给/练习箱，可开可不开。
+       这样教程既是「锁盘教学」，又是一个最小可通关关卡：
+       撬开 DIAL 箱 → 拿 1 根保险丝 → 给配电箱通电 → 走到出口。 */
+    containerCount = 4;
+    memset(containers, 0, sizeof(containers));
+    {
+        static const float boxX[4] = { 6.5f, 9.0f, 11.5f, 14.0f };
+        static const int   boxLock[4] = { LOCK_TYPE_DIAL, LOCK_TYPE_WIRE, LOCK_TYPE_EQ, LOCK_TYPE_TUNE };
+        static const int   boxCode[4] = { 0x012, 0x003, 0x01B, 0x02D };
+        static const int   boxContent[4] = { 1, 2, 3, 2 };   /* 1=保险丝，2=电池，3=医疗包 */
+        for (int i = 0; i < 4; i++) {
+            containers[i].x = boxX[i];
+            containers[i].y = (float)(MAP_HEIGHT / 2) + 0.5f;
+            containers[i].active = 1;
+            containers[i].searched = 0;
+            containers[i].locked = 1;
+            containers[i].lockType = boxLock[i];
+            containers[i].lockCode = boxCode[i];
+            containers[i].content = boxContent[i];
+        }
+    }
 
-    /* 教程里不需要安全屋/配电箱/出口 */
+    /* 最小可通关：1 根保险丝 → 配电箱 → 出口 */
     safeRoom.active = 0;
-    breaker.active = 0;
+    breaker.x = 17.0f;
+    breaker.y = (float)(MAP_HEIGHT / 2) + 0.5f;
+    breaker.active = 1;
     breakerOpen = 0;
     fusesHeld = 0;
     fusesNeeded = 1;
+    exitX = 21.5f;
+    exitY = (float)(MAP_HEIGHT / 2) + 0.5f;
 
     /* 手电初始电量为 55%：这样「按住 R 摇电」真的有东西可充。 */
     battery = (float)BatteryMax() * 0.55f;
@@ -903,7 +923,7 @@ const char* TutorialObjective(void) {
         snprintf(buf, sizeof(buf), "MAP  -  %s", VkName(g_bindings[ACT_MAP]));
         break;
     case TUT_SEARCH:
-        snprintf(buf, sizeof(buf), "SEARCH  -  HOLD %s", VkName(g_bindings[ACT_INTERACT]));
+        snprintf(buf, sizeof(buf), "LOCK / SEARCH  -  %s", VkName(g_bindings[ACT_INTERACT]));
         break;
     case TUT_CRANK:
         snprintf(buf, sizeof(buf), "CRANK  -  HOLD %s", VkName(g_bindings[ACT_CRANK]));
@@ -914,6 +934,11 @@ const char* TutorialObjective(void) {
     case TUT_KNOCK:
         snprintf(buf, sizeof(buf), "KNOCK  -  HOLD %s", VkName(g_bindings[ACT_CANCEL_CHARGE]));
         break;
+    case TUT_BREAKER:
+        snprintf(buf, sizeof(buf), "BREAKER  -  HOLD %s", VkName(g_bindings[ACT_INTERACT]));
+        break;
+    case TUT_EXIT:
+        return "REACH THE EXIT";
     case TUT_DONE:
     default:
         return "TUTORIAL COMPLETE";
@@ -928,10 +953,12 @@ const char* TutorialHint(void) {
     case TUT_SPRINT: return "HOLD SPRINT AND RUN FOR A MOMENT.";
     case TUT_LIGHT:  return "TURN THE FLASHLIGHT OFF, THEN BACK ON.";
     case TUT_MAP:    return "OPEN THE MAP, THEN CLOSE IT.";
-    case TUT_SEARCH: return "WALK TO THE CRATE AND HOLD SEARCH.";
+    case TUT_SEARCH: return "SOLVE THE LOCK, THEN HOLD INTERACT.";
     case TUT_CRANK:  return "HOLD CRANK UNTIL THE BATTERY RISES.";
     case TUT_THROW:  return "HOLD THROW, AIM AT THE TARGET, RELEASE.";
     case TUT_KNOCK:  return "HOLD KNOCK, RELEASE TO MAKE NOISE.";
+    case TUT_BREAKER:return "TAKE THE FUSE TO THE BREAKER.";
+    case TUT_EXIT:   return "THE EXIT IS AT THE END OF THE HALL.";
     case TUT_DONE:
     default:         return "NICE WORK. RETURNING TO THE MAIN MENU...";
     }
@@ -1016,7 +1043,8 @@ static void TutorialUpdate(float dt) {
         if (tutorialMapOpened && !isMapOpen) TutorialAdvance();
         break;
     case TUT_SEARCH:
-        if (containerCount > 0 && containers[0].searched) TutorialAdvance();
+        /* 第一只箱子（DIAL 锁）里才有保险丝；拿到它就算这一步过了。 */
+        if (fusesHeld > 0) TutorialAdvance();
         break;
     case TUT_CRANK:
         if (cranking || IsActionDown(ACT_CRANK)) tutorialActionTimer += dt;
@@ -1028,6 +1056,12 @@ static void TutorialUpdate(float dt) {
         break;
     case TUT_KNOCK:
         if (tutorialKnocked) TutorialAdvance();
+        break;
+    case TUT_BREAKER:
+        if (breakerOpen) TutorialAdvance();
+        break;
+    case TUT_EXIT:
+        if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f) TutorialAdvance();
         break;
     default:
         break;
@@ -2793,7 +2827,8 @@ void Update(float dt) {
            已经按着的键不算新按下，必须先松开再按才会敲。 */
     {
         static int atkPrev = -1;
-        int atkNow = IsActionDown(ACT_CANCEL_CHARGE);
+        /* 锁盘打开时左键属于 UI，不能进入武器蓄力 */
+        int atkNow = (!lockActive) && IsActionDown(ACT_CANCEL_CHARGE);
         if (resetInputState) {
             atkPrev = atkNow;
             weaponAtkCharge = 0.0f;
@@ -2853,8 +2888,8 @@ void Update(float dt) {
         isCharging = 0;
         mouseCharge = 0.0f;
     }
-    int mouseLeftNow = IsActionDown(ACT_THROW);
-    int mouseRightNow = IsActionDown(ACT_CANCEL_CHARGE);
+    int mouseLeftNow = (!lockActive) && IsActionDown(ACT_THROW);
+    int mouseRightNow = (!lockActive) && IsActionDown(ACT_CANCEL_CHARGE);
 
     if (mouseLeftNow && !mouseLeftPrev && throwCd <= 0.0f && !holdingNow && !cranking) {
         /* 未按下 -> 按下：开始蓄力 */
@@ -3085,8 +3120,9 @@ void Update(float dt) {
         if (pickupMsgTimer <= 0.0f) pickupMsg = NULL;
     }
 
-    /* 出口：通电后才能进下一关；第 WIN_LEVEL 层的出口 = 逃出生天 */
-    if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f) {
+    /* 出口：通电后才能进下一关；第 WIN_LEVEL 层的出口 = 逃出生天。
+       教程的出口只负责把教程标记为完成，不参与正常换层。 */
+    if (!trainingMode && breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f) {
         /* NOCTURNAL：本层全程手电关着过关 */
         if (!flashlightOn) flashlightOffLevel = 1;
 
@@ -3829,6 +3865,7 @@ void ApplySetting(int item, int value) {
     if (settings[item].value == &resIndex || settings[item].value == &isFullscreen) ApplyDisplayMode();
     else if (settings[item].value == &renderScaleIndex) InitPixels();
     else if (settings[item].value == &fovIndex) ApplyFov();
+    SaveGame();   /* 设置改完立刻落盘，不再等退出设置页 */
     uiDirty = 1;
 }
 
@@ -4539,7 +4576,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (LOWORD(lParam) == HTCLIENT) {
                 /* 游戏中（含小窗地图）隐藏光标 —— 鼠标是锁定的。
                    只有全屏地图才显示箭头光标。 */
-                int mouseFree = (currentState != STATE_PLAYING) || (isMapOpen && mapFullScreen);
+                int mouseFree = (currentState != STATE_PLAYING) ||
+                                (isMapOpen && mapFullScreen) || lockActive;
                 if (!mouseFree) SetCursor(NULL);
                 else SetCursor(LoadCursor(NULL, IDC_ARROW));
                 return TRUE;
@@ -4557,6 +4595,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 MouseToLogical(&lmx, &lmy);
                 g_mousePos.x = lmx;
                 g_mousePos.y = lmy;
+                /* 锁盘打开时鼠标是 UI 指针，不能再回中/转视角 */
+                uiDirty = 1;
+                return 0;
             }
 
             /* v3.0：安全屋行悬停 —— 记录鼠标落在第几行，供绘制高亮 */
@@ -4809,7 +4850,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_LBUTTONUP:
             BenchDragEnd();   /* v2.9：结束画布拖拽 */
-            if (sliderDragging) ReleaseCapture();
+            if (sliderDragging) {
+                ReleaseCapture();
+                SaveGame();   /* 拖动滑块松手就落盘 */
+            }
             sliderDragging = 0;
             return 0;
 
@@ -4838,6 +4882,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                必须在通用 Esc/菜单处理之前消费按键，否则 Esc 会误进暂停，
                玩家看起来就像被锁盘卡住了。 */
             if (lockActive) {
+                /* 打开锁盘的那次交互键还按着时，Windows 会持续发 WM_KEYDOWN；
+                   不能把第一次自动重复当成「任意键退出」，否则锁盘刚开就关。 */
+                if ((int)wParam == lockIgnoreVK) return 0;
                 CloseLockOverlay();
                 return 0;
             }
@@ -4931,6 +4978,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         if (menuConfirm || menuCancel) {
                             settingsPopupOpen = 0;
                             sliderDragging = 0;
+                            SaveGame();   /* 滑块值确认后立刻落盘 */
                             uiDirty = 1;
                         }
                     } else {
@@ -5114,6 +5162,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_KEYUP:
+            /* 锁盘打开键松开后，才允许它重新作为「任意键退出」 */
+            if ((int)wParam == lockIgnoreVK) lockIgnoreVK = 0;
             /* 与 WM_KEYDOWN 保持同一套折算，否则小键盘数字的 keys[] 会卡在按下状态 */
             if (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9)
                 wParam = (WPARAM)('0' + (wParam - VK_NUMPAD0));

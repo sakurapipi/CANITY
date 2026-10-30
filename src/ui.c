@@ -2738,8 +2738,8 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
             }
             if (nvis > 0) {
                 if (curVis < 0) curVis = 0;
-                /* 锚点：当前行固定在 y0，上面一行露一点，下面一行露一点 */
-                int y0 = UIS(44);   /* v2.6：18 太靠边会被切掉顶行，下移到 44 */
+                /* 锚点：当前行固定在右下角，上面一行露在它上方 */
+                int y0 = winH - UIS(120);
 
                 for (int k = -1; k <= 1; k++) {
                     int idx = curVis + k;
@@ -3014,7 +3014,7 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
             else if (monster.state == 2) { st = Tr("SEARCHING", "搜寻中"); sc = 0x00E0A020u; }
             else                          { st = Tr("WANDERING", "游荡"); sc = 0x0080C080u; }
             int tw3 = TextWidthWin(st);
-            DrawTextWin(winW - UIS(24) - tw3, winH - UIS(150), st, sc);
+            DrawTextWin(winW - UIS(24) - tw3, winH - UIS(210), st, sc);
         }
     }
 
