@@ -83,3 +83,5 @@ void LockEqAdjust(int band, int delta);
 void LockTuneAdjust(int knob, int delta);
 
 #endif
+
+extern int locksOpened;   /* v3.3：累计开锁数（成就用） */

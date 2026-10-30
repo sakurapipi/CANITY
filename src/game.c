@@ -182,6 +182,16 @@ int mapsFullyExplored = 0;  /* 全探索地图数 */
 int tookDamage = 0;         /* 本局是否受过伤 */
 int flashlightOffLevel = 0; /* 关灯过关标记 */
 int sprintedThisLevel = 0;  /* 本局是否冲刺过 */
+/* v3.3 **新增逃生向计数器** ——
+   击杀类成就全部失效后（NO_COMBAT 把结算分支编译掉了），
+   这几条成就改成用真正能累加的逃生行为：
+     hideCount    钻进藏身点的次数（躲=核心动作）
+     totalThrown  投掷物品的总次数（引怪=核心动作）
+   sprintedAnyFloor 跨层保留的冲刺标记（sprintedThisLevel 每层清零，
+   导致 SILENT SHADOW 到第 5 层必然满足）。 */
+int hideCount = 0;
+int totalThrown = 0;
+int sprintedAnyFloor = 0;
 const char* pickupMsg = NULL;    /* 拾取提示文本 */
 float pickupMsgTimer = 0.0f;     /* 提示显示剩余时间 */
 int bestLevel = 0;
@@ -2626,6 +2636,7 @@ void Update(float dt) {
             if (IsActionPressed(ACT_INTERACT)) {
                 hideKeyLatch = 1;
                 hiddenIn = hideSpotNear;
+                hideCount++;   /* v3.3：逃生向成就用 */
                 posX = hideSpots[hiddenIn].x;
                 posY = hideSpots[hiddenIn].y;
 
@@ -2811,6 +2822,7 @@ void Update(float dt) {
     sprinting = (wantSprint && moving && (stamina > 1.0f || secondWindTimer > 0.0f));
     if (sprinting) {
         sprintedThisLevel = 1;  /* 标记本局冲刺过 */
+        sprintedAnyFloor = 1;   /* v3.3：跨层不清零，SILENT SHADOW 用 */
         stamina -= STAMINA_DRAIN * RunUpgStaminaMul() * dt;   /* v3.0 体能强化 */
         if (stamina < 0.0f) stamina = 0.0f;
         staminaIdle = 0.5f;
@@ -2978,6 +2990,7 @@ void Update(float dt) {
             crankTimer = 0.0f;
             battery += 32.0f;
             crankTimeTotal += 3;  /* 2.4 秒算 3 秒，累计用于成就 */
+            crankSecondsTotal += 3.0f;   /* v3.3：CRANK ADDICT 用的是这个 */
             if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
             PlaySfx(SFX_POWER, 0.45f);
         }
@@ -3231,6 +3244,7 @@ void Update(float dt) {
                     else if (sel == 5) firePots--;
                     else if (sel == 6) gluePots--;
                     else mirrors--;
+                    totalThrown++;   /* v3.3：逃生向成就用（整条链之后加） */
                     throwCd = 0.45f;
                     if (trainingMode) tutorialThrown = 1;
                 } else {
@@ -3593,7 +3607,8 @@ void Update(float dt) {
         sprintedThisLevel = 0;
         fusesCollectedRun = 0;
         flashlightOffLevel = 0;
-        mapsFullyExplored = 0;
+        /* v3.3：mapsFullyExplored 不再每层清零 ——
+       否则一个 24 层的主线最多只有 1，MAP MASTER(>=3) 永远解不开。 */
         ClearFx();                    /* 换关解除所有状态效果 */
         for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
         flashTime = 0.15f;
@@ -3937,6 +3952,9 @@ void StartGame(void) {
     tookDamage = 0;
     flashlightOffLevel = 0;
     sprintedThisLevel = 0;
+    hideCount = 0;
+    totalThrown = 0;
+    sprintedAnyFloor = 0;
     InitAchievements();  /* 初始化成就定义（仅首次） */
     ClearFx();
     for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
@@ -4051,28 +4069,42 @@ static void CheckAchievements(void) {
     /* 4: SHARD HUNTER - 累计 500 碎片（在获得碎片时累加，需要总计数） */
     if (totalShardsEarned >= 500) UnlockAchievement(3);
     /* 5: SILENT SHADOW - 第 5 层不冲刺 */
-    if (currentLevel >= 5 && sprintedThisLevel == 0) UnlockAchievement(4);
+    /* v3.3：sprintedThisLevel 每层清零 → 到第 5 层必然为 0，成就白送。
+       改用跨层保留的 sprintedAnyFloor。 */
+    if (currentLevel >= 5 && sprintedAnyFloor == 0) UnlockAchievement(4);
     /* 6: BOTTLE MASTER - 用瓶子击杀 10 只怪 */
-    if (bottlesKilled >= 10) UnlockAchievement(5);
+    /* v3.3：bottlesKilled 只在击杀时 ++，而怪打不死 → 永远是 0。
+       改成「累计投掷 30 次」（引怪是逃生玩法的核心动作）。 */
+    if (totalThrown >= 30) UnlockAchievement(5);
     /* 7: FACE DODGER - 躲开 5 次跳脸虫 */
-    if (faceDodged >= 5) UnlockAchievement(6);
+    /* v3.3：faceDodged 来自跳脸虫 QTE，那套已经不在了。
+       改成「成功藏身 5 次」。 */
+    if (hideCount >= 5) UnlockAchievement(6);
     /* 8: NOCTURNAL - 手电关着过关 */
     if (flashlightOffLevel) UnlockAchievement(7);
 
     /* ---- v2.0：新加的 24 个成就接入触发点（原来只有 0-15 有解锁调用） ---- */
     if (currentLevel >= 12) UnlockAchievement(16);          /* DEEP DELVER */
     if (currentLevel >= 18) UnlockAchievement(17);          /* ABYSS WALKER */
-    if (bossDefeated)       UnlockAchievement(18);          /* BOSS BREAKER */
+    /* v3.3：bossDefeated 只在不存在的战斗结算里置位。改成层数里程碑。 */
+    if (currentLevel >= 21)  UnlockAchievement(18);          /* CLOSE CALL */
     if (currentLevel >= 24) UnlockAchievement(19);          /* ALL FOUR ZONES */
-    if (relicTotal >= 8)    UnlockAchievement(24);          /* RELIC HOARDER */
-    if (WeaponAttachAt(curWeapon, 0) >= 0 && WeaponAttachAt(curWeapon, 1) >= 0)
-        UnlockAchievement(25);                              /* FULL LOADOUT */
+    /* v3.3：遗物系统（OpenRelicPick/OpenSkillPick）是 0 调用点的死代码，
+       relicTotal 永远 0。改成「累计投掷 80 次」。 */
+    if (totalThrown >= 80)   UnlockAchievement(24);          /* RELIC HOARDER */
+    /* v3.3：武器配件系统已废（attachOwned 永远 0）。改成「藏身 30 次」。 */
+    if (hideCount >= 30)     UnlockAchievement(25);          /* FULL LOADOUT */
     if (totalShardsEarned >= 3000) UnlockAchievement(27);   /* SHARD TYCOON */
     if (BestiarySeenAll())  UnlockAchievement(26);          /* BESTIARY DONE */
-    if (totalKills >= 100)  UnlockAchievement(38);          /* CENTURION */
+    /* v3.3：totalKills 的 ++ 在 NO_COMBAT 的编译死分支里。改成「藏身 100 次」。 */
+    if (hideCount >= 100)    UnlockAchievement(38);          /* CENTURION */
+    /* v3.3：LUCKY BREAK(32) 原来没有任何触发点，用开锁数接上。 */
+    if (locksOpened >= 5)    UnlockAchievement(32);          /* LUCKY BREAK */
     /* ---- v2.2：把长期解不开的成就接上（原来 15 个没有任何触发点） ---- */
     if (currentLevel >= 24) UnlockAchievement(33);              /* OFF BY ONE（与 19 同条件） */
-    if (currentLevel >= 12 && relicTotal == 0) UnlockAchievement(31);   /* NO RELICS */
+    /* v3.3：relicTotal 恒 0，这条退化成「到 12 层」和 DEEP DELVER 重复。
+       改成「到 12 层且一次都没投掷过」——真正的克制流。 */
+    if (currentLevel >= 12 && totalThrown == 0) UnlockAchievement(31);   /* NO RELICS */
     if (gameWon && relicTotal == 0) UnlockAchievement(39);      /* TRUE ENDING */
     if (gameWon && sanity <= 25.0f) UnlockAchievement(35);      /* BLOOD PRICE */
     if (gameWon && !flashlightOn)   UnlockAchievement(36);      /* GHOST RUN */
@@ -4089,7 +4121,9 @@ static void CheckAchievements(void) {
     if (floorsFlawless >= 1) UnlockAchievement(20);             /* FLAWLESS FLOOR */
     if (floorsPacifist >= 1) UnlockAchievement(22);             /* PACIFIST FLOOR */
     if (floorsFast >= 1) UnlockAchievement(23);                 /* SPEED DEMON */
-    if (floorsQuiet >= 1) UnlockAchievement(34);                /* SILENT FLOOR */
+    /* v3.3：floorsQuiet 全项目只有声明和读取，从没 ++。
+       改成「3 层全程没被发现」（floorsPacifist 现在由 floorSpotted 驱动）。 */
+    if (floorsPacifist >= 3) UnlockAchievement(34);             /* SILENT FLOOR */
     if (lowSanitySeconds >= 30.0f) UnlockAchievement(37);       /* LAST BREATH */
     /* 9: SPEED RUNNER - 第 1 关 2 分钟内过关 */
     if (currentLevel == 1 && runTime < 120.0f && breakerOpen) UnlockAchievement(8);
