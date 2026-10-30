@@ -231,6 +231,13 @@ void SaveGame(void) {
     g_save.hideSpotSaveCount = hideSpotCount;
     for (int i = 0; i < 6; i++) g_save.hideSpotSave[i] = hideSpots[i];
     g_save.hiddenInSave = hiddenIn;
+    /* v3.3：安全屋每层限一次的标记也要存，否则读档后可以同层再免费充一次 */
+    {
+        extern int  ShopSafeHealLv(void), ShopSafeChargeLv(void), ShopSafeStaminaLv(void);
+        g_save.safeHealLvSave    = ShopSafeHealLv();
+        g_save.safeChargeLvSave  = ShopSafeChargeLv();
+        g_save.safeStaminaLvSave = ShopSafeStaminaLv();
+    }
     for (int i = 0; i < 4; i++) g_save.runUpgSave[i] = RunUpgLevel(i);   /* v2.3 */
     g_save.flashlightOn = flashlightOn;
     g_save.posX = posX; g_save.posY = posY;
@@ -605,6 +612,13 @@ void ContinueRun(void) {
     if (hideSpotCount > 6) hideSpotCount = 6;
     for (int i = 0; i < 6; i++) hideSpots[i] = g_save.hideSpotSave[i];
     hiddenIn = g_save.hiddenInSave;
+    /* v3.3：恢复安全屋每层限一次的标记（老档没有这几个字段，读到 0 也安全） */
+    {
+        extern void ShopSetSafeLv(int, int, int);
+        ShopSetSafeLv(g_save.safeHealLvSave,
+                      g_save.safeChargeLvSave,
+                      g_save.safeStaminaLvSave);
+    }
     if (hiddenIn >= hideSpotCount) hiddenIn = -1;
     RunUpgLoadFromSave(g_save.runUpgSave);   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
     if (!(energy > 0.0f)) energy = ENERGY_MAX;

@@ -78,6 +78,28 @@ const char* ShopPageTitle(void) {
 }
 }
 
+
+/* v3.3 **本层碎片可以花** ——
+   搜箱子的碎片先进 pendingShards，过关才并入 shards（重生细胞式上缴）。
+   但安全屋就在本层，玩家身上明明有 60 碎片，站店里却提示「碎片不够」。
+   这里提供统一入口：先扣已入账的 shards，不够再扣本层待上缴的 pendingShards。
+   返回 1 = 扣成功，0 = 两边加起来也不够。 */
+static int ShopSpend(int cost) {
+    extern int pendingShards;
+    if (cost <= 0) return 1;
+    if (shards + pendingShards < cost) return 0;
+    int need = cost;
+    if (shards >= need) {
+        shards -= need;
+        return 1;
+    }
+    need -= shards;
+    shards = 0;
+    pendingShards -= need;
+    if (pendingShards < 0) pendingShards = 0;
+    return 1;
+}
+
 int ShopRowCount(void) {
     if (shopPage == SHP_TREE) return 0;   /* v2.7：树自己画，不用列表行 */
     switch (shopPage) {
@@ -113,15 +135,20 @@ const char* ShopRowText(int row) {
         if (row >= SHOP_OFFERS) {
             return Tr("LEAVE  (ESC)", "离开  (ESC)");
         }
+        /* v3.3：**修价格倒挂** ——
+           原来「急救包 +25 理智 40 碎片」比安全屋「休息 +40 理智 25 碎片」
+           又贵又少，玩家没有任何理由买急救包。
+           现在急救包 25（同价但少给 15 点），是「临时补给」的定位，
+           安全屋休息仍然是性价比最高的恢复手段。 */
         static const char* en[4] = {
             "BATTERY PACK   +35 battery   25",
-            "MED KIT        +25 sanity    40",
+            "MED KIT        +25 sanity    25",
             "FLARE x1                      30",
             "BOTTLES x2                    20",
         };
         static const char* zh[4] = {
             "电池包   +35 电量   25",
-            "急救包   +25 理智   40",
+            "急救包   +25 理智   25",
             "照明弹 x1           30",
             "瓶子   x2           20",
         };
@@ -250,14 +277,13 @@ void ShopActivate(void) {
     if (shopPage == SHP_SHOP) {
         if (shopRow >= SHOP_OFFERS) return;      /* LEAVE 由 Esc 处理 */
         /* v3.0：**消耗品商店** —— 四种补给，价格与行文本一一对应 */
-        static const int price[4] = { 25, 40, 30, 20 };
+        static const int price[4] = { 25, 25, 30, 20 };   /* v3.3：急救包 40 -> 25，与行文本一致 */
         int idx = shopRow & 3;
-        if (shards < price[idx]) {
+        if (!ShopSpend(price[idx])) {
             pickupMsg = Tr("NOT ENOUGH SHARDS", "碎片不够");
             pickupMsgTimer = 1.2f;
             return;
         }
-        shards -= price[idx];
         switch (idx) {
         case 0: battery += 35.0f; if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
                 pickupMsg = Tr("+35 BATTERY", "+35 电量"); break;
@@ -302,13 +328,12 @@ void ShopActivate(void) {
        让理智彻底不像计时器） */
     if (shopRow == 0) {
         if (safeHealLevel == currentLevel) return;
-        if (shards < SAFE_REST_COST) {
+        if (!ShopSpend(SAFE_REST_COST)) {
             pickupMsg = Tr("NEED 25 SHARDS", "需要 25 碎片");
             pickupMsgTimer = 1.2f;
             uiDirty = 1;
             return;
         }
-        shards -= SAFE_REST_COST;
         safeHealLevel = currentLevel;
         sanity += 40.0f;
         if (sanity > SanityMax()) sanity = SanityMax();
@@ -346,13 +371,12 @@ void ShopActivate(void) {
            原来这一行什么都不收，玩家可以躲衣柜→按 T→回车→Esc→跑，
            无限刷满体力，冲刺等于没有成本。 */
         if (safeStaminaLevel == currentLevel) return;
-        if (shards < 15) {
+        if (!ShopSpend(15)) {
             pickupMsg = Tr("NEED 15 SHARDS", "需要 15 碎片");
             pickupMsgTimer = 1.2f;
             uiDirty = 1;
             return;
         }
-        shards -= 15;
         safeStaminaLevel = currentLevel;
         stamina = StaminaMax();
         pickupMsg = Tr("STAMINA RESTORED (-15)", "体力已恢复 (-15)");
@@ -369,4 +393,14 @@ void SafeLevelReset(void) {
     safeHealLevel = -1;
     safeChargeLevel = -1;
     safeStaminaLevel = -1;   /* v3.3 */
+}
+
+/* v3.3：给存档层读写这三个「每层限一次」标记 */
+int  ShopSafeHealLv(void)    { return safeHealLevel; }
+int  ShopSafeChargeLv(void)  { return safeChargeLevel; }
+int  ShopSafeStaminaLv(void) { return safeStaminaLevel; }
+void ShopSetSafeLv(int heal, int charge, int stamina) {
+    safeHealLevel = heal;
+    safeChargeLevel = charge;
+    safeStaminaLevel = stamina;
 }

@@ -16,7 +16,7 @@
    读档时会按文件的**实际长度**判断是老版本还是新版本：
    老存档照样能读（新增字段取默认值），不用丢玩家进度。
    —— 参见 LoadSettings 里的迁移逻辑。 */
-#define SAVE_VERSION 17  /* v17：藏身点进存档（HideSpot[6] + count + hiddenIn） */
+#define SAVE_VERSION 18  /* v17：藏身点进存档（HideSpot[6] + count + hiddenIn） */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
@@ -123,6 +123,13 @@ typedef struct {
     int hideSpotSaveCount;
     HideSpot hideSpotSave[6];
     int hiddenInSave;
+    /* v18：安全屋每层限一次的三个标记必须存盘 ——
+       原来它们是 shop.c 的文件级 static，读档后全回 -1，
+       于是「在 6 层充过电 → 触发任一自动存档 → 退出重进」
+       就能在同一层再免费充一次（审计报告商店 #5）。 */
+    int safeHealLvSave;
+    int safeChargeLvSave;
+    int safeStaminaLvSave;
 } SaveBlob;
 
 /* 写当前进度（游戏中 / 退出时） */
