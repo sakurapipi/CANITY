@@ -286,6 +286,12 @@ float crankSecondsTotal = 0.0f;
 int floorsNoLight = 0, floorsFlawless = 0, floorsPacifist = 0, floorsFast = 0, floorsQuiet = 0;
 float lowSanitySeconds = 0.0f;
 int floorKills = 0, floorTookDamage = 0;
+/* v3.3 **新增 floorSpotted** ——
+   UNSEEN FLOOR（原文案「Clear a floor without ever being spotted」）
+   原来判的是 floorKills == 0，但 floorKills++ 在 NO_COMBAT 的
+   #else 编译死分支里（怪物打不死，永远不会 +1），所以该成就首层必解。
+   换成真正能反映「被发现」的计数器：怪物切到追捕（state=1）时 +1。 */
+int floorSpotted = 0;
 float floorStartTime = 0.0f;
 int lastResortUsed = 0;   /* v2.2 LAST RESORT：本局是否已用掉免死 */    /* v2.0 SHORTCUT：本局是否已用过跳层 */
 int dailyMode = 0;
@@ -3500,6 +3506,15 @@ void Update(float dt) {
             if (SkillsAllMaxed()) {
                 UnlockAchievement(15);  /* TRUE SURVIVOR */
             }
+            /* v3.3 **修复 3 个永远解不开的通关成就** ——
+               它们的判定写在 CheckAchievements 里（gameWon && ...），
+               但 CheckAchievements 只在 STATE_PLAYING 执行，
+               而本函数上面第 3485 行已经把 currentState 设成 GAMEOVER 了，
+               所以这三条判定从来没有被求值过。
+               在这里用同样的条件补一次。 */
+            if (relicTotal == 0)      UnlockAchievement(39);  /* TRUE ENDING */
+            if (sanity <= 25.0f)      UnlockAchievement(35);  /* BLOOD PRICE */
+            if (!flashlightOn)        UnlockAchievement(36);  /* GHOST RUN */
             uiDirty = 1;
             return;
         }
@@ -3559,11 +3574,12 @@ void Update(float dt) {
         {
             float floorTime = runTime - floorStartTime;
             if (floorTime < 90.0f)  floorsFast++;
-            if (floorKills == 0)    floorsPacifist++;
+            if (floorSpotted == 0)  floorsPacifist++;   /* v3.3：原来判 floorKills，恒 0 */
             if (floorTookDamage == 0) floorsFlawless++;
             if (!flashlightOn)      floorsNoLight++;
         }
         floorKills = 0;
+    floorSpotted = 0;
         floorTookDamage = 0;
         floorStartTime = runTime;
         CheckAchievements();
@@ -4001,8 +4017,13 @@ static void UnlockAchievement(int idx) {
     /* v2.0 修复：原来每个成就白送 1 核心。40 个成就 = 40 核心，
        而满技能树只需要 9 个 —— 核心货币直接失去意义。
        现在成就只给碎片；核心只由「Boss 击杀 / 通关 / 里程碑楼层」产出。 */
-    shards += 400;
-    totalShardsEarned += 400;
+    /* v3.3 **成就奖励下调 + 不再计入 totalShardsEarned** ——
+       400/条 × 约 27 条 ≈ 10800 碎片，而全商店一次性购买项总共只要 5720，
+       等于成就白送两套全目录，经济直接被打穿。
+       而且原来把它加进 totalShardsEarned，而 SHARD HUNTER / SHARD TYCOON
+       判的就是该计数器 —— 解成就 → 计数器涨 → 再解成就，自我喂养。
+       现在 60/条（约 1600 总量，相当于小半个商店），且不计入统计。 */
+    shards += 60;
     /* v2.2：解锁要有反馈 —— 原来只是静默加碎片 */
     pickupMsg = g_achievements[idx].name;
     pickupMsgTimer = 2.2f;

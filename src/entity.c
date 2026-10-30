@@ -456,6 +456,7 @@ void UpdateLightBeast(float dt) {
             }
         if (sanity < 0.0f) sanity = 0.0f;
         extern int tookDamage;
+        { extern int floorTookDamage; floorTookDamage = 1; }
         tookDamage = 1;
         healFlash = 0.16f;
         if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
@@ -473,7 +474,8 @@ static void JumperFail(void) {
     sanity -= JUMPER_FAIL_SANITY;
     if (sanity < 0.0f) sanity = 0.0f;
     extern int tookDamage;
-    tookDamage = 1;
+    { extern int floorTookDamage; floorTookDamage = 1; }
+        tookDamage = 1;
     ApplyFx(FX_BLIND, JUMPER_FAIL_FX_POWER, JUMPER_FAIL_FX_TIME);
     ApplyFx(FX_SLOW, JUMPER_FAIL_FX_POWER, JUMPER_FAIL_FX_TIME);
     healFlash = 0.25f;
@@ -653,6 +655,7 @@ void UpdateMonster(float dt) {
             monster.sightHold += dt;
             if (monster.state != 1 && monster.sightHold >= 0.6f) {
                 monster.state = 1;
+        { extern int floorSpotted; floorSpotted = 1; }
                 monster.repath = 0.0f;
                 monster.stateTimer = 0.0f;
                 PlaySfx(SFX_HEART, 0.55f);   /* 心跳：它发现你了 */
@@ -826,6 +829,7 @@ void UpdateMonster(float dt) {
     PlaySfx(SFX_HEART, 0.95f);
         if (sanity < 0.0f) sanity = 0.0f;
         extern int tookDamage;
+        { extern int floorTookDamage; floorTookDamage = 1; }
         tookDamage = 1;
         healFlash = 0.18f;
         if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
