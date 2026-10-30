@@ -45,7 +45,9 @@ jobs:
         shell: pwsh
         run: |
           $ver = (Select-String -Path include/common.h -Pattern 'CANITY_VERSION_STR\s+"([^"]+)"').Matches[0].Groups[1].Value
-          $name = "CANITY_v$ver_win64"
+          # 注意：必须写 ${ver}，写成 $ver_win64 会被 PowerShell 当成变量名 ver_win64（为空），
+          # 结果包名变成 CANITY_v.zip，上传步骤的通配符就匹配不到。
+          $name = "CANITY_v${ver}_win64"
           New-Item -ItemType Directory -Path $name | Out-Null
           Copy-Item canity.exe "$name/canity.exe"
 

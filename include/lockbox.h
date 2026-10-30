@@ -57,6 +57,7 @@ extern int lockWireSel;
 extern int lockWireLink[LOCK_WIRES];
 extern int lockEqVal[LOCK_EQ_BANDS];
 extern int lockTuneVal[LOCK_TUNE_KNOBS];
+extern int lockIgnoreVK;   /* 打开锁盘的那次按键：松开前不当作「任意键退出」 */
 
 void LockOpenFor(int containerIndex, int type);   /* 打开某个箱子的锁盘 */
 void LockClose(void);

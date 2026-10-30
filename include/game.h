@@ -208,6 +208,12 @@ extern int firePots, gluePots, mirrors;   /* v2.0 */
 extern int g_dmgIgnoreArmor;
 int ApplyDamage(Monster* m, int base, int type, float sx, float sy);
 extern int trainingMode, trainingTotal, trainingLast, trainingCount, trainingDps;
+extern int tutorialStep, tutorialDone;
+const char* TutorialObjective(void);
+const char* TutorialHint(void);
+int TutorialStepNumber(void);
+int TutorialStepTotal(void);
+void TutorialBegin(void);
 extern int trainingHist[6];
 extern float trainingDpsTimer;
 extern int lastHitDamage;

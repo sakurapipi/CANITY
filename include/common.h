@@ -65,6 +65,7 @@ typedef enum {
 #define MOVE_SPEED 2.0f       /* 单位/秒（基础走速） */
 #define SPRINT_MULT 1.5f      /* 冲刺倍率 */
 #define SANITY_DRAIN 0.5f     /* 理智/秒（基础值） */
+#define HIDE_SANITY_REGEN 2.0f /* 躲在垃圾桶里每秒恢复的理智 */
 #define ENDLESS_SANITY_DRAIN 0.35f  /* 无尽模式：理智流失更慢 */
 
 /* ---- v1.8 理智经济（docs/终极方案_v2.md 第 1 节） ----
@@ -166,7 +167,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 38   /* v2.0：+Language +Save Slot（原来 36 会把最后两行丢掉） */
+#define SETTING_COUNT 37   /* v3.1：界面固定英文，移除 Language 项（原 38） */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 

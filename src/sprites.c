@@ -935,6 +935,50 @@ static void BakeProp(int id, int kind) {
         float b2[8] = { c - 33, baseY - 142, c + 33, baseY - 142, c + 33, baseY - 4, c - 33, baseY - 4 };
         cvPolyGrad(b2, 4, 0x00C0E8FFu, 0x00306080u, 1.0f);
         cvGlow(c, baseY - 70, 60.0f, 0x0060C0FFu, 0.35f);
+    } else if (kind == 4) {     /* 翻过的空箱：盖子掀开、里面发黑 */
+        float base[8] = { c - 44, baseY - 58, c + 44, baseY - 58, c + 44, baseY, c - 44, baseY };
+        cvPoly(base, 4, 0x000A0806u, 1.0f);
+        float inner[8] = { c - 38, baseY - 52, c + 38, baseY - 52, c + 38, baseY - 5, c - 38, baseY - 5 };
+        cvPolyGrad(inner, 4, 0x00402C18u, 0x00140E08u, 1.0f);
+        /* 箱口：一条深色横带，读作“空的” */
+        float hole[8] = { c - 34, baseY - 55, c + 34, baseY - 55, c + 30, baseY - 40, c - 30, baseY - 40 };
+        cvPoly(hole, 4, 0x00060404u, 1.0f);
+        /* 掀起的盖子：向后上方斜 */
+        float lid[8] = { c - 48, baseY - 56, c - 42, baseY - 104, c + 38, baseY - 112, c + 46, baseY - 60 };
+        cvPoly(lid, 4, 0x00120C08u, 1.0f);
+        float lid2[8] = { c - 42, baseY - 60, c - 36, baseY - 98, c + 34, baseY - 105, c + 40, baseY - 64 };
+        cvPolyGrad(lid2, 4, 0x00906A40u, 0x00302014u, 1.0f);
+        cvLine(c - 44, baseY - 58, c + 44, baseY - 58, 3.0f, 0x00201810u, 0.9f);
+    } else if (kind == 5) {     /* 未解锁的箱子：普通木箱 + 正面金锁 */
+        float b[8] = { c - 46, baseY - 96, c + 46, baseY - 96, c + 46, baseY, c - 46, baseY };
+        cvPoly(b, 4, 0x000A0806u, 1.0f);
+        float b2[8] = { c - 40, baseY - 90, c + 40, baseY - 90, c + 40, baseY - 4, c - 40, baseY - 4 };
+        cvPolyGrad(b2, 4, 0x00906A40u, 0x00402C18u, 1.0f);
+        for (int i = 0; i < 3; i++)
+            cvLine(c - 40, baseY - 74 + (float)i * 26, c + 40, baseY - 74 + (float)i * 26, 3.0f, 0x00301C0Cu, 0.8f);
+        cvLine(c - 40, baseY - 90, c - 40, baseY - 4, 8.0f, 0x00605848u, 1.0f);
+        cvLine(c + 40, baseY - 90, c + 40, baseY - 4, 8.0f, 0x00605848u, 1.0f);
+        /* 锁体 + 锁梁 */
+        float lock[8] = { c - 18, baseY - 58, c + 18, baseY - 58, c + 18, baseY - 22, c - 18, baseY - 22 };
+        cvPoly(lock, 4, 0x006A4E10u, 1.0f);
+        cvPoly(lock, 4, 0x00C8A030u, 0.65f);
+        cvLine(c - 10, baseY - 58, c - 10, baseY - 72, 4.0f, 0x00E0C050u, 1.0f);
+        cvLine(c + 10, baseY - 58, c + 10, baseY - 72, 4.0f, 0x00E0C050u, 1.0f);
+        cvLine(c - 10, baseY - 72, c + 10, baseY - 72, 4.0f, 0x00E0C050u, 1.0f);
+        cvEllipse(c, baseY - 40, 4.0f, 5.0f, 0x00201808u, 1.0f);
+    } else if (kind == 6) {     /* 藏身点：垃圾桶 */
+        float body[8] = { c - 34, baseY - 150, c + 34, baseY - 150, c + 42, baseY, c - 42, baseY };
+        cvPoly(body, 4, 0x000A0C0Au, 1.0f);
+        float body2[8] = { c - 28, baseY - 144, c + 28, baseY - 144, c + 35, baseY - 5, c - 35, baseY - 5 };
+        cvPolyGrad(body2, 4, 0x00607868u, 0x00283028u, 1.0f);
+        for (int i = -2; i <= 2; i++)
+            cvLine(c + (float)i * 13.0f, baseY - 140, c + (float)i * 16.0f, baseY - 8, 2.0f, 0x00202820u, 0.75f);
+        cvEllipse(c, baseY - 150, 36.0f, 9.0f, 0x003A4A40u, 1.0f);
+        cvEllipse(c, baseY - 152, 30.0f, 6.0f, 0x00060604u, 0.95f);
+        cvLine(c - 38, baseY - 158, c + 38, baseY - 158, 5.0f, 0x00809878u, 0.9f);
+        cvLine(c - 38, baseY - 158, c - 34, baseY - 168, 4.0f, 0x00607858u, 0.8f);
+        cvLine(c + 38, baseY - 158, c + 34, baseY - 168, 4.0f, 0x00607858u, 0.8f);
+        cvLine(c - 34, baseY - 168, c + 34, baseY - 168, 4.0f, 0x00809878u, 0.85f);
     } else {
         /* 安全屋（v2.2 第三次重做）
            第一版是营火 -> 一颗蛋。第二版是沙袋+立杆+油灯 -> 一根路灯 + 两块鹅卵石 + 一张饼。
@@ -1156,6 +1200,9 @@ void SpritesInit(void) {
     BakeProp(SPR_PROP_BREAKER, 1);
     BakeProp(SPR_PROP_EXIT, 2);
     BakeProp(SPR_PROP_SAFE, 3);
+    BakeProp(SPR_PROP_CRATE_OPEN, 4);
+    BakeProp(SPR_PROP_CRATE_LOCKED, 5);
+    BakeProp(SPR_PROP_TRASH, 6);
     BakeUiPanel(SPR_UI_PANEL, 0);
     BakeUiPanel(SPR_UI_PANEL_HOT, 1);
     BakeUiCursor();

@@ -15,11 +15,13 @@
 typedef struct {
     float x, y;
     float vx, vy;
+    float tx, ty;     /* 最后一次听到噪音的位置（盲螨用） */
     float timer;      /* 行为计时器（闪现/冲刺冷却） */
     int   active;
     int   kind;       /* 0 SHADE / 1 SPIDER / 2 ECHO */
     int   cool;       /* 接触伤害后的短暂无敌 */
     int   hp;         /* v2.2：血量（原来没有 hp，三把武器都打不到它们） */
+    int   hasTarget;  /* 1 = 有噪音目标；盲螨平时不知道玩家在哪 */
 } Extra;
 
 extern Extra extras[EXTRA_MAX];

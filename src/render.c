@@ -554,7 +554,11 @@ static void DrawCrateSprite(int i) {
     if (i < 0 || i >= containerCount) return;
     Container* c = &containers[i];
     if (c->searched) {
-        DrawBakedProp(SPR_PROP_CRATE, c->x, c->y, 0.34f, 0.55f);
+        /* 翻过：盖子掀开、里面黑 */
+        DrawBakedProp(SPR_PROP_CRATE_OPEN, c->x, c->y, 0.34f, 0.55f);
+    } else if (c->locked) {
+        /* 未解锁：正常木箱 + 金锁 */
+        DrawBakedProp(SPR_PROP_CRATE_LOCKED, c->x, c->y, 0.42f, 1.0f);
     } else {
         DrawBakedProp(SPR_PROP_CRATE, c->x, c->y, 0.42f, 1.0f);
     }
@@ -566,17 +570,13 @@ static void DrawCrateSprite(int i) {
    原来全项目 render.c/ui.c 对 hideSpots 零引用 —— 玩家根本看不见
    衣柜/床底/桌下，只有按下 E 之后闪 1.6 秒的一行字。
    这里复用箱子的精灵，缩小 + 压暗，和真箱子区分开。 */
+/* 藏身点：垃圾桶。之前复用箱子精灵缩小压暗，玩家根本分不清是箱子还是藏身点。 */
 static void DrawHideSpotSprite(int i) {
     if (i < 0 || i >= hideSpotCount) return;
     HideSpot* h = &hideSpots[i];
     if (!h->active) return;
-    /* v3.0：**换成保险箱精灵 + 三种明显不同的高度** ——
-       原来三种都用箱子的精灵，只差缩放（1.0/0.78/0.62），
-       和真箱子只差 30% 大小，玩家分不清哪个能保命（体验评审）。
-       现在：衣柜最高、床底最矮、桌下居中，且统一压暗成青灰色，
-       和暖色木箱一眼区分。 */
-    float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.55f : 0.75f);
-    DrawBakedProp(SPR_PROP_SAFE, h->x, h->y, 0.34f, 0.62f * k);
+    float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.90f : 0.82f);
+    DrawBakedProp(SPR_PROP_TRASH, h->x, h->y, 0.46f, 0.72f * k);
 }
 static void DrawBreakerSprite(void) {
     if (!breaker.active) return;
@@ -591,9 +591,17 @@ static void DrawBreakerSprite(void) {
 static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK) {
     SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
     if (!s.ok) return;
+    /* v3.2：贴脸时直接不画。箱子/配电箱没有碰撞，玩家可以站进模型里，
+       这时 billboard 的投影会被放大到几倍屏幕、看起来像视角畸变。
+       近平面裁掉比硬拉一个巨大精灵更干净；交互提示仍然保留。 */
+    if (s.ty < 0.55f) return;
     int w = s.x1 - s.x0, h = s.y1 - s.y0;
     if (w < 2 || h < 2) return;
-    int size = (w > h) ? w : h;
+    /* v3.2：道具按**投影高度**缩放，不再用 max(w,h)。
+       箱子的 halfH=0.34，但固定 half 宽是 0.56；
+       用 max 会把箱子按宽度放大 1.65 倍，贴脸时尤其像一个巨大的方块。
+       烘焙图的画布是正方形的，按高度画才能保持半高参数的真实含义。 */
+    int size = h;
     int x = (s.x0 + s.x1) / 2 - size / 2;
     int y = s.y1 - size;
     float light = SpriteShade(s.ty, 0.12f);
@@ -655,6 +663,8 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
                              float lightK, int zTest, float facing, float walkPhase) {
     SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
     if (!s.ok) return;
+    /* 同理：怪贴脸时 sprite 投影会铺满屏幕，先裁掉。 */
+    if (s.ty < 0.55f) return;
     int w = s.x1 - s.x0;
     int h = s.y1 - s.y0;
     if (w < 2 || h < 2) return;
@@ -1488,6 +1498,18 @@ void RenderSprites(void) {
         list[n].idx = i;
         n++;
     }
+    /* v3.3：藏身点必须真的进渲染列表。
+       原来这里没有插入，case 12 却去画 hideSpots[idx]，
+       而 kind=12 又被 Extras 占用 → 垃圾桶画在错误的位置/根本不画，
+       玩家只看到随机出现的 HIDE 提示。 */
+    for (int i = 0; i < hideSpotCount; i++) {
+        if (!hideSpots[i].active) continue;
+        if (n >= MAX_SPRITES) break;
+        list[n].d2 = Dist2(hideSpots[i].x, hideSpots[i].y, posX, posY);
+        list[n].kind = 12;
+        list[n].idx = i;
+        n++;
+    }
     if (breaker.active) {
         if (n < MAX_SPRITES) {
             list[n].d2 = Dist2(breaker.x, breaker.y, posX, posY);
@@ -1554,7 +1576,7 @@ void RenderSprites(void) {
         if (e->kind == 0 && flashlightOn && battery > 0.0f) continue;
         if (n >= MAX_SPRITES) break;
         list[n].d2 = Dist2(e->x, e->y, posX, posY);
-        list[n].kind = 12;
+        list[n].kind = 11;
         list[n].idx = i;
         n++;
     }

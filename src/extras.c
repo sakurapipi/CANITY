@@ -14,6 +14,7 @@ void ExtrasReset(void) {
         extras[i].kind = -1;
         extras[i].timer = 0.0f;
         extras[i].cool = 0;
+        extras[i].hasTarget = 0;
     }
 }
 
@@ -45,6 +46,7 @@ void ExtrasSpawnOne(int idx) {
     extras[idx].hp = (extras[idx].kind == 0) ? 20 : (extras[idx].kind == 1 ? 15 : 10);
     extras[idx].timer = 1.0f;
     extras[idx].cool = 0;
+    extras[idx].hasTarget = 0;
 }
 
 int DamageExtrasAt(float x, float y, float radius, int dmg) {
@@ -85,6 +87,7 @@ void ExtrasSpawnForLevel(int level) {
         extras[i].hp = (extras[i].kind == 0) ? 20 : (extras[i].kind == 1 ? 15 : 10);
         extras[i].timer = 1.0f + (float)(rand() % 200) / 100.0f;
         extras[i].cool = 0;
+        extras[i].hasTarget = 0;
     }
 }
 
@@ -111,12 +114,18 @@ void UpdateExtras(float dt) {
             }
             break;
         }
-        case 1: {   /* SPIDER：极快，但只在计时器循环里冲刺 */
-            if (e->timer <= 0.0f) {
-                e->timer = 1.6f;
-                float sp = 1.4f;               /* 一次冲 1.4 格 */
-                float tx = e->x + nx * sp, ty = e->y + ny * sp;
-                if (!Blocked(tx, ty)) { e->x = tx; e->y = ty; }
+        case 1: {   /* SPIDER：盲的，只朝最后一次噪音源冲刺；没听到声音就原地待机 */
+            if (!e->hasTarget) break;
+            {
+                float sx = e->tx - e->x, sy = e->ty - e->y;
+                float sd = sqrtf(sx * sx + sy * sy);
+                if (sd < 0.45f) { e->hasTarget = 0; e->timer = 1.0f; break; }
+                if (e->timer <= 0.0f) {
+                    e->timer = 1.6f;
+                    float sp = 1.4f;               /* 一次冲 1.4 格 */
+                    float tx = e->x + (sx / sd) * sp, ty = e->y + (sy / sd) * sp;
+                    if (!Blocked(tx, ty)) { e->x = tx; e->y = ty; }
+                }
             }
             break;
         }

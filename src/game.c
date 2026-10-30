@@ -114,6 +114,31 @@ int trainingCount = 0;          /* 命中次数 */
 int trainingHist[6] = {0};      /* 最近 6 次 */
 float trainingDpsTimer = 0.0f;
 int trainingDps = 0;
+/* ---- v3.1 新手教程 ---- */
+int tutorialStep = 0;
+int tutorialDone = 0;
+enum {
+    TUT_MOVE = 0,
+    TUT_LOOK,
+    TUT_SPRINT,
+    TUT_LIGHT,
+    TUT_MAP,
+    TUT_SEARCH,
+    TUT_CRANK,
+    TUT_THROW,
+    TUT_KNOCK,
+    TUT_BREAKER,
+    TUT_EXIT,
+    TUT_DONE
+};
+static float tutorialTimer = 0.0f;        /* 完成后的回菜单倒计时 */
+static float tutorialActionTimer = 0.0f;  /* 持续动作计时（冲刺/摇电） */
+static float tutorialStartX = 0.0f, tutorialStartY = 0.0f;
+static float tutorialStartDirX = 1.0f, tutorialStartDirY = 0.0f;
+static int   tutorialLightOff = 0;        /* 手电关过再开 */
+static int   tutorialThrown = 0;
+static int   tutorialKnocked = 0;
+static int   tutorialMapOpened = 0;       /* 地图至少打开过一次 */
 SmokeCloud smokes[MAX_SMOKE];
 int throwSelected = 0;        /* 0=荧光棒, 1=玻璃瓶, 2=预留 */
 Thrown thrown[MAX_THROWN];
@@ -622,7 +647,7 @@ static const char* optRes[RES_COUNT] = {
     "1600x900", "1920x1080", "2560x1440", "AUTO (FIT SCREEN)"
 };
 static const char* optFps[5] = {"30", "60", "120", "144", "Unlimited"};
-static const char* optScale[4] = {"100%", "75%", "50%", "25%"};
+static const char* optScale[4] = {"HIGH (100%)", "MEDIUM (75%)", "LOW (50%)", "MINIMAL (25%)"};
 static const char* optFov[5] = {"66", "75", "85", "95", "105"};
 static const char* optOnOff[2] = {"OFF", "ON"};
 /* HUD 详细度：游戏画面上放多少字。
@@ -630,18 +655,16 @@ static const char* optOnOff[2] = {"OFF", "ON"};
 static const char* optHud[3] = {"Minimal", "Normal", "Full"};
 /* QTE 提示详细度：Full = 带英文说明，Minimal = 只留大按键和倒计时条 */
 static const char* optQte[2] = {"Minimal", "Full"};
-static const char* optLang[LANG_COUNT] = {"ENGLISH", "中文"};
 static const char* optSlot[SAVE_SLOTS] = {"SLOT 1", "SLOT 2", "SLOT 3"};
 SettingItem settings[] = {
     /* ========== 分类 1: DISPLAY ========== */
     {"Resolution",      SET_LIST,   optRes,      RES_COUNT, &resIndex,          NULL,      0,    0,    0, 1},
     {"Fullscreen",      SET_LIST,   optOnOff,    2, &isFullscreen,      NULL,      0,    0,    0, 1},
     {"Frame Limit",     SET_LIST,   optFps,      5, &fpsCapIndex,       NULL,      0,    0,    0, 1},
-    {"Render Scale",    SET_LIST,   optScale,    4, &renderScaleIndex,  NULL,      0,    0,    0, 1},
+    {"Graphics Quality", SET_LIST,  optScale,    4, &renderScaleIndex,  NULL,      0,    0,    0, 1},
     {"Dynamic Res",     SET_LIST,   optOnOff,   2, &dynamicRes,        NULL,      0,    0,    0, 1},
     {"Gamma",           SET_SLIDER, NULL,        0, NULL,               &gammaValue, 0.7f, 1.6f, 0.05f, 1},
     {"Field of View",   SET_LIST,   optFov,      5, &fovIndex,          NULL,      0,    0,    0, 1},
-    {"Language",        SET_LIST,   optLang, LANG_COUNT, &g_lang,      NULL,      0,    0,    0, 1},
     {"Save Slot",       SET_LIST,   optSlot, SAVE_SLOTS, &g_saveSlot,  NULL,      0,    0,    0, 6},
 
     /* ========== 分类: KEY BINDINGS / MOVEMENT ========== */
@@ -797,12 +820,13 @@ static int ContainerTargetCount(int mod, int base) {
    否则后续的地图/容器随机序列会错位，测试就没法做对照了。 */
 int g_forceMod = -1;
 
-/* v1.19 训练场：一条长方形长廊（不是迷宫），尽头站一个标靶 */
+/* v3.1 训练场改成新手教程：一条长廊 + 一个可翻的箱子 + 一个不会动的靶子。
+   不再摆安全屋/配电箱/出口 —— 教程只教「怎么操作」，不要求真的逃出去。 */
 static void BuildTrainingArena(void) {
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++) {
             worldMap[y][x] = 1;
-            explored[y][x] = 1;          /* 长廊全图可见，方便测试 */
+            explored[y][x] = 1;          /* 长廊全图可见，方便看提示 */
         }
 
     /* 一条 3 格高、从 x=2 到 x=21 的直走廊，y 中心 12 */
@@ -815,8 +839,8 @@ static void BuildTrainingArena(void) {
     posY = (float)(MAP_HEIGHT / 2) + 0.5f;
     dirX = 1.0f; dirY = 0.0f;
 
-    /* 标靶：走廊尽头，固定不动 */
-    monster.x = (float)(MAP_WIDTH - 4) + 0.5f;
+    /* 靶子：走廊靠后，固定不动，只用来试投掷/敲击 */
+    monster.x = 18.5f;
     monster.y = (float)(MAP_HEIGHT / 2) + 0.5f;
     monster.active = 1;
     monster.state = 2;
@@ -827,13 +851,51 @@ static void BuildTrainingArena(void) {
     lightBeast.active = 0;
     parasite.active = 0;
     for (int i = 0; i < LEECH_MAX; i++) leeches[i].active = 0;
-    containerCount = 0;
-    breaker.active = 0;
 
-    /* v2.5：训练营里也放一个安全区 —— 用来试「校准小游戏」。 */
-    safeRoom.x = 7.5f;
-    safeRoom.y = (float)(MAP_HEIGHT / 2) + 0.5f;
-    safeRoom.active = 1;
+    /* 教程里没有藏身点；必须清掉上一局留下的 active 标记，
+       否则走廊里会凭空冒出「按 E 躲藏」提示。 */
+    hideSpotCount = 0;
+    hiddenIn = -1;
+    hideSpotNear = -1;
+    for (int i = 0; i < HIDESPOT_MAX; i++) hideSpots[i].active = 0;
+
+    /* v3.2：四个上锁的箱子，四种锁型各一个。
+       最近的一个（DIAL）里放本层唯一的一根保险丝；
+       另外三个是补给/练习箱，可开可不开。
+       这样教程既是「锁盘教学」，又是一个最小可通关关卡：
+       撬开 DIAL 箱 → 拿 1 根保险丝 → 给配电箱通电 → 走到出口。 */
+    containerCount = 4;
+    memset(containers, 0, sizeof(containers));
+    {
+        static const float boxX[4] = { 6.5f, 9.0f, 11.5f, 14.0f };
+        static const int   boxLock[4] = { LOCK_TYPE_DIAL, LOCK_TYPE_WIRE, LOCK_TYPE_EQ, LOCK_TYPE_TUNE };
+        static const int   boxCode[4] = { 0x012, 0x003, 0x01B, 0x02D };
+        static const int   boxContent[4] = { 1, 2, 3, 2 };   /* 1=保险丝，2=电池，3=医疗包 */
+        for (int i = 0; i < 4; i++) {
+            containers[i].x = boxX[i];
+            containers[i].y = (float)(MAP_HEIGHT / 2) + 0.5f;
+            containers[i].active = 1;
+            containers[i].searched = 0;
+            containers[i].locked = 1;
+            containers[i].lockType = boxLock[i];
+            containers[i].lockCode = boxCode[i];
+            containers[i].content = boxContent[i];
+        }
+    }
+
+    /* 最小可通关：1 根保险丝 → 配电箱 → 出口 */
+    safeRoom.active = 0;
+    breaker.x = 17.0f;
+    breaker.y = (float)(MAP_HEIGHT / 2) + 0.5f;
+    breaker.active = 1;
+    breakerOpen = 0;
+    fusesHeld = 0;
+    fusesNeeded = 1;
+    exitX = 21.5f;
+    exitY = (float)(MAP_HEIGHT / 2) + 0.5f;
+
+    /* 手电初始电量为 55%：这样「按住 R 摇电」真的有东西可充。 */
+    battery = (float)BatteryMax() * 0.55f;
 
     /* ===== v3.0：训练场重做 =====
        用户要求：留 1 个（可搜容器）+ 2 个躲藏点 + 1 个解密装置。
@@ -895,6 +957,180 @@ static void BuildTrainingArena(void) {
     }
 
     ApplyFov();
+}
+
+/* ------------------------------------------------------------------ */
+/* v3.1 新手教程：一步一步检测玩家真的做了动作                          */
+/* ------------------------------------------------------------------ */
+
+int TutorialStepTotal(void) { return TUT_DONE - TUT_MOVE; }
+int TutorialStepNumber(void) {
+    if (tutorialDone) return TutorialStepTotal();
+    return tutorialStep + 1;
+}
+
+const char* TutorialObjective(void) {
+    static char buf[160];
+    switch (tutorialStep) {
+    case TUT_MOVE:
+        snprintf(buf, sizeof(buf), "MOVE  -  %s %s %s %s",
+                 VkName(g_bindings[ACT_MOVE_FWD]), VkName(g_bindings[ACT_MOVE_LEFT]),
+                 VkName(g_bindings[ACT_MOVE_BACK]), VkName(g_bindings[ACT_MOVE_RIGHT]));
+        break;
+    case TUT_LOOK:   return "LOOK  -  MOUSE";
+    case TUT_SPRINT:
+        snprintf(buf, sizeof(buf), "SPRINT  -  HOLD %s", VkName(g_bindings[ACT_SPRINT]));
+        break;
+    case TUT_LIGHT:
+        snprintf(buf, sizeof(buf), "FLASHLIGHT  -  %s", VkName(g_bindings[ACT_FLASHLIGHT]));
+        break;
+    case TUT_MAP:
+        snprintf(buf, sizeof(buf), "MAP  -  %s", VkName(g_bindings[ACT_MAP]));
+        break;
+    case TUT_SEARCH:
+        snprintf(buf, sizeof(buf), "LOCK / SEARCH  -  %s", VkName(g_bindings[ACT_INTERACT]));
+        break;
+    case TUT_CRANK:
+        snprintf(buf, sizeof(buf), "CRANK  -  HOLD %s", VkName(g_bindings[ACT_CRANK]));
+        break;
+    case TUT_THROW:
+        snprintf(buf, sizeof(buf), "THROW  -  HOLD %s", VkName(g_bindings[ACT_THROW]));
+        break;
+    case TUT_KNOCK:
+        snprintf(buf, sizeof(buf), "KNOCK  -  HOLD %s", VkName(g_bindings[ACT_CANCEL_CHARGE]));
+        break;
+    case TUT_BREAKER:
+        snprintf(buf, sizeof(buf), "BREAKER  -  HOLD %s", VkName(g_bindings[ACT_INTERACT]));
+        break;
+    case TUT_EXIT:
+        return "REACH THE EXIT";
+    case TUT_DONE:
+    default:
+        return "TUTORIAL COMPLETE";
+    }
+    return buf;
+}
+
+const char* TutorialHint(void) {
+    switch (tutorialStep) {
+    case TUT_MOVE:   return "WALK A FEW STEPS DOWN THE HALL.";
+    case TUT_LOOK:   return "MOVE THE MOUSE TO LOOK AROUND.";
+    case TUT_SPRINT: return "HOLD SPRINT AND RUN FOR A MOMENT.";
+    case TUT_LIGHT:  return "TURN THE FLASHLIGHT OFF, THEN BACK ON.";
+    case TUT_MAP:    return "OPEN THE MAP, THEN CLOSE IT.";
+    case TUT_SEARCH: return "SOLVE THE LOCK, THEN HOLD INTERACT.";
+    case TUT_CRANK:  return "HOLD CRANK UNTIL THE BATTERY RISES.";
+    case TUT_THROW:  return "HOLD THROW, AIM AT THE TARGET, RELEASE.";
+    case TUT_KNOCK:  return "HOLD KNOCK, RELEASE TO MAKE NOISE.";
+    case TUT_BREAKER:return "TAKE THE FUSE TO THE BREAKER.";
+    case TUT_EXIT:   return "THE EXIT IS AT THE END OF THE HALL.";
+    case TUT_DONE:
+    default:         return "NICE WORK. RETURNING TO THE MAIN MENU...";
+    }
+}
+
+void TutorialBegin(void) {
+    tutorialStep = TUT_MOVE;
+    tutorialDone = 0;
+    tutorialTimer = 0.0f;
+    tutorialActionTimer = 0.0f;
+    tutorialStartX = posX;
+    tutorialStartY = posY;
+    tutorialStartDirX = dirX;
+    tutorialStartDirY = dirY;
+    tutorialLightOff = 0;
+    tutorialThrown = 0;
+    tutorialKnocked = 0;
+    tutorialMapOpened = 0;
+    uiDirty = 1;
+}
+
+static void TutorialAdvance(void) {
+    if (tutorialStep >= TUT_DONE) return;
+    tutorialStep++;
+    tutorialTimer = 0.0f;
+    tutorialActionTimer = 0.0f;
+    tutorialStartX = posX;
+    tutorialStartY = posY;
+    tutorialStartDirX = dirX;
+    tutorialStartDirY = dirY;
+    tutorialLightOff = 0;
+    tutorialThrown = 0;
+    tutorialKnocked = 0;
+    tutorialMapOpened = 0;
+    if (tutorialStep >= TUT_DONE) {
+        tutorialStep = TUT_DONE;
+        tutorialDone = 1;
+        tutorialTimer = 0.0f;
+    }
+    uiDirty = 1;
+}
+
+static void TutorialUpdate(float dt) {
+    if (!trainingMode) return;
+
+    if (tutorialDone) {
+        tutorialTimer += dt;
+        if (tutorialTimer >= 3.5f) {
+            /* 教程不写存档，也不影响正式进度，直接回主菜单。 */
+            trainingMode = 0;
+            currentState = STATE_MAIN_MENU;
+            menuSelection = 0;
+            isMapOpen = 0;
+            mapFullScreen = 0;
+            ForceCursor(1);
+            uiDirty = 1;
+        }
+        return;
+    }
+
+    switch (tutorialStep) {
+    case TUT_MOVE:
+        /* 离开起点 1 格就算学会移动 */
+        if (Dist2(posX, posY, tutorialStartX, tutorialStartY) >= 1.0f) TutorialAdvance();
+        break;
+    case TUT_LOOK:
+        /* 视线方向转了约 10 度 */
+        if (dirX * tutorialStartDirX + dirY * tutorialStartDirY < 0.985f) TutorialAdvance();
+        break;
+    case TUT_SPRINT:
+        if (sprinting) tutorialActionTimer += dt;
+        else tutorialActionTimer = 0.0f;
+        if (tutorialActionTimer >= 0.5f) TutorialAdvance();
+        break;
+    case TUT_LIGHT:
+        if (!flashlightOn) tutorialLightOff = 1;
+        if (tutorialLightOff && flashlightOn) TutorialAdvance();
+        break;
+    case TUT_MAP:
+        /* 地图打开时 Update 会提前 return，所以这里不能只看 isMapOpen；
+           改由 WndProc 在真正打开地图时记一个 flag，玩家把地图关掉后再推进。 */
+        if (tutorialMapOpened && !isMapOpen) TutorialAdvance();
+        break;
+    case TUT_SEARCH:
+        /* 第一只箱子（DIAL 锁）里才有保险丝；拿到它就算这一步过了。 */
+        if (fusesHeld > 0) TutorialAdvance();
+        break;
+    case TUT_CRANK:
+        if (cranking || IsActionDown(ACT_CRANK)) tutorialActionTimer += dt;
+        else tutorialActionTimer = 0.0f;
+        if (tutorialActionTimer >= 0.5f) TutorialAdvance();
+        break;
+    case TUT_THROW:
+        if (tutorialThrown) TutorialAdvance();
+        break;
+    case TUT_KNOCK:
+        if (tutorialKnocked) TutorialAdvance();
+        break;
+    case TUT_BREAKER:
+        if (breakerOpen) TutorialAdvance();
+        break;
+    case TUT_EXIT:
+        if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f) TutorialAdvance();
+        break;
+    default:
+        break;
+    }
 }
 
 
@@ -1149,7 +1385,7 @@ void GenerateLevel(void) {
        （用户实测 hideSpotCount=0）。 */
     hideSpotCount = 0;
     {
-        int want = 4 + (rand() % 3);   /* v3.0 平衡：3~5 → 4~6，被追时更有牌可打 */          /* 3~5 个 */
+        int want = 2 + (rand() % 2);          /* v3.3：3~5 → 2~3，藏身点少一点 */
 
         /* ---- 第一轮：严格 ---- */
         for (int tries = 0; tries < 300 && hideSpotCount < want && emptyCount > 0; tries++) {
@@ -1179,18 +1415,9 @@ void GenerateLevel(void) {
             for (int k = 0; k < hideSpotCount; k++)
                 if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < 1.5f) { bad = 1; break; }
             if (bad) continue;
-            /* v3.0 修复（用户实测）：**兜底也不能压在箱子上** ——
-               原来第二轮完全不走 SpotClear，藏身点可以和容器刷在同一格。
-               运行时藏身点的 E 处理在容器之前，会抢先消费按键，
-               表现就是「箱子看得见、按 E 却进了柜子 / 箱子开不了」。 */
-            for (int k = 0; k < containerCount; k++) {
-                if (!containers[k].active) continue;
-                if (Dist2(hx2, hy2, containers[k].x, containers[k].y) < 2.25f) { bad = 1; break; }
-            }
-            if (bad) continue;
-            /* 配电箱和保险库也一样 */
-            if (breaker.active && Dist2(hx2, hy2, breaker.x, breaker.y) < 2.25f) continue;
-            if (safeRoom.active && Dist2(hx2, hy2, safeRoom.x, safeRoom.y) < 2.25f) continue;
+            /* 兜底也不能压在箱子/配电箱上，否则垃圾桶会被道具盖住，
+               玩家只看到 HIDE 提示却找不到桶。 */
+            if (!SpotClear(hx2, hy2, 0.9f, 1, -1)) continue;
             hideSpots[hideSpotCount].x = hx2;
             hideSpots[hideSpotCount].y = hy2;
             hideSpots[hideSpotCount].kind = rand() % 3;
@@ -1951,7 +2178,8 @@ void WeaponTryAttack(float charge) {
        不消耗能量、不判定伤害、不产生子弹。 */
     MakeNoise(posX + dirX * 2.0f, posY + dirY * 2.0f, 11.0f);   /* v3.0 平衡：18 → 11 */
     PlaySfx(SFX_GLASS, 0.55f);
-    pickupMsg = g_lang == LANG_ZH ? "敲击  制造噪音" : "KNOCK";
+    if (trainingMode) tutorialKnocked = 1;
+    pickupMsg = g_lang == LANG_ZH ? "敲击  制造噪音" : "KNOCK  NOISE";
     pickupMsgTimer = 0.8f;
     uiDirty = 1;
     (void)charge;
@@ -2199,6 +2427,11 @@ void Update(float dt) {
         /* v2.5：安全屋里不流失 —— 这是"安全"二字的承诺 */
         if (!inSafe) sanity -= drain * siphonSan * dt;
     }
+    /* v3.3：躲进垃圾桶后缓慢回理智；净恢复约 1.5/秒 */
+    if (hiddenIn >= 0) {
+        sanity += HIDE_SANITY_REGEN * dt;
+        if (sanity > SanityMax()) sanity = SanityMax();
+    }
     lowSanitySeconds += (sanity <= 1.0f) ? dt : 0.0f;   /* v2.2：LAST BREATH */
     if (sanity <= 0.0f) {
         sanity = 0.0f;
@@ -2264,6 +2497,11 @@ void Update(float dt) {
     }
 
 
+    /* v3.1：藏身提示范围从 2.6 格收到 1.2 格。
+       原来是一个直径 5 格的圆，站在房间中间就提示「按 E 躲藏」，
+       玩家会以为整片空地都能藏；其实藏身点是一个具体位置。 */
+    hideSpotNear = -1;
+
     /* v3.0：上锁的箱子**按一下 E 就弹锁盘**，不走长按翻箱；
        没锁的仍然长按搜索。 */
     if (hoverKind == 1 && hoverIndex >= 0 && hoverIndex < MAX_CONTAINERS &&
@@ -2278,12 +2516,31 @@ void Update(float dt) {
     } else {
         /* v3.0：藏身点 —— 找最近的一个，按 E 进出 */
     {
-        hideSpotNear = -1;
-        float bestHD = 1.9f * 1.9f;   /* v3.0：2.6 → 1.9，避免和箱子的 1.25 交互区重叠 */
+        float bestHD = 1.2f * 1.2f;
         for (int i = 0; i < hideSpotCount; i++) {
             if (!hideSpots[i].active) continue;
-            float d = Dist2(posX, posY, hideSpots[i].x, hideSpots[i].y);
-            if (d < bestHD) { bestHD = d; hideSpotNear = i; }
+            float dx = hideSpots[i].x - posX, dy = hideSpots[i].y - posY;
+            float d = dx * dx + dy * dy;
+            if (d >= bestHD) continue;
+            /* 只提示“看得见的垃圾桶”：
+               ① 必须在视线前方（背后的桶不提示，避免走在空地上突然冒出 HIDE）
+               ② 玩家到桶之间不能隔墙
+               ③ 距离 1.2 格以内 */
+            if (dx * dirX + dy * dirY < 0.35f) continue;
+            {
+                int steps = (int)(sqrtf(d) * 10.0f) + 1;
+                int blocked = 0;
+                for (int s = 1; s < steps; s++) {
+                    float t = (float)s / (float)steps;
+                    int cx = (int)floorf(posX + dx * t);
+                    int cy = (int)floorf(posY + dy * t);
+                    if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT ||
+                        worldMap[cy][cx]) { blocked = 1; break; }
+                }
+                if (blocked) continue;
+            }
+            bestHD = d;
+            hideSpotNear = i;
         }
         /* v3.0：**E 必须松开再按才算下一次** ——
            按住 0.5 秒时 WM_KEYDOWN 会自动重复，每次重复都置 keyPressed，
@@ -2806,20 +3063,41 @@ void Update(float dt) {
         holdTimer = 0.0f;
     }
 
-    /* ---- v2.0 武器攻击（鼠标右键，蓄力 0.45 秒）----
-       三把武器各烧一条资源：扳手→体力、信号枪→电量、符印→理智。 */
+    /* ---- v2.0 武器攻击 / v3.0 敲击（按住蓄力 0.45 秒）----
+       三把武器各烧一条资源：扳手→体力、信号枪→电量、符印→理智。
+
+       v3.1：**严格的「未按下 -> 按下」边沿检测**。
+       以前只要这一帧按着就加蓄力，于是用鼠标点主菜单「新游戏」进入游戏时，
+       左键还物理按着，下一帧就成了攻击蓄力，松手直接敲一下 ——
+       玩家看到的就是「一进去就会敲」。现在：
+         - 只有 atkPrev == 0 && atkNow == 1 才允许开始蓄力；
+         - 刚进游戏（resetInputState）时把 atkPrev 同步成当前物理状态，
+           已经按着的键不算新按下，必须先松开再按才会敲。 */
     {
         static int atkPrev = -1;
-        int atkNow = IsActionDown(ACT_CANCEL_CHARGE);
+        /* 锁盘打开时左键属于 UI，不能进入武器蓄力 */
+        int atkNow = (!lockActive) && IsActionDown(ACT_CANCEL_CHARGE);
+        if (resetInputState) {
+            atkPrev = atkNow;
+            weaponAtkCharge = 0.0f;
+        }
         if (atkPrev < 0) atkPrev = atkNow;
+        int atkPressed = (atkNow && !atkPrev);
         if (weaponCd > 0.0f) {
             weaponCd -= dt;
             if (weaponCd < 0.0f) weaponCd = 0.0f;
         }
-        if (atkNow && !holdingNow && !cranking && !isCharging) {   /* v2.0：投掷蓄力中不抢右键 */
+        if (atkPressed && !holdingNow && !cranking && !isCharging) {
+            /* 未按下 -> 按下：开始蓄力（投掷蓄力中不抢键） */
+            weaponAtkCharge = dt / 0.45f;
+            if (weaponAtkCharge > 1.0f) weaponAtkCharge = 1.0f;
+        } else if (atkNow && weaponAtkCharge > 0.0f &&
+                   !holdingNow && !cranking && !isCharging) {
+            /* 持续按住：累积蓄力 */
             weaponAtkCharge += dt / 0.45f;
             if (weaponAtkCharge > 1.0f) weaponAtkCharge = 1.0f;
-        } else if (atkPrev && weaponAtkCharge > 0.10f) {
+        } else if (atkPrev && !atkNow && weaponAtkCharge > 0.10f) {
+            /* 松开：释放攻击 / 敲击 */
             WeaponTryAttack(weaponAtkCharge);
             weaponAtkCharge = 0.0f;
         } else {
@@ -2858,8 +3136,8 @@ void Update(float dt) {
         isCharging = 0;
         mouseCharge = 0.0f;
     }
-    int mouseLeftNow = IsActionDown(ACT_THROW);
-    int mouseRightNow = IsActionDown(ACT_CANCEL_CHARGE);
+    int mouseLeftNow = (!lockActive) && IsActionDown(ACT_THROW);
+    int mouseRightNow = (!lockActive) && IsActionDown(ACT_CANCEL_CHARGE);
 
     if (mouseLeftNow && !mouseLeftPrev && throwCd <= 0.0f && !holdingNow && !cranking) {
         /* 未按下 -> 按下：开始蓄力 */
@@ -2900,6 +3178,7 @@ void Update(float dt) {
                     else if (sel == 6) gluePots--;
                     else mirrors--;
                     throwCd = 0.45f;
+                    if (trainingMode) tutorialThrown = 1;
                 } else {
                     pickupMsg = "NO ROOM";
                     pickupMsgTimer = 1.0f;
@@ -2986,7 +3265,9 @@ void Update(float dt) {
         flares = bottles = bricks = acids = smokeBombs = 99;
         firePots = gluePots = mirrors = 99;
         sanity = 100.0f;
-        battery = (float)BatteryMax();
+        /* 教程里手电电量会正常消耗，这样「按住 R 摇电」才有可见效果；
+           只做上限夹取，不再每帧强行充满。 */
+        if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
         stamina = StaminaMax();
         monster.active = 1;
         monster.state = 2;              /* 原地不动，当标本 */
@@ -3091,8 +3372,9 @@ void Update(float dt) {
         if (pickupMsgTimer <= 0.0f) pickupMsg = NULL;
     }
 
-    /* 出口：通电后才能进下一关；第 WIN_LEVEL 层的出口 = 逃出生天 */
-    if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f) {
+    /* 出口：通电后才能进下一关；第 WIN_LEVEL 层的出口 = 逃出生天。
+       教程的出口只负责把教程标记为完成，不参与正常换层。 */
+    if (!trainingMode && breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f) {
         /* NOCTURNAL：本层全程手电关着过关 */
         if (!flashlightOn) flashlightOffLevel = 1;
 
@@ -3241,11 +3523,7 @@ void Update(float dt) {
         /* v1.8：通过本层 → 事件加分进本局总分 */
         if (evThisLevel >= 0) eventBonus += EventScore(evThisLevel);
 
-        /* v1.8：每通关 2 层给一次局内技能三选一（下一层的层号判定） */
-        if (currentState == STATE_PLAYING) {
-            if (currentLevel % INRUN_PICK_EVERY == 0) OpenSkillPick();   /* 每 2 层：局内技能 */
-            else                                     OpenRelicPick();    /* 其余层：遗物 */
-        }
+        /* v3.3：取消每层/每两层的三选一。玩家明确要求不再弹 CHOOSE ONE。 */
 
         /* 重置本层/本局的成就追踪变量 */
         sprintedThisLevel = 0;
@@ -3257,6 +3535,9 @@ void Update(float dt) {
         flashTime = 0.15f;
         UpdateExplored();
     }
+
+    /* 新手教程：放在最后，保证所有交互/移动状态都已经更新完 */
+    if (trainingMode) TutorialUpdate(dt);
 }
 /* ------------------------------------------------------------------ */
 /* 菜单动作                                                            */
@@ -3599,6 +3880,7 @@ void StartGame(void) {
     /* 生成关卡后清除过关白屏时间，避免新游戏开局 0.15s 逻辑不跑 */
     flashTime = 0.0f;
     UpdateExplored();
+    if (trainingMode) TutorialBegin();
     ForceCursor(0);
     firstMouseMove = 1;
     uiDirty = 1;
@@ -3866,6 +4148,7 @@ void ApplySetting(int item, int value) {
     if (settings[item].value == &resIndex || settings[item].value == &isFullscreen) ApplyDisplayMode();
     else if (settings[item].value == &renderScaleIndex) InitPixels();
     else if (settings[item].value == &fovIndex) ApplyFov();
+    SaveGame();   /* 设置改完立刻落盘，不再等退出设置页 */
     uiDirty = 1;
 }
 
@@ -3936,14 +4219,9 @@ void ActivateMenuItem(void) {
             SaveGame();
             StartDailyRun();
         } else if (sel == MainMenuCount() - 2) {
-            /* v1.17：训练营 —— 无限道具 + 标本 + 右侧伤害屏 */
-            DeleteSave();
+            /* v3.1：训练营改成新手教程 —— 不删档，不影响正式进度 */
             pendingStartMode = START_TRAINING;
             StartGame();
-            trainingTotal = trainingCount = trainingLast = trainingDps = 0;
-            for (int i = 0; i < 6; i++) trainingHist[i] = 0;
-            flares = bottles = bricks = acids = smokeBombs = 99;
-            firePots = gluePots = mirrors = 99;
             uiDirty = 1;
         } else {
             SaveGame();
@@ -4581,11 +4859,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (LOWORD(lParam) == HTCLIENT) {
                 /* 游戏中（含小窗地图）隐藏光标 —— 鼠标是锁定的。
                    只有全屏地图才显示箭头光标。 */
-                /* v3.0：**锁盘开着也算"鼠标自由"** ——
-       原来漏了 lockActive，开锁后用 ForceCursor(1) 显示出来的指针，
-       只要一动鼠标就被 WM_SETCURSOR 的 SetCursor(NULL) 又藏回去
-       （验证报告：CURSOR_SHOWING 由 1 变 0）。 */
-    int mouseFree = (currentState != STATE_PLAYING) || (isMapOpen && mapFullScreen) || lockActive;
+                int mouseFree = (currentState != STATE_PLAYING) ||
+                                (isMapOpen && mapFullScreen) || lockActive;
                 if (!mouseFree) SetCursor(NULL);
                 else SetCursor(LoadCursor(NULL, IDC_ARROW));
                 return TRUE;
@@ -4603,14 +4878,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 MouseToLogical(&lmx, &lmy);
                 g_mousePos.x = lmx;
                 g_mousePos.y = lmy;
-                /* v3.0：**锁盘打开时立刻返回，别走下面的视角代码** ——
-                   用户实测「解锁时角色乱动、鼠标不能动」。
-                   原因：下面的视角代码每帧 SetCursorPos(center) 把光标拉回屏幕中心，
-                   同时按位移旋转相机。于是：
-                     · 光标被强制回中 → 鼠标「不能动」
-                     · 相机被旋转     → 画面「乱动」
-                   锁盘是鼠标操作的模态层，绝不能让它跑视角逻辑。 */
-                firstMouseMove = 1;
+                /* 锁盘打开时鼠标是 UI 指针，不能再回中/转视角 */
+                uiDirty = 1;
                 return 0;
             }
 
@@ -4663,7 +4932,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     settings[popupItem].kind == SET_SLIDER) {
                     const SettingItem* it = &settings[popupItem];
                     MenuGeo p = GetPopupGeo();
-                    float v = SliderXToValue(p, mx, it->fmin, it->fmax, it->fstep);
+                    int lmx = mx, lmy = my;
+                    MouseToLogical(&lmx, &lmy);   /* 拖拽坐标也必须换到 UI 逻辑空间 */
+                    float v = SliderXToValue(p, lmx, it->fmin, it->fmax, it->fstep);
                     if (v != *it->fvalue) { *it->fvalue = v; uiDirty = 1; }
                     return 0;
                 }
@@ -4864,7 +5135,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_LBUTTONUP:
             BenchDragEnd();   /* v2.9：结束画布拖拽 */
-            if (sliderDragging) ReleaseCapture();
+            if (sliderDragging) {
+                ReleaseCapture();
+                SaveGame();   /* 拖动滑块松手就落盘 */
+            }
             sliderDragging = 0;
             return 0;
 
@@ -4894,27 +5168,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                玩家得重新按 E 再从头对一遍（用户反馈「解密码的时候按键会出 bug」）。
                上游原本就是 M 关闭（原版截图底栏写的是 M: CLOSE）。 */
             if (lockActive) {
-                if (wParam == VK_ESCAPE || wParam == 'M') {
-                    CloseLockOverlay();
-                }
-                return 0;      /* 其它键一律吞掉，不影响锁盘 */
-            }
-
-            /* v3.0：**开局引导可以按键关掉** ——
-               玩家反馈「不知道怎么关闭新手指引」。任意键关闭，
-               但排在锁盘之后（锁盘优先，不能抢它的按键）。 */
-            {
-                extern int tutorialOff;
-                /* v3.0：**只有空格能关掉引导** ——
-                   用户要求「开局的引导需要按空格来取消」。
-                   原来任意键都关，导致按 W 想走路也会顺手把说明关掉。 */
-                if (!tutorialOff && currentState == STATE_PLAYING && runTime < 25.0f
-                    && wParam == VK_SPACE) {
-                    tutorialOff = 1;
-                    resetInputState = 1;
-                    uiDirty = 1;
-                    return 0;
-                }
+                /* 打开锁盘的那次交互键还按着时，Windows 会持续发 WM_KEYDOWN；
+                   不能把第一次自动重复当成「任意键退出」，否则锁盘刚开就关。 */
+                if ((int)wParam == lockIgnoreVK) return 0;
+                CloseLockOverlay();
+                return 0;
             }
             /* 小键盘数字（NumLock 开启时是 VK_NUMPAD0..9）统一折算成主键盘数字，
                这样 1/2/3 选投掷槽位、以及改绑数字键都不会因为按小键盘而失效。 */
@@ -5006,6 +5264,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         if (menuConfirm || menuCancel) {
                             settingsPopupOpen = 0;
                             sliderDragging = 0;
+                            SaveGame();   /* 滑块值确认后立刻落盘 */
                             uiDirty = 1;
                         }
                     } else {
@@ -5166,6 +5425,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     } else {
                         isMapOpen = 1;
                         mapFullScreen = 1;
+                        if (trainingMode && tutorialStep == TUT_MAP) tutorialMapOpened = 1;
                     }
                     MapCursorRefresh();
                 }
@@ -5177,6 +5437,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     isMapOpen = 1;
                     mapFullScreen = 0;
                     mapHeld = 1;
+                    if (trainingMode && tutorialStep == TUT_MAP) tutorialMapOpened = 1;
                     MapCursorRefresh();
                 }
                 if (wParam == (WPARAM)g_bindings[ACT_FLASHLIGHT]) {
@@ -5187,6 +5448,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_KEYUP:
+            /* 锁盘打开键松开后，才允许它重新作为「任意键退出」 */
+            if ((int)wParam == lockIgnoreVK) lockIgnoreVK = 0;
             /* 与 WM_KEYDOWN 保持同一套折算，否则小键盘数字的 keys[] 会卡在按下状态 */
             if (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9)
                 wParam = (WPARAM)('0' + (wParam - VK_NUMPAD0));

@@ -152,14 +152,19 @@ static const unsigned char fontData[95][FONT_H] = {
 
 /* 文字直接写进像素缓冲：和面板同一层，不存在“文字层丢失” */
 static int TextScale(void) {
-    /* v2.2：UI 在渲染空间排版，字形固定 2 倍（12x2=24 渲染像素），
-       整帧一起被拉伸到窗口，所以任何分辨率下比例都一致。 */
-    return (renderH < 300) ? 1 : 2;
+    /* v3.3：像素字体的缩放必须和 renderH 同步。
+       原来固定 2 倍，但 TextHeightWin/TextWidthWin 又乘了 renderH/458，
+       于是布局按“大字”排、实际画出来的字却只有 24px：
+       文字偏左（居中按错误宽度算）、MINIMAL 下字大得离谱。
+       现在实际绘制、测量、布局统一用同一个整数缩放。 */
+    int s = (renderH * 2) / 458;   /* 设计基准 458；向下取整，低画质只会更小，不会突然变大 */
+    if (s < 1) s = 1;
+    if (s > 6) s = 6;
+    return s;
 }
 
 static int TextAdvWin(void) {
-    /* v3.0：同 TextHeightWin —— 用高度基准，保证字符宽高比不变 */
-    return FONT_W * TextScale() * renderH / 458;
+    return FONT_W * TextScale();
 }
 
 int TextWidthWin(const char* t) {
@@ -235,15 +240,10 @@ static void ClampRowText(char* buf, int availPx) {
 }
 
 int TextHeightWin(void) {
-    /* v3.0：**字号必须和 UIS() 站在同一基准**。
-       原来返回 FONT_H*TextScale() *winH/renderH，而 SyncWindowSize
-       每帧把 winW/winH 覆盖成 renderW/renderH → 那个比值恒为 1，
-       于是字高恒定 24px；但 UIS() 跟 renderH 缩放。
-       两者只在 renderH=458（旧的 28 万像素预算）时相等 ——
-       现在预算是 90 万（renderH≈711），UIS 系统性大 1.55 倍，
-       表现就是「框越大、字相对越小」，高分辨率像空面板。
-       改成跟 renderH 比 458 的设计基准，两套比例就永远一致。 */
-    return FONT_H * TextScale() * renderH / 458;
+    /* 实际绘制也用 FONT_H * TextScale()，这里必须返回同一个值。
+       之前还乘 renderH/458，布局以为字很高、实际只画 24px，
+       居中、行高、滑条命中都会跟着偏。 */
+    return FONT_H * TextScale();
 }
 
 /* xWin/yWin 用窗口坐标，内部换算到渲染坐标 */
@@ -377,9 +377,10 @@ static void DrawTitleWin(const char* t, int yWin, unsigned int color) {
 #define UI_BASE_TH 31          /* 800x600 时 TextHeightWin() 的实测值 */
 
 int UIS(int v) {
-    /* v2.2：UI 在渲染空间排版，基准高度 = 800x600 时的 renderH（458）。
-       这样字号（TH=24 渲染像素）和行高永远同比例，窗口多大都一样。 */
-    long s = ((long)v * renderH * 2 + 458) / 916;
+    /* v3.3：UI 尺寸跟**实际字体高度**走，而不是单独跟 renderH 走。
+       否则字体缩放取整后（比如 MINIMAL 下 s=1）面板还按 renderH 算，
+       两者比例又对不上，界面就会忽大忽小。 */
+    long s = ((long)v * TextHeightWin() + 12) / 24;
     if (s < 6) s = 6;
     if (s > 2000) s = 2000;
     return (int)s;
@@ -925,15 +926,15 @@ static const char* MenuLabel(int i) {
     static char buf[128];
     switch (currentState) {
         case STATE_MAIN_MENU: {
-            static const char* withSave[] = {"Continue", "New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
+            static const char* withSave[] = {"Continue", "New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
             /* v2.0 中文菜单 */
-            static const char* withSaveZh[] = {"继续", "新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
-            static const char* noSaveZh[]   = {"新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
-            static const char* withEndlessZh[]   = {"继续", "新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
-            static const char* noSaveEndlessZh[] = {"新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "训练营", "退出"};
-            static const char* noSave[] = {"New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
-            static const char* withEndless[] = {"Continue", "New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
-            static const char* noSaveEndless[] = {"New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Training", "Quit"};
+            static const char* withSaveZh[] = {"继续", "新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
+            static const char* noSaveZh[]   = {"新游戏", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
+            static const char* withEndlessZh[]   = {"继续", "新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
+            static const char* noSaveEndlessZh[] = {"新游戏", "无尽", "大厅", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
+            static const char* noSave[] = {"New Run", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
+            static const char* withEndless[] = {"Continue", "New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
+            static const char* noSaveEndless[] = {"New Run", "Endless", "Hub", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
             /* Endless 解锁条件：通关过第 10 层 */
             int endlessUnlocked = (bestLevel >= 10) || gameWon;
             int zh = (g_lang == LANG_ZH);
@@ -973,18 +974,18 @@ static const char* MenuLabel(int i) {
                 case 0: sprintf(kb, "%s:  %s %s %s %s", Tr("MOVE","移动"),
                                 VkName(g_bindings[ACT_MOVE_FWD]), VkName(g_bindings[ACT_MOVE_LEFT]),
                                 VkName(g_bindings[ACT_MOVE_BACK]), VkName(g_bindings[ACT_MOVE_RIGHT])); break;
-                case 1: sprintf(kb, "%s: %s  (噪声)", Tr("SPRINT","冲刺"), VkName(g_bindings[ACT_SPRINT])); break;
-                case 2: sprintf(kb, "%s: 长按 %s  (噪声)", Tr("SEARCH","翻找"), VkName(g_bindings[ACT_INTERACT])); break;
-                case 3: sprintf(kb, "%s: 长按 %s  (+32)", Tr("CRANK","摇电"), VkName(g_bindings[ACT_CRANK])); break;
+                case 1: sprintf(kb, "%s: %s  (NOISE)", Tr("SPRINT","冲刺"), VkName(g_bindings[ACT_SPRINT])); break;
+                case 2: sprintf(kb, "%s: HOLD %s  (NOISE)", Tr("SEARCH","翻找"), VkName(g_bindings[ACT_INTERACT])); break;
+                case 3: sprintf(kb, "%s: HOLD %s  (+32)", Tr("CRANK","摇电"), VkName(g_bindings[ACT_CRANK])); break;
                 case 4: sprintf(kb, "%s: %s", Tr("LIGHT","手电"), VkName(g_bindings[ACT_FLASHLIGHT])); break;
-                case 5: sprintf(kb, "%s: %s (全图)  长按 TAB (小图)  -10/秒", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
+                case 5: sprintf(kb, "%s: %s (FULL)  TAB (MINI)  -10/S", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
                 case 6: sprintf(kb, "%s: %s", Tr("THROW","投掷"), VkName(g_bindings[ACT_THROW])); break;
-                case 7: sprintf(kb, "%s: %s %s %s  (滚轮: 全部)", Tr("SLOT","选槽"),
+                case 7: sprintf(kb, "%s: %s %s %s  (WHEEL: ALL)", Tr("SLOT","选槽"),
                                 VkName(g_bindings[ACT_SELECT_1]), VkName(g_bindings[ACT_SELECT_2]),
                                 VkName(g_bindings[ACT_SELECT_3])); break;
-                case 8: sprintf(kb, "%s: %s  (敲击制造噪音)", Tr("KNOCK","敲击"),
+                case 8: sprintf(kb, "%s: %s  (KNOCK: NOISE)", Tr("KNOCK","敲击"),
                                 VkName(g_bindings[ACT_CANCEL_CHARGE])); break;
-                default: sprintf(kb, "%s: %s  闪避: %s", Tr("PAUSE","暂停"),
+                default: sprintf(kb, "%s: %s  DODGE: %s", Tr("PAUSE","暂停"),
                                 VkName(g_bindings[ACT_PAUSE]), VkName(g_bindings[ACT_DODGE])); break;
                 }
                 {
@@ -2737,8 +2738,8 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
             }
             if (nvis > 0) {
                 if (curVis < 0) curVis = 0;
-                /* 锚点：当前行固定在 y0，上面一行露一点，下面一行露一点 */
-                int y0 = UIS(44);   /* v2.6：18 太靠边会被切掉顶行，下移到 44 */
+                /* 锚点：当前行固定在右下角，上面一行露在它上方 */
+                int y0 = winH - UIS(120);
 
                 for (int k = -1; k <= 1; k++) {
                     /* v3.0：**件数不够就不画上下行** ——
@@ -3073,14 +3074,16 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
                         Tr("PRESS E  -  HIDE", "按 E 躲进去"), 0x0090D0F0u);
         }
 
-        /* v3.0：**删掉「敌人状态」雷达** ——
-           历史：
-             ① 最初播报 WANDERING / SEARCHING / HUNTING —— 等于把 AI 明着播报
-             ② 改成 !! / ? —— 用户截图：「右下角出现红色感叹号，有bug」
-           两次都不对。恐怖游戏不该在 HUD 上告诉玩家「敌人在想什么」，
-           该让玩家靠声音、脚步、画面边缘的压迫感去感知。
-           （感知系改造树里的「预知」已经提供了屏幕边缘泛红，
-             那是更克制、更符合类型的做法。） */
+        /* ② 敌人状态（三态雷达）—— 怪不可杀后这是唯一的威胁指标 */
+        if (monster.active && currentState == STATE_PLAYING) {
+            const char* st = NULL;
+            unsigned int sc = 0x0080FF80u;
+            if (monster.state == 1)      { st = Tr("HUNTING", "追捕中"); sc = 0x00FF3020u; }
+            else if (monster.state == 2) { st = Tr("SEARCHING", "搜寻中"); sc = 0x00E0A020u; }
+            else                          { st = Tr("WANDERING", "游荡"); sc = 0x0080C080u; }
+            int tw3 = TextWidthWin(st);
+            DrawTextWin(winW - UIS(24) - tw3, winH - UIS(210), st, sc);
+        }
     }
 
     DrawTextWin(labelX, y1 - UIS(3), "LIGHT", 0x00A0A0A0u);
@@ -3385,6 +3388,40 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
        「M: FULL  M: CLOSE」，再在底部挂一行是重复的。 */
 }
 
+/* v3.1：新手教程的顶部提示条。步骤文案和推进逻辑都在 game.c，
+   这里只负责画，避免两边各维护一套步骤。 */
+static void DrawTutorialPanel(void) {
+    if (!trainingMode) return;
+
+    int th = TextHeightWin();
+    int w = UIS(620);
+    if (w > winW - UIS(24)) w = winW - UIS(24);
+    int h = th * 3 + UIS(30);
+    int x = (winW - w) / 2;
+    int y = UIS(120);
+    if (y + h > winH * 2 / 3) y = UIS(56);
+
+    BlendRectWin(x, y, x + w, y + h, 0x00081018u, 0.90f);
+    FrameRectWin(x, y, x + w, y + h, 0x00C8A040u, 0.92f, UIS(2));
+
+    char line[160];
+
+    if (tutorialDone) {
+        DrawTextCenterWin(winW / 2, y + UIS(10), "TUTORIAL COMPLETE", 0x00FFE070u);
+    } else {
+        sprintf(line, "TUTORIAL  %d / %d", TutorialStepNumber(), TutorialStepTotal());
+        DrawTextCenterWin(winW / 2, y + UIS(10), line, 0x00FFE070u);
+    }
+
+    snprintf(line, sizeof(line), "%s", TutorialObjective());
+    ClampRowText(line, w - UIS(24));
+    DrawTextCenterWin(winW / 2, y + UIS(10) + th, line, 0x00FFFFFFu);
+
+    snprintf(line, sizeof(line), "%s", TutorialHint());
+    ClampRowText(line, w - UIS(24));
+    DrawTextCenterWin(winW / 2, y + UIS(10) + th * 2, line, 0x00A8B4B8u);
+}
+
 /* ------------------------------------------------------------------ */
 /* 存档失败横幅                                                        */
 /* ------------------------------------------------------------------ */
@@ -3520,6 +3557,7 @@ void RenderFrame(void) {
            小窗地图则照常画 HUD（它只是右下角一个叠加层）。 */
     } else {
         DrawHUD();
+        DrawTutorialPanel();
     }
 
     /* v3.0：**帧末覆盖层** —— 不管什么状态都要画
@@ -3528,14 +3566,30 @@ void RenderFrame(void) {
        结果玩游戏时锁盘一帧都不显示、藏身也没有任何视觉反馈。 */
     DrawLockOverlay();
     {
-        /* v3.0：**校准时不能盖遮罩** ——
-           用户实测「在衣柜全黑的情况下看不到判定条」：
-           校准条画在 UIS(146)（靠上），而遮罩上下各盖 37%，正好埋掉。
-           校准时让遮罩让路 —— 此时玩家本来就在盯着滑块，
-           看不清走廊不影响玩法。 */
-        {
-            extern int calibActive;
-            if (calibActive) goto skip_hide_mask;
+        extern int hiddenIn;
+        if (hiddenIn >= 0) {
+            /* 躲进垃圾桶：只留中间一条很窄的缝，四周是桶壁。
+               旧版只是四条暗边，中间还留一大块，看起来不像“藏在里面”。 */
+            int ow = winW * 18 / 100;
+            int oh = winH * 38 / 100;
+            if (ow < 90) ow = 90;
+            if (oh < 110) oh = 110;
+            int ox0 = (winW - ow) / 2;
+            int oy0 = (winH - oh) / 2;
+            int ox1 = ox0 + ow;
+            int oy1 = oy0 + oh;
+
+            BlendRectWin(0, 0, ox0, winH, 0x00000000u, 0.94f);
+            BlendRectWin(ox1, 0, winW, winH, 0x00000000u, 0.94f);
+            BlendRectWin(ox0, 0, ox1, oy0, 0x00000000u, 0.94f);
+            BlendRectWin(ox0, oy1, ox1, winH, 0x00000000u, 0.94f);
+
+            /* 铁皮桶口：内圈阴影 + 外圈金属边 */
+            FrameRectWin(ox0 - UIS(4), oy0 - UIS(4), ox1 + UIS(4), oy1 + UIS(4),
+                         0x00182018u, 0.95f, UIS(5));
+            FrameRectWin(ox0, oy0, ox1, oy1, 0x00506058u, 0.9f, UIS(2));
+            BlendRectWin(ox0, oy0, ox1, oy0 + UIS(8), 0x00000000u, 0.55f);
+            BlendRectWin(ox0, oy1 - UIS(10), ox1, oy1, 0x00000000u, 0.45f);
         }
             /* v3.0：**藏身遮罩取消** ——
                用户实测：「躲在柜子里视野受限，根本看不到任何小游戏提示」。

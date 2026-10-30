@@ -39,6 +39,9 @@ enum {
     SPR_MON_JUMPER, SPR_MON_SHADE, SPR_MON_SPIDER, SPR_MON_ECHO,
     /* 道具 */
     SPR_PROP_CRATE, SPR_PROP_BREAKER, SPR_PROP_EXIT, SPR_PROP_SAFE,
+    SPR_PROP_CRATE_OPEN,   /* 已翻过的空箱（盖子掀开） */
+    SPR_PROP_CRATE_LOCKED, /* 未解锁：正面挂金锁 */
+    SPR_PROP_TRASH,        /* 藏身点：垃圾桶 */
     /* UI（v2.2） */
     SPR_UI_PANEL,      /* 9-slice 铆接金属板 */
     SPR_UI_PANEL_HOT,  /* 同上，聚焦态（边框泛琥珀） */
