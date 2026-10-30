@@ -78,6 +78,9 @@ extern int hubSelection;
 
 /* ---- 投掷物 ---- */
 extern int flares, bottles;
+/* v3.3 投掷物重做后新增的两个槽位计数 */
+extern int echoBolts;   /* 回声弹 */
+extern int decoys;      /* 玩家诱饵玩偶 */
 extern int throwSelected;           /* 0=荧光棒, 1=玻璃瓶, 2=预留 */
 extern Thrown thrown[MAX_THROWN];
 extern Shot shot[MAX_SHOTS];

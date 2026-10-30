@@ -1082,6 +1082,17 @@ static float FlareLightAt(float wx, float wy) {
         if (d2 > R * R) continue;
         float f = 1.0f - sqrtf(d2) / R;
         f = f * f * 0.95f;
+        /* v3.3 **亮度随剩余寿命衰减** ——
+           原来 25 秒内亮度恒定，然后「啪」一下灭掉，玩家没有任何预兆。
+           现在最后 8 秒线性变暗到 25%，熄灭前会明显发暗，
+           「该找下一个光源了」变成可感知的信息。 */
+        float life = thrown[i].life;
+        float dim = 1.0f;
+        if (life < 8.0f) {
+            dim = 0.25f + 0.75f * (life / 8.0f);
+            if (dim < 0.25f) dim = 0.25f;
+        }
+        f *= dim;
         if (f > best) best = f;
     }
     return best;
@@ -1202,8 +1213,15 @@ static void DrawOrbSprite(float wx, float wy, float z, float worldR,
 /* 荧光棒（落地发光体也用同一套，只是 z=0、半径略大） */
 static void DrawFlareSprite(int idx) {
     if (!thrown[idx].active) return;
+    /* v3.3：最后 8 秒精灵也跟着变暗，和环境亮度同步 */
+    float a = 1.0f;
+    if (thrown[idx].life < 8.0f) {
+        a = 0.30f + 0.70f * (thrown[idx].life / 8.0f);
+        if (a < 0.30f) a = 0.30f;
+    }
+    float size = 0.17f * (0.75f + 0.25f * a);
     DrawOrbSprite(thrown[idx].x, thrown[idx].y, thrown[idx].z,
-                  0.17f, 0x00fff8e0u, 0x00ff9050u, 1.00f);
+                  size, 0x00fff8e0u, 0x00ff9050u, a);
 }
 
 /* ---------------- v1.19 投掷物建模 ----------------

@@ -104,6 +104,18 @@ static float MonsterSpeedFor(int level, float base, float modMul) {
     return s;
 }
 
+
+/* v3.3 胶水：这个位置有没有粘胶区域。返回 1 = 踩到了。
+   怪物和追光鬼共用 —— 胶水对两种追击者都有效，这是它值钱的地方。 */
+static int InGlue(float x, float y) {
+    for (int i = 0; i < MAX_GLUE; i++) {
+        if (!glues[i].active) continue;
+        float dx = x - glues[i].x, dy = y - glues[i].y;
+        if (dx * dx + dy * dy < GLUE_RADIUS * GLUE_RADIUS) return 1;
+    }
+    return 0;
+}
+
 /* 被抓后的无敌时间：深层收紧，让连续被抓不再是无解连击。
    第 6 层开始，每深一层减 0.1 秒，第 15 层触到下限 3.0 秒。 */
 static float HitCooldownFor(int level) {
@@ -249,6 +261,20 @@ float noiseDisplay = 0.0f;
 float noiseDisplayTimer = 0.0f;
 float noiseSrcX = 0.0f, noiseSrcY = 0.0f;   /* v3.0：听觉用 */
 
+/* v3.3 光球护佑：藏身点 4 格内有没有还亮着的光球。
+   有的话，躲在里面更难被搜到 —— 柜门缝隙被外面的光晃着，怪不容易注意到。 */
+static int FlareNearHide(void) {
+    extern Thrown thrown[MAX_THROWN];
+    if (hiddenIn < 0 || hiddenIn >= hideSpotCount) return 0;
+    float hx = hideSpots[hiddenIn].x, hy = hideSpots[hiddenIn].y;
+    for (int i = 0; i < MAX_THROWN; i++) {
+        if (!thrown[i].active) continue;
+        float dx = thrown[i].x - hx, dy = thrown[i].y - hy;
+        if (dx * dx + dy * dy <= 16.0f) return 1;    /* 4 格 */
+    }
+    return 0;
+}
+
 void MakeNoise(float x, float y, float radius) {
     /* v3.0：**先记录再判距离** ——
        原来这段在主循环之后，而前面有 `if (Dist2 > radius) return;`，
@@ -294,11 +320,18 @@ void MakeNoise(float x, float y, float radius) {
             mm->ty = y;
             mm->repath = 0.0f;
             mm->stateTimer = 0.0f;
-            /* v3.0 改造树「屏息」：玩家藏着时，追捕者更快放弃搜寻。
+            
+
+/* v3.0 改造树「屏息」：玩家藏着时，追捕者更快放弃搜寻。
                之前这条补丁没落地（验证报告：BenchHideStealth 在 exe 里 0 个调用点）。 */
             /* v3.0：屏息 = 改造树 + 技能树 HOLD BREATH，再加上静面 STILL FACE */
             if (hiddenIn >= 0 && (BenchHideStealth() < 1.0f || HideStealthMul() < 1.0f)) {
                 mm->stateTimer = 1.2f * StillFaceMul();
+            }
+            /* v3.3：光球护佑 —— 藏身点 4 格内有亮着的光球时，
+               怪更快放弃（光晃着柜门缝，它认不准）。 */
+            if (hiddenIn >= 0 && FlareNearHide()) {
+                if (mm->stateTimer > 0.8f) mm->stateTimer = 0.8f;
             }
 
         }
@@ -442,7 +475,8 @@ void UpdateLightBeast(float dt) {
         float d = sqrtf(dx * dx + dy * dy);
         if (d < 0.12f) lightBeast.pathIdx++;
         else {
-            float step = lightBeast.speed * dt;
+            /* v3.3：追光鬼同样会被胶水减速 */
+    float step = lightBeast.speed * dt * (InGlue(lightBeast.x, lightBeast.y) ? GLUE_MONSTER_MUL : 1.0f);
             if (step > d) step = d;
             lightBeast.x += dx / d * step;
             lightBeast.y += dy / d * step;
@@ -450,7 +484,10 @@ void UpdateLightBeast(float dt) {
     }
 
     float pd2 = Dist2(lightBeast.x, lightBeast.y, posX, posY);
-    if (lightBeast.hitCooldown <= 0.0f && pd2 < 0.55f) {
+    /* v3.3：诱饵同样能替玩家挡追光鬼这一下 */
+    if (lightBeast.hitCooldown <= 0.0f && pd2 < 0.55f && DecoyIntercept()) {
+        lightBeast.hitCooldown = HIT_COOLDOWN_BASE;
+    } else if (lightBeast.hitCooldown <= 0.0f && pd2 < 0.55f) {
             if (hiddenIn < 0) {   /* v3.0：藏起来抓不到 */
         sanity -= 14.0f;
             }
@@ -778,7 +815,8 @@ void UpdateMonster(float dt) {
         if (d < 0.12f) {
             monster.pathIdx++;
         } else {
-            float step = monster.speed * dt;
+            /* v3.3：踩到胶水 → 移速 x0.20（-80%）。还在动，只是变成慢动作。 */
+    float step = monster.speed * dt * (InGlue(monster.x, monster.y) ? GLUE_MONSTER_MUL : 1.0f);
             if (step > d) step = d;
             monster.x += dx / d * step;
             monster.y += dy / d * step;
@@ -793,7 +831,22 @@ void UpdateMonster(float dt) {
     }
 
     /* 抓到玩家：掉理智 + 怪被弹开（以后可以换成真正的地图事件） */
-    if (!playerInSafe && monster.hitCooldown <= 0.0f && pd2 < 0.55f) {
+    /* v3.3：**诱饵先替玩家挨这一下** ——
+       附近有激活的玩偶就抵掉，玩家不掉理智，怪物还会转向玩偶。 */
+    if (!playerInSafe && monster.hitCooldown <= 0.0f && pd2 < 0.55f && DecoyIntercept()) {
+        monster.hitCooldown = HitCooldownFor(currentLevel);
+        for (int di = 0; di < MAX_DECOY; di++) {
+            if (decoysArr[di].active && decoysArr[di].armed) {
+                monster.state = 1;
+                monster.tx = decoysArr[di].x;
+                monster.ty = decoysArr[di].y;
+                monster.repath = 0.0f;
+                monster.pathLen = 0;
+                monster.pathIdx = 0;
+                break;
+            }
+        }
+    } else if (!playerInSafe && monster.hitCooldown <= 0.0f && pd2 < 0.55f) {
         /* v1.8：被抓的惩罚随层数增长，且受局内"铁皮"减免 */
         float catchLoss = CATCH_SANITY_BASE *
                           (1.0f + CATCH_SANITY_STEP * (float)(currentLevel > 0 ? currentLevel - 1 : 0));

@@ -205,6 +205,34 @@ typedef struct {
 #define DT_COUNT  3
 
 /* v1.16 烟幕云 */
+/* v3.3 粘胶区域：和烟云同构，但作用的是移速而不是视线 */
+#define MAX_GLUE 4
+typedef struct {
+    float x, y;
+    float life;
+    int   active;
+} GlueZone;
+extern GlueZone glues[MAX_GLUE];
+
+/* v3.3 玩家诱饵「玩偶」
+   放在自己脚下，C 键激活；激活后每 3 秒发一次强声，
+   吸引范围内怪物（含会瞬移的那只）；能替玩家挨 2 次抓。
+   hp 归零就散架。 */
+#define MAX_DECOY 2
+typedef struct {
+    float x, y;
+    float life;        /* 剩余存活秒数 */
+    float shoutT;      /* 距下一次叫的秒数 */
+    int   hp;          /* 还能挡几次 */
+    int   active;
+    int   armed;       /* 0=放下还没激活  1=已在叫 */
+} Decoy;
+extern Decoy decoysArr[MAX_DECOY];
+void PlaceDecoy(float x, float y);
+void ArmDecoy(void);
+int  DecoyIntercept(void);       /* 若有激活的诱饵可以替玩家挨打，返回 1 并消耗一次 */
+
+
 #define MAX_SMOKE 3
 #define SMOKE_LIFE 5.0f
 #define SMOKE_RADIUS 3.6f      /* v1.19：范围扩大（原来 2.2 太小） */
@@ -468,7 +496,27 @@ typedef struct { float x, y; int active; } Breaker;
 
 
 /* 道具槽位数量（滚轮列表长度）。加武器只改这一个数。 */
-#define ITEM_SLOT_COUNT 8      /* v2.0：+ 燃烧瓶 / 胶水瓶 / 镜片 */
+/* v3.3 **投掷物重做：8 → 6**
+   老 8 种：光球/瓶/砖/酸/烟/火/胶/镜 —— 其中酸、燃烧瓶、镜片只有伤害，
+   NO_COMBAT 之后完全是空壳，删掉。
+   瓶 + 砖合并成「投石」（蓄力同时控制距离和噪音）。
+   砖头腾出的槽位换成「回声弹」，另新增「玩家诱饵」。
+   新 6 种：光球 / 投石 / 烟雾 / 胶水 / 回声 / 诱饵 */
+#define ITEM_SLOT_COUNT 6
+
+/* ---- v3.3 投掷物重做：粘胶区域 + 回声扫描 ----
+   胶水：落地生成一滩，半径 2.5 格、持续 6 秒、区域内移速 -80%
+   回声：落地后 5 秒内显示 15 格内所有怪物位置（静音、不发光） */
+#define GLUE_MAX        4
+#define GLUE_RADIUS     2.5f
+#define GLUE_LIFE       6.0f
+#define GLUE_MONSTER_MUL 0.20f   /* 怪物移速 x0.20 = -80% */
+#define GLUE_PLAYER_MUL  0.55f   /* 玩家自己也会被粘 */
+#define ECHO_RADIUS     15.0f
+#define ECHO_LIFE       5.0f
+#define DECOY_SHOUT_EVERY 3.0f   /* 诱饵每 3 秒叫一次 */
+#define DECOY_SHOUT_R    20.0f   /* 叫声半径（比投石最大噪音还大） */
+#define DECOY_HP         2       /* 能挡两次伤害 */
 
 /* 关卡主题（墙面/地板/天花板风格）数量 */
 /* 7 种主题已经写好，但 4/5/6 目前会崩（贴图生成越界，未定位），

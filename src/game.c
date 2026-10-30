@@ -28,6 +28,8 @@
    （原来集中在 main.c 中部的前置声明块，拆分后只保留模块内部需要的）。 */
 static void ThrowItem(int type, float charge);
 static void SpawnShards(float x, float y, float vx, float vy, float charge);
+/* v3.3：粘胶区域（实现放在 entity.c） */
+void SpawnGlue(float x, float y);
 void WeaponTryAttack(float charge);   /* v2.0 武器攻击 */
 /* InitAchievements is public now (see game.h) */
 static void UnlockAchievement(int idx);
@@ -102,7 +104,9 @@ int hubSelection = 0;
 int weaponPickSel = 0;          /* v2.0: 开局选武器光标 */
 int flares = 0, bottles = 0;
 int bricks = 0, acids = 0, smokeBombs = 0;   /* v1.16 新投掷物 */
-int firePots = 0, gluePots = 0, mirrors = 0; /* v2.0 三个新投掷物 */
+int firePots = 0, gluePots = 0, mirrors = 0; /* v2.0 三个新投掷物（v3.3：火/镜已删，只剩 gluPots 在用） */
+int echoBolts = 0;   /* v3.3 回声弹：落地显示 15 格内怪物位置 5 秒 */
+int decoys = 0;      /* v3.3 玩家诱饵玩偶：C 键放置，每 3 秒发声，挡 2 次伤害 */
 int g_dmgIgnoreArmor = 0;
 float smokeDim = 1.0f;      /* 烟幕内的光线衰减 */
 int monsterMuted = 0;       /* v1.20b：只静怪物的叫声（训练场） */
@@ -140,6 +144,9 @@ static int   tutorialThrown = 0;
 static int   tutorialKnocked = 0;
 static int   tutorialMapOpened = 0;       /* 地图至少打开过一次 */
 SmokeCloud smokes[MAX_SMOKE];
+GlueZone  glues[MAX_GLUE];     /* v3.3 粘胶区域 */
+float echoScanT = 0.0f;        /* v3.3 回声弹剩余秒数 */
+float echoScanX = 0.0f, echoScanY = 0.0f;
 int throwSelected = 0;        /* 0=荧光棒, 1=玻璃瓶, 2=预留 */
 Thrown thrown[MAX_THROWN];
 Shot shot[MAX_SHOTS];
@@ -429,7 +436,8 @@ static inline int IsActionDown(ActionId act) {
    如果当前槽位数量为 0，自动跳到另一个有货的槽位 ——
    玩家滚轮/按键切到空槽时不需要自己再切回来。 */
 int itemHasStock(void) {
-    int c[ITEM_SLOT_COUNT] = { flares, bottles, bricks, acids, smokeBombs, firePots, gluePots, mirrors };
+    /* v3.3 槽位：0 光球 / 1 投石 / 2 烟雾 / 3 胶水 / 4 回声 / 5 诱饵 */
+    int c[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
     if (throwSelected < 0 || throwSelected >= ITEM_SLOT_COUNT) return 0;
     return c[throwSelected] > 0;
 }
@@ -439,7 +447,7 @@ int itemHasStock(void) {
    只能靠滚轮 —— 玩家看到 HUD 上明明写着 ACID x2 却用不了。
    现在改成"第 N 个**有货的**槽"：HUD 只列有货的槽，第 3 行按 3 就对了。 */
 static void SelectVisibleSlot(int n) {
-    int counts[ITEM_SLOT_COUNT] = { flares, bottles, bricks, acids, smokeBombs, firePots, gluePots, mirrors };
+    int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
     int k = 0;
     for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
         if (counts[i] <= 0) continue;
@@ -455,7 +463,7 @@ void EnsureThrowSelectedValid(void) {
     /* v1.18：这里原来写死 2 个槽位 —— 滚到砖头/酸瓶时
        counts[throwSelected] 越界读到垃圾值，随即被拉回第 0/1 槽，
        表现就是"选不中砖头和酸瓶"。 */
-    int counts[ITEM_SLOT_COUNT] = { flares, bottles, bricks, acids, smokeBombs, firePots, gluePots, mirrors };
+    int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
     if (throwSelected < 0 || throwSelected >= ITEM_SLOT_COUNT) throwSelected = 0;
     if (counts[throwSelected] > 0) return;
     for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
@@ -474,6 +482,90 @@ void SpawnSmoke(float x, float y) {
     }
 }
 
+
+/* ================= v3.3 玩家诱饵「玩偶」 =================
+   设计来源（调研结论）：硬核逃生游戏里的「假人」类道具只做两件事之一 ——
+   要么当诱饵把怪引走，要么替你挨一下。两者同时做会太强，
+   所以这里加了**时间和次数**两道闸门：
+     · 每 3 秒才叫一次（不是持续噪音，怪有反应窗口）
+     · 只挡 2 次抓（不是无敌）
+     · 放下后要按 C 才激活（给你决定时机的余地）
+   ======================================================= */
+Decoy decoysArr[MAX_DECOY];
+
+void PlaceDecoy(float x, float y) {
+    int slot = -1;
+    for (int i = 0; i < MAX_DECOY; i++) {
+        if (!decoysArr[i].active) { slot = i; break; }
+    }
+    if (slot < 0) {
+        /* 顶掉最老的那个 */
+        float oldest = 1e9f; 
+        for (int i = 0; i < MAX_DECOY; i++)
+            if (decoysArr[i].life < oldest) { oldest = decoysArr[i].life; slot = i; }
+    }
+    if (slot < 0) return;
+    decoysArr[slot].x = x;
+    decoysArr[slot].y = y;
+    decoysArr[slot].life = 30.0f;
+    decoysArr[slot].shoutT = DECOY_SHOUT_EVERY;
+    decoysArr[slot].hp = DECOY_HP;
+    decoysArr[slot].active = 1;
+    decoysArr[slot].armed = 0;
+}
+
+void ArmDecoy(void) {
+    /* 激活最近的一个未激活玩偶 */
+    int best = -1; float bd = 1e9f;
+    for (int i = 0; i < MAX_DECOY; i++) {
+        if (!decoysArr[i].active || decoysArr[i].armed) continue;
+        float d = Dist2(decoysArr[i].x, decoysArr[i].y, posX, posY);
+        if (d < bd) { bd = d; best = i; }
+    }
+    if (best >= 0) {
+        decoysArr[best].armed = 1;
+        decoysArr[best].shoutT = 0.0f;   /* 激活立刻叫第一声 */
+    }
+}
+
+/* 怪物快要抓到玩家时调这个：有激活的玩偶在附近就替玩家挨一下 */
+int DecoyIntercept(void) {
+    for (int i = 0; i < MAX_DECOY; i++) {
+        if (!decoysArr[i].active || !decoysArr[i].armed) continue;
+        if (decoysArr[i].hp <= 0) continue;
+        /* 玩偶要在怪物附近（它替玩家吸引了怪） */
+        if (Dist2(decoysArr[i].x, decoysArr[i].y, posX, posY) > 64.0f) continue;
+        decoysArr[i].hp--;
+        if (decoysArr[i].hp <= 0) {
+            decoysArr[i].active = 0;
+            pickupMsg = (g_lang == LANG_ZH) ? "玩偶散架了" : "DECOY BROKE";
+        } else {
+            pickupMsg = (g_lang == LANG_ZH) ? "玩偶替你挨了一下" : "DECOY TOOK THE HIT";
+        }
+        pickupMsgTimer = 1.6f;
+        PlaySfx(SFX_GLASS, 0.8f);
+        return 1;
+    }
+    return 0;
+}
+
+/* v3.3 胶水：落地生成一滩粘胶，半径 GLUE_RADIUS，持续 GLUE_LIFE。
+   占满 MAX_GLUE 时**顶掉剩余时间最短的那个**（不是拒绝）——
+   否则玩家在同一个门口连扔两瓶，第二瓶会静默消失。 */
+void SpawnGlue(float x, float y) {
+    int best = -1;
+    float bestLife = 1e9f;
+    for (int i = 0; i < MAX_GLUE; i++) {
+        if (!glues[i].active) { best = i; bestLife = -1.0f; break; }
+        if (glues[i].life < bestLife) { bestLife = glues[i].life; best = i; }
+    }
+    if (best < 0) return;
+    glues[best].x = x;
+    glues[best].y = y;
+    glues[best].life = GLUE_LIFE;
+    glues[best].active = 1;
+}
+
 /* 玩家是否在某朵烟里 */
 int PlayerInSmoke(void) {
     for (int i = 0; i < MAX_SMOKE; i++) {
@@ -489,6 +581,26 @@ void UpdateSmokes(float dt) {
         if (!smokes[i].active) continue;
         smokes[i].life -= dt;
         if (smokes[i].life <= 0.0f) smokes[i].active = 0;
+    }
+    /* v3.3：诱饵心跳 —— 每 3 秒叫一次，把怪引过去 */
+    for (int i = 0; i < MAX_DECOY; i++) {
+        if (!decoysArr[i].active) continue;
+        decoysArr[i].life -= dt;
+        if (decoysArr[i].life <= 0.0f) { decoysArr[i].active = 0; continue; }
+        if (!decoysArr[i].armed) continue;
+        decoysArr[i].shoutT -= dt;
+        if (decoysArr[i].shoutT <= 0.0f) {
+            decoysArr[i].shoutT = DECOY_SHOUT_EVERY;
+            MakeNoise(decoysArr[i].x, decoysArr[i].y, DECOY_SHOUT_R);
+            PlaySfx(SFX_GATE, 0.55f);
+        }
+    }
+
+    /* v3.3：粘胶区域 / 回声扫描的生命周期 */
+    for (int i = 0; i < MAX_GLUE; i++) {
+        if (!glues[i].active) continue;
+        glues[i].life -= dt;
+        if (glues[i].life <= 0.0f) { glues[i].active = 0; glues[i].life = 0.0f; }
     }
 }
 
@@ -1538,12 +1650,20 @@ void GenerateLevel(void) {
         for (int k = 0; k < containerCount; k++) {
             if (containers[k].content == 0) {
                 int r = rand() % 100;
-                /* 40% 电池 25% 药 15% 荧光棒 12% 玻璃瓶 8% 空 */
-                if (r < 40) containers[k].content = 2;
-                else if (r < 65) containers[k].content = 3;
-                else if (r < 80) containers[k].content = 4;
-                else if (r < 92) containers[k].content = 5;
-                else containers[k].content = 0;
+                /* v3.3 掉落表（投掷物重做后按新的 6 槽位重新分配）
+                   content: 2 电池 / 3 药 / 4 光球 / 5 投石 /
+                            6 烟雾 / 7 胶水 / 8 回声 / 9 诱饵 / 0 空
+                   配比思路：投石最多（基础诱饵）、光球次之（照明刚需）、
+                   烟雾和胶水是战术道具、回声和诱饵稀有。 */
+                if      (r < 30) containers[k].content = 2;   /* 电池 30% */
+                else if (r < 50) containers[k].content = 3;   /* 药   20% */
+                else if (r < 64) containers[k].content = 4;   /* 光球 14% */
+                else if (r < 82) containers[k].content = 5;   /* 投石 18% */
+                else if (r < 89) containers[k].content = 6;   /* 烟雾  7% */
+                else if (r < 95) containers[k].content = 7;   /* 胶水  6% */
+                else if (r < 98) containers[k].content = 8;   /* 回声  3% */
+                else if (r < 99) containers[k].content = 9;   /* 诱饵  1% */
+                else             containers[k].content = 0;   /* 空    1% */
             }
         }
 
@@ -1957,24 +2077,27 @@ static void ThrowItem(int type, float charge) {
         return;
     }
 
-    /* ---- v1.16 砖头 / 酸瓶 / 烟雾弹：都走 shot 弹道 ---- */
+    /* ---- v3.3 投掷物重做：2 烟雾 / 3 胶水 / 4 回声，全部走 shot 弹道 ----
+       槽位：0 光球 / 1 投石 / 2 烟雾 / 3 胶水 / 4 回声 / 5 诱饵（C 键放置，不走这里）
+       shot.kind 约定：1 投石 / 4 烟雾 / 8 胶水 / 10 回声 */
     if (type >= 2) {
-        int kind = type - 1;
-        /* v2.0：2 砖 / 3 酸 / 4 烟 / 5 火 / 6 胶 / 7 镜 */
-        kind = (type == 2) ? 2 : (type == 3) ? 3 :
-               (type == 4) ? 4 : (type == 5) ? 7 : (type == 6) ? 8 : 9;
-        /* 砖头更重、飞得低且慢；酸瓶更轻、抛物线更高，避免只是换一张贴图。 */
+        int kind = (type == 2) ? 4 : (type == 3) ? 8 : 10;
         float itemSpeed = speed;
         float itemAngle = angle;
         float itemHeight = 1.0f;
         if (type == 2) {
-            itemSpeed *= 0.82f;
-            itemAngle *= 0.65f;
-            itemHeight = 0.90f;
+            /* 烟雾弹：轻、抛得高、滞空久，落点好控制 */
+            itemSpeed *= 1.05f;
+            itemAngle = angle * 1.25f + 0.06f;
         } else if (type == 3) {
-            itemSpeed *= 1.08f;
-            itemAngle = angle * 1.35f + 0.08f;
-            itemHeight = 1.08f;
+            /* 胶水瓶：重、低抛、飞得近 —— 它就是用来扔脚下的 */
+            itemSpeed *= 0.88f;
+            itemAngle *= 0.75f;
+            itemHeight = 0.94f;
+        } else {
+            /* 回声弹：小、轻、平飞 */
+            itemSpeed *= 1.10f;
+            itemAngle *= 0.80f;
         }
         for (int i = 0; i < MAX_SHOTS; i++) {
             if (shot[i].active) continue;
@@ -1989,7 +2112,7 @@ static void ThrowItem(int type, float charge) {
             shot[i].charge = charge;
             shot[i].kind = kind;
             shot[i].dmg = 0;
-            shot[i].pierce = (kind == 9) ? 1 : 0;
+            shot[i].pierce = 0;   /* v3.3：镜片已删，不再有穿透弹 */
             shot[i].mirrorRebounded = 0;
             shot[i].ignoreTarget = -1;
             shot[i].ignoreTargetTime = 0.0f;
@@ -2047,18 +2170,39 @@ static void UpdateShots(float dt) {
         shot[i].z += shot[i].vz * dt;
         if (shot[i].z <= 0.0f && shot[i].age > 0.02f) {
             shot[i].z = 0.0f;
-            if (shot[i].kind == 4) SpawnSmoke(shot[i].x, shot[i].y);
-            else SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-            /* v2.0：燃烧瓶落地留火区 */
-            if (shot[i].kind == 7) {
-                for (int f = 0; f < 3; f++) {
-                    if (fireT[f] > 0.0f) continue;
-                    fireX[f] = shot[i].x; fireY[f] = shot[i].y;
-                    fireT[f] = 6.0f; fireTick[f] = 0.0f;
-                    break;
-                }
+            /* ---- v3.3 落地效果分派 ----
+               kind 1 投石 / 4 烟雾 / 8 胶水 / 10 回声 ----
+               噪音全部由**落点 + 蓄力**决定，不再固定：
+                 投石   8 + 蓄力*12  ->  8 ~ 20（玩家自己调）
+                 胶水   6（小）
+                 烟雾   5（小）
+                 回声   0（完全静音 —— 它就是用来偷情报的） */
+            if (shot[i].kind == 4) {
+                SpawnSmoke(shot[i].x, shot[i].y);
+            } else if (shot[i].kind == 8) {
+                SpawnGlue(shot[i].x, shot[i].y);
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+            } else if (shot[i].kind == 10) {
+                /* 回声弹：不发光、不出声，只把 15 格内怪物位置暴露 5 秒 */
+                extern float echoScanT;
+                extern float echoScanX, echoScanY;
+                echoScanT = 5.0f;
+                echoScanX = shot[i].x;
+                echoScanY = shot[i].y;
+                pickupMsg = (g_lang == LANG_ZH) ? "回声扫过" : "ECHO SCAN";
+                pickupMsgTimer = 1.4f;
+                PlaySfx(SFX_PICKUP, 0.7f);   /* v3.3：没有专回声音效，用拾取提示音 */
+            } else {
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
             }
-            MakeNoise(shot[i].x, shot[i].y, (shot[i].kind == 2) ? 3.0f : 14.0f);
+            {
+                float nz = 14.0f;
+                if (shot[i].kind == 1)      nz = 8.0f + shot[i].charge * 12.0f;  /* 8 ~ 20 */
+                else if (shot[i].kind == 8) nz = 6.0f;
+                else if (shot[i].kind == 4) nz = 5.0f;
+                else if (shot[i].kind == 10) nz = 0.0f;                          /* 静音 */
+                if (nz > 0.0f) MakeNoise(shot[i].x, shot[i].y, nz);
+            }
             shot[i].active = 0;
             continue;
         }
@@ -2674,6 +2818,20 @@ void Update(float dt) {
        原来 runUltimate 只被存读档，**从来没有激活入口** ——
        三选一拿到的大招等于永远用不出来。现在按 Q 释放，一局一次。 */
     if (ultTimer > 0.0f) ultTimer -= dt;
+    /* v3.3：**C 键激活诱饵**（右键负责放置，C 负责激活） */
+    if (currentState == STATE_PLAYING && keyPressed['C']) {
+        keyPressed['C'] = 0;
+        int any = 0;
+        for (int i = 0; i < MAX_DECOY; i++)
+            if (decoysArr[i].active && !decoysArr[i].armed) { any = 1; break; }
+        if (any) {
+            ArmDecoy();
+            pickupMsg = (g_lang == LANG_ZH) ? "诱饵已激活 - 每 3 秒叫一次"
+                                            : "DECOY ARMED - SHOUTS EVERY 3s";
+            pickupMsgTimer = 2.0f;
+        }
+    }
+
     if (runUltimate >= 0 && !ultUsed && currentState == STATE_PLAYING
         && IsActionPressed(ACT_SWING)) {
 
@@ -2725,6 +2883,9 @@ void Update(float dt) {
         }
         pickupMsgTimer = 2.0f;
     }
+
+    /* v3.3：回声扫描倒计时 */
+    if (echoScanT > 0.0f) echoScanT -= dt;
 
     /* v3.0：锁定窗口递减（见 hideBlockTimer 的用法） */
     if (hideBlockTimer > 0.0f) hideBlockTimer -= dt;
@@ -3005,7 +3166,17 @@ void Update(float dt) {
     /* CRANK WALK：有这个技能时摇电也允许移动，只是移速打折 */
     float crankMul = cranking ? (1.0f - SkillCrankWalkPenalty()) : 1.0f;
     if (cranking) sprinting = 0;            /* 边摇边冲刺太离谱 */
-    float sp = MOVE_SPEED * (1.0f + SkillSpeedAdd() + darkAdd) * slowMul * RelicSpeedMul() * dt
+    /* v3.3：**玩家自己也会被胶水粘住** —— 这是胶水的代价，
+       扔之前要看清自己站哪，否则等于把自己钉住。 */
+    float glueSelf = 1.0f;
+    for (int gi = 0; gi < MAX_GLUE; gi++) {
+        if (!glues[gi].active) continue;
+        if (Dist2(posX, posY, glues[gi].x, glues[gi].y) < GLUE_RADIUS * GLUE_RADIUS) {
+            glueSelf = GLUE_PLAYER_MUL;
+            break;
+        }
+    }
+    float sp = MOVE_SPEED * (1.0f + SkillSpeedAdd() + darkAdd) * slowMul * RelicSpeedMul() * glueSelf * dt
              * (sprinting ? SPRINT_MULT * BenchSprintMul() : 1.0f)   /* v3.0 爆发 */ * crankMul;
     float perpX = -dirY, perpY = dirX;      /* 单位侧向，与 FOV 无关 */
     float dx = 0.0f, dy = 0.0f;
@@ -3071,9 +3242,10 @@ void Update(float dt) {
                 else if (roll < 84) { acids++; pickupMsg = "+ACID"; }
                 else if (roll < 90) { smokeBombs++; pickupMsg = "+SMOKE"; }
                 /* v2.0：三个新投掷物终于有产出了（原来全项目没有任何 ++） */
-                else if (roll < 94) { firePots++;  pickupMsg = "+FIREPOT"; }
+                /* v3.3：酸/火/镜已删 —— 这三个槽位换成回声音/诱饵 */
+                else if (roll < 94) { echoBolts++; pickupMsg = "+ECHO"; }
                 else if (roll < 97) { gluePots++;  pickupMsg = "+GLUE"; }
-                else                { mirrors++;   pickupMsg = "+MIRROR"; }
+                else                { decoys++;    pickupMsg = "+DECOY"; }
             }
                 else if (c->content == 2) {
                     battery += BATTERY_PICKUP * BenchBatteryPickupMul();   /* v2.7 电池库 */
@@ -3088,17 +3260,21 @@ void Update(float dt) {
                     healFlash = 0.15f;
                     pickupMsg = "+MEDKIT";
                 }
+                /* v3.3：新掉落表的四种投掷物 */
+                else if (c->content == 6) { smokeBombs++; pickupMsg = "+SMOKE"; }
+                else if (c->content == 7) { gluePots++;   pickupMsg = "+GLUE"; }
+                else if (c->content == 8) { echoBolts++;  pickupMsg = "+ECHO"; }
+                else if (c->content == 9) { decoys++;     pickupMsg = "+DECOY"; }
                 /* SCAVENGER: every search also drops a random throwable */
         if (SkillScavenger()) {
-            int r2 = rand() % 8;
+            /* v3.3：6 选 1，对应新的六个槽位 */
+            int r2 = rand() % 6;
             if (r2 == 0) { flares++; pickupMsg = "+FLARE"; }
-            else if (r2 == 1) { if (bottles < BottleCap()) bottles++; pickupMsg = "+BOTTLE"; }
-            else if (r2 == 2) { bricks++; pickupMsg = "+BRICK"; }
-            else if (r2 == 3) { acids++; pickupMsg = "+ACID"; }
-            else if (r2 == 4) { smokeBombs++; pickupMsg = "+SMOKE"; }
-            else if (r2 == 5) { firePots++; pickupMsg = "+FIREPOT"; }
-            else if (r2 == 6) { gluePots++; pickupMsg = "+GLUE"; }
-            else { mirrors++; pickupMsg = "+MIRROR"; }
+            else if (r2 == 1) { if (bottles < BottleCap()) bottles++; pickupMsg = "+SLING"; }
+            else if (r2 == 2) { smokeBombs++; pickupMsg = "+SMOKE"; }
+            else if (r2 == 3) { gluePots++; pickupMsg = "+GLUE"; }
+            else if (r2 == 4) { echoBolts++; pickupMsg = "+ECHO"; }
+            else { decoys++; pickupMsg = "+DECOY"; }
         }
         if (pickupMsg) pickupMsgTimer = 2.0f;
             } else if (hoverKind == 2) {
@@ -3218,7 +3394,7 @@ void Update(float dt) {
             mouseCharge = 0.0f;
         } else if (mouseLeftNow) {
             /* 持续按住：累积蓄力（仅当选中道具有库存时） */
-            int counts[ITEM_SLOT_COUNT] = { flares, bottles, bricks, acids, smokeBombs, firePots, gluePots, mirrors };
+            int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
             int sel = throwSelected;
             if (sel < 0 || sel >= ITEM_SLOT_COUNT) sel = 0;
             if (counts[sel] > 0) {
@@ -3228,9 +3404,29 @@ void Update(float dt) {
         } else {
             /* 松开左键：发射（v1.16：0..4 = 荧光棒/瓶/砖/酸/烟） */
             isCharging = 0;
-            int counts[ITEM_SLOT_COUNT] = { flares, bottles, bricks, acids, smokeBombs, firePots, gluePots, mirrors };
+            int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
             int sel = throwSelected;
             if (sel < 0 || sel >= ITEM_SLOT_COUNT) sel = 0;
+            /* ===== v3.3 六槽位的右键行为 =====
+               0 光球 / 1 投石 / 2 烟雾 / 3 胶水 / 4 回声  → 投掷
+               5 诱饵                                     → **放在脚下**（不投）
+               诱饵放下后要按 C 才激活（用户要求：C 是激活，右键才是放置）。 */
+            if (sel == 5) {
+                if (decoys > 0) {
+                    PlaceDecoy(posX, posY);
+                    decoys--;
+                    totalThrown++;          /* 也算一次道具消耗 */
+                    throwCd = 0.60f;
+                    pickupMsg = (g_lang == LANG_ZH)
+                        ? "诱饵已放下 - 按 C 激活" : "DECOY PLACED - PRESS C";
+                    pickupMsgTimer = 2.0f;
+                    PlaySfx(SFX_PICKUP, 0.7f);
+                }
+                mouseCharge = 0.0f;
+                mouseLeftPrev = mouseLeftNow;
+                mouseRightPrev = mouseRightNow;
+                return;
+            }
             if (mouseCharge >= 0.1f && counts[sel] > 0) {
                 /* v2.7：先投，真生成了才扣。原来先扣再投，
                    池子满时 ThrowItem 静默不生成，东西凭空消失。 */
@@ -3238,12 +3434,9 @@ void Update(float dt) {
                 if (g_throwOk) {
                     if (sel == 0) flares--;
                     else if (sel == 1) bottles--;
-                    else if (sel == 2) bricks--;
-                    else if (sel == 3) acids--;
-                    else if (sel == 4) smokeBombs--;
-                    else if (sel == 5) firePots--;
-                    else if (sel == 6) gluePots--;
-                    else mirrors--;
+                    else if (sel == 2) smokeBombs--;
+                    else if (sel == 3) gluePots--;
+                    else if (sel == 4) echoBolts--;
                     totalThrown++;   /* v3.3：逃生向成就用（整条链之后加） */
                     throwCd = 0.45f;
                     if (trainingMode) tutorialThrown = 1;

@@ -2730,8 +2730,9 @@ void DrawHUD(void) {
        现在右对齐贴右上角，纵向排列，滚轮切换时平滑滚动。
        加武器只改 ITEM_SLOT_COUNT + 两个数组。 */
     {
-        static const char* slotName[ITEM_SLOT_COUNT] = { "FLARE", "BOTTLE", "BRICK", "ACID", "SMOKE",
-                                                  "FIREPOT", "GLUE", "MIRROR" };
+        /* v3.3 六个槽位的显示名：光球 / 投石 / 烟雾 / 胶水 / 回声 / 诱饵 */
+    static const char* slotName[ITEM_SLOT_COUNT] = {
+        "FLARE", "SLING", "SMOKE", "GLUE", "ECHO", "DECOY" };
 static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖头", "酸液", "烟雾弹",
                                                     "燃烧瓶", "胶瓶", "镜面弹" };
 
@@ -2744,7 +2745,7 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         lastT = nowT;
         {
             /* v1.17：只给"有货的槽位"排序号，空槽不参与滚动 */
-            int cArr[ITEM_SLOT_COUNT] = { flares, bottles, bricks, acids, smokeBombs, firePots, gluePots, mirrors };
+                int cArr[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
             int selVis = 0;
             for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
                 if (cArr[i] <= 0) continue;
@@ -2756,13 +2757,11 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
 
         int counts[ITEM_SLOT_COUNT];
         counts[0] = flares;
-        counts[1] = bottles;
-        counts[2] = bricks;
-        counts[3] = acids;
-        counts[4] = smokeBombs;
-    counts[5] = firePots;      /* v2.0：三个新投掷物 */
-    counts[6] = gluePots;
-    counts[7] = mirrors;
+    counts[1] = bottles;
+    counts[2] = smokeBombs;
+    counts[3] = gluePots;
+    counts[4] = echoBolts;
+    counts[5] = decoys;
 
         /* v2.7：判据改成「任一槽有货」。原来只看 flare/bottle，
        所以手上只剩砖头/酸/烟雾弹时整条道具栏会消失。 */
