@@ -418,7 +418,10 @@ static const unsigned int kBranchColor[4] = {
     0x00B080FFu,   /* 跨支   紫 */
 };
 /* v2.9：分支名走翻译（原来只有英文） */
-static const char* kBranchName[4] = { "SILENCE", "ECONOMY", "DELIVERY", "SHAPE" };
+/* v3.3：第 3 列从「伤害交付」改成「藏匿脱身」后，表头没跟着改 ——
+   界面上写 DELIVERY，里面却是 HOLD BREATH / STILL FACE / SLIP AWAY /
+   PLAY DEAD（见 skills.c 的「列 2：隐」）。改成 CONCEAL。 */
+static const char* kBranchName[4] = { "SILENCE", "ECONOMY", "CONCEAL", "SHAPE" };
 static const char* kBranchNameZh[4] = { "沉寂", "节流", "投放", "塑形" };
 ;
 
