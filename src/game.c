@@ -774,6 +774,16 @@ int SpotClear(float x, float y, float minD, int selfKind, int selfIdx) {
     }
     if (selfKind != 2 && breaker.active && Dist2(x, y, breaker.x, breaker.y) < m2) return 0;
     if (selfKind != 3 && safeRoom.active && Dist2(x, y, safeRoom.x, safeRoom.y) < m2) return 0;
+    /* v3.3 **修复藏身点被箱子压住** ——
+       原来这里只查容器/配电箱/安全屋，**完全没查藏身点**。
+       而生成顺序是「先藏身点、后容器」，所以后放的箱子可以直接怼在垃圾桶上
+       （用户截图：垃圾桶和木箱叠在同一格，只看见 HIDE 提示却找不到桶）。
+       注意：藏身点自己是最后才写进 hideSpots[] 的，
+       所以调用 SpotClear 时不会把自己也判进去。 */
+    for (int i = 0; i < hideSpotCount; i++) {
+        if (!hideSpots[i].active) continue;
+        if (Dist2(x, y, hideSpots[i].x, hideSpots[i].y) < m2) return 0;
+    }
     return 1;
 }
 
@@ -1439,6 +1449,37 @@ void GenerateLevel(void) {
         int ok = 1;
         for (int k = 0; k < containerCount; k++)
             if (Dist2(cx, cy, containers[k].x, containers[k].y) < 2.0f) { ok = 0; break; }
+        if (!ok) continue;
+
+        containers[containerCount].x = cx;
+        containers[containerCount].y = cy;
+        containers[containerCount].searched = 0;
+        containers[containerCount].content = 0;
+        containers[containerCount].active = 1;
+        containerCount++;
+    }
+
+    /* v3.3 **折中兜底** ——
+       上面那轮要求容器离藏身点 1.6 格。加了这条检查之后，
+       小地图里可能放不满 contCap，而**箱子少 = 保险丝少 = 整层卡关**，
+       比视觉重叠严重得多。
+       所以再补一轮宽松放置：只要求离藏身点 0.9 格（不压在同一格），
+       离其它容器仍然 1.2 格。这样最坏情况是「挨着」而不是「叠在一起」。 */
+    attempts = 0;
+    while (containerCount < contCap && containerCount < MAX_CONTAINERS && attempts < 256) {
+        attempts++;
+        int idx = rand() % emptyCount;
+        float cx = cells[idx][0] + 0.5f, cy = cells[idx][1] + 0.5f;
+        if (Dist2(cx, cy, exitX, exitY) < 9.0f) continue;
+
+        int ok = 1;
+        for (int k = 0; k < containerCount; k++)
+            if (Dist2(cx, cy, containers[k].x, containers[k].y) < 1.44f) { ok = 0; break; }
+        if (!ok) continue;
+        for (int k = 0; k < hideSpotCount; k++) {
+            if (!hideSpots[k].active) continue;
+            if (Dist2(cx, cy, hideSpots[k].x, hideSpots[k].y) < 0.81f) { ok = 0; break; }
+        }
         if (!ok) continue;
 
         containers[containerCount].x = cx;
