@@ -1813,44 +1813,14 @@ void GenerateLevel(void) {
     parasite.active = 0;
     for (int i = 0; i < MAX_THROWN; i++) thrown[i].active = 0;
 
-    /* v2.0：安全屋改成每 3 层一个（第 3/6/9… 层），其余层不放 */
+    /* ===== v6 **删除旧安全区** =====
+       用户：「安全区是旧版本遗物，隐藏点才是主流机制」。
+       核实：商店（T 键）、操作提示、校准小游戏三处的判定
+       早就写成了 `inSafe || hiddenIn >= 0` —— 也就是说
+       **藏在藏身点里已经能做安全区能做的全部事情**。
+       安全区那半边是纯冗余，而且它的模型会顶掉配电箱的位置。
+       现在 safeRoom.active 恒为 0，不再生成、不再绘制。 */
     safeRoom.active = 0;
-    if (currentLevel % 3 != 0) {
-        /* 本层没有安全屋，直接跳过下面的放置 */
-    } else
-    for (int t = 0; t < 256; t++) {
-        int idx = rand() % emptyCount;
-        float sx = cells[idx][0] + 0.5f, sy = cells[idx][1] + 0.5f;
-        if (Dist2(sx, sy, 1.5f, 1.5f) < 25.0f) continue;
-        if (Dist2(sx, sy, exitX, exitY) < 9.0f) continue;
-        if (!SpotClear(sx, sy, 1.6f, 3, -1)) continue;
-        safeRoom.x = sx;
-        safeRoom.y = sy;
-        safeRoom.active = 1;
-        break;
-    }
-    /* 强制兜底：只有「本层该有安全屋」时才兜底。
-       v2.1：原来这段在 else 之外 —— 非 3 倍层刚被清 0，兜底立刻又放一个，
-       结果 10/10 层都有安全屋。 */
-    if (currentLevel % 3 == 0 && !safeRoom.active) {
-        float bestD2 = -1.0f;
-        for (int y = 1; y < MAP_HEIGHT - 1; y++) {
-            for (int x = 1; x < MAP_WIDTH - 1; x++) {
-                if (worldMap[y][x]) continue;
-                float sx = x + 0.5f, sy = y + 0.5f;
-                if (Dist2(sx, sy, 1.5f, 1.5f) < 25.0f) continue;
-                if (Dist2(sx, sy, exitX, exitY) < 9.0f) continue;
-                if (!SpotClear(sx, sy, 1.2f, 3, -1)) continue;  /* 放宽到 1.2f */
-                float d2 = Dist2(sx, sy, 1.5f, 1.5f);
-                if (d2 > bestD2) {
-                    bestD2 = d2;
-                    safeRoom.x = sx;
-                    safeRoom.y = sy;
-                }
-            }
-        }
-        if (bestD2 > 0.0f) safeRoom.active = 1;
-    }
 
     /* 配电箱：放在离出生点 15 格以上的远处，迫使玩家深入探索 */
     breaker.active = 0;
@@ -1884,30 +1854,50 @@ void GenerateLevel(void) {
         }
         if (bestD2 > 0.0f) breaker.active = 1;
     }
-    /* 最终兜底：如果还失败（极端情况），直接找任意空地 */
-    /* v2.2 修复：兜底必须也遵守"每 3 层"的规则。
-                     原来这段无条件执行，而里面会把安全屋放上 ——
-                     于是 %3 的判断被完全架空，24 层生成 24 个安全屋
-                     （每层白送 +60 电 + 一次收费休息）。 */
-    if ((currentLevel % 3 == 0) && (!safeRoom.active || !breaker.active)) {
-        for (int y = 1; y < MAP_HEIGHT - 1 && (!safeRoom.active || !breaker.active); y++) {
-            for (int x = 1; x < MAP_WIDTH - 1 && (!safeRoom.active || !breaker.active); x++) {
+    /* ===== 最终兜底（v6 重写）=====
+       原来这段有三个问题，正好对上玩家报的两个 bug：
+
+       ① **安全屋会把配电箱顶掉** ——
+          判重只写了「同一格」（cx == safeRoom.x），没有用半径。
+          安全屋建模占 1.6 格，配电箱落在它隔壁一格也算「在安全屋里」，
+          玩家看到的就是「安全区盖住了电闸，这层没有电闸」。
+
+       ② **配电箱兜底被 %3 挡住** ——
+          整段挂在 `currentLevel % 3 == 0` 里面。
+          非 3 倍层只要前两轮随机都失败，就**永远没有配电箱**，
+          而配电箱是通关必需品 → 那一层直接卡死。
+
+       ③ 兜底没用 SpotClear，可以落在墙角/箱子里。
+
+       现在安全区已删，只保留配电箱的两段兜底。 */
+
+
+    /* ② 配电箱兜底（**无条件**，每层必须有） */
+    if (!breaker.active) {
+        for (int y = 1; y < MAP_HEIGHT - 1 && !breaker.active; y++) {
+            for (int x = 1; x < MAP_WIDTH - 1 && !breaker.active; x++) {
                 if (worldMap[y][x]) continue;
                 float cx = x + 0.5f, cy = y + 0.5f;
-                int placedSafe = 0;  /* 标志位：本格刚给了安全屋，配电箱必须跳过这一格 */
-                if (!safeRoom.active && Dist2(cx, cy, 1.5f, 1.5f) >= 25.0f && Dist2(cx, cy, exitX, exitY) >= 9.0f &&
-                    !(breaker.active && cx == breaker.x && cy == breaker.y)) {
-                    safeRoom.x = cx; safeRoom.y = cy; safeRoom.active = 1;
-                    placedSafe = 1;
-                }
-                if (!placedSafe && !breaker.active && Dist2(cx, cy, 1.5f, 1.5f) >= 225.0f &&
-                    !(safeRoom.active && cx == safeRoom.x && cy == safeRoom.y)) {
-                    breaker.x = cx; breaker.y = cy; breaker.active = 1;
-                }
+                if (Dist2(cx, cy, 1.5f, 1.5f) < 25.0f) continue;
+                if (!SpotClear(cx, cy, 1.2f, 2, -1)) continue;
+                /* 离安全屋至少 4 格，绝不和它重叠 */
+                if (safeRoom.active && Dist2(cx, cy, safeRoom.x, safeRoom.y) < 16.0f) continue;
+                breaker.x = cx; breaker.y = cy; breaker.active = 1;
             }
         }
     }
+    /* ③ 最后保险：全图任意空格（只在真的没别的地方时才走） */
+    if (!breaker.active) {
+        for (int y = 1; y < MAP_HEIGHT - 1 && !breaker.active; y++) {
+            for (int x = 1; x < MAP_WIDTH - 1 && !breaker.active; x++) {
+                if (worldMap[y][x]) continue;
+                float cx = x + 0.5f, cy = y + 0.5f;
+                if (safeRoom.active && Dist2(cx, cy, safeRoom.x, safeRoom.y) < 9.0f) continue;
+                breaker.x = cx; breaker.y = cy; breaker.active = 1;
+            }
+        }
     }
+}
 /* ShowCursor 是引用计数的，跨状态切换很容易把引用数弄歪；
    这里用 GetCursorInfo 把光标状态直接拧到目标值 */
 void ForceCursor(int visible) {

@@ -17,8 +17,8 @@
 1 ICON "canity.ico"
 
 1 VERSIONINFO
-  FILEVERSION     2,2,2,0
-  PRODUCTVERSION  2,2,2,0
+  FILEVERSION     2,2,3,0
+  PRODUCTVERSION  2,2,3,0
   FILEOS          0x40004L   /* VOS_NT_WINDOWS32 */
   FILETYPE        0x1L       /* VFT_APP */
   BEGIN
@@ -28,11 +28,11 @@
       BEGIN
         VALUE "CompanyName",      "Canity"
         VALUE "FileDescription",  "Canity - raycasting horror game"
-        VALUE "FileVersion",      "2.2.2.0"
+        VALUE "FileVersion",      "2.2.3.0"
         VALUE "InternalName",     "canity"
         VALUE "OriginalFilename", "canity.exe"
         VALUE "ProductName",      "Canity"
-        VALUE "ProductVersion",   "2.2.2.0"
+        VALUE "ProductVersion",   "2.2.3.0"
         VALUE "LegalCopyright",   "MIT License"
       END
     END

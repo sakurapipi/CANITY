@@ -779,7 +779,11 @@ void ContinueRun(void) {
     else if (bossLevel && monster.active) monster.hp = bossMaxHp;
     if (flares < 0) flares = 0;
     if (bottles < 0) bottles = 0;
-    safeRoom.active = g_save.safeActive;
+    /* v6 **旧安全区已删除** ——
+       存档里 safeActive 还是 1 的老档，读回来会让旧安全区重新出现
+       （用户：「有时候会冒出旧版本的安全区 / 旧道具旧模型」）。
+       这里无条件清零，不管存档里写的是什么。 */
+    safeRoom.active = 0;
     safeRoom.x = g_save.safeX;
     safeRoom.y = g_save.safeY;
     levelMod = g_save.levelMod;
