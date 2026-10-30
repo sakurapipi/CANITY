@@ -9,7 +9,8 @@
 /*   全部用碎片结算                                                     */
 /* ------------------------------------------------------------------ */
 
-#define SHOP_OFFERS 3
+#define SHOP_OFFERS 4   /* v3.3：3 -> 4。SHOP 页卖 4 件消耗品，
+                           原来 3 会让第 4 件（BOTTLES x2）永远显示不出来 */
 #define SAFEHOUSE_PAGES 5   /* v3.0：+ 强化 */
 
 typedef enum {

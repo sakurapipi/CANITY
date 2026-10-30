@@ -12,8 +12,8 @@
 int shopPage = SHP_SHOP;
 int shopRow = 0;
 int shopNodeSel = 0;   /* v2.7：改造树光标 */
-int shopOffer[SHOP_OFFERS] = {-1, -1, -1};
-int shopPrice[SHOP_OFFERS] = {0, 0, 0};
+int shopOffer[SHOP_OFFERS] = {-1, -1, -1, -1};
+int shopPrice[SHOP_OFFERS] = {0, 0, 0, 0};
 int attachOwned[ATTACH_COUNT];
 
 /* v2.1：改成按层记，反复开关面板不能刷新次数 */
@@ -22,6 +22,7 @@ static int safeHealLevel = -1;
 /* v2.2：开局/换局清一次。原来这两个 static 永不重置，
    上一局在某层休息过，之后任何一局走到同一层都是「已休息」。 */
 
+static int safeStaminaLevel = -1;   /* v3.3：体力每层限一次 */
 static int safeChargeLevel = -1;
 static char sbuf[160];
 
@@ -81,7 +82,7 @@ int ShopRowCount(void) {
     if (shopPage == SHP_TREE) return 0;   /* v2.7：树自己画，不用列表行 */
     switch (shopPage) {
     case SHP_BENCH: return 4;     /* CORE / MOD / CLEAR / LEAVE */
-    case SHP_REST:  return 4;     /* REST / CHARGE / SWITCH / LEAVE */
+    case SHP_REST:  return 5;     /* REST / CHARGE / STAMINA / SHORTCUT / LEAVE */
     case SHP_UPGRADE: return RUN_UPG_COUNT + 1;   /* 4 条线 + LEAVE */
     default:        return SHOP_OFFERS + 1;
     }
@@ -167,12 +168,10 @@ const char* ShopRowText(int row) {
         return Tr("CHARGE   +60 BATTERY", "充电   +60 电量");
     }
     if (row == 2) {
-        /* v2.0：换武器。原来武器开局选完就锁死 24 层。 */
-        extern int curWeapon;
-        static const char* wname[WPN_COUNT] = { "CRANKWRENCH", "FLARE PISTOL", "SIGIL" };
-        /* v3.0：武器取消 → 这一行改成「静步开关」提示（占位，不消耗） */
-        sprintf(sbuf, "%s", Tr("RECOVER STAMINA", "恢复体力"));
-        return sbuf;
+        /* v3.3：**这一行原来是免费无限体力**（躲衣柜→按 T→满体力→Esc→跑，
+           可以无限重复）。现在加每层一次的标记 + 15 碎片。 */
+        if (safeStaminaLevel == currentLevel) return Tr("STAMINA RESTORED", "体力已恢复");
+        return Tr("RECOVER STAMINA  (15)", "恢复体力  (15)");
     }
     if (row == 3) {
         /* v2.0 SHORTCUT：每局一次，Boss 层不可跳 */
@@ -182,7 +181,7 @@ const char* ShopRowText(int row) {
         if (bossLevel)                 return Tr("SHORTCUT (boss floor)", "跳层（首领层）");
         return Tr("SHORTCUT   skip this floor", "跳层   跳过本层");
     }
-    return Tr("LEAVE  (ESC)", "离开  (ESC)");
+    return Tr("LEAVE  (ESC)", "离开  (ESC)");   /* v3.3：row 4 现在真能走到了 */
 }
 
 void ShopMoveSel(int delta) {
@@ -276,40 +275,25 @@ void ShopActivate(void) {
     }
 
     if (shopPage == SHP_BENCH) {
-        if (shopRow == 0 || shopRow == 1) {
-            int slot = shopRow;
-            /* v2.0：按索引轮换该槽位的所有已拥有配件（原来只会在前两件之间来回） */
-            {
-                static int benchIdx[2] = {0, 0};
-                int list[ATTACH_COUNT], n = 0;
-                for (int i = 0; i < ATTACH_COUNT; i++)
-                    if (attachOwned[i] > 0 && attachDefs[i].slot == slot) list[n++] = i;
-                if (n == 0) {
-                    WeaponAttachRemove(curWeapon, slot);
-                    pickupMsg = Tr("REMOVED", "已卸下");
-                } else {
-                    benchIdx[slot] = (benchIdx[slot] + 1) % (n + 1);   /* 0 = 空 */
-                    if (benchIdx[slot] == 0) {
-                        WeaponAttachRemove(curWeapon, slot);
-                        pickupMsg = Tr("REMOVED", "已卸下");
-                    } else {
-                        WeaponAttachAdd(curWeapon, list[benchIdx[slot] - 1]);
-                        pickupMsg = Tr("INSTALLED", "已安装");
-                    }
-                }
-            }
-            pickupMsgTimer = 1.2f;
-            PlaySfx(SFX_POWER, 0.6f);
-            uiDirty = 1;
-            return;
-        }
+        /* v3.3 **修复文案与动作完全错位** ——
+           界面上画的是 THROWABLES / LIGHT GEAR / CHECK INVENTORY，
+           回车却执行 WeaponAttachAdd / Remove / 清空两个武器配件槽。
+           玩家点「查看背包」会把自己的武器配件清掉（武器早取消了，
+           等于把老存档里的残留配件也一并抹掉）。
+           现在这一页是**只读信息页**：三行都只是看，不产生任何副作用。
+           （武器配件系统本身已被 NO_COMBAT 废掉，这里不再碰它。） */
         if (shopRow == 2) {
-            WeaponAttachRemove(curWeapon, 0);
-            WeaponAttachRemove(curWeapon, 1);
-            pickupMsg = Tr("SLOTS CLEARED", "已清空");
-            pickupMsgTimer = 1.2f;
+            int nb = (bottles > 0) + (flares > 0) + (bricks > 0)
+                   + (acids > 0) + (smokeBombs > 0);
+            char msg[96];
+            snprintf(msg, sizeof(msg),
+                     Tr("BOTTLES %d  FLARES %d  OTHERS %d",
+                        "瓶子 %d  照明弹 %d  其它 %d"),
+                     bottles, flares, nb);
+            pickupMsg = msg;
+            pickupMsgTimer = 1.6f;
+            PlaySfx(SFX_POWER, 0.5f);
             uiDirty = 1;
-            return;
         }
         return;
     }
@@ -358,10 +342,20 @@ void ShopActivate(void) {
         return;
     }
     if (shopRow == 2) {
-        extern int curWeapon;
-        /* v3.0：武器取消，这个槽改成「恢复体力」 */
+        /* v3.3：**体力从免费无限改成 15 碎片 + 每层一次**。
+           原来这一行什么都不收，玩家可以躲衣柜→按 T→回车→Esc→跑，
+           无限刷满体力，冲刺等于没有成本。 */
+        if (safeStaminaLevel == currentLevel) return;
+        if (shards < 15) {
+            pickupMsg = Tr("NEED 15 SHARDS", "需要 15 碎片");
+            pickupMsgTimer = 1.2f;
+            uiDirty = 1;
+            return;
+        }
+        shards -= 15;
+        safeStaminaLevel = currentLevel;
         stamina = StaminaMax();
-        pickupMsg = Tr("STAMINA RESTORED", "体力已恢复");
+        pickupMsg = Tr("STAMINA RESTORED (-15)", "体力已恢复 (-15)");
         pickupMsgTimer = 1.2f;
         PlaySfx(SFX_POWER, 0.8f);
         uiDirty = 1;
@@ -374,4 +368,5 @@ void ShopActivate(void) {
 void SafeLevelReset(void) {
     safeHealLevel = -1;
     safeChargeLevel = -1;
+    safeStaminaLevel = -1;   /* v3.3 */
 }
