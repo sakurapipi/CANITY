@@ -1524,8 +1524,14 @@ void DrawMenuPanels(void) {
             UiSectionRule(cx2, ty, (R2 - L2) - inner * 2);
         }
 
-        /* 页脚横线 + 操作提示：只在有行列表的界面画 */
-        if (currentState != STATE_MAIN_MENU) {
+        /* 页脚横线 + 操作提示：只在**有行列表**的界面画。
+           v3.3：技能树也要排除 —— 它的 MenuGeo 是给命中测试用的：
+             count = SKILL_COUNT(20)，rowH = nodeH
+           但实际布局是 4 列 × 5 行，所以 firstY + (count-1)*rowH 算出来
+           一路算到面板底之外，线要么被夹到 keytone 那一排上（用户截图），
+           要么干脆不画。技能树自己有排版，不需要这条线。 */
+        if (currentState != STATE_MAIN_MENU &&
+            !(currentState == STATE_HUB && hubPage == 1)) {
             int fy = B2 - UIS(26);
             /* v2.9：**线要画在最后一行文字下面**。
                原来 y - TH/2，主菜单第 10 行「Quit」正好被这条线横切
