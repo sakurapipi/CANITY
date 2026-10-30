@@ -553,7 +553,11 @@ static void DrawCrateSprite(int i) {
     if (i < 0 || i >= containerCount) return;
     Container* c = &containers[i];
     if (c->searched) {
-        DrawBakedProp(SPR_PROP_CRATE, c->x, c->y, 0.34f, 0.55f);
+        /* 翻过：盖子掀开、里面黑 */
+        DrawBakedProp(SPR_PROP_CRATE_OPEN, c->x, c->y, 0.34f, 0.55f);
+    } else if (c->locked) {
+        /* 未解锁：正常木箱 + 金锁 */
+        DrawBakedProp(SPR_PROP_CRATE_LOCKED, c->x, c->y, 0.42f, 1.0f);
     } else {
         DrawBakedProp(SPR_PROP_CRATE, c->x, c->y, 0.42f, 1.0f);
     }
@@ -565,12 +569,13 @@ static void DrawCrateSprite(int i) {
    原来全项目 render.c/ui.c 对 hideSpots 零引用 —— 玩家根本看不见
    衣柜/床底/桌下，只有按下 E 之后闪 1.6 秒的一行字。
    这里复用箱子的精灵，缩小 + 压暗，和真箱子区分开。 */
+/* 藏身点：垃圾桶。之前复用箱子精灵缩小压暗，玩家根本分不清是箱子还是藏身点。 */
 static void DrawHideSpotSprite(int i) {
     if (i < 0 || i >= hideSpotCount) return;
     HideSpot* h = &hideSpots[i];
     if (!h->active) return;
-    float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.78f : 0.62f);
-    DrawBakedProp(SPR_PROP_CRATE, h->x, h->y, 0.30f, 0.55f * k);
+    float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.90f : 0.82f);
+    DrawBakedProp(SPR_PROP_TRASH, h->x, h->y, 0.46f, 0.72f * k);
 }
 static void DrawBreakerSprite(void) {
     if (!breaker.active) return;
@@ -1479,6 +1484,18 @@ void RenderSprites(void) {
         list[n].idx = i;
         n++;
     }
+    /* v3.3：藏身点必须真的进渲染列表。
+       原来这里没有插入，case 12 却去画 hideSpots[idx]，
+       而 kind=12 又被 Extras 占用 → 垃圾桶画在错误的位置/根本不画，
+       玩家只看到随机出现的 HIDE 提示。 */
+    for (int i = 0; i < hideSpotCount; i++) {
+        if (!hideSpots[i].active) continue;
+        if (n >= MAX_SPRITES) break;
+        list[n].d2 = Dist2(hideSpots[i].x, hideSpots[i].y, posX, posY);
+        list[n].kind = 12;
+        list[n].idx = i;
+        n++;
+    }
     if (breaker.active) {
         if (n < MAX_SPRITES) {
             list[n].d2 = Dist2(breaker.x, breaker.y, posX, posY);
@@ -1545,7 +1562,7 @@ void RenderSprites(void) {
         if (e->kind == 0 && flashlightOn && battery > 0.0f) continue;
         if (n >= MAX_SPRITES) break;
         list[n].d2 = Dist2(e->x, e->y, posX, posY);
-        list[n].kind = 12;
+        list[n].kind = 11;
         list[n].idx = i;
         n++;
     }

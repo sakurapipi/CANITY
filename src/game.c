@@ -641,7 +641,7 @@ static const char* optRes[RES_COUNT] = {
     "1600x900", "1920x1080", "2560x1440", "AUTO (FIT SCREEN)"
 };
 static const char* optFps[5] = {"30", "60", "120", "144", "Unlimited"};
-static const char* optScale[4] = {"100%", "75%", "50%", "25%"};
+static const char* optScale[4] = {"HIGH (100%)", "MEDIUM (75%)", "LOW (50%)", "MINIMAL (25%)"};
 static const char* optFov[5] = {"66", "75", "85", "95", "105"};
 static const char* optOnOff[2] = {"OFF", "ON"};
 /* HUD 详细度：游戏画面上放多少字。
@@ -655,7 +655,7 @@ SettingItem settings[] = {
     {"Resolution",      SET_LIST,   optRes,      RES_COUNT, &resIndex,          NULL,      0,    0,    0, 1},
     {"Fullscreen",      SET_LIST,   optOnOff,    2, &isFullscreen,      NULL,      0,    0,    0, 1},
     {"Frame Limit",     SET_LIST,   optFps,      5, &fpsCapIndex,       NULL,      0,    0,    0, 1},
-    {"Render Scale",    SET_LIST,   optScale,    4, &renderScaleIndex,  NULL,      0,    0,    0, 1},
+    {"Graphics Quality", SET_LIST,  optScale,    4, &renderScaleIndex,  NULL,      0,    0,    0, 1},
     {"Dynamic Res",     SET_LIST,   optOnOff,   2, &dynamicRes,        NULL,      0,    0,    0, 1},
     {"Gamma",           SET_SLIDER, NULL,        0, NULL,               &gammaValue, 0.7f, 1.6f, 0.05f, 1},
     {"Field of View",   SET_LIST,   optFov,      5, &fovIndex,          NULL,      0,    0,    0, 1},
@@ -1311,7 +1311,7 @@ void GenerateLevel(void) {
        （用户实测 hideSpotCount=0）。 */
     hideSpotCount = 0;
     {
-        int want = 3 + (rand() % 3);          /* 3~5 个 */
+        int want = 2 + (rand() % 2);          /* v3.3：3~5 → 2~3，藏身点少一点 */
 
         /* ---- 第一轮：严格 ---- */
         for (int tries = 0; tries < 300 && hideSpotCount < want && emptyCount > 0; tries++) {
@@ -1341,6 +1341,9 @@ void GenerateLevel(void) {
             for (int k = 0; k < hideSpotCount; k++)
                 if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < 1.5f) { bad = 1; break; }
             if (bad) continue;
+            /* 兜底也不能压在箱子/配电箱上，否则垃圾桶会被道具盖住，
+               玩家只看到 HIDE 提示却找不到桶。 */
+            if (!SpotClear(hx2, hy2, 0.9f, 1, -1)) continue;
             hideSpots[hideSpotCount].x = hx2;
             hideSpots[hideSpotCount].y = hy2;
             hideSpots[hideSpotCount].kind = rand() % 3;
@@ -2332,6 +2335,11 @@ void Update(float dt) {
         /* v2.5：安全屋里不流失 —— 这是"安全"二字的承诺 */
         if (!inSafe) sanity -= drain * siphonSan * dt;
     }
+    /* v3.3：躲进垃圾桶后缓慢回理智；净恢复约 1.5/秒 */
+    if (hiddenIn >= 0) {
+        sanity += HIDE_SANITY_REGEN * dt;
+        if (sanity > SanityMax()) sanity = SanityMax();
+    }
     lowSanitySeconds += (sanity <= 1.0f) ? dt : 0.0f;   /* v2.2：LAST BREATH */
     if (sanity <= 0.0f) {
         sanity = 0.0f;
@@ -2419,8 +2427,28 @@ void Update(float dt) {
         float bestHD = 1.2f * 1.2f;
         for (int i = 0; i < hideSpotCount; i++) {
             if (!hideSpots[i].active) continue;
-            float d = Dist2(posX, posY, hideSpots[i].x, hideSpots[i].y);
-            if (d < bestHD) { bestHD = d; hideSpotNear = i; }
+            float dx = hideSpots[i].x - posX, dy = hideSpots[i].y - posY;
+            float d = dx * dx + dy * dy;
+            if (d >= bestHD) continue;
+            /* 只提示“看得见的垃圾桶”：
+               ① 必须在视线前方（背后的桶不提示，避免走在空地上突然冒出 HIDE）
+               ② 玩家到桶之间不能隔墙
+               ③ 距离 1.2 格以内 */
+            if (dx * dirX + dy * dirY < 0.35f) continue;
+            {
+                int steps = (int)(sqrtf(d) * 10.0f) + 1;
+                int blocked = 0;
+                for (int s = 1; s < steps; s++) {
+                    float t = (float)s / (float)steps;
+                    int cx = (int)floorf(posX + dx * t);
+                    int cy = (int)floorf(posY + dy * t);
+                    if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT ||
+                        worldMap[cy][cx]) { blocked = 1; break; }
+                }
+                if (blocked) continue;
+            }
+            bestHD = d;
+            hideSpotNear = i;
         }
         /* v3.0：**E 必须松开再按才算下一次** ——
            按住 0.5 秒时 WM_KEYDOWN 会自动重复，每次重复都置 keyPressed，
@@ -3263,11 +3291,7 @@ void Update(float dt) {
         /* v1.8：通过本层 → 事件加分进本局总分 */
         if (evThisLevel >= 0) eventBonus += EventScore(evThisLevel);
 
-        /* v1.8：每通关 2 层给一次局内技能三选一（下一层的层号判定） */
-        if (currentState == STATE_PLAYING) {
-            if (currentLevel % INRUN_PICK_EVERY == 0) OpenSkillPick();   /* 每 2 层：局内技能 */
-            else                                     OpenRelicPick();    /* 其余层：遗物 */
-        }
+        /* v3.3：取消每层/每两层的三选一。玩家明确要求不再弹 CHOOSE ONE。 */
 
         /* 重置本层/本局的成就追踪变量 */
         sprintedThisLevel = 0;
@@ -4649,7 +4673,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     settings[popupItem].kind == SET_SLIDER) {
                     const SettingItem* it = &settings[popupItem];
                     MenuGeo p = GetPopupGeo();
-                    float v = SliderXToValue(p, mx, it->fmin, it->fmax, it->fstep);
+                    int lmx = mx, lmy = my;
+                    MouseToLogical(&lmx, &lmy);   /* 拖拽坐标也必须换到 UI 逻辑空间 */
+                    float v = SliderXToValue(p, lmx, it->fmin, it->fmax, it->fstep);
                     if (v != *it->fvalue) { *it->fvalue = v; uiDirty = 1; }
                     return 0;
                 }

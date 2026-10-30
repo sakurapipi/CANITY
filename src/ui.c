@@ -152,14 +152,19 @@ static const unsigned char fontData[95][FONT_H] = {
 
 /* 文字直接写进像素缓冲：和面板同一层，不存在“文字层丢失” */
 static int TextScale(void) {
-    /* v2.2：UI 在渲染空间排版，字形固定 2 倍（12x2=24 渲染像素），
-       整帧一起被拉伸到窗口，所以任何分辨率下比例都一致。 */
-    return (renderH < 300) ? 1 : 2;
+    /* v3.3：像素字体的缩放必须和 renderH 同步。
+       原来固定 2 倍，但 TextHeightWin/TextWidthWin 又乘了 renderH/458，
+       于是布局按“大字”排、实际画出来的字却只有 24px：
+       文字偏左（居中按错误宽度算）、MINIMAL 下字大得离谱。
+       现在实际绘制、测量、布局统一用同一个整数缩放。 */
+    int s = (renderH * 2) / 458;   /* 设计基准 458；向下取整，低画质只会更小，不会突然变大 */
+    if (s < 1) s = 1;
+    if (s > 6) s = 6;
+    return s;
 }
 
 static int TextAdvWin(void) {
-    /* v3.0：同 TextHeightWin —— 用高度基准，保证字符宽高比不变 */
-    return FONT_W * TextScale() * renderH / 458;
+    return FONT_W * TextScale();
 }
 
 int TextWidthWin(const char* t) {
@@ -235,15 +240,10 @@ static void ClampRowText(char* buf, int availPx) {
 }
 
 int TextHeightWin(void) {
-    /* v3.0：**字号必须和 UIS() 站在同一基准**。
-       原来返回 FONT_H*TextScale() *winH/renderH，而 SyncWindowSize
-       每帧把 winW/winH 覆盖成 renderW/renderH → 那个比值恒为 1，
-       于是字高恒定 24px；但 UIS() 跟 renderH 缩放。
-       两者只在 renderH=458（旧的 28 万像素预算）时相等 ——
-       现在预算是 90 万（renderH≈711），UIS 系统性大 1.55 倍，
-       表现就是「框越大、字相对越小」，高分辨率像空面板。
-       改成跟 renderH 比 458 的设计基准，两套比例就永远一致。 */
-    return FONT_H * TextScale() * renderH / 458;
+    /* 实际绘制也用 FONT_H * TextScale()，这里必须返回同一个值。
+       之前还乘 renderH/458，布局以为字很高、实际只画 24px，
+       居中、行高、滑条命中都会跟着偏。 */
+    return FONT_H * TextScale();
 }
 
 /* xWin/yWin 用窗口坐标，内部换算到渲染坐标 */
@@ -377,9 +377,10 @@ static void DrawTitleWin(const char* t, int yWin, unsigned int color) {
 #define UI_BASE_TH 31          /* 800x600 时 TextHeightWin() 的实测值 */
 
 int UIS(int v) {
-    /* v2.2：UI 在渲染空间排版，基准高度 = 800x600 时的 renderH（458）。
-       这样字号（TH=24 渲染像素）和行高永远同比例，窗口多大都一样。 */
-    long s = ((long)v * renderH * 2 + 458) / 916;
+    /* v3.3：UI 尺寸跟**实际字体高度**走，而不是单独跟 renderH 走。
+       否则字体缩放取整后（比如 MINIMAL 下 s=1）面板还按 renderH 算，
+       两者比例又对不上，界面就会忽大忽小。 */
+    long s = ((long)v * TextHeightWin() + 12) / 24;
     if (s < 6) s = 6;
     if (s > 2000) s = 2000;
     return (int)s;
@@ -3430,13 +3431,28 @@ void RenderFrame(void) {
     {
         extern int hiddenIn;
         if (hiddenIn >= 0) {
-            int bandH = winH / 5;
-            /* 藏身遮罩只保留稳定的四块暗边。旧版逐扫描线改变 alpha，
-               每帧要做数百次小矩形混合，边缘会产生类似抽搐的视觉噪声。 */
-            BlendRectWin(0, 0, winW, bandH, 0x00000000u, 0.70f);
-            BlendRectWin(0, winH - bandH, winW, winH, 0x00000000u, 0.70f);
-            BlendRectWin(0, 0, winW / 8, winH, 0x00000000u, 0.75f);
-            BlendRectWin(winW - winW / 8, 0, winW, winH, 0x00000000u, 0.75f);
+            /* 躲进垃圾桶：只留中间一条很窄的缝，四周是桶壁。
+               旧版只是四条暗边，中间还留一大块，看起来不像“藏在里面”。 */
+            int ow = winW * 18 / 100;
+            int oh = winH * 38 / 100;
+            if (ow < 90) ow = 90;
+            if (oh < 110) oh = 110;
+            int ox0 = (winW - ow) / 2;
+            int oy0 = (winH - oh) / 2;
+            int ox1 = ox0 + ow;
+            int oy1 = oy0 + oh;
+
+            BlendRectWin(0, 0, ox0, winH, 0x00000000u, 0.94f);
+            BlendRectWin(ox1, 0, winW, winH, 0x00000000u, 0.94f);
+            BlendRectWin(ox0, 0, ox1, oy0, 0x00000000u, 0.94f);
+            BlendRectWin(ox0, oy1, ox1, winH, 0x00000000u, 0.94f);
+
+            /* 铁皮桶口：内圈阴影 + 外圈金属边 */
+            FrameRectWin(ox0 - UIS(4), oy0 - UIS(4), ox1 + UIS(4), oy1 + UIS(4),
+                         0x00182018u, 0.95f, UIS(5));
+            FrameRectWin(ox0, oy0, ox1, oy1, 0x00506058u, 0.9f, UIS(2));
+            BlendRectWin(ox0, oy0, ox1, oy0 + UIS(8), 0x00000000u, 0.55f);
+            BlendRectWin(ox0, oy1 - UIS(10), ox1, oy1, 0x00000000u, 0.45f);
         }
     }
 

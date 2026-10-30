@@ -14,6 +14,7 @@
 #include "game.h"
 #include "render.h"
 #include "audio.h"
+#include "extras.h"
 
 
 float posX = 1.5f, posY = 1.5f;
@@ -275,9 +276,19 @@ void MakeNoise(float x, float y, float radius) {
 
         }
     }
-    if (!monster.active) return;
     extern float modNoiseMul;
     radius *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;   /* QUIET LID + 遗物 + 事件 */
+    /* v3.3：盲螨只认声音。它原来每帧直接朝玩家冲刺，所以玩家“静音走路”
+       也会被它追；现在只有噪音落在半径内才给它目标。 */
+    for (int i = 0; i < EXTRA_MAX; i++) {
+        Extra* e = &extras[i];
+        if (!e->active || e->kind != 1) continue;
+        if (Dist2(x, y, e->x, e->y) > radius * radius) continue;
+        e->hasTarget = 1;
+        e->tx = x; e->ty = y;
+        e->timer = 0.0f;
+    }
+    if (!monster.active) return;
     if (Dist2(x, y, monster.x, monster.y) > radius * radius) return;
     monster.state = 1;
     monster.tx = x;

@@ -65,6 +65,7 @@ typedef enum {
 #define MOVE_SPEED 2.0f       /* 单位/秒（基础走速） */
 #define SPRINT_MULT 1.5f      /* 冲刺倍率 */
 #define SANITY_DRAIN 0.5f     /* 理智/秒（基础值） */
+#define HIDE_SANITY_REGEN 2.0f /* 躲在垃圾桶里每秒恢复的理智 */
 #define ENDLESS_SANITY_DRAIN 0.35f  /* 无尽模式：理智流失更慢 */
 
 /* ---- v1.8 理智经济（docs/终极方案_v2.md 第 1 节） ----
