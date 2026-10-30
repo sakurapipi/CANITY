@@ -227,7 +227,9 @@ float weaponAtkCharge = 0.0f;  /* 武器蓄力 0..1 */
 float secondWindTimer = 0.0f;   /* v3.0 二次呼吸：体力归零后的宽限秒数 */
 float vanishTimer = 0.0f;       /* v3.0 消失：脱离视线累计秒数 */
 int   playDeadUsed = 0;         /* v3.0 假死：本局用过了吗 */
-int   tutorialOff = 0;          /* v3.0 开局引导：玩家按键关闭了 */
+/* v3.3：tutorialOff 已删除 ——
+   旧的四行开局引导整块移除了（改用 Tutorial 模式的分步引导），
+   这个变量既不写也不读，留着只是噪音。 */
 float hideBlockTimer = 0.0f;    /* v3.0：刚解锁/刚翻完箱时短暂禁止进藏身点 */
 int   ultUsed = 0;              /* v3.0：本局大招用过了吗 */
 float ultTimer = 0.0f;          /* v3.0：大招持续秒数 */

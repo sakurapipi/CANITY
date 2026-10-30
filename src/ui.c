@@ -3020,71 +3020,16 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
 
 
 
-    /* ===== v3.0 开局引导 =====
-       玩家实测：「双击 exe 直接掉进一局，没有标题画面也没有操作说明，
-       E/F/R/T/M 全靠瞎按才发现」。这里在第 1 层前 25 秒给一段最简说明。 */
-    {
-        extern int tutorialOff;
-        /* v3.3：**tutorial 模式下关掉这套旧引导** ——
-           作者新加了 DrawTutorialPanel()（"TUTORIAL 1/11" 分步引导），
-           两套同时画会叠在一起（用户截图：旧框的四行字从新面板后面透出来）。
-           tutorial 有自己那套，这里让路。 */
-        extern int trainingMode;
-        if (currentState == STATE_PLAYING && currentLevel <= 1 &&
-            runTime < 25.0f && !tutorialOff && !trainingMode) {
-        /* v3.0：**框必须按实际文字宽度算** ——
-           上一版固定 winW-80，最长那行「fuses -> power the breaker -> reach the exit」
-           比框还宽，文字直接溢出到框外（用户截图：「引导 UI 不完整被遮蔽」）。
-           这里先用 TextWidthWin 量出最宽一行，再决定框宽；同时把文案压短。 */
-        static const char* hintZh[4] = {
-            "WASD 移动    SHIFT 冲刺",
-            "E 翻箱/躲藏   F 手电   R 摇电",
-            "左键 敲击引怪   右键 扔东西",
-            "保险丝 → 配电箱通电 → 出口",
-        };
-        static const char* hintEn[4] = {
-            "WASD move    SHIFT sprint",
-            "E search/hide   F light   R crank",
-            "LMB knock to lure    RMB throw",
-            "fuses -> breaker -> exit",
-        };
-        int lineH = TextHeightWin() + UIS(6);
-        int padX  = UIS(24), padY = UIS(14);
-
-        /* 量最宽一行 */
-        int maxW = 0;
-        for (int li = 0; li < 4; li++) {
-            const char* t = (g_lang == LANG_ZH) ? hintZh[li] : hintEn[li];
-            int w = TextWidthWin(t);
-            if (w > maxW) maxW = w;
-        }
-        int boxW = maxW + padX * 2;
-        int limitW = winW - UIS(40);
-        if (boxW > limitW) boxW = limitW;        /* 屏幕实在放不下才截 */
-        int boxH = lineH * 4 + padY * 2;
-
-        int bx0 = (winW - boxW) / 2;
-        int by0 = winH - UIS(200) - boxH;
-        if (by0 < UIS(70)) by0 = UIS(70);
-
-        float fade = 1.0f;
-        if (runTime > 20.0f) fade = (25.0f - runTime) / 5.0f;
-        if (fade < 0.0f) fade = 0.0f;
-
-        BlendRectWin(bx0, by0, bx0 + boxW, by0 + boxH, 0x000C1116u, 0.82f * fade);
-        FrameRectWin(bx0, by0, bx0 + boxW, by0 + boxH, 0x00C8B060u, 0.75f * fade, 1);
-        for (int li = 0; li < 4; li++) {
-            const char* t = (g_lang == LANG_ZH) ? hintZh[li] : hintEn[li];
-            unsigned int col = (li == 3) ? 0x00FFD060u : 0x00C8C4BCu;
-            DrawTextCenterWin(winW / 2, by0 + padY + li * lineH, t, col);
-        }
-        /* v3.0：告诉玩家怎么关 —— 原来只能等 25 秒自动消失，
-           玩家反馈「不知道怎么关闭新手指引」。 */
-        DrawTextCenterWin(winW / 2, by0 + boxH + UIS(8),
-                          Tr("PRESS SPACE TO DISMISS", "按空格关闭"),
-                          0x0090A0A8u);
-        }
-    }
+    /* ===== v3.3：**旧的「开局四行说明」整块删除** =====
+       用户要求：「旧的局内引导完全删掉，因为我们已经有引导模式了」。
+       现在有 Tutorial 模式里的分步引导（TUTORIAL n/11，见 DrawTutorialPanel），
+       覆盖了同样的内容而且更细；两套并存只会互相干扰
+       （之前就出现过旧框的字从新面板后面透出来）。
+       原来这块负责：
+         · 第 1 层前 25 秒显示 4 行操作说明
+         · 底部「PRESS SPACE TO DISMISS」可提前关闭
+       全部移除。tutorialOff 变量还在 game.c 里（按键处理会置 1），
+       但已经没有绘制点了，不影响编译。 */
 
     /* ===== v3.0 逃生向 HUD：藏身提示 + 被发现状态 =====
        怪已经打不死了，「它现在有没有在追我」是唯一需要盯的信息。 */
