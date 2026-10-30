@@ -2000,9 +2000,36 @@ static void DrawMainMenu(const MainMenuLayout* M) {
     sprintf(rstr, "BEST LEVEL %d", bestLevel);
     int lx = M->panel.left + M->padX + TH / 2;
     int rx = M->panel.right - M->padX - TH / 2;
-    DrawTextWin(lx, M->footY, lstr, 0x0060D0FFu);
-    int wr = TextWidthWin(rstr);
-    DrawTextWin(rx - wr, M->footY, rstr, 0x00808088u);
+
+    /* v3.3：**页脚两项会撞车** ——
+       用户截图：碎片涨到 7000 之后 "SHARDS 7000" 变宽，
+       和右对齐的 "BEST LEVEL 0" 直接叠在一起。
+       原来完全没做宽度检查。现在按可用宽度逐级缩短右侧文案：
+         ① BEST LEVEL 12  （完整）
+         ② BEST 12        （去掉 LEVEL）
+         ③ Lv12           （极窄窗口）
+       仍然放不下就左右各让一半，保证至少一个字的间隙。 */
+    {
+        int avail = rx - lx;
+        int gapMin = TH;                     /* 最小间隙 = 一个字高 */
+        int wl = TextWidthWin(lstr);
+        int wr = TextWidthWin(rstr);
+        if (wl + wr + gapMin > avail) {
+            sprintf(rstr, "BEST %d", bestLevel);
+            wr = TextWidthWin(rstr);
+        }
+        if (wl + wr + gapMin > avail) {
+            sprintf(rstr, "Lv%d", bestLevel);
+            wr = TextWidthWin(rstr);
+        }
+        /* 极端情况：左侧也收一点，保证不重叠 */
+        if (wl + wr + gapMin > avail && wl > avail / 2) {
+            sprintf(lstr, "%d", shards);
+            wl = TextWidthWin(lstr);
+        }
+        DrawTextWin(lx, M->footY, lstr, 0x0060D0FFu);
+        DrawTextWin(rx - wr, M->footY, rstr, 0x00808088u);
+    }
 
     DrawTextWin(winW - TextWidthWin(CANITY_VERSION_STR) - UIS(8),
                 winH - TextHeightWin() - UIS(4), CANITY_VERSION_STR, 0x007C8088u);
@@ -2980,8 +3007,13 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
        E/F/R/T/M 全靠瞎按才发现」。这里在第 1 层前 25 秒给一段最简说明。 */
     {
         extern int tutorialOff;
+        /* v3.3：**tutorial 模式下关掉这套旧引导** ——
+           作者新加了 DrawTutorialPanel()（"TUTORIAL 1/11" 分步引导），
+           两套同时画会叠在一起（用户截图：旧框的四行字从新面板后面透出来）。
+           tutorial 有自己那套，这里让路。 */
+        extern int trainingMode;
         if (currentState == STATE_PLAYING && currentLevel <= 1 &&
-            runTime < 25.0f && !tutorialOff) {
+            runTime < 25.0f && !tutorialOff && !trainingMode) {
         /* v3.0：**框必须按实际文字宽度算** ——
            上一版固定 winW-80，最长那行「fuses -> power the breaker -> reach the exit」
            比框还宽，文字直接溢出到框外（用户截图：「引导 UI 不完整被遮蔽」）。
