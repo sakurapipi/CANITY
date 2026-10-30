@@ -27,6 +27,10 @@ static short g_sndScream[13230];   /* 0.60s 尖叫 */
 static short g_sndGlass[6615];     /* 0.30s 玻璃碎裂 */
 static short g_sndSearch[3307];    /* 0.15s 翻箱子：金属刮擦+闷响 */
 static short g_sndThrow[4410];     /* 0.20s 投掷：呼啸+出手音 */
+/* v3.3 投掷物重做配套的三个音效 */
+static short g_sndGlue[6615];      /* 0.30s 胶水：黏稠噗叽 */
+static short g_sndEcho[9922];      /* 0.45s 回声：短叮 + 回响 */
+static short g_sndDecoy[13230];    /* 0.60s 玩偶：嘎吱叫两声 */
 
 typedef struct { const short* data; int len, pos; float vol; int active; } Voice;
 
@@ -96,6 +100,9 @@ void PlaySfx(int id, float vol) {
         case SFX_GLASS:  data = g_sndGlass; len = (int)(sizeof(g_sndGlass) / sizeof(short)); break;
         case SFX_SEARCH: data = g_sndSearch;len = (int)(sizeof(g_sndSearch) / sizeof(short)); break;
         case SFX_THROW:  data = g_sndThrow; len = (int)(sizeof(g_sndThrow) / sizeof(short)); break;
+        case SFX_GLUE:   data = g_sndGlue;  len = (int)(sizeof(g_sndGlue) / sizeof(short));  break;
+        case SFX_ECHO:   data = g_sndEcho;  len = (int)(sizeof(g_sndEcho) / sizeof(short));  break;
+        case SFX_DECOY:  data = g_sndDecoy; len = (int)(sizeof(g_sndDecoy) / sizeof(short)); break;
         default: return;
     }
     EnterCriticalSection(&g_audioLock);
@@ -260,6 +267,73 @@ static void GenSounds(void) {
                 v += sinf(6.2831f * 60.0f * t) * expf(-t * 50.0f) * 0.4f * p;
             }
             g_sndThrow[i] = (short)(v * 32000.0f);
+        }
+    }
+
+    /* ===== v3.3 投掷物重做配套的音效 =====
+       全部现场合成，不引入外部资源（项目一直是零外部资产的单 exe）。 */
+
+    /* 胶水：黏稠的「噗叽」—— 低频正弦快速下滑 + 噪声湿滑感 */
+    {
+        int n = (int)(sizeof(g_sndGlue) / sizeof(short));
+        float lp2 = 0.0f;
+        unsigned int s2 = 777u;
+        for (int i = 0; i < n; i++) {
+            float t = (float)i / AUDIO_RATE;
+            s2 = s2 * 1664525u + 1013904223u;
+            float nz = ((float)((s2 >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+            lp2 = lp2 * 0.88f + nz * 0.12f;                 /* 重低通 = 黏糊感 */
+            float f = 210.0f * expf(-t * 7.0f) + 55.0f;      /* 音高快速滑到底 */
+            float env = expf(-t * 9.0f);
+            float v = (sinf(6.2831f * f * t) * 0.7f + lp2 * 0.5f) * env * 0.42f;
+            g_sndGlue[i] = (short)(v * 32000.0f);
+        }
+    }
+
+    /* 回声：短促「叮」+ 两次延迟回响（模拟洞穴回声） */
+    {
+        int n = (int)(sizeof(g_sndEcho) / sizeof(short));
+        float echoTap[3] = {0.0f, 0.13f, 0.26f};
+        float echoAmp[3] = {1.0f, 0.42f, 0.18f};
+        for (int i = 0; i < n; i++) {
+            float t = (float)i / AUDIO_RATE;
+            float v = 0.0f;
+            for (int k2 = 0; k2 < 3; k2++) {
+                float d = t - echoTap[k2];
+                if (d < 0.0f || d > 0.30f) continue;
+                float env = expf(-d * 26.0f);
+                /* 2350Hz 的金属质感 + 一点点高频泛音 */
+                v += (sinf(6.2831f * 2350.0f * d) * 0.7f
+                    + sinf(6.2831f * 4700.0f * d) * 0.3f)
+                    * env * echoAmp[k2];
+            }
+            v *= 0.30f;
+            g_sndEcho[i] = (short)(v * 32000.0f);
+        }
+    }
+
+    /* 玩偶：木头/金属的「嘎吱」——
+       两段锯齿噪声（嘎 + 吱），音高上移，像被人拧了一下 */
+    {
+        int n = (int)(sizeof(g_sndDecoy) / sizeof(short));
+        float segT[2] = {0.0f, 0.22f};
+        for (int i = 0; i < n; i++) {
+            float t = (float)i / AUDIO_RATE;
+            float v = 0.0f;
+            for (int k2 = 0; k2 < 2; k2++) {
+                float d = t - segT[k2];
+                if (d < 0.0f || d > 0.20f) continue;
+                /* 第二段音高更高 = 被拧紧 */
+                float base = (k2 == 0) ? 380.0f : 620.0f;
+                float f = base + 140.0f * (d / 0.20f);
+                /* 锯齿波：木头摩擦的粗糙感 */
+                float ph = f * d;
+                float saw = 2.0f * (ph - floorf(ph)) - 1.0f;
+                float env = expf(-d * 14.0f);
+                v += saw * env * (k2 == 0 ? 0.55f : 0.70f);
+            }
+            v *= 0.38f;
+            g_sndDecoy[i] = (short)(v * 32000.0f);
         }
     }
 }

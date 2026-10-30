@@ -3338,6 +3338,36 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         }
     }
 
+    /* v3.3：**诱饵放下后提示「按 C 键激活」** ——
+       用户要求：放置成功之后屏幕上要出现这行字。
+       只要场上有「已放下但没激活」的玩偶就常驻显示，
+       全部激活 / 用光后自动消失。 */
+    if (currentState == STATE_PLAYING) {
+        extern Decoy decoysArr[MAX_DECOY];
+        extern float runTime;
+        int unarmed = 0;
+        for (int di = 0; di < MAX_DECOY; di++) {
+            if (decoysArr[di].active && !decoysArr[di].armed) { unarmed = 1; break; }
+        }
+        if (unarmed) {
+            float pulse = 0.72f + 0.28f * sinf(runTime * 5.0f);
+            int ty = (int)(winH * 0.30f);
+            const char* txt = Tr("PRESS  C  TO ARM THE DECOY",
+                                 "按  C  键 激 活 诱 饵");
+            int tw = TextWidthWin(txt);
+            int bx0 = (winW - tw) / 2;
+            BlendRectWin(bx0 - UIS(14), ty - UIS(6),
+                         bx0 + tw + UIS(14), ty + TextHeightWin() + UIS(6),
+                         0x00101418u, 0.82f);
+            FrameRectWin(bx0 - UIS(14), ty - UIS(6),
+                         bx0 + tw + UIS(14), ty + TextHeightWin() + UIS(6),
+                         0x00E8C040u, 0.75f * pulse, 1);
+            DrawTextCenterWin(winW / 2, ty, txt,
+                              (pulse > 0.85f) ? 0x00FFE070u : 0x00C8A040u);
+        }
+    }
+
+
     /* v3.0：**校准倒计时常驻显示** ——
        用户两次反馈「倒计时没有加进去」。
        之前只在 hiddenIn >= 0（藏进藏身点）时才画，玩家在走廊里

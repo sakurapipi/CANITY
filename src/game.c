@@ -592,7 +592,7 @@ void UpdateSmokes(float dt) {
         if (decoysArr[i].shoutT <= 0.0f) {
             decoysArr[i].shoutT = DECOY_SHOUT_EVERY;
             MakeNoise(decoysArr[i].x, decoysArr[i].y, DECOY_SHOUT_R);
-            PlaySfx(SFX_GATE, 0.55f);
+            PlaySfx(SFX_DECOY, 0.70f);   /* v3.3：玩偶嘎吱叫 */
         }
     }
 
@@ -2181,6 +2181,7 @@ static void UpdateShots(float dt) {
                 SpawnSmoke(shot[i].x, shot[i].y);
             } else if (shot[i].kind == 8) {
                 SpawnGlue(shot[i].x, shot[i].y);
+                PlaySfx(SFX_GLUE, 0.85f);   /* v3.3：黏稠噗叽 */
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
             } else if (shot[i].kind == 10) {
                 /* 回声弹：不发光、不出声，只把 15 格内怪物位置暴露 5 秒 */
@@ -2191,7 +2192,7 @@ static void UpdateShots(float dt) {
                 echoScanY = shot[i].y;
                 pickupMsg = (g_lang == LANG_ZH) ? "回声扫过" : "ECHO SCAN";
                 pickupMsgTimer = 1.4f;
-                PlaySfx(SFX_PICKUP, 0.7f);   /* v3.3：没有专回声音效，用拾取提示音 */
+                PlaySfx(SFX_ECHO, 0.80f);   /* v3.3：短叮 + 回响 */
             } else {
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
             }
@@ -3418,7 +3419,7 @@ void Update(float dt) {
                     totalThrown++;          /* 也算一次道具消耗 */
                     throwCd = 0.60f;
                     pickupMsg = (g_lang == LANG_ZH)
-                        ? "诱饵已放下 - 按 C 激活" : "DECOY PLACED - PRESS C";
+                        ? "诱饵已放下" : "DECOY PLACED";
                     pickupMsgTimer = 2.0f;
                     PlaySfx(SFX_PICKUP, 0.7f);
                 }
@@ -3523,8 +3524,16 @@ void Update(float dt) {
     UpdateShots(dt);
     /* v1.17 训练场：无限道具、不掉理智、标本固定不动 */
     if (trainingMode) {
-        flares = bottles = bricks = acids = smokeBombs = 99;
-        firePots = gluePots = mirrors = 99;
+        /* v3.3：投掷物重做后训练场要给全六种，方便逐个试手感。
+           对应槽位：光球 / 投石 / 烟雾 / 胶水 / 回声 / 诱饵 */
+        flares = 99;
+        bottles = 99;      /* 投石 */
+        smokeBombs = 99;
+        gluePots = 99;
+        echoBolts = 99;
+        decoys = 99;
+        /* 已删的三种清零，免得老存档带进来 */
+        bricks = 0; acids = 0; firePots = 0; mirrors = 0;
         sanity = 100.0f;
         /* 教程里手电电量会正常消耗，这样「按住 R 摇电」才有可见效果；
            只做上限夹取，不再每帧强行充满。 */
@@ -4083,14 +4092,18 @@ void StartGame(void) {
     currentState = STATE_PLAYING;
     currentLevel = campaignMode ? campaignStage * CAMPAIGN_LEVELS_PER_STAGE + 1 : 1;
     gameWon = 0;
+    /* v3.3：新六槽位的开局初始量
+       光球 1（照明刚需）/ 投石 2（基础诱饵）/ 其余从箱子里找 */
     flares = 1;
-    bottles = 1;
-    /* v2.9：三种新投掷物以前没在开局清零 —— 训练场（99 个）或上一局的
-       砖/酸/烟会直接带进新一局。 */
+    bottles = 2;
+    smokeBombs = 0;
+    gluePots = 0;
+    echoBolts = 0;
+    decoys = 0;
+    /* 已删的三种清零，免得训练场（99 个）或上一局带进新一局 */
     bricks = 0;
     acids = 0;
-    smokeBombs = 0;
-    firePots = 0; gluePots = 0; mirrors = 0;
+    firePots = 0; mirrors = 0;
     throwSelected = 0;
     runInProgress = 1;
     runTime = 0.0f;

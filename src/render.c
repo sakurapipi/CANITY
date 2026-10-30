@@ -1227,6 +1227,114 @@ static void DrawFlareSprite(int idx) {
 /* ---------------- v1.19 投掷物建模 ----------------
    砖头 = 横放的矩形块；酸瓶 = 细长瓶身 + 瓶颈；烟雾弹 = 罐体；
    玻璃瓶沿用小球（它本来就是飞行的碎玻璃反光）。 */
+/* ===== v3.3 玩家诱饵「玩偶」的模型 =====
+   用户要求建模。设计意图：
+     · 看得出是个人偶（有头有身子有腿），不是又一个道具罐
+     · 未激活时整体暗哑 —— 一眼能看出「还没生效」
+     · 激活后一只眼睛亮起 + 随叫声做缩放脉冲 —— 一眼能看出「它在工作」
+   全部用 PutPixelBlend 现场画，沿用项目零外部资源的原则。 */
+static void DrawDecoyModel(int idx) {
+    extern Decoy decoysArr[MAX_DECOY];
+    if (idx < 0 || idx >= MAX_DECOY) return;
+    if (!decoysArr[idx].active) return;
+
+    Decoy* d = &decoysArr[idx];
+
+    /* 叫声脉冲：shoutT 刚重置时最大，之后衰减 —— 视觉上「它刚叫过」 */
+    float pulse = 1.0f;
+    if (d->armed) {
+        float p = d->shoutT / DECOY_SHOUT_EVERY;      /* 1 → 0 */
+        if (p > 1.0f) p = 1.0f;
+        if (p > 0.82f) pulse = 1.0f + (p - 0.82f) / 0.18f * 0.22f;   /* 最高 +22% */
+    }
+
+    SpriteBox sb = ProjectSprite(d->x, d->y, 0.0f, 0.55f * pulse);
+    if (!sb.ok) return;
+    int cx = (sb.x0 + sb.x1) / 2;
+    int baseY = sb.y1;                 /* 脚底 */
+    int h = (sb.y1 - sb.y0);           /* 整体高度 */
+    if (h < 6) h = 6;
+    int headR = h / 6; if (headR < 2) headR = 2;
+    int bodyW = h / 5; if (bodyW < 2) bodyW = 2;
+
+    /* 未激活：全部压暗；激活：正常亮度 */
+    float dim = d->armed ? 1.0f : 0.45f;
+
+    unsigned int cBody  = d->armed ? 0x00807A6Au : 0x00403E38u;   /* 脏布 */
+    unsigned int cBody2 = d->armed ? 0x00605C50u : 0x00302E2Au;   /* 阴影侧 */
+    unsigned int cLeg   = d->armed ? 0x00564F44u : 0x002C2A26u;
+
+    /* 腿：两根细柱 */
+    int legH = h / 3;
+    for (int i = 0; i < legH; i++) {
+        int py = baseY - i;
+        if (py < 0 || py >= renderH) continue;
+        int off = (i < legH / 2) ? bodyW : bodyW + 1;
+        if (cx - off > 0 && cx - off < renderW) PutPixelBlend(cx - off, py, cLeg, dim);
+        if (cx + off > 0 && cx + off < renderW) PutPixelBlend(cx + off, py, cLeg, dim);
+    }
+
+    /* 身体：梯形，上窄下宽 */
+    int bodyH = h / 2;
+    for (int i = 0; i < bodyH; i++) {
+        int py = baseY - legH - i;
+        if (py < 0 || py >= renderH) continue;
+        int halfW = bodyW + i / (bodyW + 1);
+        for (int x = -halfW; x <= halfW; x++) {
+            int px = cx + x;
+            if (px < 0 || px >= renderW) continue;
+            unsigned int c = (x > 0) ? cBody2 : cBody;      /* 右侧暗 = 侧光 */
+            /* 胸口一块深色补丁，让它像「旧玩偶」 */
+            if (i > bodyH / 3 && i < bodyH * 2 / 3 && x > -halfW / 2 && x < halfW / 2)
+                c = d->armed ? 0x00544E42u : 0x00282420u;
+            PutPixelBlend(px, py, c, dim);
+        }
+    }
+
+    /* 头：一个圆 */
+    int headCY = baseY - legH - bodyH - headR;
+    for (int dy = -headR; dy <= headR; dy++) {
+        for (int dx = -headR; dx <= headR; dx++) {
+            if (dx * dx + dy * dy > headR * headR) continue;
+            int px = cx + dx, py = headCY + dy;
+            if (px < 0 || px >= renderW || py < 0 || py >= renderH) continue;
+            PutPixelBlend(px, py, d->armed ? 0x00A09884u : 0x00484440u, dim);
+        }
+    }
+
+    /* 眼睛：未激活两眼都是暗点；激活后左眼亮起（琥珀）+ 光晕 */
+    {
+        int eR = (headR >= 3) ? 1 : 0;
+        int ex = cx - headR / 2, ey = headCY;
+        for (int dy = -eR; dy <= eR; dy++)
+            for (int dx = -eR; dx <= eR; dx++) {
+                int px = ex + dx, py = ey + dy;
+                if (px < 0 || px >= renderW || py < 0 || py >= renderH) continue;
+                if (d->armed) PutPixelBlend(px, py, 0x00FFD060u, 1.0f);
+                else          PutPixelBlend(px, py, 0x00202020u, 1.0f);
+            }
+        if (d->armed && headR >= 3) {
+            /* 光晕：让激活状态在暗场里也能被看见 */
+            int gr = headR + 2;
+            for (int dy = -gr; dy <= gr; dy++)
+                for (int dx = -gr; dx <= gr; dx++) {
+                    float dd = sqrtf((float)(dx * dx + dy * dy));
+                    if (dd > (float)gr || dd < (float)headR) continue;
+                    int px = ex + dx, py = ey + dy;
+                    if (px < 0 || px >= renderW || py < 0 || py >= renderH) continue;
+                    float a = (1.0f - dd / (float)gr) * 0.22f * pulse;
+                    PutPixelBlend(px, py, 0x00FFC040u, a);
+                }
+        }
+        /* 另一只眼始终暗 —— 「独眼亮」比两眼都亮更像坏掉的玩偶 */
+        if (headR >= 3) {
+            int ex2 = cx + headR / 2;
+            if (ex2 >= 0 && ex2 < renderW && headCY >= 0 && headCY < renderH)
+                PutPixelBlend(ex2, headCY, 0x00202020u, 1.0f);
+        }
+    }
+}
+
 static void DrawShotModel(int idx) {
     float wx = shot[idx].x, wy = shot[idx].y, z = shot[idx].z;
     int cx, cy;
@@ -1785,6 +1893,12 @@ void RenderSprites(void) {
     DrawHearingMarker();   /* v3.0 听觉 */
     DrawSmokeCloud();
     DrawGluePuddle();   /* v3.3 地面胶水 */
+    /* v3.3：诱饵玩偶 */
+    {
+        extern Decoy decoysArr[MAX_DECOY];
+        for (int di = 0; di < MAX_DECOY; di++)
+            if (decoysArr[di].active) DrawDecoyModel(di);
+    }
 
     /* 玻璃碎片：不在深度排序里，直接画在最后（覆盖在所有 billboard 之上） */
     DrawShardSprite();

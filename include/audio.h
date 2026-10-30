@@ -9,7 +9,12 @@
 #include "common.h"
 
 enum { SFX_STEP = 0, SFX_HEART, SFX_PICKUP, SFX_POWER, SFX_GATE, SFX_CRANK,
-       SFX_SCREAM, SFX_GLASS, SFX_SEARCH, SFX_THROW, SFX_COUNT };
+       SFX_SCREAM, SFX_GLASS, SFX_SEARCH, SFX_THROW,
+       /* v3.3 投掷物重做配套 */
+       SFX_GLUE,     /* 胶水落地：黏稠的「噗叽」 */
+       SFX_ECHO,     /* 回声弹：短促「叮」+ 尾音回响 */
+       SFX_DECOY,    /* 诱饵玩偶：木头/金属的「嘎吱」 */
+       SFX_COUNT };
 
 void PlaySfx(int id, float vol);
 void InitAudio(void);
