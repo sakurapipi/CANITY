@@ -1257,29 +1257,42 @@ static void DrawDecoyModel(int idx) {
     int headR = h / 6; if (headR < 2) headR = 2;
     int bodyW = h / 5; if (bodyW < 2) bodyW = 2;
 
-    /* 未激活：全部压暗；激活：正常亮度 */
-    float dim = d->armed ? 1.0f : 0.45f;
+    /* v3.3 **未激活也要看得见** ——
+       用户实测：「玩偶首次释放出来的时候，阴影特效过于浅短，有时候看不见」。
+       原来未激活压到 45% 亮度，加上底色本来就接近 #40 灰，暗走廊里等于隐形。
+       现在：
+         · 亮度 45% → 78%（还是明显比激活态暗，但一定看得见）
+         · 底色整体上调，保证和环境有对比
+         · 外面再加一圈**深色轮廓**，任何背景上都能读出剪影 */
+    float dim = d->armed ? 1.0f : 0.78f;
 
-    unsigned int cBody  = d->armed ? 0x00807A6Au : 0x00403E38u;   /* 脏布 */
-    unsigned int cBody2 = d->armed ? 0x00605C50u : 0x00302E2Au;   /* 阴影侧 */
-    unsigned int cLeg   = d->armed ? 0x00564F44u : 0x002C2A26u;
+    unsigned int cBody  = d->armed ? 0x00807A6Au : 0x00605A4Eu;   /* 脏布 */
+    unsigned int cBody2 = d->armed ? 0x00605C50u : 0x0048443Au;   /* 阴影侧 */
+    unsigned int cLeg   = d->armed ? 0x00564F44u : 0x003E3A32u;
+    unsigned int cEdge  = 0x00161A1Cu;                             /* 轮廓 */
 
-    /* 腿：两根细柱 */
+    /* 腿：两根细柱，**先铺轮廓再填色** */
     int legH = h / 3;
     for (int i = 0; i < legH; i++) {
         int py = baseY - i;
         if (py < 0 || py >= renderH) continue;
         int off = (i < legH / 2) ? bodyW : bodyW + 1;
+        /* 轮廓：比本体宽 1 像素 */
+        if (cx - off - 1 > 0 && cx - off - 1 < renderW) PutPixelBlend(cx - off - 1, py, cEdge, 0.95f);
+        if (cx + off + 1 > 0 && cx + off + 1 < renderW) PutPixelBlend(cx + off + 1, py, cEdge, 0.95f);
         if (cx - off > 0 && cx - off < renderW) PutPixelBlend(cx - off, py, cLeg, dim);
         if (cx + off > 0 && cx + off < renderW) PutPixelBlend(cx + off, py, cLeg, dim);
     }
 
-    /* 身体：梯形，上窄下宽 */
+    /* 身体：梯形，上窄下宽（先画深色轮廓，再填本体） */
     int bodyH = h / 2;
     for (int i = 0; i < bodyH; i++) {
         int py = baseY - legH - i;
         if (py < 0 || py >= renderH) continue;
         int halfW = bodyW + i / (bodyW + 1);
+        /* 轮廓：左右各多 1 像素 */
+        if (cx - halfW - 1 >= 0 && cx - halfW - 1 < renderW) PutPixelBlend(cx - halfW - 1, py, cEdge, 0.95f);
+        if (cx + halfW + 1 >= 0 && cx + halfW + 1 < renderW) PutPixelBlend(cx + halfW + 1, py, cEdge, 0.95f);
         for (int x = -halfW; x <= halfW; x++) {
             int px = cx + x;
             if (px < 0 || px >= renderW) continue;
@@ -1291,14 +1304,18 @@ static void DrawDecoyModel(int idx) {
         }
     }
 
-    /* 头：一个圆 */
+    /* 头：一个圆 + 外圈轮廓 */
     int headCY = baseY - legH - bodyH - headR;
-    for (int dy = -headR; dy <= headR; dy++) {
-        for (int dx = -headR; dx <= headR; dx++) {
-            if (dx * dx + dy * dy > headR * headR) continue;
+    for (int dy = -(headR + 1); dy <= headR + 1; dy++) {
+        for (int dx = -(headR + 1); dx <= headR + 1; dx++) {
+            float dd = sqrtf((float)(dx * dx + dy * dy));
             int px = cx + dx, py = headCY + dy;
             if (px < 0 || px >= renderW || py < 0 || py >= renderH) continue;
-            PutPixelBlend(px, py, d->armed ? 0x00A09884u : 0x00484440u, dim);
+            if (dd > (float)headR) {
+                if (dd <= (float)headR + 1.2f) PutPixelBlend(px, py, cEdge, 0.95f);
+                continue;
+            }
+            PutPixelBlend(px, py, d->armed ? 0x00A09884u : 0x00706A5Cu, dim);
         }
     }
 
