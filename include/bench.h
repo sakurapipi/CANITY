@@ -2,7 +2,11 @@
  * Canity — 局内改造树（v2.7）
  *
  * 安全屋按 T 打开。4 条分支 × 3 层 = 12 个节点，用**局内碎片**买，
- * 每局重置。和局外 20 节点技能树互不相干。
+ * **跨局保留**（元进度）。和局外 20 节点技能树互不相干。
+ *
+ * v3.3 修正：这里原来写「每局重置」，但实现和存盘都是跨局累积的
+ * （benchOwnedSave 进 SaveBlob，BenchResetRun 全项目 0 调用点）——
+ * 玩家花碎片买的东西不该一局就没了。注释跟着实现改，函数保留待用。
  *
  * 设计约束（见 docs 调研记录）：
  *   · 精确数字，不用抽象图标 —— "能量上限 +15" 而不是 "★★☆"
@@ -15,7 +19,7 @@
 #include "common.h"
 
 #define BENCH_COLS 4
-#define BENCH_ROWS 3
+#define BENCH_ROWS 4   /* v3.4（方案 v5 §3.2）：3 → 4，12 节点扩到 16 */
 #define BENCH_COUNT (BENCH_COLS * BENCH_ROWS)
 
 /* 节点 id = col * BENCH_ROWS + row  (row 0 = 最便宜那层) */
@@ -86,5 +90,19 @@ void  BenchDragEnd(void);
 void  BenchZoomAt(float factor, int mx, int my);
 void  BenchResetView(void);
 void  BenchPanBy(float dxScreen, float dyScreen);
+
+
+/* ===== v3.4 新增的 10 个机制 accessor（方案 v5 §3.2）=====
+   节点 id = col * BENCH_ROWS + row，BENCH_ROWS 现为 4。 */
+float BenchSearchQuiet(void);    /* 1  QUIET LID    翻箱噪音倍率 */
+int   BenchSilentThrow(void);    /* 2  SILENT THROW 投掷无声 */
+int   BenchCrankWalk(void);      /* 5  CRANK WALK   边走边摇 */
+int   BenchSlide(void);          /* 6  SLIDE        滑铲 */
+int   BenchDeepPocket(void);     /* 8  DEEP POCKET  携带上限 +2 */
+float BenchSteadyHand(void);     /* 9  STEADY HAND  蓄力时间倍率 */
+int   BenchSalvage(void);        /* 10 SALVAGE      可捡回 */
+int   BenchTwinThrow(void);      /* 11 TWIN THROW   双投 */
+float BenchBatterySaver(void);   /* 13 SPARE CELL   耗电倍率 */
+int   BenchCatchBreak(void);     /* 14 CATCH BREAK  挣脱 */
 
 #endif

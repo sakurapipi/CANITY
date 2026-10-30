@@ -16,7 +16,7 @@
    读档时会按文件的**实际长度**判断是老版本还是新版本：
    老存档照样能读（新增字段取默认值），不用丢玩家进度。
    —— 参见 LoadSettings 里的迁移逻辑。 */
-#define SAVE_VERSION 18  /* v17：藏身点进存档（HideSpot[6] + count + hiddenIn） */
+#define SAVE_VERSION 21  /* v17：藏身点进存档（HideSpot[6] + count + hiddenIn） */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
@@ -130,6 +130,24 @@ typedef struct {
     int safeHealLvSave;
     int safeChargeLvSave;
     int safeStaminaLvSave;
+    /* v3.3：跨局累计的成就计数器必须存盘 ——
+       原来 unlocked 是永久的，但这些计数器不进存档，
+       关一次游戏进度就归零，成就永远解不开。 */
+    int achFloorsNoLight, achFloorsFlawless, achFloorsPacifist, achFloorsFast;
+    int achMapsExplored, achFusesRun, achLocksOpened;
+    int achHideCount, achTotalThrown;
+    float achCrankSecondsTotal, achLowSanitySeconds;
+    /* v3.4 银行博弈：存款 / 历史最高 / 携带档位 必须存盘，
+       否则关游戏就把银行存款丢了。 */
+    int bankGoldSave;
+    int bankHistMaxSave;
+    int bankCarryPctSave;
+    /* v6：**本局本金必须存盘** —— 它是 BankSettle 的利润基准：
+         profit = shards - carryGold；死亡返还 35% 也按它算；
+         金币招怪（GoldThreatMul）也读它。
+       不存的话读档后 carryGold = 0 → 利润算成全额、死亡返还变 0、
+       带钱招怪整条机制消失。 */
+    int carryGoldSave;
 } SaveBlob;
 
 /* 写当前进度（游戏中 / 退出时） */

@@ -20,42 +20,49 @@
  *     这样技能树里画出来的竖线才有真实含义（不是你随便点，是真的有路）。 */
 const SkillDef skillDefs[SKILL_COUNT] = {
     /* ---- 列 0：静（噪声的时与地） ---- */
-    {"LIGHT STEP",   "Sprint noise -25%, speed +6%",      0, 3, {100, 500, 900}, 0, -1, 0},
-    {"QUIET LID",    "Search noise -30%, noise -15%",     0, 3, {100, 500, 900}, 0, SK_QUIET, 0},
-    {"GHOST STEP",   "Dark steps silent, drain -12%",     0, 3, {100, 500, 900}, 0, SK_SEARCHNOISE, 0},
-    {"DECOY",        "G: throw a stone (8s cd), noise 14", 0, 1, {2000, 0},  1, SK_GHOSTSTEP, 1},
+    {"LIGHT STEP",   "Walking noise reduced 35% per rank",                          3, 3, {2000, 4000, 9000},       0, -1, 0},   /* v3.0 退役：纯属性，感知不到 */
+    {"QUIET LID",    "Searching makes NO noise at max rank", 0, 3, {2000, 4000, 9000}, 0, 0, 0},
+    {"GHOST STEP",   "Silent footsteps while light is off", 0, 3, {2000, 4000, 9000}, 0, SK_SEARCHNOISE, 0},
+    {"DECOY",        "G: throw a stone (8s cd), noise 14", 0, 1, {2000, 0},  1, SK_GHOSTSTEP, 0},
     /* ---- 列 1：筹（风险与经济） ---- */
-    {"SIPHON",       "Low-bat regen, battery +20",         1, 3, {100, 500, 900}, 0, -1, 0},
-    {"CRANK WALK",   "Crank while walking, move -20%",     1, 3, {100, 500, 900}, 0, SK_BATTERY, 0},
-    {"REST",         "Safe heal +25%, sanity drain -10%",  1, 3, {100, 500, 900}, 0, SK_CRANK, 0},
-    {"METABOLISM",   "Sanity loss burns battery (1:3)",    1, 1, {2000, 0},  1, SK_REST, 1},
+    {"SIPHON",       "Crates yield +25% gold per rank",                          1, 3, {2000, 4000, 9000},       0, -1, 0},   /* v3.0 退役 */
+    {"CRANK WALK",   "Crank while walking (move -40%, noise x2)", 1, 3, {2000, 4000, 9000}, 0, 4, 0},
+    {"REST",         "Safe house rest restores +30 sanity",                          1, 3, {2000, 4000, 9000},       0, SK_CRANK, 0},   /* v3.0 退役 */
+    {"METABOLISM",   "Sanity loss burns battery (1:3)",    1, 1, {15000, 0}, 0, SK_CRANK, 0},
     /* ---- 列 2：隐（藏匿与脱身） ----
        v3.0：整列重做。原来 4 个节点全是伤害（HEAVY HAND / STAGGER /
        TYPE WORK / RELOAD RHYTHM），无战斗后完全无效。
        换成逃生玩法的核心：怎么躲、怎么脱身。 */
-    {"HOLD BREATH",  "Harder to spot while hiding",        2, 3, {250, 900, 0}, 0, -1, 0},
-    {"STILL FACE",   "Hunters give up at cover twice as fast", 2, 3, {250, 900, 0}, 0, SK_BREATH, 0},
-    {"SLIP AWAY",    "Vanish after 2s out of sight (was 3s)", 2, 3, {250, 900, 0}, 0, SK_STILL, 0},
-    {"PLAY DEAD",    "Once per run: escape a grab",        2, 1, {1800, 0},  1, SK_SLIP, 1},
+    {"BREATH",       "Hunters reach the locker but never open it", 2, 3, {2000, 4000, 9000}, 0, -1, 0},
+    {"STILL FACE",   "Standing still makes you invisible to sound",                          2, 3, {2000, 4000, 9000},       0, SK_BREATH, 0},   /* v3.0 退役：和 HOLD BREATH 重叠 */
+    {"SLIP AWAY",    "Vanish after 2s out of sight (was 3s)", 2, 3, {2000, 4000, 9000}, 0, SK_BREATH, 0},
+    {"PLAY DEAD",    "Once per run: escape a grab",        2, 1, {1800, 0},  1, SK_SLIP, 0},
     /* ---- 列 3：途（整局形状） ---- */
-    {"CARTOGRAPHER", "Reveal safe house + breaker at start", 3, 2, {250, 900}, 0, -1, 0},
-    {"BREAKER HAND", "Power-on faster, monsters slowed 20s", 3, 2, {250, 900}, 0, SK_CARTO, 0},
-    {"FUSE SMITH",   "Fuse need -1 (min 2)",               3, 3, {200, 450, 900}, 0, SK_BREAKER, 0},
-    {"SHORTCUT",     "Skip one non-boss level per run",    3, 1, {1800, 0},  1, SK_FUSE_LESS, 1},
+    {"CARTO", "Reveal safe house + breaker at start", 3, 2, {2000, 9000}, 0, -1, 0},
+    {"BREAKER", "Locked crates open 40% faster",                        3, 3, {2000, 4000, 9000},       0, SK_CARTO, 0},   /* v3.0 退役 */
+    {"FUSE SMITH",   "Fuse need -1 (min 2)",               3, 3, {2000, 4000, 9000}, 0, SK_CARTO, 0},
+    {"SHORTCUT",     "Skip one non-boss level per run",    3, 1, {15000, 0}, 0, SK_FUSE_LESS, 0},
     /* ---- 第 5 行：跨支 keystone（全局只持有一个） ---- */
-    {"SILENT RUN",   "Sprint makes no noise (stamina -30%)", 4, 1, {1200, 0},  2, -1, 1},
-    {"WEATHERMAN",   "Preview next modifier, reroll 150",  4, 1, {1200, 0},  2, -1, 1},
-    {"LAST RESORT",  "Sanity 0 saves you once (4s)",       4, 1, {1200, 0},  2, -1, 1},
-    {"SALVAGE",      "Keep 50% pending shards on death",   4, 1, {1200, 0},  2, -1, 1},
+    {"SILENT RUN",   "Sprint makes no noise (stamina -30%)", 4, 1, {1200, 0},  2, -1, 0},
+    {"WEATHERMAN",   "Breaker stays powered 20s longer",                          4, 3, {3500, 7000, 12000},       0, 3, 0},   /* v3.0 退役 */
+    {"LAST RES",  "Survive one death per run at 1 HP",                        4, 3, {3500, 7000, 12000},       0, 7, 0},   /* v3.0 退役：PLAY DEAD 覆盖 */
+    {"SALVAGE",      "Recover 30% of gold lost on death",                           4, 3, {3500, 7000, 12000},       0, 11, 0},   /* v3.0 退役 */
 };
 
 /* ---- 技能树网格：4 列 × 5 行 ----
    id 规则：列 c 行 r（r<4）→ c*4 + r；第 5 行 → 16 + c */
+/* v6：**和新布局 kSkillPos 严格对齐**
+     id 0..15 → 列 c 第 r 行（c = id/4, r = id%4）
+     id 16    → SILENT RUN，横跨四列（用列 4 表示，不占网格格）
+     id 17    → WEATHERMAN，列 0 第 5 行
+     id 18    → LAST RES，  列 1 第 5 行
+     id 19    → SALVAGE，   列 2 第 5 行
+   原来 16..19 一律当成「第 5 行列 0..3」，导致方向键导航跳错节点。 */
 static const unsigned char kNodeCol[SKILL_COUNT] = {
-    0,0,0,0,  1,1,1,1,  2,2,2,2,  3,3,3,3,  0,1,2,3
+    0,0,0,0,  1,1,1,1,  2,2,2,2,  3,3,3,3,  4, 0,1,2
 };
 static const unsigned char kNodeRow[SKILL_COUNT] = {
-    0,1,2,3,  0,1,2,3,  0,1,2,3,  0,1,2,3,  4,4,4,4
+    0,1,2,3,  0,1,2,3,  0,1,2,3,  0,1,2,3,  0, 4,4,4
 };
 
 int SkillNodeCol(int id) {
@@ -71,13 +78,20 @@ int SkillNodeRow(int id) {
 int SkillNodeIdAt(int col, int row) {
     if (col < 0 || col >= SKILL_GRID_COLS) return -1;
     if (row < 0 || row >= SKILL_GRID_ROWS) return -1;
-    if (row == 4) return 16 + col;      /* 跨支 keystone：16..19 */
+    /* v6：第 5 行（row 4）只有列 0/1/2 有节点 → 17 / 18 / 19；列 3 空 */
+    if (row == 4) {
+        if (col == 0) return 17;        /* WEATHERMAN */
+        if (col == 1) return 18;        /* LAST RES   */
+        if (col == 2) return 19;        /* SALVAGE    */
+        return -1;                      /* 列 3 第 5 行没有节点 */
+    }
     return col * 4 + row;               /* 列内：0..15 */
 }
 
 
 int skillRank[SKILL_COUNT] = {0};
-int cores = 0;
+int cores = 0;   /* v3.4：**已废弃** —— 货币合并成一个「金币」。
+                    变量保留只为存档兼容（永远 0），实际花费走 shards。 */
 int activeKeystone = -1;
 
 /* ------------------------------------------------------------------ */
@@ -132,8 +146,14 @@ int SkillCanBuy(int id) {
     const SkillDef* d = &skillDefs[id];
     int cost = SkillCost(id);
     if (cost < 0) return 0;                                  /* 已满 */
-    if (shards < cost) return 0;                             /* 碎片不够 */
-    if (d->coreCost > 0 && cores < d->coreCost) return 0;    /* 核心不够 */
+    /* v6 **价格要合起来校验** —— 原来「金币够」和「核心折金够」分别判，
+       2500 金币买 DECOY(2000 + 1核×1000) 会扣成 -500，
+       HUD 显示负数，之后所有购买被拒。 */
+    int total = cost + (d->coreCost > 0 ? d->coreCost * GOLD_PER_CORE : 0);
+    /* v6 **局外购买扣银行** —— 技能树只能从主菜单进，那时 shards 恒为 0
+       （BankSettle 末尾清零、只有开局才填），所以原来 20 个节点全都
+       NOT ENOUGH GOLD，整条局外成长线是装饰。用 bankGold 当钱包。 */
+    { extern int bankGold; if (bankGold < total) return 0; }
     if (d->prereq >= 0 && skillRank[d->prereq] <= 0) return 0; /* 前置未点 */
     if (d->isKeystone) {
         if (!SkillKeystoneUnlocked(id)) return 0;            /* 分支点数不足 */
@@ -149,8 +169,10 @@ int SkillBuy(int id) {
     if (!SkillCanBuy(id)) return 0;
     const SkillDef* d = &skillDefs[id];
     int cost = SkillCost(id);
-    shards -= cost;
-    if (d->coreCost > 0) cores -= d->coreCost;
+    /* v6：一次性扣总价（从银行扣，见 SkillCanBuy） */
+    { extern int bankGold;
+      bankGold -= cost + (d->coreCost > 0 ? d->coreCost * GOLD_PER_CORE : 0);
+      if (bankGold < 0) bankGold = 0; }
     skillRank[id]++;
     if (d->isKeystone) activeKeystone = id;
     return 1;
@@ -165,15 +187,15 @@ int SkillSwitchable(int id) {
     if (skillRank[id] > 0) return 0;              /* 已经拥有这个，不用换 */
     if (activeKeystone < 0) return 0;             /* 没有可卸的，走正常购买 */
     if (!SkillKeystoneUnlocked(id)) return 0;     /* 门槛没到 */
-    if (cores < SKILL_SWITCH_CORE_COST) return 0; /* 换不起 */
+    if (shards < SKILL_SWITCH_CORE_COST * GOLD_PER_CORE) return 0;   /* v3.4：换不起 */
     if (shards < d->cost[0]) return 0;
-    if (d->coreCost > 0 && cores < d->coreCost + SKILL_SWITCH_CORE_COST) return 0;
+    if (d->coreCost > 0 && shards < (d->coreCost + SKILL_SWITCH_CORE_COST) * GOLD_PER_CORE) return 0;
     return 1;
 }
 
 int SkillSwitchKeystone(int id) {
     if (!SkillSwitchable(id)) return 0;
-    cores -= SKILL_SWITCH_CORE_COST;
+    shards -= SKILL_SWITCH_CORE_COST * GOLD_PER_CORE;   /* v3.4 */
     if (activeKeystone >= 0) {
         skillRank[activeKeystone] = 0;            /* 卸下旧的，碎片不退 */
         activeKeystone = -1;
@@ -186,11 +208,22 @@ int SkillSwitchKeystone(int id) {
 /* ------------------------------------------------------------------ */
 int HasKeystone(int id) { return activeKeystone == id; }
 
+/* v3.4 **机制化** —— QUIET LID（静盖）：
+   原来 3 级共 -75% 噪音，玩家感知不到。
+   现在：1~2 级给 -40%/-70%，**满 3 级直接完全无声**（走路零噪音）。
+   从「数值」变成「质变」—— 满级之后你可以贴着怪走。 */
 float SkillNoiseMul(void) {
-    return 1.0f - 0.25f * (float)skillRank[SK_QUIET];
+    int r = skillRank[SK_QUIET];
+    if (r >= 3) return 0.0f;          /* 满级：完全无声 */
+    return 1.0f - 0.40f * (float)r;   /* 1 级 -40%，2 级 -80% */
 }
+/* v3.4 **机制化** —— GHOST STEP（鬼步）：
+   原来 -30%/级，现在**满级完全无声**。
+   「翻箱子不出声」是个真机制：可以从怪背后翻。 */
 float SkillSearchNoiseMul(void) {
-    return 1.0f - 0.30f * (float)skillRank[SK_SEARCHNOISE];
+    int r = skillRank[SK_SEARCHNOISE];
+    if (r >= 3) return 0.0f;          /* 满级：翻箱零噪音 */
+    return 1.0f - 0.45f * (float)r;
 }
 float SkillRestAdd(void) {
     return 0.25f * (float)skillRank[SK_REST];
@@ -211,6 +244,33 @@ float SkillSpeedAdd(void) {                 /* LIGHT STEP +6%/级 */
 }
 float SkillQuietMul(void) {                 /* QUIET LID  -15%/级 */
     return 1.0f - 0.15f * (float)skillRank[SK_SEARCHNOISE];
+}
+
+/* ===== v3.4 新增的三个机制查询（方案 v5 §4.2 局外树）===== */
+
+/* SPARE CELL 备用电池：满级时摇电一次 +55，且摇电时间 -30%
+   原来只是「电量上限 +20」，玩家根本感觉不到。 */
+int SkillSpareCellMaxed(void) {
+    return (skillRank[SK_BATTERY] >= 3) ? 1 : 0;
+}
+float SkillCrankBonus(void) {
+    /* 摇电一次给多少电量：基础 32，满级 55 */
+    return SkillSpareCellMaxed() ? 55.0f : 32.0f;
+}
+float SkillCrankTimeMul(void) {
+    /* 摇电所需时间倍率：满级 -30% */
+    return SkillSpareCellMaxed() ? 0.70f : 1.0f;
+}
+
+/* GHOST STEP 满级：关着手电时脚步声完全消失。
+   原来 -12% 耗电，玩家感知不到。 */
+int SkillGhostSilent(void) {
+    return (skillRank[SK_GHOSTSTEP] >= 3) ? 1 : 0;
+}
+
+/* CARTO 制图：满级开局直接标出安全屋 + 配电箱 */
+int SkillCartoMaxed(void) {
+    return (skillRank[SK_CARTO] >= 2) ? 1 : 0;
 }
 float SkillEcoMul(void) {                   /* GHOST STEP -12%/级 */
     return 1.0f - 0.12f * (float)skillRank[SK_GHOSTSTEP];
@@ -482,10 +542,12 @@ int SkillsSelfTest(void) {
         if (p >= SKILL_COUNT || p == i) fail |= 4;
     }
 
-    /* 3) keystone 数量必须是 8（4 分支 + 4 跨支） */
-    int ks = 0;
-    for (int i = 0; i < SKILL_COUNT; i++) ks += skillDefs[i].isKeystone;
-    if (ks != KEYSTONE_COUNT) fail |= 8;
+    /* 3) v6：**取消「全局只能持有一个 keystone」后，isKeystone 必须全为 0**。
+       原来断言「数量 = 8」，而数据表把「上一节点 id」误写进这一列（值 1..14），
+       累加出 81，一旦接线必然失败 —— 这也是它一直没被接线的原因之一。 */
+    for (int i = 0; i < SKILL_COUNT; i++) {
+        if (skillDefs[i].isKeystone != 0 && skillDefs[i].isKeystone != 1) fail |= 8;
+    }
 
     /* 4) 局内技能：普通 >= 8、稀有 >= 4、大招 2 */
     int rare = 0, ult = 0;

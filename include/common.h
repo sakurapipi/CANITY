@@ -49,7 +49,11 @@ typedef enum {
     STATE_SKILL_PICK,     /* v1.8：局内技能三选一 */
     STATE_BESTIARY,       /* v1.8：怪物图鉴 */
     STATE_WEAPON_PICK,    /* v2.0：开局选初始武器 */
-    STATE_SAFEHOUSE       /* v2.0：安全屋（商店/改装台/休息） */
+    STATE_SAFEHOUSE,      /* v2.0：安全屋（商店/改装台/休息） */
+    STATE_BANK            /* v6：**独立的银行页** —— 和 HUB（属性页）分开。
+                             原来银行塞在 Hub 的第 3 页里，用户指出
+                             「不然我单独设计一个 BANK 干嘛」。
+                             加在枚举末尾，不动已有编号。 */
 } GameState;
 
 /* ------------------------------------------------------------------ */
@@ -66,18 +70,27 @@ typedef enum {
 #define SPRINT_MULT 1.5f      /* 冲刺倍率 */
 #define SANITY_DRAIN 0.5f     /* 理智/秒（基础值） */
 #define HIDE_SANITY_REGEN 2.0f /* 躲在垃圾桶里每秒恢复的理智 */
+/* v3.3 **藏身回电** ——
+   躲进藏身点时手电自动充电。
+   设计理由：藏身已经是「暂停被追」的动作，玩家在里面本来就在等，
+   让它同时做件有用的事；而且这给了「电池快没了先找个柜子」一个具体解法。
+   速度略低于安全屋充电（+60 一次），大约 20 秒回满一整块。 */
+#define HIDE_BATTERY_REGEN  4.0f   /* 每秒回 4 点电量 */
 #define ENDLESS_SANITY_DRAIN 0.35f  /* 无尽模式：理智流失更慢 */
 
 /* ---- v1.8 理智经济（docs/终极方案_v2.md 第 1 节） ----
    原版每层净 +31（安全屋 +28 / 通关 +30 / 流失 -33），玩家不可能死。
    改成按层加成流失 + 削减回血，让深层真正吃紧。 */
-#define SANITY_DRAIN_STEP 0.012f  /* v2.2：0.02→0.012（裸装原来第 11 层必死） */    /* v2.1：0.03→0.02，第 10 层 0.68 而非 0.77 */
+#define SANITY_DRAIN_STEP 0.028f   /* v3.4（方案 v5 §5.3）：0.012 → 0.028。
+                                     原来 STEP 和 CLEAR_REWARD 的曲线互相抵消 ——
+                                     算出每层允许停留时间 37→39 秒，全程几乎不变，
+                                     深层根本不比浅层难。改 0.028 后 25 → 17 秒。 */  /* v2.2：0.02→0.012（裸装原来第 11 层必死） */    /* v2.1：0.03→0.02，第 10 层 0.68 而非 0.77 */
 #define SANITY_DRAIN_CAP  1.2f     /* 流失上限 */
 #define SAFE_HEAL_RATE    1.2f     /* v2.0：3.0→1.2。审计实测三资源线里只有体力会卡，
                                       理智靠 8 个安全屋白送反而净 +187，恐怖感被抹平 */
 #define SAFE_HEAL_CAP     60.0f    /* v2.0：安全屋回智封顶（不再是满血点） */
 #define SAFE_REST_COST    25       /* v2.0：主动休息要花碎片 */
-#define LEVEL_CLEAR_SANITY 12.0f   /* 过关回智（原 30） */
+#define LEVEL_CLEAR_SANITY 12.0f   /* 过关回智（配合 STEP 上调，奖励同步下调） */   /* 过关回智（原 30） */
 #define CATCH_SANITY_BASE 18.0f    /* 被抓扣智基础值 */
 #define CATCH_SANITY_STEP 0.015f   /* 每层额外 +1.5% */
 #define MOUSE_BASE_SENS 0.0035   /* v3.0：0.002→0.0035（玩家实测转身太慢） */ /* 弧度/像素（1.0x） */
@@ -91,7 +104,8 @@ extern int bestEndlessScore;
    RICH 词条会额外 +2，所以数组本身要留出余量，
    否则容器数量一旦真的涨上去就会写越界。 */
 #define MAX_CONTAINERS 8
-#define CONTAINERS_BASE 6    /* 常规关卡的容器数上限 */
+#define CONTAINERS_BASE 5    /* v3.4：6 → 5。箱子太多 = 道具白送，
+                                方案 v5 决定把箱子从「道具售货机」改成「金币来源」。 */
 /* 场上最多同时存在几件投掷物（荧光棒 / 玻璃瓶） */
 #define MAX_THROWN 4
 /* 场上最多同时存在几枚飞行中的玻璃瓶 */
@@ -457,7 +471,7 @@ typedef struct { float x, y; int active; } Breaker;
    安全屋里按空格开一次，滑块左右扫，再按空格锁定。
    完美区命中给得多，普通区给得少，失手什么都没有。 */
 #define CALIB_ATTEMPTS       2        /* v2.6：**已取消次数限制**，这个常量不再参与判定 */
-#define CALIB_COOLDOWN      30.0f     /* v3.0：用户要求改成 30 秒 */
+#define CALIB_COOLDOWN      22.0f     /* v3.0：用户要求改成 30 秒 */
 #define CALIB_PER_LEVEL      99      /* v3.0：藏身点里校准，不再按层限次，只靠 60 秒冷却 */        /* v3.0：**每层只能校准 1 次** ——
                                          原来无次数限制 + 安全屋不掉理智，
                                          站 3 分钟能刷 190 能量，能量经济直接失效
@@ -478,8 +492,9 @@ typedef struct { float x, y; int active; } Breaker;
    这样「躲进柜子里校准」是值得的，但不足以完全替代找安全屋。 */
 #define CALIB_PERFECT_ENERGY_PCT 0.00f   /* 不再给能量 */
 #define CALIB_GOOD_ENERGY_PCT    0.00f
-#define CALIB_PERFECT_SANITY 22.0f
-#define CALIB_GOOD_SANITY    11.0f
+#define CALIB_PERFECT_SANITY 30.0f  /* v3.4：22 → 30。STEP 上调后必须加强回智，
+                                       否则算出来第 3 层就死。 */
+#define CALIB_GOOD_SANITY    15.0f  /* v3.4：11 → 15 */
 
 /* v2.6 校准难度成长：
    · 每层把目标区缩 2.5%，缩到基准的 45% 就停（CALIB_ZONE_MIN）
@@ -511,7 +526,11 @@ typedef struct { float x, y; int active; } Breaker;
 #define GLUE_RADIUS     2.5f
 #define GLUE_LIFE       6.0f
 #define GLUE_MONSTER_MUL 0.20f   /* 怪物移速 x0.20 = -80% */
-#define GLUE_PLAYER_MUL  0.55f   /* 玩家自己也会被粘 */
+#define GLUE_PLAYER_MUL  0.80f   /* 玩家自己也会被粘，但只 -20% ——
+                                    v3.3：原来 -45% 太重，逃跑时踩到自己的胶水
+                                    等于自杀，用户要求降到 20% */
+#define GLUE_BODY_PAD    0.35f   /* 怪物/玩家的体积半径：中心还没进圈、
+                                    身体边缘蹭到就该减速，否则「有时候不生效」 */
 #define ECHO_RADIUS     15.0f
 #define ECHO_LIFE       5.0f
 #define DECOY_SHOUT_EVERY 3.0f   /* 诱饵每 3 秒叫一次 */
@@ -560,8 +579,8 @@ extern const char* const eventNames[EVENT_COUNT];
 #define SKILL_COUNT 20
 #define KEYSTONE_COUNT 8              /* 4 个分支 keystone + 4 个跨支 */
 #define SKILL_POINTS_FOR_KEYSTONE 5   /* 分支投入门槛（每列上限 7 点） */
-#define SKILL_TOTAL_COST 28700        /* 满树碎片（自检会校验，按 20 节点新表算出来） */
-#define SKILL_TOTAL_CORES 12          /* 满树核心 */
+#define SKILL_TOTAL_COST 278500   /* v6：按现表重算 */        /* 满树碎片（自检会校验，按 20 节点新表算出来） */
+#define SKILL_TOTAL_CORES 4   /* v6：按现表重算 */          /* 满树核心 */
 #define SKILL_SWITCH_CORE_COST 3      /* 换 keystone 花费 */
 
 /* 技能 id（顺序必须与 skills.c 的表一致；按列连续排列） */
@@ -641,9 +660,62 @@ extern Leech leeches[LEECH_MAX];
 /* ------------------------------------------------------------------ */
 /* v1.8 碎片"过关上缴"（重生细胞式）                                   */
 /* ------------------------------------------------------------------ */
-#define SHARD_SEARCH 12         /* v2.0：7→12（一局满通 2160 → 3600 左右） */
-#define SHARD_POWER  32         /* v2.0：20→32 */
-#define SHARD_EXIT   50         /* v2.0：35→50 */
+#define SHARD_SEARCH 12        /* v3.4：实际值改成 8 + 层数×1.5，见 GoldSearchAt() */         /* v2.0：7→12（一局满通 2160 → 3600 左右） */
+#define SHARD_POWER  32        /* v3.4：实际值改成 25 + 层数×3，见 GoldBreakerAt() */         /* v2.0：20→32 */
+#define SHARD_EXIT   50        /* v3.4：实际值改成 30 + 层数×6，见 GoldExitAt() */         /* v2.0：35→50 */
+
+/* ===== v3.4 金币产出渠道（方案 v5 §4）=====
+   原来金币只绑「搜箱」，那是重复劳动。
+   现在把奖励绑到**需要技巧的动作**上：解谜 / 完美校准 / 甩脱追捕 / 探索 / 潜行。 */
+/* v3.4 货币合并：1 核心 = 1000 金币（原来核心是稀有的，
+       合并后按这个比率折算，保持顶级节点的「贵」感） */
+#define GOLD_PER_CORE 1000
+
+/* ===== v3.4（方案 v5 §2）银行博弈 =====
+   局外有银行存款，进局前选「带多少进去」。
+   带得多 → 局内能买的道具多 + 结算倍数高，但死了损失大。
+   带得少 → 一切按比例缩水，且低于 20% 还要额外惩罚。 */
+/* ===== v6 **威胁分（ThreatScore）算法** =====
+   把怪物的每个数值先**归一化**（除以参考值，让基准 = 1.0），
+   再按「对玩家威胁的真实贡献」加权求和。这是行业里算综合强度的标准做法：
+     ① 归一化   stat / REF   （不同量纲拉到同一尺度）
+     ② 加权     × w          （体现哪个数值真的更致命）
+     ③ 求和     Σ            （得到无量纲的综合分）
+   权重之和 = 1.0，所以「基准怪物」的威胁分正好是 1.0。 */
+#define THREAT_REF_SPEED     1.90f   /* 寻声怪基础速度 */
+#define THREAT_REF_HEAR      14.0f   /* 标准噪音感知半径 */
+#define THREAT_REF_PERSIST   8.0f    /* 标准追捕持久秒数 */
+#define THREAT_W_SPEED       0.30f   /* 速度：跑得快最难甩 */
+#define THREAT_W_HEAR        0.40f   /* 听觉：这游戏怪物主要靠听，权重最高 */
+#define THREAT_W_PERSIST     0.20f   /* 持久：追得久 = 压力大 */
+#define THREAT_W_REACT       0.10f   /* 反应：重算路径越快越难骗 */
+
+/* 金币招怪：每 5000 金币 +15% 威胁，上限 +100% */
+#define GOLD_THREAT_PER      5000.0f
+#define GOLD_THREAT_STEP     0.15f
+#define GOLD_THREAT_MAXBONUS 1.00f
+
+#define BANK_DEATH_REFUND   0.35f  /* v6：死亡保留 35%。
+   调研原话：「partial salvage … keeps ~35% … 全损最大化张力，但也最大化怒退。
+   这是赌场和健身房的区别 —— 两者都惩罚贪心，但只有一个让你下次还愿意来。」 */
+#define BANK_LOW_CARRY      0.20f  /* 低于历史最高的 20% 算「躺平」 */
+#define BANK_LOW_PENALTY    0.50f  /* 躺平惩罚：本局利润 ×0.5 */
+#define BANK_MAX_MULT       2.00f  /* 倍数上限 */
+/* v6 **滑动额选择**：0% ~ 100%，每档 5%，共 21 档。
+   用户要「左右滑动选带多少」，所以档位必须足够密。
+   百分比 = 档位 × 5。 */
+#define BANK_CARRY_STEPS    21
+#define BANK_STEP_PCT       5      /* 每档 5% */
+
+
+#define GOLD_LOCK_BASE      40      /* 解开一个锁盘：40 + 层数×5 */
+#define GOLD_LOCK_STEP      5
+#define GOLD_CALIB_PERFECT  35      /* 校准完美 */
+#define GOLD_CALIB_GOOD     15      /* 校准良好 */
+#define GOLD_ESCAPE         30      /* 成功甩脱追捕（追捕者放弃） */
+#define GOLD_NEWROOM        5       /* 首次进入新房间 */
+#define GOLD_QUIET_BASE     20      /* 本层没触发警报：20 + 层数×2 */
+#define GOLD_QUIET_STEP     2
 #define BANK_STREAK_AFTER 3     /* 连续上缴几层开始给加成 */
 #define BANK_STREAK_BONUS 0.10f /* 加成比例 */
 

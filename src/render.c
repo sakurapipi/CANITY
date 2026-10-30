@@ -1584,6 +1584,13 @@ static void DrawShotSprite(int idx) {
    和烟团的关键区别：烟是**压暗**（遮蔽），胶水是**提亮**（反光湿滑），
    所以这里用加法式的青绿高光，同时把底色往暗里压一点点做出对比。
    画法照抄烟团的椭圆 + 圆心衰减，但颜色和遮罩相反。 */
+/* v3.3 地面胶水：**贴地的横截面**，不是立体的团块。
+   用户反馈：「胶水地面贴图是立体的，我希望你做成横截面的」。
+   原来的写法用 ProjectSprite 拿一个竖直 billboard，
+   在透视下看起来像地上立着的一团东西。
+   现在改成**世界空间网格采样**：在半径内撒一圈采样点，
+   每点单独投影 —— 远的点在屏幕上更靠上，自然就变成被压扁的地面椭圆，
+   这才是正确的「地面贴花」画法。 */
 static void DrawGluePuddle(void) {
     spriteLight = 1.0f;
     extern GlueZone glues[MAX_GLUE];
@@ -1591,38 +1598,63 @@ static void DrawGluePuddle(void) {
         if (!glues[i].active) continue;
         float t = glues[i].life / GLUE_LIFE;         /* 1 → 0 */
         if (t > 1.0f) t = 1.0f;
-        SpriteBox sb = ProjectSprite(glues[i].x, glues[i].y, 0.0f, GLUE_RADIUS * 1.15f);
-        if (!sb.ok) continue;
-        int cx = (sb.x0 + sb.x1) / 2, cyy = (sb.y0 + sb.y1) / 2;
-        int rx = (sb.x1 - sb.x0) / 2, ry = (sb.y1 - sb.y0) / 2;
-        if (rx < 3 || ry < 2) continue;
-        /* 快消失时整体变淡，玩家能看出「快干了」 */
+        if (t < 0.0f) t = 0.0f;
         float fade = 0.35f + 0.65f * t;
-        for (int y = -ry; y <= ry; y++) {
-            int py = cyy + y;
-            if (py < 0 || py >= renderH) continue;
-            for (int x = -rx; x <= rx; x++) {
-                int px = cx + x;
-                if (px < 0 || px >= renderW) continue;
-                if (sb.ty >= zBuffer[px]) continue;
-                float u = (float)(x * x) / (float)(rx * rx) +
-                          (float)(y * y) / (float)(ry * ry);
-                if (u > 1.0f) continue;
-                /* 形状：圆心最浓，边缘化开；再叠一点不规则感 */
-                float core = 1.0f - u;
-                float wob = 0.90f + 0.10f * sinf((float)x * 0.55f + (float)y * 0.9f);
-                float a = (0.30f + 0.45f * core) * fade * wob;
-                /* 边缘一圈更亮 = 湿滑反光 */
-                unsigned int col = 0x003a6b4au;          /* 底色：暗青绿 */
-                float aa = a * 0.75f;
-                if (core > 0.72f) {                       /* 中心高光 */
+
+        /* 网格密度：半径 2.5 格 → 采样 22x22，步长约 0.23 格。
+           太稀会看到断点，太密单帧开销上去了（软件光栅，得省）。 */
+        const int N = 22;
+        float step = (GLUE_RADIUS * 2.0f) / (float)(N - 1);
+        int cellR = (int)(UIS(3));
+        if (cellR < 1) cellR = 1;
+
+        for (int gy = 0; gy < N; gy++) {
+            for (int gx = 0; gx < N; gx++) {
+                float wx = glues[i].x - GLUE_RADIUS + (float)gx * step;
+                float wy = glues[i].y - GLUE_RADIUS + (float)gy * step;
+                float dx = wx - glues[i].x, dy = wy - glues[i].y;
+                float d2n = (dx * dx + dy * dy) / (GLUE_RADIUS * GLUE_RADIUS);
+                if (d2n > 1.0f) continue;              /* 圆外不画 */
+
+                int px, py;
+                float unit, ty;
+                /* z = 0：贴地。这正是「横截面」的关键 —— 不用 billboard */
+                if (!ProjectPoint(wx, wy, 0.0f, &px, &py, &unit, &ty)) continue;
+                if (px < 0 || px >= renderW || py < 0 || py >= renderH) continue;
+                if (ty >= zBuffer[px]) continue;       /* 被墙挡住就不画 */
+
+                /* 形状：圆心最浓 → 边缘化开；再加一点不规则 */
+                float core = 1.0f - d2n;
+                float wob = 0.90f + 0.10f * sinf((float)gx * 1.7f + (float)gy * 2.3f);
+                unsigned int col;
+                float a;
+                if (core > 0.72f) {                    /* 中心高光 */
                     col = 0x006fd08au;
-                    aa = (0.18f + 0.22f * core) * fade;
-                } else if (u > 0.80f) {                   /* 边缘反光 */
+                    a = (0.16f + 0.20f * core) * fade;
+                } else if (d2n > 0.78f) {               /* 边缘一圈反光 */
                     col = 0x005cb87cu;
-                    aa = a * 1.15f;
+                    a = (0.34f + 0.28f * core) * fade * wob;
+                } else {                                /* 主体 */
+                    col = 0x003a6b4au;
+                    a = (0.30f + 0.40f * core) * fade * wob;
                 }
-                PutPixelBlend(px, py, col, aa > 0.85f ? 0.85f : aa);
+                if (a > 0.85f) a = 0.85f;
+                if (a <= 0.02f) continue;
+
+                /* 每个采样点画一个小方块，方块之间自然连成一片 */
+                int x0 = px - cellR, x1 = px + cellR;
+                int y0 = py - cellR, y1 = py + cellR;
+                if (x0 < 0) x0 = 0;
+                if (y0 < 0) y0 = 0;
+                if (x1 >= renderW) x1 = renderW - 1;
+                /* 竖直方向压扁 —— 地面贴花在屏幕上总是扁的 */
+                int yShrink = cellR / 2;
+                if (yShrink < 1) yShrink = 1;
+                y1 = py + yShrink;
+                if (y1 >= renderH) y1 = renderH - 1;
+                for (int yy = y0; yy <= y1; yy++)
+                    for (int xx = x0; xx <= x1; xx++)
+                        PutPixelBlend(xx, yy, col, a);
             }
         }
     }
@@ -2594,10 +2626,12 @@ static void DrawViewModel(void) {
 
     /* 左手：托着当前选中的投掷物 */
     {
-        extern int flares, bottles, bricks, acids, smokeBombs;
-        extern int firePots, gluePots, mirrors;
-        int counts[ITEM_SLOT_COUNT] = { flares, bottles, bricks, acids, smokeBombs,
-                                        firePots, gluePots, mirrors };
+        extern int flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
+        /* v6 **槽位表必须和 ITEM_SLOT_COUNT(6) 一致** ——
+           原来用旧的 8 个变量初始化 6 元素数组：多出初值被丢弃，
+           索引整体错位（槽 2..5 读到砖头/酸液/燃烧瓶等已删除物品）。 */
+        int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs,
+                                        gluePots, echoBolts, decoys };
         int sel = throwSelected;
         if (sel >= 0 && sel < ITEM_SLOT_COUNT && counts[sel] > 0) {
             /* v2.9：按报告重算 —— 原来 100px 大、落进枪模框内、亮度 0.55，
@@ -2683,12 +2717,15 @@ void Render3D(void) {
 static void DrawMapLegend(void) {
     extern int winW, winH;
     struct { unsigned int col; const char* zh; const char* en; } items[6] = {
-        { 0x0030FF60u, "你",      "YOU"    },
-        { 0x00E8C040u, "出口",    "EXIT"   },
-        { 0x0030D0D0u, "保险丝箱","FUSE"   },
-        { 0x00B0C0D0u, "配电箱",  "BREAKER"},
-        { 0x0060FF90u, "安全屋",  "SAFE"   },
-        { 0x0090E0FFu, "藏身点","HIDE"   },
+        /* v3.3 **图例颜色两两分开** ——
+           试玩实测：「YOU 和 SAFE 都是绿色，FUSE 和 HIDE 都是青色，两两分不清」。
+           现在每个标记一个色相：绿 / 金 / 橙 / 灰蓝 / 蓝 / 浅青。 */
+        { 0x0030FF60u, "你",      "YOU"    },   /* 亮绿 */
+        { 0x00E8C040u, "出口",    "EXIT"   },   /* 金 */
+        { 0x00FF8040u, "保险丝箱","FUSE"   },   /* 橙（原青，与 HIDE 撞） */
+        { 0x00B0C0D0u, "配电箱",  "BREAKER"},   /* 灰蓝 */
+        { 0x004090FFu, "安全屋",  "SAFE"   },   /* 蓝（原绿，与 YOU 撞） */
+        { 0x0090E0FFu, "藏身点","HIDE"   },   /* 浅青 */
     };
     extern int g_lang;
     int rowH = TextHeightWin() + UIS(6);
@@ -2731,9 +2768,9 @@ void RenderMap(void) {
              ② 只抬不管上界   → 顶到右上角的道具栏（1 FLARE / 2 BOTTLE）
            这次算清楚可用区间；塞不下就**缩小格子**，绝不叠 HUD。 */
         {
-            int barTop   = renderH - UIS(120);   /* LIGHT/RUN 上沿 */
-            int itemsBot = UIS(150);             /* 右上角道具栏下沿 */
-            int room = barTop - itemsBot;
+            int itemsBot = UIS(115);             /* 顶部留白：给 LEVEL/SANITY 那一列让位 */
+            /* 可用高度 = 顶部留白 到 底部 UI 带的上沿 */
+            int room = (renderH - UIS(152)) - itemsBot;
             if (room < UIS(60)) room = UIS(60);
 
             /* 塞不下就缩格子（3px 是下限，再小就看不清了） */
@@ -2742,9 +2779,21 @@ void RenderMap(void) {
                 mapW = MAP_WIDTH * cellSize;
                 mapH = MAP_HEIGHT * cellSize;
             }
-            mapStartX = renderW - mapW - UIS(10);
-            mapStartY = barTop - mapH;
-            if (mapStartY < itemsBot) mapStartY = itemsBot;
+            /* v6 **小地图位置：右侧、底边贴着 LIGHT/RUN 条上沿** ——
+               真实布局调查（800x600）：
+                 · 道具栏三行   y 409..501（右下角！不是右上角）
+                 · LIGHT/RUN 条 y 443 起
+                 · WANDERING     y 207（已上移让开）
+               所以地图必须整体待在 y=443 以上，否则会压住道具栏。
+               我上一轮把它推到右下角，正好撞进道具栏（用户截图）。 */
+            /* v6 **底部 UI 带 = 从 renderH-UIS(152) 往下**：
+                 · 道具栏三行（右侧）  y 409..501
+                 · LIGHT/RUN 条（左侧） y 443 起
+               地图底边必须停在 401 以上，否则压住道具栏（用户截图）。 */
+            int uiBandTop = renderH - UIS(152);        /* 401 */
+            mapStartX = renderW - mapW - UIS(14);
+            mapStartY = uiBandTop - mapH;
+            if (mapStartY < itemsBot) mapStartY = itemsBot;   /* 上界：别顶到画面顶部 */
             if (mapStartX < 0) mapStartX = 0;
             if (mapStartY < 0) mapStartY = 0;
         }

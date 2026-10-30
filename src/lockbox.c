@@ -177,6 +177,17 @@ static void LockUnlock(int idx) {
     g_lockType_[idx] = LOCK_TYPE_DIAL;      /* 开了就不必再留着谜题参数 */
     g_lockCode_[idx] = 0;
     locksOpened++;              /* LOCKSMITH 成就 */
+    /* v3.4：解谜给金币 —— 40 + 层数×5。解谜是主动技能，比搜箱子值钱。 */
+    {
+        extern int pendingShards, totalShardsEarned, currentLevel;
+        int gld = (int)(GOLD_LOCK_BASE + GOLD_LOCK_STEP * (float)currentLevel + 0.5f);
+        pendingShards += gld;
+        totalShardsEarned += gld;
+        extern const char* pickupMsg;
+        extern float pickupMsgTimer;
+        pickupMsg = "LOCK +GOLD";
+        pickupMsgTimer = 1.4f;
+    }
     PlaySfx(SFX_POWER, 0.7f);
     pickupMsg = "UNLOCKED";
     pickupMsgTimer = 2.0f;

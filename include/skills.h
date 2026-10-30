@@ -141,7 +141,15 @@ int   RunFuseLess(void);
 /* 自检：返回 0 = 通过 */
 int SkillsSelfTest(void);
 
-#endif /* CANITY_SKILLS_H */
+
+/* ===== v3.4 新增机制查询（方案 v5 §4.2）===== */
+int   SkillSpareCellMaxed(void);   /* 备用电池：摇电 +55 且快 30% */
+float SkillCrankBonus(void);       /* 摇电一次给多少电量 */
+float SkillCrankTimeMul(void);     /* 摇电所需时间倍率 */
+int   SkillGhostSilent(void);      /* 鬼步满级：关灯时脚步完全无声 */
+int   SkillCartoMaxed(void);       /* 制图满级：开局标出安全屋+配电箱 */
+
+
 
 /* ==================== v3.0 逃生向效果（统一入口） ==================== */
 float HideStealthMul(void);      /* 屏息：藏身被发现概率 */
@@ -152,3 +160,5 @@ int   SilentRunOwned(void);      /* 静音冲刺 keystone */
 float QuietSoleMul(void);        /* 静底：走路噪音 */
 float ColdBloodMul(void);        /* 冷血：理智流失 */
 float ThickHideMul(void);        /* 厚皮：被抓扣理智 */
+
+#endif /* CANITY_SKILLS_H */

@@ -9,8 +9,15 @@
 /*   全部用碎片结算                                                     */
 /* ------------------------------------------------------------------ */
 
-#define SHOP_OFFERS 4   /* v3.3：3 -> 4。SHOP 页卖 4 件消耗品，
-                           原来 3 会让第 4 件（BOTTLES x2）永远显示不出来 */
+/* v3.4（方案 v5 §6）**商店改成 8 行、不限量、每行独立倒计时** ——
+   用户要求：「商店里面不限制数量，只限制倒计时和金币，这样金币的捆绑更大」。
+   库存无限，但每买一次该行进入冷却；金币才是真正的瓶颈。 */
+/* v3.4：8 件商品。原第 9/10 行是「存钱」，已删除 ——
+   调研结论：局内存钱是纯亏（本局变弱、下一局才收益、且倍数已锁定），
+   银行决策统一挪到主菜单的 BANK 页。 */
+#define SHOP_OFFERS 8
+#define SHOP_COOLDOWN_ROWS 8
+
 #define SAFEHOUSE_PAGES 5   /* v3.0：+ 强化 */
 
 typedef enum {
@@ -49,4 +56,12 @@ void ShopTreeMove(int dx, int dy);   /* v2.7 */     /* TAB */
 
 int  AttachPrice(int id);
 
+void ShopLeave(void);
+
 #endif
+
+/* v3.4：每行的剩余冷却秒数（0 = 可买） */
+extern float shopCooldown[SHOP_COOLDOWN_ROWS];
+float ShopCooldownOf(int row);
+void  ShopTickCooldown(float dt);   /* 每帧递减 */
+void  ShopResetCooldowns(void);

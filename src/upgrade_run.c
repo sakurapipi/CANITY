@@ -59,7 +59,7 @@ const char* RunUpgNameZh(int kind) {
 const char* RunUpgDesc(int kind) {
     switch (kind) {
     case 0: return "Throwable capacity +2 / lv";
-    case 1: return "Damage taken -10% / lv";
+    case 1: return "Lose 10% less sanity when grabbed";
     case 2: return "Sprint stamina -15% / lv";
     default: return "Flashlight drain -15% / lv";
     }
@@ -68,14 +68,16 @@ const char* RunUpgDesc(int kind) {
 const char* RunUpgDescZh(int kind) {
     switch (kind) {
     case 0: return "投掷物携带上限 +2 / 级";
-    case 1: return "受到伤害 -10% / 级";
+    case 1: return "被抓时少掉 10% 理智 / 级";
     case 2: return "冲刺体力消耗 -15% / 级";
     default: return "手电耗电 -15% / 级";
     }
 }
 
 /* ---- 效果 ---- */
-/* v3.0：武器取消 → 这一条改成携带量（暂时返回 1，等投掷物上限接入） */
+/* v3.0：武器取消 → 这一条改成携带量
+   v3.3：**真正接到全部投掷物上**，不再只作用于瓶子。
+   审计报告：「CARRY 只进 BottleCap（只管瓶子），文案写投掷物上限」。 */
 float RunUpgDamageMul(void)   { return 1.0f; }
 int   RunUpgCarryBonus(void)  { return 2 * upg[0]; }
 float RunUpgResistMul(void)   { return 1.0f - 0.10f * (float)upg[1]; }

@@ -77,15 +77,17 @@ static int hide_candidate_clear(const int map[MAP_HEIGHT][MAP_WIDTH],
 }
 
 static void test_bench_contract(void) {
+    /* v3.4（方案 v5 §3.2）：12 节点 → 16 节点，4 列 × 4 层。
+       价格四档 150 / 350 / 700 / 1200；新增 THROWING 列。 */
     static const int costs[BENCH_COUNT] = {
-        120, 280, 620, 120, 280, 620,
-        120, 280, 620, 120, 280, 620
+        150, 350, 700, 1200,   150, 350, 700, 1200,
+        150, 350, 700, 1200,   150, 350, 700, 1200
     };
     static const char* names[BENCH_COUNT] = {
-        "LIGHT STEP", "HOLD BREATH", "VANISH",
-        "ENDURANCE", "BURST", "SECOND WIND",
-        "HEARING", "INNER EYE", "PREMONITION",
-        "THICK SKIN", "COMPOSURE", "PLAY DEAD"
+        "LIGHT STEP", "QUIET LID", "SILENT THROW", "VANISH",
+        "ENDURANCE", "CRANK WALK", "SLIDE", "SECOND WIND",
+        "DEEP POCKET", "STEADY HAND", "SALVAGE", "TWIN THROW",
+        "THICK SKIN", "SPARE CELL", "CATCH BREAK", "PLAY DEAD"
     };
     const char* source = read_file("src/bench.c");
     int i;

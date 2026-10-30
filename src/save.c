@@ -238,6 +238,32 @@ void SaveGame(void) {
         g_save.safeChargeLvSave  = ShopSafeChargeLv();
         g_save.safeStaminaLvSave = ShopSafeStaminaLv();
     }
+    /* v3.3：跨局累计的成就计数器 */
+    {
+        extern int floorsNoLight, floorsFlawless, floorsPacifist, floorsFast;
+        extern int mapsFullyExplored, fusesCollectedRun, hideCount, totalThrown;
+        extern float crankSecondsTotal, lowSanitySeconds;
+        extern int locksOpened;
+        g_save.achFloorsNoLight    = floorsNoLight;
+        g_save.achFloorsFlawless   = floorsFlawless;
+        g_save.achFloorsPacifist   = floorsPacifist;
+        g_save.achFloorsFast       = floorsFast;
+        g_save.achMapsExplored     = mapsFullyExplored;
+        g_save.achFusesRun         = fusesCollectedRun;
+        g_save.achLocksOpened      = locksOpened;
+        g_save.achHideCount        = hideCount;
+        g_save.achTotalThrown      = totalThrown;
+        g_save.achCrankSecondsTotal= crankSecondsTotal;
+        g_save.achLowSanitySeconds = lowSanitySeconds;
+    }
+    /* v3.4 银行 */
+    {
+        extern int bankGold, bankHistMax, bankCarryPct, carryGold;
+        g_save.bankGoldSave    = bankGold;
+        g_save.bankHistMaxSave = bankHistMax;
+        g_save.bankCarryPctSave= bankCarryPct;
+        g_save.carryGoldSave   = carryGold;   /* v6：本局本金 */
+    }
     for (int i = 0; i < 4; i++) g_save.runUpgSave[i] = RunUpgLevel(i);   /* v2.3 */
     g_save.flashlightOn = flashlightOn;
     g_save.posX = posX; g_save.posY = posY;
@@ -391,6 +417,38 @@ static int FindNewestSaveSlot(void) {
 }
 
 /* 只读设置（启动时），返回是否还有可继续的进度 */
+/* ===== v6 **银行状态恢复（LoadSettings / ContinueRun 共用）** =====
+   原来只在 ContinueRun 里恢复，但 SaveGame 无条件写 bankGold 等字段。
+   后果：启动后不进 Continue（直接看 BANK 页、改设置、或关窗口）就触发
+        SaveGame，把存款覆盖成 0 —— 玩家全部存款静默消失。
+   现在启动读设置时也恢复，写回去的值就是对的。 */
+static void RestoreBankFromSave(void) {
+    extern int bankGold, bankHistMax, bankCarryPct, carryGold;
+    int rawGold = g_save.bankGoldSave;
+    int rawHist = g_save.bankHistMaxSave;
+    int rawPct  = g_save.bankCarryPctSave;
+
+    bankGold     = rawGold > 0 ? rawGold : 0;
+    bankHistMax  = rawHist > 0 ? rawHist : 1;
+    bankCarryPct = rawPct;
+
+    /* 三个字段全是 0 → 这份存档根本没有银行段（老档），把 0..3 换算成 21 档 */
+    if (rawGold == 0 && rawHist == 0 && rawPct >= 0 && rawPct <= 3) {
+        static const int oldMap[4] = { 5, 10, 15, 20 };
+        bankCarryPct = oldMap[rawPct];
+    }
+    if (bankCarryPct < 0) bankCarryPct = 0;
+    if (bankCarryPct >= BANK_CARRY_STEPS) bankCarryPct = BANK_CARRY_STEPS - 1;
+    if (bankHistMax < bankGold) bankHistMax = bankGold;
+    if (bankHistMax < 1) bankHistMax = 1;
+
+    /* v6：本局本金 —— 老档没有这个字段（读出 0），此时按当前金币兜底，
+       保证 profit = shards - carryGold 不会把全部余额当成利润。 */
+    carryGold = g_save.carryGoldSave;
+    { extern int shards; if (carryGold < 0) carryGold = 0;
+      if (carryGold > shards) carryGold = shards; }
+}
+
 int LoadSettings(void) {
     char p[MAX_PATH];
     memset(&g_save, 0, sizeof(g_save));
@@ -542,8 +600,14 @@ int LoadSettings(void) {
     if (!(gammaValue >= 0.7f && gammaValue <= 1.6f)) gammaValue = 1.0f;
     if (!(mouseSens >= 0.2f && mouseSens <= 3.0f)) mouseSens = 1.0f;
 
-    /* v7 新增：恢复成就数据（如果存档里有） */
-    if (fileSize >= sizeof(SaveBlob)) {
+    /* v7 新增：恢复成就数据（如果存档里有）。
+       v6 **判据改成「成就段是否完整在文件里」** ——
+       原来用 fileSize >= sizeof(SaveBlob)，等于「文件必须包含当前结构体的全部尾部字段」。
+       于是每次往 SaveBlob 尾巴追加字段，都会把所有历史存档判成老档，
+       把成就 / 技能树 / cores / 图鉴 / 无尽进度整段清零，哪怕那些字段其实读得到。
+       现在用成就段的起始偏移做判据：只要文件覆盖到该段就正常读。 */
+        size_t achOff = (size_t)((char*)&g_save.achUnlocked[0] - (char*)&g_save);
+    if (fileSize >= achOff) {
         for (int i = 0; i < ACH_COUNT; i++) {
             g_achievements[i].unlocked = g_save.achUnlocked[i];
             g_achievements[i].progress = g_save.achProgress[i];
@@ -566,7 +630,8 @@ int LoadSettings(void) {
         bestEndlessLevel = g_save.bestEndlessLevel;
         bestEndlessScore = g_save.bestEndlessScore;
         isEndlessRun = g_save.isEndlessRunSaved;
-    } else {
+    }
+    else {  /* 老档没有成就数据 */
         /* 老存档没有成就数据，全置 0 */
         for (int i = 0; i < ACH_COUNT; i++) {
             g_achievements[i].unlocked = 0;
@@ -582,6 +647,8 @@ int LoadSettings(void) {
         g_saveSlot = g_save.saveSlot;
 
     return g_save.hasRun;
+    /* v6：**读设置成功后立刻恢复银行**，否则 SaveGame 会把 0 写回去 */
+    RestoreBankFromSave();
 }
 
 /* 把存档里的进度灌回运行时 */
@@ -619,6 +686,26 @@ void ContinueRun(void) {
                       g_save.safeChargeLvSave,
                       g_save.safeStaminaLvSave);
     }
+    /* v3.3：恢复跨局累计的成就计数器（老档读到 0，安全） */
+    {
+        extern int floorsNoLight, floorsFlawless, floorsPacifist, floorsFast;
+        extern int mapsFullyExplored, fusesCollectedRun, hideCount, totalThrown;
+        extern float crankSecondsTotal, lowSanitySeconds;
+        extern int locksOpened;
+        floorsNoLight      = g_save.achFloorsNoLight;
+        floorsFlawless     = g_save.achFloorsFlawless;
+        floorsPacifist     = g_save.achFloorsPacifist;
+        floorsFast         = g_save.achFloorsFast;
+        mapsFullyExplored  = g_save.achMapsExplored;
+        fusesCollectedRun  = g_save.achFusesRun;
+        locksOpened        = g_save.achLocksOpened;
+        hideCount          = g_save.achHideCount;
+        totalThrown        = g_save.achTotalThrown;
+        crankSecondsTotal  = g_save.achCrankSecondsTotal;
+        lowSanitySeconds   = g_save.achLowSanitySeconds;
+    }
+    /* v3.4/v6 银行：统一走 RestoreBankFromSave，只有一份逻辑 */
+    RestoreBankFromSave();
     if (hiddenIn >= hideSpotCount) hiddenIn = -1;
     RunUpgLoadFromSave(g_save.runUpgSave);   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
     if (!(energy > 0.0f)) energy = ENERGY_MAX;

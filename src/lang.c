@@ -19,7 +19,7 @@ void LangToggle(void) {
 /* ------------------------------------------------------------------ */
 typedef struct { const char* en; const char* zh; } TrEntry;
 
-static const TrEntry kTr[] = {
+static const TrEntry kTrTable[] = {
     /* 标题 */
     { "SETTINGS", "设置" }, { "DISPLAY", "显示" }, { "KEY BINDINGS", "按键绑定" },
     { "GAMEPLAY", "玩法" }, { "HELP", "帮助" }, { "BESTIARY", "图鉴" },
@@ -45,11 +45,11 @@ static const TrEntry kTr[] = {
     { "ACCESS DENIED", "拒绝访问" }, { "SPECIMEN DMG", "木桩伤害" },
 
     /* 技能树 */
-    { "MAXED", "已满级" }, { "MAX", "满" }, { "NOT ENOUGH SHARDS", "碎片不够" },
-    { "NOT ENOUGH CORES", "核心不够" }, { "BUY THE NODE ABOVE", "先买上面的节点" },
+    { "MAXED", "已满级" }, { "MAX", "满" }, { "NOT ENOUGH GOLD", "金币不够" },
+    { "NOT ENOUGH GOLD", "金币不够" }, { "BUY THE NODE ABOVE", "先买上面的节点" },
     { "NEEDS A BRANCH ULT", "需要分支终极" }, { "NEEDS 6 PTS IN BRANCH", "需要分支 6 点" },
     { "ENTER BUY   ARROWS MOVE   ESC BACK", "回车购买   方向键移动   ESC 返回" },
-    { "ENTER-SWAP 3 CORES", "回车切换（3 核心）" },
+    { "ENTER-SWAP 3000 GOLD", "回车切换（3000 金币）" },
     { "PRESS AGAIN TO REPLACE", "再按一次替换" }, { "MAX 3 RANKS", "每节点 3 级" },
     { "ANOTHER ULT IS ACTIVE", "已有其它终极生效" },
     { "STEALTH", "潜行" }, { "STAMINA", "续航" }, { "COMBAT", "反击" }, { "CROSS", "跨支" },
@@ -317,34 +317,58 @@ static const TrEntry kTr[] = {
     { "SMALL", "小" },
     { "LARGE", "大" },
     { "Dark steps silent, drain -12%", "暗步无声，流失 -12%" },
+    { "DEEP DELVER", "深渊行者" },
+    { "Beat the game (reach level 24 exit)", "通关（走到第 24 层的出口）" },
+    { "Reach level 5 without ever sprinting", "到达第 5 层且全程没冲刺过" },
+    { "Throw 30 objects total", "累计投掷 30 次" },
+    { "Hide 5 times total", "累计藏身 5 次" },
+    { "Complete a level with the flashlight off", "关着手电过关" },
+    { "Collect 5 fuses in a single level", "单层收集 5 根保险丝" },
+    { "Crank the generator for 60 seconds total", "累计摇电 60 秒" },
+    { "Max out every skill tree node", "技能树全部点满" },
+    { "Reach the exit without taking damage", "无伤抵达出口" },
+    { "Reach level 24 with every skill node maxed", "技能树全满的情况下到第 24 层" },
+    { "Reach level 21", "到达第 21 层" },
+    { "Clear all four zones (level 24)", "清完四个区域（第 24 层）" },
+    { "Clear 3 floors without ever being spotted", "全程没被发现地清完 3 层" },
+    { "Throw 80 objects total", "累计投掷 80 次" },
+    { "Hide 30 times total", "累计藏身 30 次" },
+    { "Crank the generator for 300 seconds total", "累计摇电 300 秒" },
+    { "Search 60 containers in a single run", "一局内搜索 60 个箱子" },
+    { "Search 120 containers in a single run", "一局内搜索 120 个箱子" },
+    { "Reach level 12 without throwing a single object", "一次都不投掷地到第 12 层" },
+    { "Open 5 lock puzzles", "解开 5 个锁盘" },
+    { "Survive at 1 sanity for 30 seconds", "以 1 点理智存活 30 秒" },
+    { "Hide 100 times total", "累计藏身 100 次" },
+    { "GOLD", "金币" },
 };
 
-#define KTR_N ((int)(sizeof(kTr) / sizeof(kTr[0])))
+#define KTR_N ((int)(sizeof(kTrTable) / sizeof(kTrTable[0])))
 
 const char* Transl(const char* en) {
     if (!en) return en;
     if (g_lang != LANG_ZH) return en;
 
     for (int i = 0; i < KTR_N; i++) {
-        if (strcmp(en, kTr[i].en) == 0) return kTr[i].zh;
+        if (strcmp(en, kTrTable[i].en) == 0) return kTrTable[i].zh;
     }
 
     /* 动态字符串：按前缀造 */
     static char buf[160];
     if (!strncmp(en, "SHARDS ", 7))  { snprintf(buf, sizeof(buf), "碎片 %s", en + 7); return buf; }
     if (!strncmp(en, "CORES ", 6))   { snprintf(buf, sizeof(buf), "核心 %s", en + 6); return buf; }
-    if (!strncmp(en, "BEST LEVEL ", 11)) { sprintf(buf, "最高层 %s", en + 11); return buf; }
-    if (!strncmp(en, "PENDING ", 8)) { sprintf(buf, "待上缴 %s", en + 8); return buf; }
-    if (!strncmp(en, "LEVEL ", 6))   { sprintf(buf, "第 %s 层", en + 6); return buf; }
-    if (!strncmp(en, "TIME ", 5))    { sprintf(buf, "时间 %s", en + 5); return buf; }
-    if (!strncmp(en, "FUSES ", 6))   { sprintf(buf, "保险丝 %s", en + 6); return buf; }
-    if (!strncmp(en, "SCORE ", 6))   { sprintf(buf, "得分 %s", en + 6); return buf; }
+    if (!strncmp(en, "BEST LEVEL ", 11)) { snprintf(buf, sizeof(buf), "最高层 %s", en + 11); return buf; }
+    if (!strncmp(en, "PENDING ", 8)) { snprintf(buf, sizeof(buf), "待上缴 %s", en + 8); return buf; }
+    if (!strncmp(en, "LEVEL ", 6))   { snprintf(buf, sizeof(buf), "第 %s 层", en + 6); return buf; }
+    if (!strncmp(en, "TIME ", 5))    { snprintf(buf, sizeof(buf), "时间 %s", en + 5); return buf; }
+    if (!strncmp(en, "FUSES ", 6))   { snprintf(buf, sizeof(buf), "保险丝 %s", en + 6); return buf; }
+    if (!strncmp(en, "SCORE ", 6))   { snprintf(buf, sizeof(buf), "得分 %s", en + 6); return buf; }
     if (!strncmp(en, "RUN FAILED", 10)) return "本局失败";
-    if (!strncmp(en, "KNIFE", 5))    { sprintf(buf, "锈刃 %s", en + 5); return buf; }
+    if (!strncmp(en, "KNIFE", 5))    { snprintf(buf, sizeof(buf), "锈刃 %s", en + 5); return buf; }
     {   /* "100 SHARDS" -> "100 碎片" */
         int n = 0; char tail[24];
-        if (sscanf(en, "%d SHARDS%23s", &n, tail) == 1) { sprintf(buf, "%d 碎片", n); return buf; }
-        if (sscanf(en, "%d CORES%23s", &n, tail) == 1)  { sprintf(buf, "%d 核心", n); return buf; }
+        if (sscanf(en, "%d SHARDS%23s", &n, tail) == 1) { snprintf(buf, sizeof(buf), "%d 碎片", n); return buf; }
+        if (sscanf(en, "%d CORES%23s", &n, tail) == 1)  { snprintf(buf, sizeof(buf), "%d 核心", n); return buf; }
     }
 
     return en;

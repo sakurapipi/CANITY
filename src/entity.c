@@ -107,11 +107,20 @@ static float MonsterSpeedFor(int level, float base, float modMul) {
 
 /* v3.3 胶水：这个位置有没有粘胶区域。返回 1 = 踩到了。
    怪物和追光鬼共用 —— 胶水对两种追击者都有效，这是它值钱的地方。 */
+/* v6：金币招怪 —— 速度倍数（实现见 game.c） */
+float GoldSpeedMul(void);
+float GoldHearMul(void);
+
 static int InGlue(float x, float y) {
+    /* v3.3：**判定加上体积半径** ——
+       原来只判中心点，怪贴边擦过、身体已经压到胶水上却不算，
+       玩家感觉就是「有时候不生效」。
+       现在按 GLUE_RADIUS + GLUE_BODY_PAD 判定：身体边缘一碰到就减速。 */
+    const float r = GLUE_RADIUS + GLUE_BODY_PAD;
     for (int i = 0; i < MAX_GLUE; i++) {
         if (!glues[i].active) continue;
         float dx = x - glues[i].x, dy = y - glues[i].y;
-        if (dx * dx + dy * dy < GLUE_RADIUS * GLUE_RADIUS) return 1;
+        if (dx * dx + dy * dy < r * r) return 1;
     }
     return 0;
 }
@@ -313,7 +322,15 @@ void MakeNoise(float x, float y, float radius) {
                玩家买 QUIET LID 是想走路更安静；如果敲击/投掷的声音也跟着缩小，
                等于「越升级越没法用声音控制敌人」，和核心玩法直接冲突。
                15 以上的是敲击/投掷，14 以下的是脚步等被动噪音。 */
-            if (r2 <= 14.0f) r2 *= SkillQuietMul();
+            /* v6 **补齐漏乘的倍率** ——
+               原来 SkillQuietMul 只在这里乘一次，而 GoldHearMul / RelicNoiseMul /
+               modNoiseMul 在函数末尾才乘、那时主怪早就通知完了。
+               于是「GHOST SHELL 降噪 45%」和「DEAD SILENCE 事件」对两只主怪完全无效，
+               遗物唯一卖点白买。现在被动噪音把三项一起算。 */
+            if (r2 <= 14.0f) {
+                r2 *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;
+                { extern float GoldHearMul(void); r2 *= GoldHearMul(); }
+            }
             if (Dist2(x, y, mm->x, mm->y) > r2 * r2) continue;
             mm->state = 1;
             mm->tx = x;
@@ -337,6 +354,13 @@ void MakeNoise(float x, float y, float radius) {
         }
     }
     extern float modNoiseMul;
+    /* v6 **金币招怪**：携带金币越多，怪物听得越远。
+       这是「奖励就是风险」原则在 CANITY 的落点 ——
+       钱让你变强，同时也让你更容易被听见。 */
+    {
+        extern float GoldHearMul(void);
+        radius *= GoldHearMul();
+    }
     radius *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;   /* QUIET LID + 遗物 + 事件 */
     /* v3.3：盲螨只认声音。它原来每帧直接朝玩家冲刺，所以玩家“静音走路”
        也会被它追；现在只有噪音落在半径内才给它目标。 */
@@ -692,7 +716,7 @@ void UpdateMonster(float dt) {
             monster.sightHold += dt;
             if (monster.state != 1 && monster.sightHold >= 0.6f) {
                 monster.state = 1;
-        { extern int floorSpotted; floorSpotted = 1; }
+        { extern int floorSpotted, runSpotted; floorSpotted = 1; runSpotted = 1; }
                 monster.repath = 0.0f;
                 monster.stateTimer = 0.0f;
                 PlaySfx(SFX_HEART, 0.55f);   /* 心跳：它发现你了 */
@@ -752,7 +776,18 @@ void UpdateMonster(float dt) {
             MonPath((int)monster.x, (int)monster.y, (int)monster.tx, (int)monster.ty);
         }
         if (Dist2(monster.x, monster.y, monster.tx, monster.ty) < 0.45f) {
-            monster.state = 2;          /* 到了声源，原地搜一圈 */
+            monster.state = 2;
+                /* v3.4：甩脱追捕给金币 —— 这是逃生玩法的核心动作，
+                   但它原来是零奖励，玩家没有「主动甩怪」的动力。 */
+                {
+                    extern int pendingShards, totalShardsEarned;
+                    extern const char* pickupMsg;
+                    extern float pickupMsgTimer;
+                    pendingShards += GOLD_ESCAPE;
+                    totalShardsEarned += GOLD_ESCAPE;
+                    pickupMsg = "ESCAPED  +GOLD";
+                    pickupMsgTimer = 1.2f;
+                }          /* 到了声源，原地搜一圈 */
             monster.stateTimer = 3.5f;
             monster.pathLen = 0;
             monster.pathIdx = 0;
@@ -816,7 +851,7 @@ void UpdateMonster(float dt) {
             monster.pathIdx++;
         } else {
             /* v3.3：踩到胶水 → 移速 x0.20（-80%）。还在动，只是变成慢动作。 */
-    float step = monster.speed * dt * (InGlue(monster.x, monster.y) ? GLUE_MONSTER_MUL : 1.0f);
+    float step = monster.speed * dt * (InGlue(monster.x, monster.y) ? GLUE_MONSTER_MUL : 1.0f) * GoldSpeedMul();
             if (step > d) step = d;
             monster.x += dx / d * step;
             monster.y += dy / d * step;
@@ -833,7 +868,19 @@ void UpdateMonster(float dt) {
     /* 抓到玩家：掉理智 + 怪被弹开（以后可以换成真正的地图事件） */
     /* v3.3：**诱饵先替玩家挨这一下** ——
        附近有激活的玩偶就抵掉，玩家不掉理智，怪物还会转向玩偶。 */
-    if (!playerInSafe && monster.hitCooldown <= 0.0f && pd2 < 0.55f && DecoyIntercept()) {
+    /* v3.4 CATCH BREAK（局内树 id 14）：每局 2 次，被抓时自动挣脱不掉理智。
+       优先级：诱饵 > CATCH BREAK > 正常受伤。 */
+    extern int catchBreakUsed;   /* v3.4 CATCH BREAK 计数 */
+    if (!playerInSafe && monster.hitCooldown <= 0.0f && pd2 < 0.55f &&
+        BenchCatchBreak() && catchBreakUsed < 2) {
+        catchBreakUsed++;
+        monster.state = 2;
+        monster.pathLen = 0;
+        monster.pathIdx = 0;
+        pickupMsg = "BROKE FREE!";
+        pickupMsgTimer = 1.2f;
+        PlaySfx(SFX_GLASS, 0.9f);
+    } else     if (!playerInSafe && monster.hitCooldown <= 0.0f && pd2 < 0.55f && DecoyIntercept()) {
         monster.hitCooldown = HitCooldownFor(currentLevel);
         for (int di = 0; di < MAX_DECOY; di++) {
             if (decoysArr[di].active && decoysArr[di].armed) {

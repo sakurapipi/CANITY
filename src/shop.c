@@ -12,8 +12,27 @@
 int shopPage = SHP_SHOP;
 int shopRow = 0;
 int shopNodeSel = 0;   /* v2.7：改造树光标 */
-int shopOffer[SHOP_OFFERS] = {-1, -1, -1, -1};
-int shopPrice[SHOP_OFFERS] = {0, 0, 0, 0};
+int shopOffer[SHOP_OFFERS] = {-1, -1, -1, -1, -1, -1, -1, -1};   /* v6：8 项全填 -1（0 是合法配件 id） */
+/* v3.4：每行的剩余冷却（秒）。0 = 可买。 */
+float shopCooldown[SHOP_COOLDOWN_ROWS] = {0};
+static const float kRowCd[SHOP_COOLDOWN_ROWS] = {
+    20.0f, 25.0f, 30.0f, 30.0f, 35.0f, 40.0f, 30.0f, 30.0f
+};
+float ShopCooldownOf(int row) {
+    if (row < 0 || row >= SHOP_COOLDOWN_ROWS) return 0.0f;
+    return shopCooldown[row];
+}
+void ShopTickCooldown(float dt) {
+    for (int i = 0; i < SHOP_COOLDOWN_ROWS; i++)
+        if (shopCooldown[i] > 0.0f) {
+            shopCooldown[i] -= dt;
+            if (shopCooldown[i] < 0.0f) shopCooldown[i] = 0.0f;
+        }
+}
+void ShopResetCooldowns(void) {
+    for (int i = 0; i < SHOP_COOLDOWN_ROWS; i++) shopCooldown[i] = 0.0f;
+}
+int shopPrice[SHOP_OFFERS] = {0, 0, 0, 0, 0, 0, 0, 0};   /* v6：补满 8 项 */
 int attachOwned[ATTACH_COUNT];
 
 /* v2.1：改成按层记，反复开关面板不能刷新次数 */
@@ -73,7 +92,7 @@ const char* ShopPageTitle(void) {
     case SHP_BENCH: return Tr("SAFE HOUSE  -  BENCH", "安全屋  -  改装台");
     case SHP_REST:  return Tr("SAFE HOUSE  -  REST",  "安全屋  -  休息");
     case SHP_TREE:  return Tr("WORKBENCH TREE", "改造树");
-    case SHP_UPGRADE: return "CRYSTAL UPGRADE";
+    case SHP_UPGRADE: return Tr("GOLD UPGRADE", "金币强化");   /* v3.3：原来写死英文且叫 CRYSTAL（核心是另一种货币） */
     default:        return Tr("SAFE HOUSE  -  SHOP",  "安全屋  -  商店");
 }
 }
@@ -140,19 +159,44 @@ const char* ShopRowText(int row) {
            又贵又少，玩家没有任何理由买急救包。
            现在急救包 25（同价但少给 15 点），是「临时补给」的定位，
            安全屋休息仍然是性价比最高的恢复手段。 */
-        static const char* en[4] = {
-            "BATTERY PACK   +35 battery   25",
-            "MED KIT        +25 sanity    25",
-            "FLARE x1                      30",
-            "BOTTLES x2                    20",
+        /* v3.4：8 行，全部 ×1 卖（不打包）—— 买多少由金币和冷却共同决定 */
+        /* v6：**价格必须落在面板里** ——
+           原来靠一长串空格把价格顶到行尾，结果正好和右侧的
+           GOLD 余额、绿色滚动条撞在一起，被裁掉一半（用户截图）。
+           现在用紧凑格式，价格紧跟数量，离面板右边缘还留足余量。 */
+        static const char* en[8] = {
+            "SLING x1       35",
+            "FLARE x1       50",
+            "SMOKE x1       70",
+            "GLUE  x1       80",
+            "ECHO  x1       95",
+            "DECOY x1      120",
+            "BATTERY +35    60",
+            "MEDKIT  +25    70",
         };
-        static const char* zh[4] = {
-            "电池包   +35 电量   25",
-            "急救包   +25 理智   25",
-            "照明弹 x1           30",
-            "瓶子   x2           20",
+        static const char* zh[8] = {
+            "投石 x1       35",
+            "光球 x1       50",
+            "烟雾 x1       70",
+            "胶水 x1       80",
+            "回声 x1       95",
+            "诱饵 x1      120",
+            "电池 +35      60",
+            "药包 +25      70",
         };
-        int idx = row & 3;
+        int idx = row;
+        if (idx < 0) idx = 0;
+        if (idx >= 8) idx = 7;
+        /* 冷却中：行尾缀上倒计时 */
+        {
+            float cd = ShopCooldownOf(row);
+            if (cd > 0.05f) {
+                static char cb[64];
+                snprintf(cb, sizeof(cb), "%s   (%ds)",
+                         (g_lang == LANG_ZH) ? zh[idx] : en[idx], (int)(cd + 0.5f));
+                return cb;
+            }
+        }
         return (g_lang == LANG_ZH) ? zh[idx] : en[idx];
     }
 
@@ -218,8 +262,24 @@ void ShopMoveSel(int delta) {
 }
 
 /* v2.7：改造树的四向移动（4 列 × 3 行） */
+/* v6：**Tab 只在这 3 页之间循环** ——
+   方案 v5 决定把 5 页压到 3 页（商店 / 改装台 / 休息），
+   TREE 和 UPGRADE 两页退役。枚举值不动（避免大规模重编号），
+   只在翻页时跳过它们。 */
+static int ShopIsLivePage(int pg) {
+    /* v6 **恢复全部 5 页** ——
+       之前为了「5 页压 3 页」把 TREE / UPGRADE 从翻页里跳过，
+       但那套压缩从来没真正完成（页签还画 5 个、绘制分支还在），
+       结果改造树（16 节点）和碎片强化两整页彻底进不去。
+       现在和画出来的页签保持一致：5 页全开。 */
+    return (pg >= 0 && pg < SAFEHOUSE_PAGES) ? 1 : 0;
+}
+
 void ShopPrevPage(void) {
-    shopPage = (shopPage + SAFEHOUSE_PAGES - 1) % SAFEHOUSE_PAGES;
+    for (int k = 0; k < SAFEHOUSE_PAGES; k++) {
+        shopPage = (shopPage + SAFEHOUSE_PAGES - 1) % SAFEHOUSE_PAGES;
+        if (ShopIsLivePage(shopPage)) break;
+    }
     shopRow = 0;
     uiDirty = 1;
 }
@@ -238,7 +298,10 @@ void ShopTreeMove(int dx, int dy) {
 }
 
 void ShopNextPage(void) {
-    shopPage = (shopPage + 1) % SAFEHOUSE_PAGES;
+    for (int k = 0; k < SAFEHOUSE_PAGES; k++) {
+        shopPage = (shopPage + 1) % SAFEHOUSE_PAGES;
+        if (ShopIsLivePage(shopPage)) break;
+    }
     shopRow = 0;
     uiDirty = 1;
 }
@@ -268,32 +331,65 @@ void ShopActivate(void) {
         } else if (r == 3) {
             pickupMsg = Tr("NEED PREVIOUS NODE", "需要先买上一层");
         } else if (r == 4) {
-            pickupMsg = Tr("NOT ENOUGH SHARDS", "碎片不够");
+            pickupMsg = Tr("NOT ENOUGH GOLD", "金币不够");
         }
         pickupMsgTimer = 1.4f;
         uiDirty = 1;
         return;
     }
     if (shopPage == SHP_SHOP) {
-        if (shopRow >= SHOP_OFFERS) return;      /* LEAVE 由 Esc 处理 */
-        /* v3.0：**消耗品商店** —— 四种补给，价格与行文本一一对应 */
-        static const int price[4] = { 25, 25, 30, 20 };   /* v3.3：急救包 40 -> 25，与行文本一致 */
-        int idx = shopRow & 3;
-        if (!ShopSpend(price[idx])) {
-            pickupMsg = Tr("NOT ENOUGH SHARDS", "碎片不够");
+        if (shopRow >= SHOP_OFFERS) {
+        /* v6 **LEAVE 行回车要能真的离开** ——
+           原来画着 "LEAVE (ESC)" 但回车直接 return，玩家选中它按回车毫无反馈。 */
+        extern void ShopLeave(void);
+        ShopLeave();
+        return;
+    }
+        /* ===== v3.4 八行补给：不限量，只受「金币 + 冷却」限制 =====
+           用户要求：「商店里面不限制数量，只限制倒计时和金币，
+           这样金币的捆绑更大，别人才有想玩的冲动。」 */
+        static const int price[8] = { 35, 50, 70, 80, 95, 120, 60, 70 };
+        int idx = shopRow;
+        if (idx < 0) idx = 0;
+        if (idx >= 8) return;
+
+        /* 冷却中 → 拒绝并提示还剩多久 */
+        if (ShopCooldownOf(idx) > 0.05f) {
+            static char cmsg[64];
+            snprintf(cmsg, sizeof(cmsg),
+                     Tr("RESTOCKING  %ds", "补货中  %d 秒"),
+                     (int)(ShopCooldownOf(idx) + 0.5f));
+            pickupMsg = cmsg;
             pickupMsgTimer = 1.2f;
+            uiDirty = 1;
+            return;
+        }
+        if (!ShopSpend(price[idx])) {
+            pickupMsg = Tr("NOT ENOUGH GOLD", "金币不够");
+            pickupMsgTimer = 1.2f;
+            uiDirty = 1;
             return;
         }
         switch (idx) {
-        case 0: battery += 35.0f; if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
+        case 0: if (bottles < BottleCap()) bottles++;
+                pickupMsg = Tr("+1 SLING", "+1 投石"); break;
+        case 1: if (flares < BottleCap()) flares++;
+                pickupMsg = Tr("+1 FLARE", "+1 光球"); break;
+        case 2: if (smokeBombs < BottleCap()) smokeBombs++;
+                pickupMsg = Tr("+1 SMOKE", "+1 烟雾"); break;
+        case 3: if (gluePots < BottleCap()) gluePots++;
+                pickupMsg = Tr("+1 GLUE", "+1 胶水"); break;
+        case 4: if (echoBolts < BottleCap()) echoBolts++;
+                pickupMsg = Tr("+1 ECHO", "+1 回声"); break;
+        case 5: if (decoys < BottleCap()) decoys++;
+                pickupMsg = Tr("+1 DECOY", "+1 诱饵"); break;
+        case 6: battery += 35.0f; if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
                 pickupMsg = Tr("+35 BATTERY", "+35 电量"); break;
-        case 1: sanity += 25.0f;  if (sanity > SanityMax()) sanity = SanityMax();
+        default: sanity += 25.0f; if (sanity > SanityMax()) sanity = SanityMax();
                 pickupMsg = Tr("+25 SANITY", "+25 理智"); break;
-        case 2: flares++;
-                pickupMsg = Tr("+1 FLARE", "+1 照明弹"); break;
-        default: bottles += 2;
-                pickupMsg = Tr("+2 BOTTLES", "+2 瓶子"); break;
         }
+        /* 买入后该行进入冷却 */
+        shopCooldown[idx] = kRowCd[idx];
         PlaySfx(SFX_POWER, 0.8f);
         pickupMsgTimer = 1.2f;
         uiDirty = 1;
@@ -329,7 +425,7 @@ void ShopActivate(void) {
     if (shopRow == 0) {
         if (safeHealLevel == currentLevel) return;
         if (!ShopSpend(SAFE_REST_COST)) {
-            pickupMsg = Tr("NEED 25 SHARDS", "需要 25 碎片");
+            pickupMsg = Tr("NEED 25 GOLD", "需要 25 金币");
             pickupMsgTimer = 1.2f;
             uiDirty = 1;
             return;
@@ -372,7 +468,7 @@ void ShopActivate(void) {
            无限刷满体力，冲刺等于没有成本。 */
         if (safeStaminaLevel == currentLevel) return;
         if (!ShopSpend(15)) {
-            pickupMsg = Tr("NEED 15 SHARDS", "需要 15 碎片");
+            pickupMsg = Tr("NEED 15 GOLD", "需要 15 金币");
             pickupMsgTimer = 1.2f;
             uiDirty = 1;
             return;
@@ -403,4 +499,16 @@ void ShopSetSafeLv(int heal, int charge, int stamina) {
     safeHealLevel = heal;
     safeChargeLevel = charge;
     safeStaminaLevel = stamina;
+}
+
+
+/* v6 **离开安全屋** —— 原来 LEAVE 行画着 "LEAVE (ESC)" 但回车直接 return，
+   玩家选中它按回车毫无反馈。这里和 ESC 走同一条路径。 */
+void ShopLeave(void) {
+    extern int resetInputState, uiDirty;
+    extern void ForceCursor(int on);
+    currentState = STATE_PLAYING;
+    resetInputState = 1;
+    ForceCursor(0);
+    uiDirty = 1;
 }
