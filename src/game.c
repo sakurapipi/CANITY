@@ -120,6 +120,10 @@ float trainingDpsTimer = 0.0f;
 int trainingDps = 0;
 /* ---- v3.1 新手教程 ---- */
 int tutorialStep = 0;
+/* v3.3 **引导默认关闭** ——
+   用户反馈「每次进训练营引导都在，很烦」。
+   现在进 Tutorial 只显示一行「按 B 激活引导」，按 B 才展开分步引导。 */
+int tutorialGuideOn = 0;
 int tutorialDone = 0;
 enum {
     TUT_MOVE = 0,
@@ -1183,6 +1187,7 @@ void TutorialBegin(void) {
     tutorialKnocked = 0;
     tutorialMapOpened = 0;
     uiDirty = 1;
+    tutorialGuideOn = 0;   /* v3.3：进训练营默认不展开引导 */
 }
 
 static void TutorialAdvance(void) {
@@ -2819,6 +2824,19 @@ void Update(float dt) {
        原来 runUltimate 只被存读档，**从来没有激活入口** ——
        三选一拿到的大招等于永远用不出来。现在按 Q 释放，一局一次。 */
     if (ultTimer > 0.0f) ultTimer -= dt;
+    /* v3.3：**B 键开/关训练营的分步引导** ——
+       进 Tutorial 时默认不展开，只提示「按 B 激活引导」。 */
+    if (currentState == STATE_PLAYING && trainingMode && keyPressed['B']) {
+        keyPressed['B'] = 0;
+        extern int tutorialGuideOn;
+        tutorialGuideOn = !tutorialGuideOn;
+        pickupMsg = tutorialGuideOn
+            ? (g_lang == LANG_ZH ? "引导已展开" : "GUIDE ON")
+            : (g_lang == LANG_ZH ? "引导已收起" : "GUIDE OFF");
+        pickupMsgTimer = 1.2f;
+        uiDirty = 1;
+    }
+
     /* v3.3：**C 键激活诱饵**（右键负责放置，C 负责激活） */
     if (currentState == STATE_PLAYING && keyPressed['C']) {
         keyPressed['C'] = 0;

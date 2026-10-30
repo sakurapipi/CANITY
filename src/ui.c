@@ -3420,6 +3420,29 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
 static void DrawTutorialPanel(void) {
     if (!trainingMode) return;
 
+    /* v3.3：**引导关着的时候不画面板**，只在屏幕中间提示怎么开。 */
+    {
+        extern int tutorialGuideOn;
+        if (!tutorialGuideOn) {
+            extern float runTime;
+            float pulse = 0.72f + 0.28f * sinf(runTime * 4.0f);
+            const char* txt = Tr("PRESS  B  TO START THE GUIDE",
+                                 "按  B  激 活 引 导");
+            int tw = TextWidthWin(txt);
+            int ty = (int)(winH * 0.12f);
+            int bx0 = (winW - tw) / 2;
+            BlendRectWin(bx0 - UIS(16), ty - UIS(6),
+                         bx0 + tw + UIS(16), ty + TextHeightWin() + UIS(6),
+                         0x00101418u, 0.80f);
+            FrameRectWin(bx0 - UIS(16), ty - UIS(6),
+                         bx0 + tw + UIS(16), ty + TextHeightWin() + UIS(6),
+                         0x0060C0A0u, 0.70f * pulse, 1);
+            DrawTextCenterWin(winW / 2, ty, txt,
+                              (pulse > 0.85f) ? 0x0080E0C0u : 0x0050A088u);
+            return;
+        }
+    }
+
     int th = TextHeightWin();
     int w = UIS(620);
     if (w > winW - UIS(24)) w = winW - UIS(24);
