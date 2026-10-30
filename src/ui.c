@@ -3338,35 +3338,6 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
         }
     }
 
-    /* v3.3：**诱饵放下后提示「按 C 键激活」** ——
-       用户要求：放置成功之后屏幕上要出现这行字。
-       只要场上有「已放下但没激活」的玩偶就常驻显示，
-       全部激活 / 用光后自动消失。 */
-    if (currentState == STATE_PLAYING) {
-        extern Decoy decoysArr[MAX_DECOY];
-        extern float runTime;
-        int unarmed = 0;
-        for (int di = 0; di < MAX_DECOY; di++) {
-            if (decoysArr[di].active && !decoysArr[di].armed) { unarmed = 1; break; }
-        }
-        if (unarmed) {
-            float pulse = 0.72f + 0.28f * sinf(runTime * 5.0f);
-            int ty = (int)(winH * 0.30f);
-            const char* txt = Tr("PRESS  C  TO ARM THE DECOY",
-                                 "按  C  键 激 活 诱 饵");
-            int tw = TextWidthWin(txt);
-            int bx0 = (winW - tw) / 2;
-            BlendRectWin(bx0 - UIS(14), ty - UIS(6),
-                         bx0 + tw + UIS(14), ty + TextHeightWin() + UIS(6),
-                         0x00101418u, 0.82f);
-            FrameRectWin(bx0 - UIS(14), ty - UIS(6),
-                         bx0 + tw + UIS(14), ty + TextHeightWin() + UIS(6),
-                         0x00E8C040u, 0.75f * pulse, 1);
-            DrawTextCenterWin(winW / 2, ty, txt,
-                              (pulse > 0.85f) ? 0x00FFE070u : 0x00C8A040u);
-        }
-    }
-
 
     /* v3.0：**校准倒计时常驻显示** ——
        用户两次反馈「倒计时没有加进去」。
@@ -3389,6 +3360,33 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
             cdc = 0x0060FF90u;
         }
         DrawTextWin(labelX, y2 + rowGap - UIS(6), cd, cdc);
+        /* ===== v3.3：两个操作提示并到这一行右侧 =====
+           用户反馈「这两个都在屏幕中间太遮挡了」。
+           现在跟在 CALIB 后面，同一条基线、**无边框、暗色小字**，
+           不占额外空间也不抢视线：
+             [B] 引导    训练营里引导没展开时才有
+             [C] 激活诱饵  场上有未激活的玩偶时才有 */
+        {
+            int px2 = labelX + TextWidthWin(cd) + UIS(20);
+            int py2 = y2 + rowGap - UIS(6);
+            extern int tutorialGuideOn;
+            extern int trainingMode;
+            extern Decoy decoysArr[MAX_DECOY];
+
+            if (trainingMode && !tutorialGuideOn) {
+                const char* gtxt = Tr("[B] GUIDE", "[B] 引导");
+                DrawTextWin(px2, py2, gtxt, 0x004A9480u);
+                px2 += TextWidthWin(gtxt) + UIS(18);
+            }
+            {
+                int unarmed = 0;
+                for (int di = 0; di < MAX_DECOY; di++)
+                    if (decoysArr[di].active && !decoysArr[di].armed) { unarmed = 1; break; }
+                if (unarmed)
+                    DrawTextWin(px2, py2, Tr("[C] ARM DECOY", "[C] 激活诱饵"), 0x00A8842Cu);
+            }
+        }
+
     }
 
     /* v3.0：**摇电只留一条黄线，不写任何文字** ——
@@ -3420,27 +3418,13 @@ static const char* slotNameZh[ITEM_SLOT_COUNT] = { "照明弹", "瓶子", "砖�
 static void DrawTutorialPanel(void) {
     if (!trainingMode) return;
 
-    /* v3.3：**引导关着的时候不画面板**，只在屏幕中间提示怎么开。 */
+    /* v3.3：**引导关着的时候整个面板不画** ——
+       用户反馈「按 B 激活引导」那行放屏幕中间太遮挡，
+       所以这行已经挪到左下角 CALIB 那一行的右边了（见 DrawHUD）。
+       这里只负责「别画面板」。 */
     {
         extern int tutorialGuideOn;
-        if (!tutorialGuideOn) {
-            extern float runTime;
-            float pulse = 0.72f + 0.28f * sinf(runTime * 4.0f);
-            const char* txt = Tr("PRESS  B  TO START THE GUIDE",
-                                 "按  B  激 活 引 导");
-            int tw = TextWidthWin(txt);
-            int ty = (int)(winH * 0.12f);
-            int bx0 = (winW - tw) / 2;
-            BlendRectWin(bx0 - UIS(16), ty - UIS(6),
-                         bx0 + tw + UIS(16), ty + TextHeightWin() + UIS(6),
-                         0x00101418u, 0.80f);
-            FrameRectWin(bx0 - UIS(16), ty - UIS(6),
-                         bx0 + tw + UIS(16), ty + TextHeightWin() + UIS(6),
-                         0x0060C0A0u, 0.70f * pulse, 1);
-            DrawTextCenterWin(winW / 2, ty, txt,
-                              (pulse > 0.85f) ? 0x0080E0C0u : 0x0050A088u);
-            return;
-        }
+        if (!tutorialGuideOn) return;
     }
 
     int th = TextHeightWin();
