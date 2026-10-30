@@ -1472,8 +1472,15 @@ static void DrawHideSpotHighlight(void) {
     if (hideSpotNear < 0 || hideSpotNear >= hideSpotCount) return;
     HideSpot* h = &hideSpots[hideSpotNear];
     if (!h->active) return;
-    /* 用两次不同大小的半透明方块模拟光晕（软件光栅下最省的画法） */
-    DrawBakedProp(SPR_PROP_SAFE, h->x, h->y, 0.40f, 0.70f);
+    /* v3.3 **删掉这里的 SPR_PROP_SAFE** ——
+       用户截图：「隐藏点把原来那个灯的模型删掉，保留作者留的垃圾桶」。
+       原来藏身点被画了两次：
+         ① DrawHideSpotSprite  → SPR_PROP_TRASH（作者 v3.3 的垃圾桶）✅
+         ② 这里                  → SPR_PROP_SAFE（我早期的柜子，顶上带灯）
+       两个精灵叠在同一格，看起来就是「垃圾桶上面压了个带灯的柜子」。
+       现在只保留作者的垃圾桶。靠近提示改由 HUD 的 PRESS E / HIDE 承担，
+       不再额外画一层模型。 */
+    (void)h;
 }
 
 static void DrawHearingMarker(void) {
