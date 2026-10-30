@@ -156,9 +156,12 @@ static void test_stable_visuals_and_input(void) {
     const char* game = read_file("src/game.c");
     const char* ui = read_file("src/ui.c");
     const char* render = read_file("src/render.c");
-      /* v3.0：锁盘改成只认 Esc / M 关闭（原来任意键都关，解题时误按就没了）。 */
-  check(contains(game, "wParam == VK_ESCAPE || wParam == 'M'"),
-  "lock overlay key guard missing");
+    /* v3.3：合并上游后，锁盘的按键守卫改成 lockIgnoreVK ——
+       打开锁盘的那次交互键自动重复不会立刻把它关掉。
+       （原来断言的是「只认 Esc/M」，那是本地分支的写法，
+         按用户要求以作者版本为准，这里跟着改。） */
+    check(contains(game, "lockIgnoreVK"),
+          "lock overlay key guard missing");
     /* v3.0：藏身遮罩已取消（用户要求：躲在柜子里也要看得见提示）。
      现在反过来检查：那段不透明黑边不该再回来。 */
     check(!contains(ui, "int bandT = winH * 37 / 100;"),
