@@ -1439,7 +1439,11 @@ void GenerateLevel(void) {
 
     /* 阶段2：继续填充到 contCap（受词条影响） */
     attempts = 0;
-    while (containerCount < contCap && containerCount < MAX_CONTAINERS && attempts < 512) {
+    /* v3.3：**必须防 emptyCount==0** —— 下面有 rand() % emptyCount，
+       空地为 0 时是整数除零，x86 上直接 SIGFPE 崩溃（不是返回 0）。
+       地图极端退化时（整层都是墙）会走到这里。 */
+    while (containerCount < contCap && containerCount < MAX_CONTAINERS
+           && emptyCount > 0 && attempts < 512) {
         attempts++;
         int idx = rand() % emptyCount;
         float cx = cells[idx][0] + 0.5f, cy = cells[idx][1] + 0.5f;
@@ -1466,7 +1470,8 @@ void GenerateLevel(void) {
        所以再补一轮宽松放置：只要求离藏身点 0.9 格（不压在同一格），
        离其它容器仍然 1.2 格。这样最坏情况是「挨着」而不是「叠在一起」。 */
     attempts = 0;
-    while (containerCount < contCap && containerCount < MAX_CONTAINERS && attempts < 256) {
+    while (containerCount < contCap && containerCount < MAX_CONTAINERS
+           && emptyCount > 0 && attempts < 256) {
         attempts++;
         int idx = rand() % emptyCount;
         float cx = cells[idx][0] + 0.5f, cy = cells[idx][1] + 0.5f;
