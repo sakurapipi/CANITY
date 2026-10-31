@@ -22,7 +22,10 @@ int RunUpgCost(int kind) {
     if (kind < 0 || kind >= RUN_UPG_COUNT) return -1;
     if (upg[kind] >= RUN_UPG_MAX) return -1;
     /* 60 / 130 / 220 —— 一局大约能满 1~2 条线 */
-    static const int costs[RUN_UPG_MAX] = { 60, 130, 220 };
+    static const int costs[RUN_UPG_MAX]  = { 60, 130, 220 };
+    /* v7：扳手是「拿到就能用」的能力升级，价格单独一档 */
+    static const int wrench[RUN_UPG_MAX] = { 300, 800, 1800 };
+    if (kind == 4) return wrench[upg[kind]];
     return costs[upg[kind]];
 }
 
@@ -43,7 +46,8 @@ const char* RunUpgName(int kind) {
     case 0: return "CARRY";
     case 1: return "RESISTANCE";
     case 2: return "STAMINA";
-    default: return "FLASHLIGHT";
+    case 3: return "FLASHLIGHT";
+    default: return "WRENCH KNOCK";
     }
 }
 
@@ -52,7 +56,8 @@ const char* RunUpgNameZh(int kind) {
     case 0: return "携带量";
     case 1: return "角色抗性";
     case 2: return "体能";
-    default: return "手电效率";
+    case 3: return "手电效率";
+    default: return "扳手击退";
     }
 }
 
@@ -61,7 +66,8 @@ const char* RunUpgDesc(int kind) {
     case 0: return "Throwable capacity +2 / lv";
     case 1: return "Lose 10% less sanity when grabbed";
     case 2: return "Sprint stamina -15% / lv";
-    default: return "Flashlight drain -15% / lv";
+    case 3: return "Flashlight drain -15% / lv";
+    default: return "Push monsters back. Lv2+ becomes cooldown.";
     }
 }
 
@@ -70,7 +76,8 @@ const char* RunUpgDescZh(int kind) {
     case 0: return "投掷物携带上限 +2 / 级";
     case 1: return "被抓时少掉 10% 理智 / 级";
     case 2: return "冲刺体力消耗 -15% / 级";
-    default: return "手电耗电 -15% / 级";
+    case 3: return "手电耗电 -15% / 级";
+    default: return "推开怪物。2 级起改为冷却制。";
     }
 }
 
@@ -83,6 +90,33 @@ int   RunUpgCarryBonus(void)  { return 2 * upg[0]; }
 float RunUpgResistMul(void)   { return 1.0f - 0.10f * (float)upg[1]; }
 float RunUpgStaminaMul(void)  { return 1.0f - 0.15f * (float)upg[2]; }
 float RunUpgFlashMul(void)    { return 1.0f - 0.15f * (float)upg[3]; }
+
+/* ===== v7 扳手击退 =====
+   0 级（默认）  每层 2 次      推开 2 格    无硬直
+   1 级          每层 4 次      推开 3 格    无硬直
+   2 级          冷却 6 秒      推开 3 格    无硬直
+   3 级          冷却 3 秒      推开 4 格    硬直 1 秒 */
+int RunUpgWrenchLevel(void) {
+    int lv = upg[4];
+    if (lv < 0) lv = 0;
+    if (lv > 3) lv = 3;
+    return lv;
+}
+float RunUpgWrenchCooldown(void) {
+    int lv = RunUpgWrenchLevel();
+    if (lv <= 1) return -1.0f;      /* 次数制 */
+    return (lv == 2) ? 6.0f : 3.0f;
+}
+int RunUpgWrenchCharges(void) {
+    return (RunUpgWrenchLevel() <= 0) ? 2 : 4;
+}
+float RunUpgWrenchRange(void) {
+    int lv = RunUpgWrenchLevel();
+    return (lv >= 3) ? 4.0f : (lv >= 1 ? 3.0f : 2.0f);
+}
+float RunUpgWrenchStun(void) {
+    return (RunUpgWrenchLevel() >= 3) ? 1.0f : 0.0f;
+}
 
 void RunUpgLoadFromSave(const int* arr) {
     for (int i = 0; i < RUN_UPG_COUNT; i++) {

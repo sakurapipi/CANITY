@@ -1,0 +1,368 @@
+/*
+ * Canity — 投掷物系统（v8 重构第六刀 C）
+ *
+ * 原来整段写在 game.c 里（ThrowItem 107 行 + UpdateShots 234 行），
+ * 现在独立成一个区块。依赖：
+ *   · include/state.h      全局状态
+ *   · include/suspicion.h  可疑点表（落地写 THE ECHO 的点）
+ *   · game.c 暴露的公开变量（下面 extern 声明）
+ */
+#include <math.h>
+#include "common.h"
+#include "game.h"
+#include "state.h"
+#include "suspicion.h"
+#include "throwing.h"
+#include "hints.h"
+#include "audio.h"
+#include "lang.h"
+#include "entity.h"
+#include "skills.h"
+#include "bench.h"
+#include "relics.h"
+#include "upgrade_run.h"
+#include "weapons.h"
+
+/* ---- game.c 里的公开变量（重构时逐步搬进 state.h） ---- */
+extern float mouseCharge;
+extern int   g_throwOk;
+extern void  SpawnGlue(float,float);
+extern void  SpawnShards(float,float,float,float,float);
+extern int chargeBonus(float);
+extern float weaponAtkCharge;
+extern int   g_lang;
+
+void ThrowItem(int type, float charge) {
+    { extern void HintOnce(int); HintOnce(0); }   /* v7 B4: 第一次投掷 */
+    g_throwOk = 0;
+    if (charge < 0.1f) charge = 0.1f;
+    if (charge > 1.0f) charge = 1.0f;
+
+    float speed = SHOT_SPEED + (SHOT_MAX_SPEED - SHOT_SPEED) * charge;
+    float angle = 0.35f * charge;  /* 抛物线角度：蓄力越高越平直 */
+
+    if (type == 1) {
+        /* 玻璃瓶：抛物线飞行弹丸 */
+        for (int i = 0; i < MAX_SHOTS; i++) {
+            if (shot[i].active) continue;
+            shot[i].x = posX;
+            shot[i].y = posY;
+            shot[i].z = SHOT_HEIGHT;
+            shot[i].vx = dirX * speed * cosf(angle);
+            shot[i].vy = dirY * speed * cosf(angle);
+            shot[i].vz = speed * sinf(angle);  /* 向上分量 */
+            shot[i].life = 2.0f;
+            shot[i].age = 0.0f;
+            shot[i].charge = charge;
+            shot[i].kind = 1;
+            shot[i].dmg = 0;
+            shot[i].pierce = 0;
+            shot[i].mirrorRebounded = 0;
+            shot[i].ignoreTarget = -1;
+            shot[i].ignoreTargetTime = 0.0f;
+            shot[i].active = 1; g_throwOk = 1;
+            break;
+        }
+        PlaySfx(SFX_THROW, 0.6f);  /* 投掷专用音效：呼啸+出手闷响 */
+        return;
+    }
+
+    /* ---- v3.3 投掷物重做：2 烟雾 / 3 胶水 / 4 回声，全部走 shot 弹道 ----
+       槽位：0 光球 / 1 投石 / 2 烟雾 / 3 胶水 / 4 回声 / 5 诱饵（C 键放置，不走这里）
+       shot.kind 约定：1 投石 / 4 烟雾 / 8 胶水 / 10 回声 */
+    if (type >= 2) {
+        int kind = (type == 2) ? 4 : (type == 3) ? 8 : 10;
+        float itemSpeed = speed;
+        float itemAngle = angle;
+        float itemHeight = 1.0f;
+        if (type == 2) {
+            /* 烟雾弹：轻、抛得高、滞空久，落点好控制 */
+            itemSpeed *= 1.05f;
+            itemAngle = angle * 1.25f + 0.06f;
+        } else if (type == 3) {
+            /* 胶水瓶：重、低抛、飞得近 —— 它就是用来扔脚下的 */
+            itemSpeed *= 0.88f;
+            itemAngle *= 0.75f;
+            itemHeight = 0.94f;
+        } else {
+            /* 回声弹：小、轻、平飞 */
+            itemSpeed *= 1.10f;
+            itemAngle *= 0.80f;
+        }
+        for (int i = 0; i < MAX_SHOTS; i++) {
+            if (shot[i].active) continue;
+            shot[i].x = posX + dirX * 0.35f;
+            shot[i].y = posY + dirY * 0.35f;
+            shot[i].z = SHOT_HEIGHT * (type == 4 ? 0.9f : itemHeight);
+            shot[i].vx = dirX * itemSpeed * cosf(itemAngle);
+            shot[i].vy = dirY * itemSpeed * cosf(itemAngle);
+            shot[i].vz = itemSpeed * sinf(itemAngle);
+            shot[i].life = (type == 4) ? 1.6f : 2.0f;
+            shot[i].age = 0.0f;
+            shot[i].charge = charge;
+            shot[i].kind = kind;
+            shot[i].dmg = 0;
+            shot[i].pierce = 0;   /* v3.3：镜片已删，不再有穿透弹 */
+            shot[i].mirrorRebounded = 0;
+            shot[i].ignoreTarget = -1;
+            shot[i].ignoreTargetTime = 0.0f;
+            shot[i].active = 1; g_throwOk = 1;
+            break;
+        }
+        PlaySfx(SFX_THROW, 0.6f);
+        return;
+    }
+
+    /* 荧光棒：抛物线飞行，落地后转为静止发光体 */
+    float flareSpeed = 6.5f + charge * 3.0f;   /* v1.11：6.5~9.5 格/秒（原来满蓄力太远） */
+    /* v1.11：仰角从 0.4~0.7 压到 0.12~0.22 rad（7°~13°）。
+       之前仰角太大，荧光棒升到 3~4 倍视高，而视角不能往上看 ——
+       玩家看到的就是"扔出去先空两秒，第三秒球才从上面掉下来"。
+       压平之后出手就能看到弧线。 */
+    float flareAngle = 0.12f + charge * 0.10f;
+    for (int i = 0; i < MAX_THROWN; i++) {
+        if (thrown[i].active) continue;
+        /* v1.10：出手点往前挪 0.45 格。
+           原来与玩家同一位置 → 投影距离 ty≈0，被 ProjectSprite 的
+           "太近就丢弃"挡掉，画面上就是"扔出去先消失一下再出现"。 */
+        thrown[i].x = posX + dirX * 0.45f;
+        thrown[i].y = posY + dirY * 0.45f;
+        thrown[i].z = SHOT_HEIGHT * 0.45f;   /* v1.11：从腹部/胯部出手，不再从头顶 */
+        thrown[i].vz = flareSpeed * sinf(flareAngle);
+        thrown[i].vx = dirX * flareSpeed * cosf(flareAngle);
+        thrown[i].vy = dirY * flareSpeed * cosf(flareAngle);
+        thrown[i].type = 0;        /* 0=荧光棒 */
+        thrown[i].life = 25.0f;    /* 落地后发光时长 */
+        thrown[i].active = 1; g_throwOk = 1;
+        break;
+    }
+    PlaySfx(SFX_THROW, 0.6f);  /* 投掷专用音效：呼啸+出手闷响 */
+}
+
+/* 推进所有飞行中的玻璃瓶，结算命中 + 抛物线 + 碎片 */
+void UpdateShots(float dt) {
+    for (int i = 0; i < MAX_SHOTS; i++) {
+        if (!shot[i].active) continue;
+        shot[i].life -= dt;
+        shot[i].age += dt;
+        if (shot[i].ignoreTargetTime > 0.0f) {
+            shot[i].ignoreTargetTime -= dt;
+            if (shot[i].ignoreTargetTime <= 0.0f) {
+                shot[i].ignoreTargetTime = 0.0f;
+                shot[i].ignoreTarget = -1;
+            }
+        }
+
+        /* v1.18：重力 + 落地。
+           之前 shot 完全没有 z 积分 —— 砖头/酸瓶/烟雾弹都是
+           从胸口直线飞出去、而且永远不落地（烟雾弹自然出不了烟）。 */
+        shot[i].vz -= 16.0f * dt;
+        shot[i].z += shot[i].vz * dt;
+        if (shot[i].z <= 0.0f && shot[i].age > 0.02f) {
+            shot[i].z = 0.0f;
+            /* ---- v3.3 落地效果分派 ----
+               kind 1 投石 / 4 烟雾 / 8 胶水 / 10 回声 ----
+               噪音全部由**落点 + 蓄力**决定，不再固定：
+                 投石   8 + 蓄力*12  ->  8 ~ 20（玩家自己调）
+                 胶水   6（小）
+                 烟雾   5（小）
+                 回声   0（完全静音 —— 它就是用来偷情报的） */
+            /* ===== v7 **THE ECHO** =====
+               你扔出去的每个东西，落点都会留下一个「可疑位置」。
+               它**自己不发声**（发声反而会分散怪物注意力），
+               而是给听声怪一条「玩家刚才在这」的坐标，10 秒后消散。 */
+            SuspicionAdd(shot[i].x, shot[i].y, 60.0f, 4.0f, 10.0f, SUSP_THROW);
+            if (shot[i].kind == 4) {
+                SpawnSmoke(shot[i].x, shot[i].y);
+            } else if (shot[i].kind == 8) {
+                SpawnGlue(shot[i].x, shot[i].y);
+                PlaySfx(SFX_GLUE, 0.85f);   /* v3.3：黏稠噗叽 */
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+            } else if (shot[i].kind == 10) {
+                /* 回声弹：不发光、不出声，只把 15 格内怪物位置暴露 5 秒 */
+                extern float echoScanT;
+                extern float echoScanX, echoScanY;
+                echoScanT = 5.0f;
+                echoScanX = shot[i].x;
+                echoScanY = shot[i].y;
+                pickupMsg = (g_lang == LANG_ZH) ? "回声扫过" : "ECHO SCAN";
+                pickupMsgTimer = 1.4f;
+                PlaySfx(SFX_ECHO, 0.80f);   /* v3.3：短叮 + 回响 */
+            } else {
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+            }
+            {
+                float nz = 14.0f;
+                /* v3.4：SILENT THROW（局内树 id 2）投掷物落地不再产生噪音 */
+                if (BenchSilentThrow()) nz = 0.0f;
+                if (shot[i].kind == 1)      nz = 8.0f + shot[i].charge * 12.0f;  /* 8 ~ 20 */
+                else if (shot[i].kind == 8) nz = 6.0f;
+                else if (shot[i].kind == 4) nz = 5.0f;
+                else if (shot[i].kind == 10) nz = 0.0f;                          /* 静音 */
+                if (BenchSilentThrow()) nz = 0.0f;   /* v3.4：静投压过所有分支 */
+                if (nz > 0.0f) MakeNoise(shot[i].x, shot[i].y, nz);
+            }
+            shot[i].active = 0;
+            continue;
+        }
+
+        /* 分段推进，避免高速穿过怪 */
+        float stepLen = sqrtf(shot[i].vx*shot[i].vx + shot[i].vy*shot[i].vy + shot[i].vz*shot[i].vz) * dt;
+        int steps = (int)(stepLen / 0.12f) + 1;
+        float sdx = shot[i].vx * dt / (float)steps;
+        float sdy = shot[i].vy * dt / (float)steps;
+        float sdz = shot[i].vz * dt / (float)steps;
+
+        for (int s = 0; s < steps && shot[i].active; s++) {
+            shot[i].x += sdx;
+            shot[i].y += sdy;
+            shot[i].z += sdz;
+            shot[i].vz -= GRAVITY * dt / (float)steps;  /* 重力 */
+
+            /* 撞地面：碎裂生成碎片 */
+            if (shot[i].z <= 0.0f) {
+                shot[i].z = 0.0f;
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+                PlaySfx(SFX_GLASS, 0.7f);
+                /* v3.0 逃生试炼：**扔东西制造噪音把追捕者引开**是核心手法，
+                   落地的动静要够大，半径 14 → 22 格。 */
+                MakeNoise(shot[i].x, shot[i].y, 15.0f);   /* v3.0 平衡：22 → 15 */
+                shot[i].active = 0;
+                break;
+            }
+
+            /* ===== 撞墙 =====
+               v3.3 **修「有时候不生效」** ——
+               原来飞行途中撞墙时**只碎、不生成任何效果**，
+               于是「对着地面扔胶水，弧线蹭到墙」就什么都不会出现，
+               玩家感觉就是「胶水有时候不生效」。
+               现在撞墙也走和落地一样的效果分派（只是落点变成墙面位置）。 */
+            if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
+                if (shot[i].kind == 4) {
+                    SpawnSmoke(shot[i].x, shot[i].y);
+                } else if (shot[i].kind == 8) {
+                    SpawnGlue(shot[i].x, shot[i].y);
+                    PlaySfx(SFX_GLUE, 0.85f);
+                } else if (shot[i].kind == 10) {
+                    extern float echoScanT;
+                    extern float echoScanX, echoScanY;
+                    echoScanT = 5.0f;
+                    echoScanX = shot[i].x;
+                    echoScanY = shot[i].y;
+                    PlaySfx(SFX_ECHO, 0.80f);
+                }
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+                PlaySfx(SFX_GLASS, 0.7f);
+                MakeNoise(shot[i].x, shot[i].y, 15.0f);
+                shot[i].active = 0;
+                break;
+            }
+
+            /* 撞怪：按 kind 分派（1 玻璃瓶 / 2 砖头 / 3 酸瓶 / 4 烟雾弹） */
+            float r = SHOT_RADIUS + 0.24f;
+            {
+                Monster* targets[2];
+                int nTargets = 0;
+                if (monster.active) targets[nTargets++] = &monster;
+                if (lightBeast.active) targets[nTargets++] = &lightBeast;
+                for (int t = 0; t < nTargets; t++) {
+                    Monster* m = targets[t];
+                    if (shot[i].ignoreTargetTime > 0.0f && shot[i].ignoreTarget == t) continue;
+                    if (Dist2(shot[i].x, shot[i].y, m->x, m->y) >= r * r) continue;
+
+                    int base = 1, type = DT_SHARD;
+                    g_dmgIgnoreArmor = 0;
+                    if (shot[i].kind == 2) {            /* 砖头：钝击 12 点，蓄满 15 */
+                        base = 12 + chargeBonus(shot[i].charge) * 3;
+                        type = DT_BLUNT;
+                    } else if (shot[i].kind == 3) {     /* 酸瓶：碎片 10 点、无视护甲 */
+                        base = 10 + chargeBonus(shot[i].charge) * 2;
+                        type = DT_SHARD;
+                        g_dmgIgnoreArmor = 1;
+                    } else if (shot[i].kind == 4) {     /* 烟雾弹：不造成伤害 */
+                        SpawnSmoke(shot[i].x, shot[i].y);
+                        shot[i].active = 0;
+                        break;
+                    } else if (shot[i].kind == 8) {    /* v2.0 胶水瓶：定身 2 秒，无伤害 */
+                        m->stun = 2.0f;
+                        m->glued = 1;   /* v2.2：胶水期间受伤 +50% */
+                        shot[i].active = 0;
+                        SpawnShards(shot[i].x, shot[i].y, 0, 0, 0.3f);
+                        PlaySfx(SFX_GLASS, 0.6f);
+                        break;
+                    } else if (shot[i].kind == 9) {    /* v2.0 镜片：反弹一次 */
+                        if (shot[i].charge > 0.5f && !shot[i].mirrorRebounded) {
+                            /* 不再严格 180°折返：那会把弹片立刻送回原目标/玩家。
+                               加一点侧向偏转，并短暂忽略被反弹的目标。 */
+                            float oldVx = shot[i].vx, oldVy = shot[i].vy;
+                            float side = 0.22f;
+                            float rvx = -oldVx - oldVy * side;
+                            float rvy = -oldVy + oldVx * side;
+                            float rlen = sqrtf(rvx * rvx + rvy * rvy);
+                            float olen = sqrtf(oldVx * oldVx + oldVy * oldVy);
+                            if (rlen > 0.001f && olen > 0.001f) {
+                                shot[i].vx = rvx * olen / rlen * 0.8f;
+                                shot[i].vy = rvy * olen / rlen * 0.8f;
+                            } else {
+                                shot[i].vx = -oldVx * 0.8f;
+                                shot[i].vy = -oldVy * 0.8f;
+                            }
+                            shot[i].x += shot[i].vx * 0.08f;
+                            shot[i].y += shot[i].vy * 0.08f;
+                            shot[i].charge = 0.0f;
+                            shot[i].mirrorRebounded = 1;
+                            shot[i].ignoreTarget = t;
+                            shot[i].ignoreTargetTime = 0.18f;
+                            break;                     /* 保留飞行 */
+                        }
+                        base = 1; type = DT_SHARD;
+                    } else if (shot[i].kind == 7) {    /* v2.0 燃烧瓶：直接命中 = 10 点火伤 */
+                        base = 10; type = DT_SHARD;
+                        g_dmgIgnoreArmor = 0;
+                    } else if (shot[i].kind == 6) {     /* v2.0 信号枪弹 */
+                        base = shot[i].dmg > 0 ? shot[i].dmg : 8;
+                        type = WeaponDamageType(curWeapon);
+                    } else {                            /* 玻璃瓶 */
+                        base = (int)(SHOT_DAMAGE * RunThrowDmgMul() + 0.5f) + chargeBonus(shot[i].charge);   /* v2.2 SILENT BOTTLE */
+                    }
+                    SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+                    ApplyDamage(m, base, type, shot[i].x, shot[i].y);
+                    if (shot[i].kind == 6) WeaponAddXp(WPN_RANGED, 1);   /* v2.1：远程也能练 */
+                    g_dmgIgnoreArmor = 0;
+                    if (shot[i].pierce) { shot[i].pierce = 0; continue; }   /* v2.0：穿透一次 */
+                    shot[i].active = 0;
+                    break;
+                }
+                if (!shot[i].active) break;
+            }
+        }
+        if (shot[i].life <= 0.0f || (shot[i].z <= 0.0f && shot[i].age > 0.02f)) {
+            if (shot[i].kind == 4) {
+                SpawnSmoke(shot[i].x, shot[i].y);       /* 烟雾弹落地成云 */
+            } else if (shot[i].z > 0.0f) {
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+            }
+            shot[i].active = 0;
+        }
+    }
+
+    /* 更新玻璃碎片 */
+    for (int i = 0; i < MAX_SHOTS * SHARD_COUNT; i++) {
+        if (!shards_debris[i].active) continue;
+        shards_debris[i].age += dt;
+        shards_debris[i].life -= dt;
+        shards_debris[i].x += shards_debris[i].vx * dt;
+        shards_debris[i].y += shards_debris[i].vy * dt;
+        shards_debris[i].z += shards_debris[i].vz * dt;
+        shards_debris[i].vz -= GRAVITY * dt;
+        if (shards_debris[i].z <= 0.0f) {
+            shards_debris[i].z = 0.0f;
+            shards_debris[i].vz *= -0.3f;  /* 反弹衰减 */
+            shards_debris[i].vx *= 0.7f;
+            shards_debris[i].vy *= 0.7f;
+        }
+        if (shards_debris[i].life <= 0.0f) {
+            shards_debris[i].active = 0;
+        }
+    }
+}

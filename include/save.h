@@ -16,7 +16,7 @@
    读档时会按文件的**实际长度**判断是老版本还是新版本：
    老存档照样能读（新增字段取默认值），不用丢玩家进度。
    —— 参见 LoadSettings 里的迁移逻辑。 */
-#define SAVE_VERSION 21  /* v17：藏身点进存档（HideSpot[6] + count + hiddenIn） */
+#define SAVE_VERSION 24   /* v8: 移除 boss 三字段 */   /* v6.4：遗物池 20→12 */  /* v17：藏身点进存档（HideSpot[6] + count + hiddenIn） */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
@@ -100,7 +100,7 @@ typedef struct {
     /* ---- v13：v2.0 新系统 ---- */
     int   relicOwned[RELIC_COUNT];
     int   relicTotal;
-    int   bossLevel, bossMaxHp, bossDefeated;
+    /* v8: bossLevel / bossMaxHp / bossDefeated 已从存档移除（BOSS 已删） */
     int   dailyMode, dailySeed;
     int   campaignMode, campaignStage;
     int   firePots, gluePots, mirrors;
@@ -118,7 +118,7 @@ typedef struct {
        原来重启后这两个全归零，但买它们的碎片已经从 shards 扣掉了，
        等于每重启一次就吞掉玩家最多 5720 碎片（数值审查 #4）。 */
     unsigned int benchOwnedSave;   /* 改造树位掩码 */
-    int runUpgSave[4];             /* 强化 4 条线的等级 */
+    int runUpgSave[5];   /* v7：4 -> 5（新增 WRENCH）。save.h 不包含 upgrade_run.h，这里写死 */             /* 强化 4 条线的等级 */
     /* v17：藏身点必须存盘 —— 否则读档后整层一个都没有（玩法审查 #3） */
     int hideSpotSaveCount;
     HideSpot hideSpotSave[6];

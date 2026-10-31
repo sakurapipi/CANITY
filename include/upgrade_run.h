@@ -11,7 +11,7 @@
 #ifndef CANITY_UPGRADE_RUN_H
 #define CANITY_UPGRADE_RUN_H
 
-#define RUN_UPG_COUNT 4
+#define RUN_UPG_COUNT 5   /* v7：+1 条 WRENCH */
 #define RUN_UPG_MAX   3
 
 void  RunUpgReset(void);
@@ -28,6 +28,12 @@ float RunUpgDamageMul(void);         /* 武器伤害倍率 */
 float RunUpgResistMul(void);         /* 受伤倍率 */
 float RunUpgStaminaMul(void);        /* 冲刺消耗倍率 */
 float RunUpgFlashMul(void);          /* 手电耗电倍率 */
+/* v7：扳手击退（常驻能力，等级由商店升级） */
+int   RunUpgWrenchLevel(void);       /* 0..3 */
+float RunUpgWrenchCooldown(void);    /* <0 = 用次数制，>=0 = 冷却秒数 */
+int   RunUpgWrenchCharges(void);     /* 每层可用次数（冷却制时无意义） */
+float RunUpgWrenchRange(void);       /* 推开几格 */
+float RunUpgWrenchStun(void);        /* 硬直秒数 */
 int   RunUpgCarryBonus(void);        /* v3.0：投掷物携带上限 +2/级 */
 void  RunUpgLoadFromSave(const int* arr);   /* v3.0 从存档载入 */
 

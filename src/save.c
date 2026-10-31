@@ -316,9 +316,6 @@ void SaveGame(void) {
     /* v13：v2.0 新系统 */
     for (int i = 0; i < RELIC_COUNT; i++) g_save.relicOwned[i] = relicOwned[i];
     g_save.relicTotal = relicTotal;
-    g_save.bossLevel = bossLevel;
-    g_save.bossMaxHp = bossMaxHp;
-    g_save.bossDefeated = bossDefeated;
     g_save.dailyMode = dailyMode;
     g_save.dailySeed = dailySeed;
     g_save.campaignMode = campaignMode;
@@ -757,9 +754,7 @@ void ContinueRun(void) {
     /* v13：v2.0 新系统（不读回来 = 中途退出丢光遗物/Boss 状态/每日战役） */
     for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = g_save.relicOwned[i];
     relicTotal = g_save.relicTotal;
-    bossLevel = g_save.bossLevel;
-    bossMaxHp = g_save.bossMaxHp;
-    bossDefeated = g_save.bossDefeated;
+    /* v8: boss 字段已移除。bossLevel 恒为 0，下面两行本就永不成立。 */
     dailyMode = g_save.dailyMode;
     dailySeed = g_save.dailySeed;
     campaignMode = g_save.campaignMode;
@@ -775,8 +770,6 @@ void ContinueRun(void) {
     modNoiseMul = g_save.modNoiseMul;
     if (!(modNoiseMul > 0.0f)) modNoiseMul = 1.0f;
     /* 读档后 Boss 状态要重建：已清的 Boss 不能再站起来 */
-    if (bossDefeated) monster.active = 0;
-    else if (bossLevel && monster.active) monster.hp = bossMaxHp;
     if (flares < 0) flares = 0;
     if (bottles < 0) bottles = 0;
     /* v6 **旧安全区已删除** ——

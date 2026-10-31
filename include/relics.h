@@ -8,7 +8,7 @@
 /*   每层通关三选一，每个必带一条负面。同类可叠加（叠满 3 层质变）。      */
 /* ------------------------------------------------------------------ */
 
-#define RELIC_COUNT 20
+#define RELIC_COUNT 12   /* v6.4：删掉 8 条纯伤害词条 */
 #define RELIC_CHOICES 3
 
 typedef struct {

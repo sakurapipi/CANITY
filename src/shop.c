@@ -124,7 +124,7 @@ int ShopRowCount(void) {
     switch (shopPage) {
     case SHP_BENCH: return 4;     /* CORE / MOD / CLEAR / LEAVE */
     case SHP_REST:  return 5;     /* REST / CHARGE / STAMINA / SHORTCUT / LEAVE */
-    case SHP_UPGRADE: return RUN_UPG_COUNT + 1;   /* 4 条线 + LEAVE */
+    case SHP_UPGRADE: return RUN_UPG_COUNT + 2;   /* 4 条线 + LEAVE */
     default:        return SHOP_OFFERS + 1;
     }
 }
@@ -134,7 +134,15 @@ const char* ShopRowText(int row) {
 
     /* v3.0：局内强化页 —— 4 条线，显示等级和价格 */
     if (shopPage == SHP_UPGRADE) {
-        if (row >= RUN_UPG_COUNT) return Tr("LEAVE  (ESC)", "离开  (ESC)");
+        if (row == RUN_UPG_COUNT) {
+            /* v7 B3：协议行 —— 回车循环切换四种协议 */
+            extern const char* ContractName(void);
+            extern float ContractExitMul(void);
+            sprintf(sbuf, "CONTRACT  %s   EXIT x%d%%",
+                    ContractName(), (int)(ContractExitMul() * 100.0f));
+            return sbuf;
+        }
+        if (row > RUN_UPG_COUNT) return Tr("LEAVE  (ESC)", "离开  (ESC)");
         int lv = RunUpgLevel(row);
         int cost = RunUpgCost(row);
         if (cost < 0)
@@ -312,7 +320,17 @@ void ShopNextPage(void) {
 void ShopActivate(void) {
     /* v3.0：碎片强化 */
     if (shopPage == SHP_UPGRADE) {
-        if (shopRow >= RUN_UPG_COUNT) return;      /* LEAVE 由 Esc 处理 */
+        if (shopRow == RUN_UPG_COUNT) {
+        /* v7 B3：切协议（每局一次，签了不能撕 —— 这里只允许首次切换） */
+        extern void ContractCycle(void);
+        extern int shopContractUsed;
+        if (shopContractUsed) { PlaySfx(SFX_GLASS, 0.4f); return; }
+        ContractCycle();
+        shopContractUsed = 1;
+        PlaySfx(SFX_POWER, 0.7f);
+        return;
+    }
+    if (shopRow > RUN_UPG_COUNT) return;      /* LEAVE 由 Esc 处理 */
         int r = RunUpgTryBuy(shopRow);
         if (r == 0)            { pickupMsg = Tr("UPGRADED", "已强化"); }
         else if (r == 2)       { pickupMsg = Tr("MAX LEVEL", "已满级"); }

@@ -3337,8 +3337,28 @@ void DrawHUD(void) {
     {
         extern int carryGold, bankHistMax;
         int hudY3 = hudY2 + hudTH + UIS(4);
-        sprintf(buf, Tr("CARRY  %d", "带入  %d"), shards);
-        DrawTextWin(UIS(20), hudY3, buf, 0x00FFC040u);
+        /* v7：丢钱滑条（按住 K 时展开） */
+        {
+            extern int moneyDropOpen, moneyDropPct, carryGold;
+            if (moneyDropOpen) {
+                int damt = (int)((long long)carryGold * moneyDropPct / 100);
+                char sb2[128];
+                sprintf(sb2, Tr("DROP %d%%  =  %d GOLD   LEFT/RIGHT   RELEASE K",
+                                "丢钱 %d%%  =  %d 金币   ←/→ 调整   松开 K 丢出"),
+                        moneyDropPct, damt);
+                DrawTextWin(UIS(20), hudY3 + hudTH * 2 + UIS(10), sb2, 0x00FFD040u);
+            }
+        }
+        /* v7：CARRY 后面跟当前强度档位 —— 玩家必须看得见「我跨档了」 */
+        {
+            extern int GoldTier(void);
+            int tier = GoldTier();
+            sprintf(buf, Tr("CARRY  %d   TIER %d", "带入  %d   强度档 %d"), shards, tier);
+            /* 档位越高颜色越烫：0~4 灰 / 5~9 黄 / 10~15 红 */
+            unsigned int tc = (tier >= 10) ? 0x00FF6050u
+                            : (tier >= 5  ? 0x00FFC040u : 0x00A0A0A0u);
+            DrawTextWin(UIS(20), hudY3, buf, tc);
+        }
 
         int boost = 0;
         if (bankHistMax > 0)

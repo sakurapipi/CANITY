@@ -5,6 +5,7 @@
  */
 #include "common.h"
 #include "entity.h"
+#include "suspicion.h"
 #include "upgrade_run.h"
 #include "bench.h"
 #include "relics.h"
@@ -310,10 +311,26 @@ void MakeNoise(float x, float y, float radius) {
     /* v3.0：**噪音要通知所有追捕者** ——
        原来只写 monster，于是扔瓶子引开对追光鬼/影子/蜘蛛完全无效，
        「用噪音控制敌人」这个逃生核心手法只对三分之一的怪成立。 */
+    /* ===== v7 **可疑点表** =====
+       原来这里直接把 monster.state 设成 1 —— 于是所有噪音源抢同一个字段，
+       谁后写谁赢。玩偶的叫声刚设好就被玩家自己的脚步顶掉，
+       这就是「发出声音的玩偶吸引不了听声怪」的根源。
+       现在改成写表：多个噪音源共存，怪物自己挑最强的那个。 */
+    {
+        float st = radius * 2.6f;              /* 半径 14 → 36；半径 20 → 52 */
+        if (st > 100.0f) st = 100.0f;
+        int srcS = (radius <= 14.0f) ? SUSP_WALK : SUSP_SEARCH;
+        /* 走路噪音衰减快、寿命短；翻箱/敲击衰减慢、寿命长 */
+        float decS = (srcS == SUSP_WALK) ? 14.0f : 8.0f;
+        float ttlS = (srcS == SUSP_WALK) ? 3.0f : 6.0f;
+        SuspicionAdd(x, y, st, decS, ttlS, srcS);
+    }
+
     {
         extern Monster lightBeast;
-        Monster* all[2] = { &monster, &lightBeast };
-        for (int mi = 0; mi < 2; mi++) {
+        /* 追光怪仍然直接通知（它不吃"声音"这套逻辑，它只认光） */
+        Monster* all[2] = { &lightBeast, &lightBeast };
+        for (int mi = 0; mi < 1; mi++) {
             Monster* mm = all[mi];
             if (!mm->active) continue;
             float r2 = radius;
@@ -729,6 +746,39 @@ void UpdateMonster(float dt) {
         }
     }
 
+    /* ===== v7 **听声怪从可疑点表里挑目标** =====
+       只在「没在追人」的时候挑，而且要求强度够高（>28），
+       否则刚走到就会因为一条 15 强度的走路噪音又改向，来回抖。
+
+       distPenalty 0.9：越近的点越容易被选，
+       避免它一直跑去地图另一头追一条早就过期的线索。 */
+    if (monster.active && monster.state != 1) {
+        int idx = SuspicionBest(monster.x, monster.y, 0.9f);
+        if (idx >= 0 && susp[idx].strength > 28.0f) {
+            monster.state = 1;
+            monster.tx = susp[idx].x;
+            monster.ty = susp[idx].y;
+            monster.repath = 0.0f;
+            monster.stateTimer = 0.0f;
+            monster.sightHold = 0.0f;
+            /* 记住目标点下标，到达后消费掉它 */
+            monster.suspTarget = idx;
+        } else {
+            monster.suspTarget = -1;
+        }
+    }
+
+    /* 到达可疑点 → 消费掉（不然它会一直站在那儿） */
+    if (monster.active && monster.state == 1 && monster.suspTarget >= 0 &&
+        monster.suspTarget < SUSP_MAX) {
+        float ddx = monster.x - susp[monster.suspTarget].x;
+        float ddy = monster.y - susp[monster.suspTarget].y;
+        if (ddx * ddx + ddy * ddy < 0.64f) {
+            SuspicionConsume(monster.suspTarget);
+            monster.suspTarget = -1;
+        }
+    }
+
     /* v3.0 消失：隐身时追捕者立刻丢失目标 */
     {
         extern int vanished;
@@ -1093,12 +1143,7 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
         finalDmg = (int)((float)finalDmg * mul + 0.5f);
     }
     if (m->glued) finalDmg = (int)((float)finalDmg * 1.5f + 0.5f);   /* v2.2 胶水 */
-    /* v2.0 EXECUTIONER：目标 <25% 血时 +80% */
-    {
-        extern int bossMaxHp, bossLevel;
-        int mx = (bossLevel && m == &monster) ? bossMaxHp : MonsterHpFor(currentLevel);
-        finalDmg = (int)((float)finalDmg * SkillExecuteMul(m->hp, mx) + 0.5f);
-    }
+    /* v6.4：EXECUTIONER（低血处决）随战斗系统一起移除 */
     if (finalDmg < 1) finalDmg = 1;                  /* 保底 1 点 */
 
     /* ⑤ 结算 */
@@ -1225,6 +1270,16 @@ void ResetLeeches(void) {
 
 /* 随机挑一个地图空地生成 */
 void SpawnLeech(int index) {
+    /* ===== v7 **电池水蛭已删除** =====
+       它偷的是「电量焦虑」，而现在：
+         · 藏身点能回电（4.0/秒）
+         · 摇电早松手也给电
+         · 电池包 60 金币一个
+       电量焦虑已经被削光了，它跟着一起废掉。
+       保留函数壳子，让 game.c 的调用点不用改。 */
+    (void)index;
+    if (1) return;
+
     if (index < 0 || index >= LEECH_MAX) return;
     for (int attempt = 0; attempt < 200; attempt++) {
         int x = 1 + rand() % (MAP_WIDTH - 2);

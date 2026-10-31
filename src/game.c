@@ -4,7 +4,14 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "state.h"
+#include "economy.h"
+#include "throwing.h"
+#include "uptimers.h"
+#include "warden.h"
+#include "hints.h"
 #include "game.h"
+#include "suspicion.h"
 #include "weapons.h"
 #include "shop.h"
 #include "bench.h"
@@ -26,8 +33,8 @@
 
 /* 文件内前置声明：这两个 static 辅助函数在被调用处之后定义
    （原来集中在 main.c 中部的前置声明块，拆分后只保留模块内部需要的）。 */
-static void ThrowItem(int type, float charge);
-static void SpawnShards(float x, float y, float vx, float vy, float charge);
+void ThrowItem(int type, float charge);
+void SpawnShards(float x, float y, float vx, float vy, float charge);
 /* v3.3：粘胶区域（实现放在 entity.c） */
 void SpawnGlue(float x, float y);
 void WeaponTryAttack(float charge);   /* v2.0 武器攻击 */
@@ -265,6 +272,15 @@ float bobPhase = 0.0f;   /* v2.1：手持模型走路摆动相位 */
 int   slashDmg = 999;
 float slashMaxDist = 14.0f;   /* v2.0：法术吃武器射程/配件 */          /* 光束伤害：剑气固定秒杀，符印用武器表 */
 float weaponAtkCharge = 0.0f;  /* 武器蓄力 0..1 */
+/* ===== v7 扳手击退 =====
+   次数制（0/1 级）与冷却制（2/3 级）共存：
+     wrenchCharges 只在次数制下有意义，每层开始重置
+     wrenchCd      只在冷却制下有意义 */
+int   shopContractUsed = 0;   /* v7 B3: 本局是否已经签过协议 */
+float playerMoveSpeedNow = 0.0f;   /* v8: 本帧玩家移速（守门人用） */
+int   wrenchCharges  = 2;
+float wrenchCd       = 0.0f;
+int   wrenchLastUsed = 0;      /* 本层已经用掉几次（次数制显示用） */
 float secondWindTimer = 0.0f;   /* v3.0 二次呼吸：体力归零后的宽限秒数 */
 float vanishTimer = 0.0f;       /* v3.0 消失：脱离视线累计秒数 */
 int   playDeadUsed = 0;         /* v3.0 假死：本局用过了吗 */
@@ -446,6 +462,9 @@ static inline int IsActionDown(ActionId act) {
     }
     return keys[vk];
 }
+/* v8: 给外部模块用的公开包装（原来 IsActionDown 是 static） */
+int ActionIsDown(int act) { return IsActionDown((ActionId)act); }
+
 
 /* v1.8：每帧轮询键盘。
    原来只靠 WM_KEYDOWN / WM_KILLFOCUS 维护 keys[]，
@@ -618,6 +637,9 @@ void UpdateSmokes(float dt) {
         ShopTickCooldown(dt);
     }
 
+    MoneyTick(dt);
+    { extern void UpdateWarden(float); UpdateWarden(dt); }   /* v8 B1: 守门人 */   /* v8: 钱袋逻辑已搬到 src/money.c */
+
     /* v3.3：诱饵心跳 —— 每 3 秒叫一次，把怪引过去 */
     for (int i = 0; i < MAX_DECOY; i++) {
         if (!decoysArr[i].active) continue;
@@ -627,8 +649,18 @@ void UpdateSmokes(float dt) {
         decoysArr[i].shoutT -= dt;
         if (decoysArr[i].shoutT <= 0.0f) {
             decoysArr[i].shoutT = DECOY_SHOUT_EVERY;
-            MakeNoise(decoysArr[i].x, decoysArr[i].y, DECOY_SHOUT_R);
-            PlaySfx(SFX_DECOY, 0.70f);   /* v3.3：玩偶嘎吱叫 */
+            /* ===== v7 **玩偶重写** =====
+               原来走 MakeNoise(半径20)，那个管道会直接改 monster.state，
+               和玩家自己的脚步噪音抢同一个字段 —— 玩偶刚设好就被顶掉，
+               所以「玩偶吸引不了听声怪」。
+
+               现在直接往可疑点表写：strength 75（比冲刺的 45 高），
+               decay 3/s、寿命 8 秒 —— 三个叫周期都能覆盖到。
+               玩家自己的脚步只有 36 强度，抢不过它。 */
+            SuspicionAdd(decoysArr[i].x, decoysArr[i].y, 75.0f, 3.0f, 8.0f, SUSP_DECOY);
+            /* 保留一小圈物理噪音，让追光怪/环境音也有反应 */
+            MakeNoise(decoysArr[i].x, decoysArr[i].y, 6.0f);
+            PlaySfx(SFX_DECOY, 0.70f);   /* 玩偶嘎吱叫 */
         }
     }
 
@@ -1351,10 +1383,42 @@ static void FindFarthestCell(float* outX, float* outY) {
 }
 
 void GenerateLevel(void) {
+    SuspicionReset();   /* v7：新一层，清空可疑点 */
+    {   /* v7：新一层，清空地上的钱袋 */
+        extern int moneyDropOpen;
+        extern void MoneyBagsResetForNewFloor(void);
+        MoneyBagsResetForNewFloor();
+    }
+    { extern void HintsReset(void); HintsReset(); }   /* v7 B4: 一次性提示 */
+    { extern void WardenReset(void); WardenReset(); }   /* v7 B1: 新一层清掉守门人 */
+    {   /* v7：清道夫计时 / 连躲计数 / 重置（每层都清） */
+        extern void ScavengerReset(void);
+        extern float floorTime;
+        extern int hideStreak;
+        ScavengerReset(); floorTime = 0.0f; hideStreak = 0;
+    }
+    {   /* v7：拾荒者按强度档决定是否出现 */
+        extern void CollectorSpawnIfEligible(void);
+        CollectorSpawnIfEligible();
+    }
+    {   /* v7：扳手次数每层补满 */
+        extern int RunUpgWrenchCharges(void);
+        extern int wrenchCharges, wrenchLastUsed;
+        extern float wrenchCd;
+        wrenchCharges = RunUpgWrenchCharges();
+        wrenchLastUsed = 0;
+        wrenchCd = 0.0f;
+    }
     /* v2.0 修复：Boss 标记必须在**任何 SpawnMonster() 之前**设置。
        原来它写在函数中段（怪物已经刷出来之后），导致第 6/12/18 层的
        第一只怪是普通血量，被打死重生后才 ×8 —— Boss 整体错位一层。 */
-    bossLevel = (currentLevel == 6 || currentLevel == 12 || currentLevel == 18) ? 1 : 0;
+    /* ===== v7 **BOSS 已删除** =====
+       它原本只是「听声怪 x 血量」，没有任何独有机制 ——
+       三个 Boss 层的差别只有 hp 倍率和速度，玩家分不出来。
+       现在恒为 0：不再有 Boss 层，第 6/12/18 层就是普通层
+       （怪物强度靠 v7 的 T0~T15 十六档强度档位来给）。
+       保留 bossLevel 变量，免得 save / HUD / shop 的引用断掉。 */
+    bossLevel = 0;
     bossDefeated = 0;
     monsterMuted = trainingMode ? 1 : 0;   /* 训练场里怪不叫 */
     if (trainingMode) {
@@ -2109,24 +2173,8 @@ float MonsterThreatScore(void) {
          + THREAT_W_REACT    * sReact;
 }
 
-/* 金币带来的威胁放大倍数：每 5000 金币 +15%，上限 +100% */
-float GoldThreatMul(void) {
-    extern int carryGold;
-    float g = (float)carryGold;
-    float bonus = (g / GOLD_THREAT_PER) * GOLD_THREAT_STEP;
-    if (bonus > GOLD_THREAT_MAXBONUS) bonus = GOLD_THREAT_MAXBONUS;
-    if (bonus < 0.0f) bonus = 0.0f;
-    return 1.0f + bonus;
-}
+/* v8: 强度档位已搬到 src/economy.c（GoldTier / GoldTierMul / GoldHearMul / GoldSpeedMul） */
 
-/* 听觉半径倍数：金币全额放大 */
-float GoldHearMul(void) { return GoldThreatMul(); }
-
-/* 速度倍数：金币只放大 40%，避免「必死」感 */
-float GoldSpeedMul(void) {
-    float m = GoldThreatMul();
-    return 1.0f + (m - 1.0f) * 0.40f;
-}
 
 float EndlessDepthBonus(int level) {
     if (level <= 24) return 1.0f;
@@ -2199,7 +2247,7 @@ static int BuyUpgrade(int kind) {
 
 /* ---------------- 寻声怪 ---------------- */
 /* v1.16：蓄满（>=0.85）额外 +1 伤害 */
-static int chargeBonus(float charge) {
+int chargeBonus(float charge) {
     int b = (charge >= 0.85f) ? 1 : 0;
     if (b) b += SkillHeavyHand();    /* HEAVY HAND */
     return b;
@@ -2208,336 +2256,9 @@ static int chargeBonus(float charge) {
 /* v2.7：ThrowItem 是否真的生成了一个投掷物。
    以前池子满时它会静默不生成，而调用方已经先把数量扣掉了 —— 东西凭空消失。 */
 static int g_shardTint = 0;   /* v2.1：下一批碎片的颜色类型 */
-static int g_throwOk = 0;
+int g_throwOk = 0;
 
-static void ThrowItem(int type, float charge) {
-    g_throwOk = 0;
-    if (charge < 0.1f) charge = 0.1f;
-    if (charge > 1.0f) charge = 1.0f;
-
-    float speed = SHOT_SPEED + (SHOT_MAX_SPEED - SHOT_SPEED) * charge;
-    float angle = 0.35f * charge;  /* 抛物线角度：蓄力越高越平直 */
-
-    if (type == 1) {
-        /* 玻璃瓶：抛物线飞行弹丸 */
-        for (int i = 0; i < MAX_SHOTS; i++) {
-            if (shot[i].active) continue;
-            shot[i].x = posX;
-            shot[i].y = posY;
-            shot[i].z = SHOT_HEIGHT;
-            shot[i].vx = dirX * speed * cosf(angle);
-            shot[i].vy = dirY * speed * cosf(angle);
-            shot[i].vz = speed * sinf(angle);  /* 向上分量 */
-            shot[i].life = 2.0f;
-            shot[i].age = 0.0f;
-            shot[i].charge = charge;
-            shot[i].kind = 1;
-            shot[i].dmg = 0;
-            shot[i].pierce = 0;
-            shot[i].mirrorRebounded = 0;
-            shot[i].ignoreTarget = -1;
-            shot[i].ignoreTargetTime = 0.0f;
-            shot[i].active = 1; g_throwOk = 1;
-            break;
-        }
-        PlaySfx(SFX_THROW, 0.6f);  /* 投掷专用音效：呼啸+出手闷响 */
-        return;
-    }
-
-    /* ---- v3.3 投掷物重做：2 烟雾 / 3 胶水 / 4 回声，全部走 shot 弹道 ----
-       槽位：0 光球 / 1 投石 / 2 烟雾 / 3 胶水 / 4 回声 / 5 诱饵（C 键放置，不走这里）
-       shot.kind 约定：1 投石 / 4 烟雾 / 8 胶水 / 10 回声 */
-    if (type >= 2) {
-        int kind = (type == 2) ? 4 : (type == 3) ? 8 : 10;
-        float itemSpeed = speed;
-        float itemAngle = angle;
-        float itemHeight = 1.0f;
-        if (type == 2) {
-            /* 烟雾弹：轻、抛得高、滞空久，落点好控制 */
-            itemSpeed *= 1.05f;
-            itemAngle = angle * 1.25f + 0.06f;
-        } else if (type == 3) {
-            /* 胶水瓶：重、低抛、飞得近 —— 它就是用来扔脚下的 */
-            itemSpeed *= 0.88f;
-            itemAngle *= 0.75f;
-            itemHeight = 0.94f;
-        } else {
-            /* 回声弹：小、轻、平飞 */
-            itemSpeed *= 1.10f;
-            itemAngle *= 0.80f;
-        }
-        for (int i = 0; i < MAX_SHOTS; i++) {
-            if (shot[i].active) continue;
-            shot[i].x = posX + dirX * 0.35f;
-            shot[i].y = posY + dirY * 0.35f;
-            shot[i].z = SHOT_HEIGHT * (type == 4 ? 0.9f : itemHeight);
-            shot[i].vx = dirX * itemSpeed * cosf(itemAngle);
-            shot[i].vy = dirY * itemSpeed * cosf(itemAngle);
-            shot[i].vz = itemSpeed * sinf(itemAngle);
-            shot[i].life = (type == 4) ? 1.6f : 2.0f;
-            shot[i].age = 0.0f;
-            shot[i].charge = charge;
-            shot[i].kind = kind;
-            shot[i].dmg = 0;
-            shot[i].pierce = 0;   /* v3.3：镜片已删，不再有穿透弹 */
-            shot[i].mirrorRebounded = 0;
-            shot[i].ignoreTarget = -1;
-            shot[i].ignoreTargetTime = 0.0f;
-            shot[i].active = 1; g_throwOk = 1;
-            break;
-        }
-        PlaySfx(SFX_THROW, 0.6f);
-        return;
-    }
-
-    /* 荧光棒：抛物线飞行，落地后转为静止发光体 */
-    float flareSpeed = 6.5f + charge * 3.0f;   /* v1.11：6.5~9.5 格/秒（原来满蓄力太远） */
-    /* v1.11：仰角从 0.4~0.7 压到 0.12~0.22 rad（7°~13°）。
-       之前仰角太大，荧光棒升到 3~4 倍视高，而视角不能往上看 ——
-       玩家看到的就是"扔出去先空两秒，第三秒球才从上面掉下来"。
-       压平之后出手就能看到弧线。 */
-    float flareAngle = 0.12f + charge * 0.10f;
-    for (int i = 0; i < MAX_THROWN; i++) {
-        if (thrown[i].active) continue;
-        /* v1.10：出手点往前挪 0.45 格。
-           原来与玩家同一位置 → 投影距离 ty≈0，被 ProjectSprite 的
-           "太近就丢弃"挡掉，画面上就是"扔出去先消失一下再出现"。 */
-        thrown[i].x = posX + dirX * 0.45f;
-        thrown[i].y = posY + dirY * 0.45f;
-        thrown[i].z = SHOT_HEIGHT * 0.45f;   /* v1.11：从腹部/胯部出手，不再从头顶 */
-        thrown[i].vz = flareSpeed * sinf(flareAngle);
-        thrown[i].vx = dirX * flareSpeed * cosf(flareAngle);
-        thrown[i].vy = dirY * flareSpeed * cosf(flareAngle);
-        thrown[i].type = 0;        /* 0=荧光棒 */
-        thrown[i].life = 25.0f;    /* 落地后发光时长 */
-        thrown[i].active = 1; g_throwOk = 1;
-        break;
-    }
-    PlaySfx(SFX_THROW, 0.6f);  /* 投掷专用音效：呼啸+出手闷响 */
-}
-
-/* 推进所有飞行中的玻璃瓶，结算命中 + 抛物线 + 碎片 */
-static void UpdateShots(float dt) {
-    for (int i = 0; i < MAX_SHOTS; i++) {
-        if (!shot[i].active) continue;
-        shot[i].life -= dt;
-        shot[i].age += dt;
-        if (shot[i].ignoreTargetTime > 0.0f) {
-            shot[i].ignoreTargetTime -= dt;
-            if (shot[i].ignoreTargetTime <= 0.0f) {
-                shot[i].ignoreTargetTime = 0.0f;
-                shot[i].ignoreTarget = -1;
-            }
-        }
-
-        /* v1.18：重力 + 落地。
-           之前 shot 完全没有 z 积分 —— 砖头/酸瓶/烟雾弹都是
-           从胸口直线飞出去、而且永远不落地（烟雾弹自然出不了烟）。 */
-        shot[i].vz -= 16.0f * dt;
-        shot[i].z += shot[i].vz * dt;
-        if (shot[i].z <= 0.0f && shot[i].age > 0.02f) {
-            shot[i].z = 0.0f;
-            /* ---- v3.3 落地效果分派 ----
-               kind 1 投石 / 4 烟雾 / 8 胶水 / 10 回声 ----
-               噪音全部由**落点 + 蓄力**决定，不再固定：
-                 投石   8 + 蓄力*12  ->  8 ~ 20（玩家自己调）
-                 胶水   6（小）
-                 烟雾   5（小）
-                 回声   0（完全静音 —— 它就是用来偷情报的） */
-            if (shot[i].kind == 4) {
-                SpawnSmoke(shot[i].x, shot[i].y);
-            } else if (shot[i].kind == 8) {
-                SpawnGlue(shot[i].x, shot[i].y);
-                PlaySfx(SFX_GLUE, 0.85f);   /* v3.3：黏稠噗叽 */
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-            } else if (shot[i].kind == 10) {
-                /* 回声弹：不发光、不出声，只把 15 格内怪物位置暴露 5 秒 */
-                extern float echoScanT;
-                extern float echoScanX, echoScanY;
-                echoScanT = 5.0f;
-                echoScanX = shot[i].x;
-                echoScanY = shot[i].y;
-                pickupMsg = (g_lang == LANG_ZH) ? "回声扫过" : "ECHO SCAN";
-                pickupMsgTimer = 1.4f;
-                PlaySfx(SFX_ECHO, 0.80f);   /* v3.3：短叮 + 回响 */
-            } else {
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-            }
-            {
-                float nz = 14.0f;
-                /* v3.4：SILENT THROW（局内树 id 2）投掷物落地不再产生噪音 */
-                if (BenchSilentThrow()) nz = 0.0f;
-                if (shot[i].kind == 1)      nz = 8.0f + shot[i].charge * 12.0f;  /* 8 ~ 20 */
-                else if (shot[i].kind == 8) nz = 6.0f;
-                else if (shot[i].kind == 4) nz = 5.0f;
-                else if (shot[i].kind == 10) nz = 0.0f;                          /* 静音 */
-                if (BenchSilentThrow()) nz = 0.0f;   /* v3.4：静投压过所有分支 */
-                if (nz > 0.0f) MakeNoise(shot[i].x, shot[i].y, nz);
-            }
-            shot[i].active = 0;
-            continue;
-        }
-
-        /* 分段推进，避免高速穿过怪 */
-        float stepLen = sqrtf(shot[i].vx*shot[i].vx + shot[i].vy*shot[i].vy + shot[i].vz*shot[i].vz) * dt;
-        int steps = (int)(stepLen / 0.12f) + 1;
-        float sdx = shot[i].vx * dt / (float)steps;
-        float sdy = shot[i].vy * dt / (float)steps;
-        float sdz = shot[i].vz * dt / (float)steps;
-
-        for (int s = 0; s < steps && shot[i].active; s++) {
-            shot[i].x += sdx;
-            shot[i].y += sdy;
-            shot[i].z += sdz;
-            shot[i].vz -= GRAVITY * dt / (float)steps;  /* 重力 */
-
-            /* 撞地面：碎裂生成碎片 */
-            if (shot[i].z <= 0.0f) {
-                shot[i].z = 0.0f;
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-                PlaySfx(SFX_GLASS, 0.7f);
-                /* v3.0 逃生试炼：**扔东西制造噪音把追捕者引开**是核心手法，
-                   落地的动静要够大，半径 14 → 22 格。 */
-                MakeNoise(shot[i].x, shot[i].y, 15.0f);   /* v3.0 平衡：22 → 15 */
-                shot[i].active = 0;
-                break;
-            }
-
-            /* ===== 撞墙 =====
-               v3.3 **修「有时候不生效」** ——
-               原来飞行途中撞墙时**只碎、不生成任何效果**，
-               于是「对着地面扔胶水，弧线蹭到墙」就什么都不会出现，
-               玩家感觉就是「胶水有时候不生效」。
-               现在撞墙也走和落地一样的效果分派（只是落点变成墙面位置）。 */
-            if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
-                if (shot[i].kind == 4) {
-                    SpawnSmoke(shot[i].x, shot[i].y);
-                } else if (shot[i].kind == 8) {
-                    SpawnGlue(shot[i].x, shot[i].y);
-                    PlaySfx(SFX_GLUE, 0.85f);
-                } else if (shot[i].kind == 10) {
-                    extern float echoScanT;
-                    extern float echoScanX, echoScanY;
-                    echoScanT = 5.0f;
-                    echoScanX = shot[i].x;
-                    echoScanY = shot[i].y;
-                    PlaySfx(SFX_ECHO, 0.80f);
-                }
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-                PlaySfx(SFX_GLASS, 0.7f);
-                MakeNoise(shot[i].x, shot[i].y, 15.0f);
-                shot[i].active = 0;
-                break;
-            }
-
-            /* 撞怪：按 kind 分派（1 玻璃瓶 / 2 砖头 / 3 酸瓶 / 4 烟雾弹） */
-            float r = SHOT_RADIUS + 0.24f;
-            {
-                Monster* targets[2];
-                int nTargets = 0;
-                if (monster.active) targets[nTargets++] = &monster;
-                if (lightBeast.active) targets[nTargets++] = &lightBeast;
-                for (int t = 0; t < nTargets; t++) {
-                    Monster* m = targets[t];
-                    if (shot[i].ignoreTargetTime > 0.0f && shot[i].ignoreTarget == t) continue;
-                    if (Dist2(shot[i].x, shot[i].y, m->x, m->y) >= r * r) continue;
-
-                    int base = 1, type = DT_SHARD;
-                    g_dmgIgnoreArmor = 0;
-                    if (shot[i].kind == 2) {            /* 砖头：钝击 12 点，蓄满 15 */
-                        base = 12 + chargeBonus(shot[i].charge) * 3;
-                        type = DT_BLUNT;
-                    } else if (shot[i].kind == 3) {     /* 酸瓶：碎片 10 点、无视护甲 */
-                        base = 10 + chargeBonus(shot[i].charge) * 2;
-                        type = DT_SHARD;
-                        g_dmgIgnoreArmor = 1;
-                    } else if (shot[i].kind == 4) {     /* 烟雾弹：不造成伤害 */
-                        SpawnSmoke(shot[i].x, shot[i].y);
-                        shot[i].active = 0;
-                        break;
-                    } else if (shot[i].kind == 8) {    /* v2.0 胶水瓶：定身 2 秒，无伤害 */
-                        m->stun = 2.0f;
-                        m->glued = 1;   /* v2.2：胶水期间受伤 +50% */
-                        shot[i].active = 0;
-                        SpawnShards(shot[i].x, shot[i].y, 0, 0, 0.3f);
-                        PlaySfx(SFX_GLASS, 0.6f);
-                        break;
-                    } else if (shot[i].kind == 9) {    /* v2.0 镜片：反弹一次 */
-                        if (shot[i].charge > 0.5f && !shot[i].mirrorRebounded) {
-                            /* 不再严格 180°折返：那会把弹片立刻送回原目标/玩家。
-                               加一点侧向偏转，并短暂忽略被反弹的目标。 */
-                            float oldVx = shot[i].vx, oldVy = shot[i].vy;
-                            float side = 0.22f;
-                            float rvx = -oldVx - oldVy * side;
-                            float rvy = -oldVy + oldVx * side;
-                            float rlen = sqrtf(rvx * rvx + rvy * rvy);
-                            float olen = sqrtf(oldVx * oldVx + oldVy * oldVy);
-                            if (rlen > 0.001f && olen > 0.001f) {
-                                shot[i].vx = rvx * olen / rlen * 0.8f;
-                                shot[i].vy = rvy * olen / rlen * 0.8f;
-                            } else {
-                                shot[i].vx = -oldVx * 0.8f;
-                                shot[i].vy = -oldVy * 0.8f;
-                            }
-                            shot[i].x += shot[i].vx * 0.08f;
-                            shot[i].y += shot[i].vy * 0.08f;
-                            shot[i].charge = 0.0f;
-                            shot[i].mirrorRebounded = 1;
-                            shot[i].ignoreTarget = t;
-                            shot[i].ignoreTargetTime = 0.18f;
-                            break;                     /* 保留飞行 */
-                        }
-                        base = 1; type = DT_SHARD;
-                    } else if (shot[i].kind == 7) {    /* v2.0 燃烧瓶：直接命中 = 10 点火伤 */
-                        base = 10; type = DT_SHARD;
-                        g_dmgIgnoreArmor = 0;
-                    } else if (shot[i].kind == 6) {     /* v2.0 信号枪弹 */
-                        base = shot[i].dmg > 0 ? shot[i].dmg : 8;
-                        type = WeaponDamageType(curWeapon);
-                    } else {                            /* 玻璃瓶 */
-                        base = (int)(SHOT_DAMAGE * RunThrowDmgMul() + 0.5f) + chargeBonus(shot[i].charge);   /* v2.2 SILENT BOTTLE */
-                    }
-                    SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-                    ApplyDamage(m, base, type, shot[i].x, shot[i].y);
-                    if (shot[i].kind == 6) WeaponAddXp(WPN_RANGED, 1);   /* v2.1：远程也能练 */
-                    g_dmgIgnoreArmor = 0;
-                    if (shot[i].pierce) { shot[i].pierce = 0; continue; }   /* v2.0：穿透一次 */
-                    shot[i].active = 0;
-                    break;
-                }
-                if (!shot[i].active) break;
-            }
-        }
-        if (shot[i].life <= 0.0f || (shot[i].z <= 0.0f && shot[i].age > 0.02f)) {
-            if (shot[i].kind == 4) {
-                SpawnSmoke(shot[i].x, shot[i].y);       /* 烟雾弹落地成云 */
-            } else if (shot[i].z > 0.0f) {
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-            }
-            shot[i].active = 0;
-        }
-    }
-
-    /* 更新玻璃碎片 */
-    for (int i = 0; i < MAX_SHOTS * SHARD_COUNT; i++) {
-        if (!shards_debris[i].active) continue;
-        shards_debris[i].age += dt;
-        shards_debris[i].life -= dt;
-        shards_debris[i].x += shards_debris[i].vx * dt;
-        shards_debris[i].y += shards_debris[i].vy * dt;
-        shards_debris[i].z += shards_debris[i].vz * dt;
-        shards_debris[i].vz -= GRAVITY * dt;
-        if (shards_debris[i].z <= 0.0f) {
-            shards_debris[i].z = 0.0f;
-            shards_debris[i].vz *= -0.3f;  /* 反弹衰减 */
-            shards_debris[i].vx *= 0.7f;
-            shards_debris[i].vy *= 0.7f;
-        }
-        if (shards_debris[i].life <= 0.0f) {
-            shards_debris[i].active = 0;
-        }
-    }
-}
+/* v8: ThrowItem / UpdateShots 已搬到 src/throwing.c */
 
 /* ------------------------------------------------------------------ */
 /* v2.0 武器攻击                                                        */
@@ -2619,6 +2340,51 @@ void WeaponTryAttack(float charge) {
                 ApplyDamage(&monster, dmg, WeaponDamageType(curWeapon), posX, posY);
                 g_dmgIgnoreArmor = 0;
                 hits++;
+                /* ===== v7 **扳手击退** =====
+                   推出几格由升级等级决定；次数制下消耗一次，冷却制下进冷却。
+                   推的方向 = 从玩家指向怪物，推开后若落进墙里就退回一半。 */
+                {
+                    extern int RunUpgWrenchLevel(void);
+                    extern float RunUpgWrenchRange(void);
+                    extern float RunUpgWrenchCooldown(void);
+                    extern float RunUpgWrenchStun(void);
+                    extern int wrenchCharges, wrenchLastUsed;
+                    extern float wrenchCd;
+                    int lv = RunUpgWrenchLevel();
+                    float cdMax = RunUpgWrenchCooldown();
+                    int can = (cdMax < 0.0f) ? (wrenchLastUsed < wrenchCharges)
+                                             : (wrenchCd <= 0.0f);
+                    if (can) {
+                        float rng  = RunUpgWrenchRange();
+                        float dxm  = monster.x - posX, dym = monster.y - posY;
+                        float dm   = sqrtf(dxm * dxm + dym * dym);
+                        if (dm < 0.01f) { dxm = dirX; dym = dirY; dm = 1.0f; }
+                        dxm /= dm; dym /= dm;
+                        float nx2 = monster.x + dxm * rng;
+                        float ny2 = monster.y + dym * rng;
+                        if (Blocked(nx2, ny2)) {          /* 撞墙就只推一半 */
+                            nx2 = monster.x + dxm * rng * 0.5f;
+                            ny2 = monster.y + dym * rng * 0.5f;
+                        }
+                        if (!Blocked(nx2, ny2)) { monster.x = nx2; monster.y = ny2; }
+                        monster.stun = RunUpgWrenchStun();
+                        if (monster.stun < 0.25f) monster.stun = 0.25f;
+                        monster.repath = 0.0f;
+                        monster.pathLen = 0;
+                        monster.pathIdx = 0;
+                        if (cdMax < 0.0f) { wrenchLastUsed++; }
+                        else { wrenchCd = cdMax; }
+                        PlaySfx(SFX_POWER, 0.5f);
+                        { extern void HintOnce(int); HintOnce(6); }   /* v7 B4 */
+                        {   /* v7：打的是拾荒者吗？两次能抢回赃款 */
+                            extern void CollectorHitByWrench(float, float);
+                            CollectorHitByWrench(monster.x, monster.y);
+                        }
+                        AddShake(0.18f, 0.12f);
+                        /* 击退拾荒者 -> 记一次（两次抢回赃款，见 v7 方案 3.4） */
+                        { extern int DecoyIntercept(void); (void)DecoyIntercept; }
+                    }
+                }
             }
             if (lightBeast.active && Dist2(px, py, lightBeast.x, lightBeast.y) < 0.42f) {
                 g_dmgIgnoreArmor = WeaponHitTick();
@@ -2626,8 +2392,7 @@ void WeaponTryAttack(float charge) {
                 g_dmgIgnoreArmor = 0;
                 hits++;
             }
-            /* v2.2：游荡怪（影子/盲螨/回响）之前完全打不到 */
-            if (DamageExtrasAt(px, py, 0.45f, dmg)) hits++;
+            /* v6.4：游荡怪已删，三只怪共用的伤害入口一起移除 */
             for (int i = 0; i < LEECH_MAX; i++) {
                 if (!leeches[i].active) continue;
                 if (Dist2(px, py, leeches[i].x, leeches[i].y) < 0.42f) {
@@ -2698,7 +2463,7 @@ void SpawnParticles(float x, float y, int tint) {
 }
 
 /* 生成玻璃碎片：撞击点产生随机扩散的碎片 */
-static void SpawnShards(float x, float y, float vx, float vy, float charge) {
+void SpawnShards(float x, float y, float vx, float vy, float charge) {
     int count = 6 + (int)(charge * 6);  /* 6~12 个碎片 */
     for (int i = 0; i < MAX_SHOTS * SHARD_COUNT && count > 0; i++) {
         if (shards_debris[i].active) continue;
@@ -2719,6 +2484,24 @@ static void SpawnShards(float x, float y, float vx, float vy, float charge) {
     }
 }
 void Update(float dt) {
+    { extern float playerMoveSpeedNow; playerMoveSpeedNow = 0.0f; }   /* v8: 守门人判断「在动/冲刺」用 */
+    /* v7：可疑点表每帧衰减 / 过期 */
+    SuspicionTick(dt);
+    {   /* v7 B4：第一次携带超过 8000 时提一句 */
+        extern void HintOnce(int);
+        if (carryGold >= 8000) HintOnce(4);
+    }
+    { extern void UpdateCollector(float); UpdateCollector(dt); }
+    {   /* v7：清道夫 */
+        extern float floorTime;
+        extern void ScavengerTickTrigger(float), UpdateScavenger(float);
+        if (currentState == STATE_PLAYING) floorTime += dt;
+        ScavengerTickTrigger(dt);
+        UpdateScavenger(dt);
+    }
+    /* v7：扳手冷却递减 */
+    { extern float wrenchCd; if (wrenchCd > 0.0f) { wrenchCd -= dt; if (wrenchCd < 0.0f) wrenchCd = 0.0f; } }
+
     CalibTick(dt);   /* v2.4：校准小游戏计时（冷却与滑块） */
     /* v2.1 屏幕特效推进：抖动 / 红闪 / 枪口闪 */
     if (hitFlash > 0.0f) { hitFlash -= dt * 3.2f; if (hitFlash < 0.0f) hitFlash = 0.0f; }
@@ -3023,6 +2806,8 @@ void Update(float dt) {
             if (IsActionPressed(ACT_INTERACT)) {
                 hideKeyLatch = 1;
                 hiddenIn = hideSpotNear;
+        { extern void HintOnce(int); HintOnce(1); }   /* v7 B4 */
+        { extern int hideStreak; hideStreak++; }   /* v7：清道夫触发条件 */
                 hideCount++;   /* v3.3：逃生向成就用 */
                 posX = hideSpots[hiddenIn].x;
                 posY = hideSpots[hiddenIn].y;
@@ -3191,30 +2976,7 @@ void Update(float dt) {
         pickupMsgTimer = 2.0f;
     }
 
-    /* v3.3：回声扫描倒计时 */
-    if (echoScanT > 0.0f) echoScanT -= dt;
-
-    /* v3.0：锁定窗口递减（见 hideBlockTimer 的用法） */
-    if (hideBlockTimer > 0.0f) hideBlockTimer -= dt;
-
-    /* v3.0：**周期自动存档** ——
-       原来 SaveGame() 只在「解锁成就 / 换层 / 安全屋操作 / 退出」时调用，
-       中途强退或崩溃等于整局白玩（验证报告 BUG1：保存后重启 benchOwned 变 0）。
-       这里在游戏中/安全屋每 20 秒存一次，代价是一次 6KB 的写盘。 */
-    /* v3.0：**暂停也要存** —— 游戏失焦会自动暂停（STATE_PAUSED），
-           原来条件里没有它，于是切出去等多久都不会存盘。 */
-    if ((currentState == STATE_PLAYING || currentState == STATE_PAUSED ||
-         currentState == STATE_SAFEHOUSE) && !trainingMode) {
-        static float autoSaveTimer = 0.0f;
-        autoSaveTimer += dt;
-        if (autoSaveTimer >= 20.0f) {
-            autoSaveTimer = 0.0f;
-            SaveGame();
-        }
-    }
-
-    /* 冲刺与体力 */
-
+    UpdateTimers(dt);   /* v8: 回声扫描 / 锁定窗口 / 周期自动存档（src/uptimers.c） */
     /* v3.0 改造树「消失」：脱离视线 3 秒后完全隐身。
        判据用「怪物是否在追捕状态」——它没在追（游荡/搜寻）就算脱离视线。 */
     if (BenchVanish()) {
@@ -3535,6 +3297,7 @@ void Update(float dt) {
        起步瞬间速度 +20%」，手感上就是滑出去一下。 */
     float sp = MOVE_SPEED * (1.0f + SkillSpeedAdd() + darkAdd) * slowMul * RelicSpeedMul() * glueSelf * dt
              * (sprinting ? SPRINT_MULT * (BenchSlide() ? 1.20f : 1.0f) : 1.0f)   /* v3.4 SLIDE +20% */ * crankMul;
+        { extern float playerMoveSpeedNow; playerMoveSpeedNow = sp; }   /* v8: 守门人据此判断在动/冲刺 */
     float perpX = -dirY, perpY = dirX;      /* 单位侧向，与 FOV 无关 */
     float dx = 0.0f, dy = 0.0f;
     /* v3.0：**锁盘打开时角色不能移动** ——
@@ -3575,6 +3338,7 @@ void Update(float dt) {
             if (hoverKind == 1) {
                 Container* c = &containers[hoverIndex];
                 c->searched = 1;
+        { extern int hideStreak; hideStreak = 0; }   /* v7：搜过箱子，连躲计数清零 */
         SpawnParticles(c->x, c->y, 2);   /* v2.1：翻箱扬起灰尘 */
                 searchedCount++;
                 runSearched++;
@@ -3661,6 +3425,7 @@ void Update(float dt) {
                     pickupMsgTimer = 1.5f;
                 } else if (fusesHeld >= fusesNeeded) {
                     breakerOpen = 1;
+                { extern void WardenSpawnIfPowered(void); WardenSpawnIfPowered(); }   /* v7 B1: 通电 -> 守门人出现 */
         SpawnParticles(breaker.x, breaker.y, 0);   /* v2.1：通电火花 */
                     fusesHeld -= fusesNeeded;
                     pendingShards += (int)(GoldBreakerAt(currentLevel) * RelicShardMul() * modShardMul + 0.5f);   /* v2.0 */
@@ -4055,6 +3820,7 @@ void Update(float dt) {
        只有「还没弹过、也不是刚选了深入」才弹。 */
     if (!trainingMode && !isFinalFloor && !exitChoiceOpen && !exitGoDeeper && atExit) {
         exitChoiceOpen = 1;
+            { extern void HintOnce(int); HintOnce(3); }   /* v7 B4 */
         exitChoiceT = 0.0f;
         PlaySfx(SFX_GATE, 0.65f);
         uiDirty = 1;

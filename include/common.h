@@ -28,13 +28,13 @@
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 24         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_NUM 25         /* 整数版本，进存档做记录 */
 /* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
    置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
    置 0 = 回到旧的战斗版本。 */
 #define NO_COMBAT 1
 
-#define CANITY_VERSION_STR "2.2.3"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_STR "2.3.0"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -265,6 +265,7 @@ typedef struct {
     float sightHold;   /* v3.0：连续看见玩家的秒数（察觉延迟） */
     float stillTimer;  /* v3.0：连续站着不动的秒数（超过就丢目标） */
     float huntTimer;   /* v3.0：本次追捕已持续秒数（超时放弃用） */
+    int   suspTarget;  /* v7：当前追的是可疑点表里的第几条，-1 = 没有 */
     float speed;
     int hp;                    /* 剩余血量 */
     /* ---- v1.15 伤害系统 ---- */
@@ -793,6 +794,7 @@ typedef enum {
     ACT_DODGE,             /* 跳脸虫 QTE：躲开（默认 SPACE，可改绑） */
     ACT_SWING,             /* v1.8 绣刀挥砍（默认 Q） */
     ACT_DECOY,             /* v1.8 投石（默认 G） */
+    ACT_DROP_GOLD,         /* v7 丢钱袋（默认 K，按住弹滑条） */
     ACT_COUNT
 } ActionId;
 
@@ -813,6 +815,7 @@ typedef enum {
     [ACT_MENU_CONFIRM] = VK_RETURN, [ACT_MENU_CANCEL] = VK_ESCAPE, \
     [ACT_DODGE] = VK_SPACE, \
     [ACT_SWING] = 'Q', [ACT_DECOY] = 'G', \
+    [ACT_DROP_GOLD] = 'K', \
 }
 
 /* ------------------------------------------------------------------ */

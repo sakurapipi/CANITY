@@ -5,6 +5,7 @@
  */
 #include "common.h"
 #include "render.h"
+#include "suspicion.h"
 #include "bench.h"
 #include "weapons.h"
 #include "extras.h"
@@ -1233,6 +1234,162 @@ static void DrawFlareSprite(int idx) {
      · 未激活时整体暗哑 —— 一眼能看出「还没生效」
      · 激活后一只眼睛亮起 + 随叫声做缩放脉冲 —— 一眼能看出「它在工作」
    全部用 PutPixelBlend 现场画，沿用项目零外部资源的原则。 */
+/* ===== v7 新怪物建模 =====
+   风格延续听声怪 / 追光怪：
+     · 同一套 ProjectSprite 投影 + zBuffer 遮挡
+     · 同一套 DrawGroundShadow 地面阴影
+     · 同一套 SpriteShade 距离衰减
+     · 眼白高光 = 怪物的「可识别点」
+   区别只在轮廓和配色，让玩家一眼能分出「这是哪一只」。
+
+   三只怪各有一个视觉识别点：
+     拾荒者  矮胖 + 金色；身上有赃款时整体变亮
+     清道夫  高瘦 + 病绿；正在开柜门时眼白变红
+     回声    极矮 + 冷白微光；随时间衰减变暗
+*/
+static void DrawNewMonsterBody(float wx, float wy, float halfH,
+                               unsigned int bodyColor,
+                               unsigned int eyeColor,
+                               float alpha,
+                               int shape) {
+    /* shape: 0 = 矮胖(拾荒者)  1 = 高瘦(清道夫)  2 = 微光(回声) */
+    SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
+    if (!s.ok) return;
+
+    int w = s.x1 - s.x0;
+    int h = s.y1 - s.y0;
+    if (w < 1 || h < 1) return;
+
+    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, w / 3, s.ty);
+    float light = SpriteShade(s.ty, 0.12f);
+
+    for (int x = s.x0; x < s.x1; x++) {
+        if (x < 0 || x >= renderW) continue;
+        if (s.ty >= zBuffer[x]) continue;
+        for (int y = s.y0; y < s.y1; y++) {
+            if (y < 0 || y >= renderH) continue;
+
+            float u = (float)(x - s.x0) / (float)w;   /* 0..1 横向 */
+            float v = (float)(y - s.y0) / (float)h;   /* 0..1 纵向，0=头顶 */
+
+            /* ---- 轮廓：椭圆，按 shape 调宽高比 ---- */
+            float dx = (u - 0.5f) * 2.0f;
+            float dy = (v - 0.5f) * 2.0f;
+            float rx = 1.0f, ry = 1.0f;
+            if (shape == 0) { rx = 1.10f; ry = 0.78f; }   /* 矮胖 */
+            if (shape == 1) { rx = 0.66f; ry = 1.05f; }   /* 高瘦 */
+            if (shape == 2) { rx = 0.95f; ry = 0.62f; }   /* 极矮 */
+            float dd = (dx / rx) * (dx / rx) + (dy / ry) * (dy / ry);
+            if (dd > 1.0f) continue;
+
+            /* ---- 眼睛：上部 22%~34% 高度，两个亮点 ---- */
+            int isEye = 0;
+            if (v > 0.22f && v < 0.34f) {
+                if ((u > 0.30f && u < 0.41f) || (u > 0.59f && u < 0.70f)) isEye = 1;
+            }
+            if (isEye) {
+                unsigned int ec = eyeColor;
+                unsigned int r = (unsigned int)((ec >> 16) & 0xFF);
+                unsigned int g = (unsigned int)((ec >> 8) & 0xFF);
+                unsigned int b = (unsigned int)(ec & 0xFF);
+                r = (unsigned int)(r * alpha);
+                g = (unsigned int)(g * alpha);
+                b = (unsigned int)(b * alpha);
+                pixels[(size_t)y * renderW + x] = (r << 16) | (g << 8) | b;
+                continue;
+            }
+
+            /* ---- 身体：底色 × 距离光衰 ---- */
+            float k = light;
+            if (shape == 2) k *= 0.55f;          /* 回声更暗更透 */
+            /* 边缘压暗，出一点体积感 */
+            if (dd > 0.72f) k *= 0.72f;
+            unsigned int bc = bodyColor;
+            unsigned int r = (unsigned int)(((bc >> 16) & 0xFF) * k);
+            unsigned int g = (unsigned int)(((bc >> 8) & 0xFF) * k);
+            unsigned int b = (unsigned int)((bc & 0xFF) * k);
+            if (r > 255u) r = 255u;
+            if (g > 255u) g = 255u;
+            if (b > 255u) b = 255u;
+            pixels[(size_t)y * renderW + x] = (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
+static void DrawNewMonsters(void) {
+    /* ---- 拾荒者：矮胖 + 金色；带赃款时更亮 ---- */
+    {
+        extern int   CollectorActive(void);
+        extern float CollectorX(void), CollectorY(void);
+        extern int   CollectorBounty(void);
+        if (CollectorActive()) {
+            int has = CollectorBounty() > 0;
+            DrawNewMonsterBody(CollectorX(), CollectorY(), 0.58f,
+                               0x00C08A20u,                    /* 暗金身体 */
+                               has ? 0x00FFE060u : 0x00FFB030u,  /* 眼睛：带钱时更亮 */
+                               has ? 1.15f : 0.90f,
+                               0);
+        }
+    }
+    /* ---- 清道夫：高瘦 + 病绿；开柜门时眼白转红 ---- */
+    {
+        extern int   ScavengerActive(void);
+        extern float ScavengerX(void), ScavengerY(void), ScavengerWarnT(void);
+        if (ScavengerActive()) {
+            int grabbing = ScavengerWarnT() > 0.0f;
+            DrawNewMonsterBody(ScavengerX(), ScavengerY(), 0.92f,
+                               0x002C4A28u,                          /* 暗绿身体 */
+                               grabbing ? 0x00FF3020u : 0x0080FF70u,  /* 眼睛 */
+                               grabbing ? 1.20f : 0.95f,
+                               1);
+        }
+    }
+    /* ---- 守门人：中等身高 + 暗蓝；堵门时眼睛转红 ---- */
+    {
+        extern int   WardenActive(void), WardenBlocking(void);
+        extern float WardenX(void), WardenY(void);
+        if (WardenActive()) {
+            int blk = WardenBlocking();
+            DrawNewMonsterBody(WardenX(), WardenY(), 0.80f,
+                               0x00203048u,                          /* 暗蓝制服 */
+                               blk ? 0x00FF3020u : 0x004080FFu,      /* 眼睛 */
+                               blk ? 1.25f : 0.85f,
+                               1);                                   /* 用高瘦轮廓，像个人形 */
+        }
+    }
+    /* ---- 回声：极矮 + 冷白微光，强度越弱越暗 ---- */
+    {
+        extern SuspicionPoint susp[SUSP_MAX];
+        for (int i = 0; i < SUSP_MAX; i++) {
+            if (susp[i].strength <= 0.0f) continue;
+            if (susp[i].source != SUSP_THROW) continue;
+            float a = susp[i].strength / 60.0f;   /* 刚扔出=1，衰减到 0 */
+            if (a > 1.0f) a = 1.0f;
+            if (a < 0.15f) a = 0.15f;
+            DrawNewMonsterBody(susp[i].x, susp[i].y, 0.26f,
+                               0x006A8CA8u,          /* 冷灰蓝 */
+                               0x00C8F0FFu,          /* 冷白眼 */
+                               a,
+                               2);
+        }
+    }
+}
+
+/* ===== v7 钱袋 =====
+   用最小的箱子道具当模型，但外面套一圈金色脉冲，
+   肉眼一眼能认出「那是钱」。金额越大脉冲越亮。 */
+static void DrawMoneyBagModel(int idx) {
+    extern float MoneyBagX(int), MoneyBagY(int), MoneyBagLife(int);
+    extern int MoneyBagAmount(int);
+    if (MoneyBagAmount(idx) <= 0) return;
+    float wx = MoneyBagX(idx), wy = MoneyBagY(idx);
+    float lf = MoneyBagLife(idx);
+    /* 快过期时闪烁，提醒玩家去捡 */
+    float blink = 1.0f;
+    if (lf < 8.0f) blink = 0.55f + 0.45f * (float)((int)(lf * 6.0f) % 2);
+    DrawBakedProp(SPR_PROP_CRATE, wx, wy, 0.22f, 0.85f * blink);
+}
+
 static void DrawDecoyModel(int idx) {
     extern Decoy decoysArr[MAX_DECOY];
     if (idx < 0 || idx >= MAX_DECOY) return;
@@ -1947,6 +2104,17 @@ void RenderSprites(void) {
         extern Decoy decoysArr[MAX_DECOY];
         for (int di = 0; di < MAX_DECOY; di++)
             if (decoysArr[di].active) DrawDecoyModel(di);
+        DrawNewMonsters();
+        /* v7：THE ECHO —— 把可疑点表里的「投掷落点」画出来 */
+        {   extern SuspicionPoint susp[SUSP_MAX];
+            for (int si = 0; si < SUSP_MAX; si++) {
+                if (susp[si].strength <= 0.0f) continue;
+                if (susp[si].source != SUSP_THROW) continue;
+                DrawBakedProp(SPR_PROP_TRASH, susp[si].x, susp[si].y, 0.16f, 0.45f);
+            }
+        }
+        /* v7：地上的钱袋 */
+        for (int mb = 0; mb < 3; mb++) DrawMoneyBagModel(mb);
     }
 
     /* 玻璃碎片：不在深度排序里，直接画在最后（覆盖在所有 billboard 之上） */
