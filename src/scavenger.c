@@ -46,6 +46,8 @@ typedef struct {
 Scavenger scavenger;
 
 int   ScavengerActive(void)  { return scavenger.active; }
+/* v2.4.7：是否正在翻箱（吃箱子中）—— 渲染层据此给红调 */
+int   ScavengerRifling(void) { return scavenger.eating >= 0; }
 float ScavengerX(void)       { return scavenger.x; }
 float ScavengerY(void)       { return scavenger.y; }
 float ScavengerWarnT(void)   { return scavenger.warnT; }
@@ -113,12 +115,15 @@ void ScavengerTickTrigger(float dt) {
     scavenger.eatT = 0.0f;
     scavenger.eating = -1;
     scavenger.active = 1;
+    { extern void BestiaryMarkSeen(int); BestiaryMarkSeen(4); }
     PlaySfx(SFX_GLASS, 0.45f);
     pickupMsg = (g_lang == LANG_ZH) ? "有东西在靠近…" : "SOMETHING IS COMING";
     pickupMsgTimer = 2.0f;
 }
 
 void UpdateScavenger(float dt) {
+    /* v2.3.9：训练营里当静态标本，不跑 AI */
+    { extern int trainingMode; if (trainingMode) return; }
     if (!scavenger.active) return;
 
     float dx = scavenger.tx - scavenger.x, dy = scavenger.ty - scavenger.y;
@@ -213,4 +218,11 @@ void UpdateScavenger(float dt) {
 
     /* ---- ③ 走过去 ---- */
     stepToward(&scavenger.x, &scavenger.y, scavenger.tx, scavenger.ty, SCAV_SPEED, dt);
+}
+
+/* v2.3.9：训练营用 —— 强制把Scavenger摆到指定位置当标本 */
+void ScavengerForcePlace(float x, float y) {
+    scavenger.active = 1;
+    scavenger.x = x;
+    scavenger.y = y;
 }

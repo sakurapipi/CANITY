@@ -196,6 +196,7 @@ void SpawnMonster(void) {
     monster.pathLen = 0;
     monster.pathIdx = 0;
     monster.repath = 0.0f;
+    monster.suspCool = 0.0f;   /* v2.3.1 */
     monster.stateTimer = 0.0f;
     monster.wanderTimer = 1.5f;
     monster.hitCooldown = HitCooldownFor(currentLevel);
@@ -752,19 +753,30 @@ void UpdateMonster(float dt) {
 
        distPenalty 0.9：越近的点越容易被选，
        避免它一直跑去地图另一头追一条早就过期的线索。 */
-    if (monster.active && monster.state != 1) {
-        int idx = SuspicionBest(monster.x, monster.y, 0.9f);
-        if (idx >= 0 && susp[idx].strength > 28.0f) {
-            monster.state = 1;
-            monster.tx = susp[idx].x;
-            monster.ty = susp[idx].y;
-            monster.repath = 0.0f;
-            monster.stateTimer = 0.0f;
-            monster.sightHold = 0.0f;
-            /* 记住目标点下标，到达后消费掉它 */
-            monster.suspTarget = idx;
+    /* v2.3.1 崩溃+闪烁修复：
+       原来条件是 state != 1，于是**每一帧**都会重新设 state=1 并清空路径，
+       而状态机自己又会把 state 打回 0/2 —— 两者打架，导致
+         · HUD 右侧的追击状态在 WANDERING / HUNTING 之间来回闪
+         · 路径被每帧强制重算，A* 反复写 monster.path[]
+           → msvcrt 里 memcpy/memset 越界，c0000005 崩溃
+       现在：只在「游荡中」才接新线索，且冷却 1.5 秒，路径只在真正换目标时清。 */
+    if (monster.active && monster.state == 0) {
+        if (monster.suspCool > 0.0f) {
+            monster.suspCool -= dt;
         } else {
-            monster.suspTarget = -1;
+            int idx = SuspicionBest(monster.x, monster.y, 0.9f);
+            if (idx >= 0 && susp[idx].strength > 28.0f) {
+                monster.state = 1;
+                monster.tx = susp[idx].x;
+                monster.ty = susp[idx].y;
+                monster.repath = 0.0f;
+                monster.stateTimer = 0.0f;
+                monster.sightHold = 0.0f;
+                monster.suspTarget = idx;
+                monster.suspCool = 1.5f;
+            } else {
+                monster.suspTarget = -1;
+            }
         }
     }
 
@@ -1079,153 +1091,10 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
     SpawnParticles(m->x, m->y, 2);
     return 0;
 }
-#else
-int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
-
-    if (!m->active) return 0;
-    if (base <= 0) return 0;
-    if (type < 0 || type >= DT_COUNT) type = DT_SLASH;
-
-    /* ① 偷袭：打"还没发现你"或"正在硬直"的怪 → 1.5 倍。
-       （没有怪物朝向数据，所以不用背刺判定，改用状态判定，语义更清楚） */
-    int backstab = (m->state == 0) ? 1 : 0;   /* v2.2：硬直不算背刺，否则全程 ×1.5 */
-
-    /* ② 乘法段：抗性（负数是弱点） */
-    int res = (int)m->resist[type];
-    /* 向上取整：否则 1 点基础伤害 × 抗性 20% 会被截成 0，
-       偷袭的 1.5 倍又截回 1 —— 玩家会觉得"暴击没感觉"。 */
-    int afterRes = (base * (100 - res) + 99) / 100;
-    if (afterRes < 0) afterRes = 0;
-
-    /* ③ 偷袭加成（同样向上取整） */
-    if (backstab) afterRes = (afterRes * 3 + 1) / 2;
-
-    /* v2.0：VAMP 配件 —— 命中回智（每击 +1，上限 100） */
-    {
-        for (int a = 0; a < 3; a++)
-            for (int sl = 0; sl < 2; sl++)
-                if (weaponAttach[a][sl] == 9) {   /* ATT_VAMP */
-                    sanity += 1.0f;
-                    if (sanity > 100.0f) sanity = 100.0f;
-                }
-    }
-
-    /* v2.0：KNOCK 配件 —— 命中击退。WeaponKnockNow() 原来定义了却 0 调用，
-       这个配件在商店里卖 150 碎片但完全不生效。 */
-    if (sx != 0.0f || sy != 0.0f) {
-        /* v2.2 修复：原来声明成 float，而 weapons.c 里是 int ——
-           x64 下 ABI 不同，返回值是垃圾，KNOCK 配件会把怪瞬移 */
-        int kb = WeaponKnockNow(curWeapon);
-        if (kb > 0.0f) {
-            float dx = m->x - sx, dy = m->y - sy;
-            float d = dx * dx + dy * dy;
-            if (d > 0.0001f) {
-                d = (float)sqrt((double)d);
-                m->x += (dx / d) * kb * 0.15f;
-                m->y += (dy / d) * kb * 0.15f;
-                if (Blocked(m->x, m->y)) { m->x -= (dx / d) * kb * 0.15f; m->y -= (dy / d) * kb * 0.15f; }
-            }
-        }
-    }
-
-    /* ④ 减法段：护甲 */
-    /* v3.0：穿甲的「无视 5 护甲」必须叠进这里 ——
-   原来 BenchArmorIgnore() 全项目 0 调用，280 碎片买了空气（数值审查 #3）。 */
-    int effArmor = m->armor - BenchArmorIgnore();
-    if (effArmor < 0) effArmor = 0;
-    int finalDmg = g_dmgIgnoreArmor ? afterRes : (afterRes - effArmor);
-    /* v3.0：**总倍率封顶** ——
-       数值审查算过：满配叠满能达到 60 倍（裸扳手 36 → 单刀 2156），
-       而 L24 怪只有 254 血，溢出 8.5 倍。这里把「来自倍率的部分」夹到 8 倍。 */
-    {
-        float mul = RelicDamageMul() * RunUpgDamageMul() * BenchDamageMul();
-        if (mul > 8.0f) mul = 8.0f;
-        finalDmg = (int)((float)finalDmg * mul + 0.5f);
-    }
-    if (m->glued) finalDmg = (int)((float)finalDmg * 1.5f + 0.5f);   /* v2.2 胶水 */
-    /* v6.4：EXECUTIONER（低血处决）随战斗系统一起移除 */
-    if (finalDmg < 1) finalDmg = 1;                  /* 保底 1 点 */
-
-    /* ⑤ 结算 */
-    m->hp -= finalDmg;
-    m->hitCooldown = 0.0f;
-    /* 钝击额外硬直 */
-    if (type == DT_BLUNT) m->stun = 0.8f;
-    else if (m->stun < 0.15f) m->stun = 0.15f;
-
-    /* ⑥ 反馈：交给 HUD 画一个伤害数字 */
-    extern int lastHitDamage;
-    extern float lastHitTimer;
-    extern int lastHitBackstab;
-    /* v1.20b：命中反馈在所有模式下都保留（用户要求） */
-    lastHitDamage = finalDmg;
-    lastHitTimer = 0.7f;
-    lastHitBackstab = backstab;
-
-    /* v1.17 训练场：只记录伤害，标本不掉血 */
-    {
-        extern int trainingMode, trainingTotal, trainingLast, trainingCount, trainingDps;
-        extern int trainingHist[6];
-        extern float trainingDpsTimer;
-        if (trainingMode) {
-            trainingTotal += finalDmg;
-            trainingLast = finalDmg;
-            trainingDps += finalDmg;
-            trainingDpsTimer = 1.0f;
-            for (int i = 5; i > 0; i--) trainingHist[i] = trainingHist[i - 1];
-            trainingHist[0] = finalDmg;
-            trainingCount++;
-            m->hp = 9999;
-            m->stun = 0.0f;
-            return finalDmg;
-        }
-    }
-
-    /* v3.0：逃生试炼下怪物永不死亡 —— 即使血量被别处扣到 0 也钳住 */
-    if (m->hp < 1) m->hp = 1;
-
-    if (m->hp <= 0) {
-        /* v2.1：死亡要有尸体消失的交代 —— 撒一把血 */
-        SpawnParticles(m->x, m->y, 1);
-        if (bossLevel && m == &monster) {
-            /* Boss 不会重生：给一笔碎片，标记本层已清 */
-            bossDefeated = 1;
-            pendingShards += 120;
-            SpawnParticles(m->x, m->y, 0);
-            PlaySfx(SFX_POWER, 1.0f);
-            m->active = 0;
-            return finalDmg;
-        }
-        /* v2.0：击杀给碎片（审计指出原来击杀 0 收益，最优解是不打） */
-        {
-                /* v2.0：原来 4/6 —— 搜一个箱子 7 碎片只用 1.1 秒，
-               打一只怪要 20 秒才 4 碎片，最优解是永远不打。 */
-            pendingShards += (m == &monster) ? 25 : 40;
-            totalKills++;
-            /* v2.2：分武器计数（KNIFE ONLY / BOTTLE RAIN 成就） */
-            {
-                extern int totalKills, killsWrench, killsBottle, floorKills;
-                extern int benchKills;
-                benchKills++;   /* v2.7 嗜血 */
-                extern int curWeapon;
-                (void)totalKills;
-                floorKills++;
-                if (type == DT_BLUNT) killsWrench++;
-                else if (type == DT_SHARD) killsBottle++;
-                (void)curWeapon;
-            }
-        }
-        if (m == &monster) SpawnMonster();
-        else SpawnLightBeast();
-        extern int bottlesKilled;
-        bottlesKilled++;
-    } else {
-        KnockbackMonster(m);
-    }
-    PlaySfx(SFX_GLASS, 0.9f);
-    if (!RunBottleSilent()) MakeNoise(m->x, m->y, 9.0f);
-    return finalDmg;
-}
+/* v2.4.7 删除死代码：NO_COMBAT=1 时上面那段就够了，
+   这里原来是完整的伤害/抗性/护甲/背刺结算管线（146 行），
+   因为条件编译永远不参与编译。留着只会让人以为战斗系统还在 —— 
+   谁哪天把 NO_COMBAT 翻成 0，那套逻辑会突然复活，而 UI 和平衡全按「打不死」写的。 */
 #endif  /* NO_COMBAT */
 
 int HitMonster(Monster* m, int dmg) {

@@ -18,7 +18,6 @@
    金额越大，写进可疑点表的强度越高 → 怪物越容易被引过去。
    走过去按 E 可以捡回来（45 秒内）。
    关键：**可逆**。没被吃掉就能捡回，玩家才愿意赌。 */
-#define MAX_MONEYBAG 3
 typedef struct {
     float x, y;
     int   amount;

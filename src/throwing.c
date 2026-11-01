@@ -32,6 +32,38 @@ extern int chargeBonus(float);
 extern float weaponAtkCharge;
 extern int   g_lang;
 
+/* ===== v2.3.2 THE ECHO 改成「连投三次」才触发 =====
+   每扔一次就出现一个小回声，太频繁也太奇怪，反而像 bug。
+   现在：8 秒内连扔到第 3 个，才在那个落点留下一次强回响。 */
+int   throwChain      = 0;    /* 连续扔了几个 */
+float throwChainTimer = 0.0f; /* 归零倒计时，8 秒不扔就断链 */
+#define THROW_CHAIN_NEED   3
+#define THROW_CHAIN_IDLE   8.0f
+
+/* ===== v2.3.6 回响统一入口 =====
+   规则：
+     · 任何投掷物都算进连投计数（8 秒内不扔就断链）
+     · 连投到第 3 个 → 触发一次强回响
+     · **全场最多只有一个回响** —— 触发前先清掉已有的，
+       否则多个 100 强度的假线索叠在一起会把怪物数值彻底搞乱。 */
+void EchoTryTrigger(float x, float y) {
+    extern SuspicionPoint susp[SUSP_MAX];
+    throwChain++;
+    throwChainTimer = THROW_CHAIN_IDLE;
+    if (throwChain < THROW_CHAIN_NEED) return;
+    throwChain = 0;
+
+    /* 上限 1 个：先把旧的清掉 */
+    for (int i = 0; i < SUSP_MAX; i++)
+        if (susp[i].strength > 0.0f && susp[i].source == SUSP_THROW)
+            SuspicionConsume(i);
+
+    SuspicionAdd(x, y, 100.0f, 1.5f, 30.0f, SUSP_THROW);
+    PlaySfx(SFX_ECHO, 0.95f);
+    pickupMsg = (g_lang == LANG_ZH) ? "回响炸开了" : "ECHO BURST";
+    pickupMsgTimer = 1.6f;
+}
+
 void ThrowItem(int type, float charge) {
     { extern void HintOnce(int); HintOnce(0); }   /* v7 B4: 第一次投掷 */
     g_throwOk = 0;
@@ -141,6 +173,11 @@ void ThrowItem(int type, float charge) {
 
 /* 推进所有飞行中的玻璃瓶，结算命中 + 抛物线 + 碎片 */
 void UpdateShots(float dt) {
+    /* v2.3.2：8 秒不扔就断链 */
+    if (throwChainTimer > 0.0f) {
+        throwChainTimer -= dt;
+        if (throwChainTimer <= 0.0f) throwChain = 0;
+    }
     for (int i = 0; i < MAX_SHOTS; i++) {
         if (!shot[i].active) continue;
         shot[i].life -= dt;
@@ -171,7 +208,8 @@ void UpdateShots(float dt) {
                你扔出去的每个东西，落点都会留下一个「可疑位置」。
                它**自己不发声**（发声反而会分散怪物注意力），
                而是给听声怪一条「玩家刚才在这」的坐标，10 秒后消散。 */
-            SuspicionAdd(shot[i].x, shot[i].y, 60.0f, 4.0f, 10.0f, SUSP_THROW);
+            /* v2.3.6：任何投掷物落地都走统一入口 */
+            EchoTryTrigger(shot[i].x, shot[i].y);
             if (shot[i].kind == 4) {
                 SpawnSmoke(shot[i].x, shot[i].y);
             } else if (shot[i].kind == 8) {

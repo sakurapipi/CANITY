@@ -3337,6 +3337,33 @@ void DrawHUD(void) {
     {
         extern int carryGold, bankHistMax;
         int hudY3 = hudY2 + hudTH + UIS(4);
+        /* ===== v2.4.7 **新怪状态行** =====
+           原来 HUD 右侧只有听声怪的 WANDERING/HUNTING。
+           清道夫正在翻你的箱子时，那里还写着 WANDERING，非常容易误读。
+           现在把三只新怪的状态单独显示。 */
+        {
+            extern int   CollectorActive(void), ScavengerActive(void), ScavengerRifling(void);
+            extern int   WardenActive(void), WardenBlocking(void);
+            const char* st = NULL;
+            unsigned int stc = 0x00D0D0D0u;
+
+            if (WardenActive() && WardenBlocking()) {
+                st = Tr("WARDEN BLOCKS EXIT", "守门人堵住了出口"); stc = 0x00FF6050u;
+            } else if (ScavengerRifling()) {
+                st = Tr("SCAVENGER RIFLING YOUR CRATES", "清道夫在翻你的箱子"); stc = 0x00FFB040u;
+            } else if (ScavengerActive()) {
+                st = Tr("SCAVENGER APPROACHING", "清道夫正在靠近"); stc = 0x00FFB040u;
+            } else if (CollectorActive()) {
+                st = Tr("THE COLLECTOR IS NEAR", "拾荒者在你附近"); stc = 0x00FFD070u;
+            } else if (WardenActive()) {
+                st = Tr("WARDEN PATROLLING", "守门人在巡逻"); stc = 0x0080A0D0u;
+            }
+            if (st) {
+                int sw = TextWidthWin(st);
+                DrawTextWin(winW - UIS(20) - sw, hudY3 + hudTH * 3 + UIS(10), st, stc);
+            }
+        }
+
         /* v7：丢钱滑条（按住 K 时展开） */
         {
             extern int moneyDropOpen, moneyDropPct, carryGold;

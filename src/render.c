@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include <math.h>
 #include "render.h"
 #include "suspicion.h"
 #include "bench.h"
@@ -726,6 +727,34 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
     }
 }
 
+/* ===== v2.4.6 **距离压迫感**（全部怪物共用的唯一入口）=====
+   用户反馈：只有新怪有衰减，听声怪/追光怪还是老样子，整体不统一。
+   所以抽成这个函数，所有怪物绘制都必须经过它。
+
+   规则：离玩家越近越亮、越远越黑。
+     ≤ NPROX_NEAR  → 全亮（它就在你面前）
+     ≥ NPROX_FAR   → 只留 NPROX_FLOOR 的一线轮廓
+     中间          → 幂曲线，近处慢降、远处急降
+
+   为什么这样有压迫感：看不清才是最恐怖的。
+   8 格外只剩黑影，你直到 4~5 格才确定那是什么 —— 那时候已经晚了。 */
+static float ProximityLight(float wx, float wy) {
+    #define NPROX_NEAR  2.5f     /* 这个距离内 = 全亮 */
+    #define NPROX_FAR  11.0f     /* 这个距离外 = 几乎全黑 */
+    #define NPROX_FLOOR 0.05f    /* 最暗也不完全消失 */
+    #define NPROX_POW   1.9f     /* 越大衰减越急 */
+
+    float dx = wx - posX, dy = wy - posY;
+    float dist = sqrtf(dx * dx + dy * dy);
+    if (dist <= NPROX_NEAR) return 1.0f;
+    if (dist >= NPROX_FAR)  return NPROX_FLOOR;
+    float k = 1.0f - (dist - NPROX_NEAR) / (NPROX_FAR - NPROX_NEAR);
+    if (k < 0.0f) k = 0.0f;
+    k = powf(k, NPROX_POW);
+    if (k < NPROX_FLOOR) k = NPROX_FLOOR;
+    return k;
+}
+
 static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
     if (!m->active) return;
     if (!SpritesReady()) {
@@ -750,6 +779,9 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
     float lightK = 1.0f;
     unsigned int tint = 0;
     float tintMix = 0.0f;
+
+    /* v2.4.6：听声怪 / 追光怪 也走同一套距离衰减 */
+    lightK *= ProximityLight(m->x, m->y);
 
     if (bossLevel && m == &monster) {
         halfH = 1.45f;
@@ -1247,72 +1279,45 @@ static void DrawFlareSprite(int idx) {
      清道夫  高瘦 + 病绿；正在开柜门时眼白变红
      回声    极矮 + 冷白微光；随时间衰减变暗
 */
-static void DrawNewMonsterBody(float wx, float wy, float halfH,
-                               unsigned int bodyColor,
-                               unsigned int eyeColor,
-                               float alpha,
-                               int shape) {
-    /* shape: 0 = 矮胖(拾荒者)  1 = 高瘦(清道夫)  2 = 微光(回声) */
+/* ===== v2.4.0 新怪物建模 —— 直接复用成功的烘焙精灵 =====
+   用户明确评价：听声怪 / 追光怪的模型是最好的，新做的三个「长得都很奇怪」。
+   所以放弃自己用椭圆拼身体的方案，改成**用同一套烘焙精灵 + 不同色调**：
+     · 主体剪影、走路帧、朝向帧、阴影、距离光衰 —— 和那两只完全一致
+     · 只在颜色上区分：拾荒者暗金 / 清道夫病绿 / 守门人暗蓝
+   这样质感立刻对齐，而且不用新画任何精灵。 */
+static void DrawTintedBeast(int spr, float wx, float wy, float halfH,
+                            unsigned int tint, float tintMix) {
+    if (!SpritesReady()) {
+        /* 烘焙失败时的兜底：至少画个剪影，不黑屏 */
+        SpriteBox sb = ProjectSprite(wx, wy, 0.0f, halfH);
+        if (!sb.ok) return;
+        for (int x = sb.x0; x < sb.x1; x++) {
+            if (x < 0 || x >= renderW) continue;
+            if (sb.ty >= zBuffer[x]) continue;
+            for (int y = sb.y0; y < sb.y1; y++) {
+                if (y < 0 || y >= renderH) continue;
+                pixels[(size_t)y * renderW + x] = 0x00141418u;
+            }
+        }
+        return;
+    }
+
     SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
     if (!s.ok) return;
 
-    int w = s.x1 - s.x0;
-    int h = s.y1 - s.y0;
-    if (w < 1 || h < 1) return;
+    int size = (s.x1 - s.x0);
+    int hh = s.y1 - s.y0;
+    if (hh > size) size = hh;
+    if (size < 2) return;
 
-    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, w / 3, s.ty);
-    float light = SpriteShade(s.ty, 0.12f);
+    int x = (s.x0 + s.x1) / 2 - size / 2;
+    int y = s.y1 - size;
 
-    for (int x = s.x0; x < s.x1; x++) {
-        if (x < 0 || x >= renderW) continue;
-        if (s.ty >= zBuffer[x]) continue;
-        for (int y = s.y0; y < s.y1; y++) {
-            if (y < 0 || y >= renderH) continue;
-
-            float u = (float)(x - s.x0) / (float)w;   /* 0..1 横向 */
-            float v = (float)(y - s.y0) / (float)h;   /* 0..1 纵向，0=头顶 */
-
-            /* ---- 轮廓：椭圆，按 shape 调宽高比 ---- */
-            float dx = (u - 0.5f) * 2.0f;
-            float dy = (v - 0.5f) * 2.0f;
-            float rx = 1.0f, ry = 1.0f;
-            if (shape == 0) { rx = 1.10f; ry = 0.78f; }   /* 矮胖 */
-            if (shape == 1) { rx = 0.66f; ry = 1.05f; }   /* 高瘦 */
-            if (shape == 2) { rx = 0.95f; ry = 0.62f; }   /* 极矮 */
-            float dd = (dx / rx) * (dx / rx) + (dy / ry) * (dy / ry);
-            if (dd > 1.0f) continue;
-
-            /* ---- 眼睛：上部 22%~34% 高度，两个亮点 ---- */
-            int isEye = 0;
-            if (v > 0.22f && v < 0.34f) {
-                if ((u > 0.30f && u < 0.41f) || (u > 0.59f && u < 0.70f)) isEye = 1;
-            }
-            if (isEye) {
-                unsigned int ec = eyeColor;
-                unsigned int r = (unsigned int)((ec >> 16) & 0xFF);
-                unsigned int g = (unsigned int)((ec >> 8) & 0xFF);
-                unsigned int b = (unsigned int)(ec & 0xFF);
-                r = (unsigned int)(r * alpha);
-                g = (unsigned int)(g * alpha);
-                b = (unsigned int)(b * alpha);
-                pixels[(size_t)y * renderW + x] = (r << 16) | (g << 8) | b;
-                continue;
-            }
-
-            /* ---- 身体：底色 × 距离光衰 ---- */
-            float k = light;
-            if (shape == 2) k *= 0.55f;          /* 回声更暗更透 */
-            /* 边缘压暗，出一点体积感 */
-            if (dd > 0.72f) k *= 0.72f;
-            unsigned int bc = bodyColor;
-            unsigned int r = (unsigned int)(((bc >> 16) & 0xFF) * k);
-            unsigned int g = (unsigned int)(((bc >> 8) & 0xFF) * k);
-            unsigned int b = (unsigned int)((bc & 0xFF) * k);
-            if (r > 255u) r = 255u;
-            if (g > 255u) g = 255u;
-            if (b > 255u) b = 255u;
-            pixels[(size_t)y * renderW + x] = (r << 16) | (g << 8) | b;
-        }
+    /* v2.4.6：统一走 ProximityLight()，和新怪完全一致 */
+    {
+        float light = SpriteShade(s.ty, 0.12f) * ProximityLight(wx, wy);
+        DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
+        DrawSpriteTint(spr, x, y, size, size, light, 1.0f, 1, s.ty, tint, tintMix);
     }
 }
 
@@ -1324,24 +1329,21 @@ static void DrawNewMonsters(void) {
         extern int   CollectorBounty(void);
         if (CollectorActive()) {
             int has = CollectorBounty() > 0;
-            DrawNewMonsterBody(CollectorX(), CollectorY(), 0.58f,
-                               0x00C08A20u,                    /* 暗金身体 */
-                               has ? 0x00FFE060u : 0x00FFB030u,  /* 眼睛：带钱时更亮 */
-                               has ? 1.15f : 0.90f,
-                               0);
+            /* 拾荒者：用听声怪的身体 + 暗金色调 */
+            DrawTintedBeast(SPR_MON_LEECH, CollectorX(), CollectorY(),
+                            0.86f, 0x00FFFFFFu, has ? 0.10f : 0.00f);   /* v2.4.2 方案A：用烘焙原色，带钱只轻微提亮 */
         }
     }
     /* ---- 清道夫：高瘦 + 病绿；开柜门时眼白转红 ---- */
     {
-        extern int   ScavengerActive(void);
+        extern int   ScavengerActive(void), ScavengerRifling(void);
         extern float ScavengerX(void), ScavengerY(void), ScavengerWarnT(void);
         if (ScavengerActive()) {
-            int grabbing = ScavengerWarnT() > 0.0f;
-            DrawNewMonsterBody(ScavengerX(), ScavengerY(), 0.92f,
-                               0x002C4A28u,                          /* 暗绿身体 */
-                               grabbing ? 0x00FF3020u : 0x0080FF70u,  /* 眼睛 */
-                               grabbing ? 1.20f : 0.95f,
-                               1);
+            /* v2.4.7：撬柜门 **或** 正在翻箱子，两种都算警戒 */
+            int grabbing = (ScavengerWarnT() > 0.0f) || ScavengerRifling();
+            /* 清道夫：用追光怪的身体（更高瘦） + 病绿色调 */
+            DrawTintedBeast(SPR_MON_SHADE, ScavengerX(), ScavengerY(),
+                            1.00f, 0x00FF4030u, grabbing ? 0.28f : 0.00f);   /* v2.4.2 方案A：原色；撬柜门才加轻红调 */
         }
     }
     /* ---- 守门人：中等身高 + 暗蓝；堵门时眼睛转红 ---- */
@@ -1350,11 +1352,9 @@ static void DrawNewMonsters(void) {
         extern float WardenX(void), WardenY(void);
         if (WardenActive()) {
             int blk = WardenBlocking();
-            DrawNewMonsterBody(WardenX(), WardenY(), 0.80f,
-                               0x00203048u,                          /* 暗蓝制服 */
-                               blk ? 0x00FF3020u : 0x004080FFu,      /* 眼睛 */
-                               blk ? 1.25f : 0.85f,
-                               1);                                   /* 用高瘦轮廓，像个人形 */
+            /* 守门人：用听声怪的身体 + 暗蓝色调；堵门时偏红 */
+            DrawTintedBeast(SPR_MON_SPIDER, WardenX(), WardenY(),
+                            0.94f, 0x00FF4030u, blk ? 0.28f : 0.00f);   /* v2.4.2 方案A：原色；堵门才加轻红调 */
         }
     }
     /* ---- 回声：极矮 + 冷白微光，强度越弱越暗 ---- */
@@ -1366,11 +1366,11 @@ static void DrawNewMonsters(void) {
             float a = susp[i].strength / 60.0f;   /* 刚扔出=1，衰减到 0 */
             if (a > 1.0f) a = 1.0f;
             if (a < 0.15f) a = 0.15f;
-            DrawNewMonsterBody(susp[i].x, susp[i].y, 0.26f,
-                               0x006A8CA8u,          /* 冷灰蓝 */
-                               0x00C8F0FFu,          /* 冷白眼 */
-                               a,
-                               2);
+            /* 回响：小号的追光怪精灵 + 冷白偏青的色调，半透明感 */
+            /* v2.4.2：回声用自己烘焙的模型（同心环 + 尖角核心），
+               并让尺寸随剩余强度做一次「呼吸」，看起来在持续广播。 */
+            DrawTintedBeast(SPR_MON_ECHO, susp[i].x, susp[i].y,
+                            0.26f + 0.18f * a, 0x00FFFFFFu, 0.0f);
         }
     }
 }
@@ -2104,20 +2104,12 @@ void RenderSprites(void) {
         extern Decoy decoysArr[MAX_DECOY];
         for (int di = 0; di < MAX_DECOY; di++)
             if (decoysArr[di].active) DrawDecoyModel(di);
-        DrawNewMonsters();
-        /* v7：THE ECHO —— 把可疑点表里的「投掷落点」画出来 */
-        {   extern SuspicionPoint susp[SUSP_MAX];
-            for (int si = 0; si < SUSP_MAX; si++) {
-                if (susp[si].strength <= 0.0f) continue;
-                if (susp[si].source != SUSP_THROW) continue;
-                DrawBakedProp(SPR_PROP_TRASH, susp[si].x, susp[si].y, 0.16f, 0.45f);
-            }
-        }
-        /* v7：地上的钱袋 */
-        for (int mb = 0; mb < 3; mb++) DrawMoneyBagModel(mb);
     }
+    /* v2.3.5：地上的钱袋 */
+    for (int mb = 0; mb < 3; mb++) DrawMoneyBagModel(mb);
+    /* v2.3.5：三只新怪 + 回响（v2.3.3 误删过一次，导致全部隐形） */
+    DrawNewMonsters();
 
-    /* 玻璃碎片：不在深度排序里，直接画在最后（覆盖在所有 billboard 之上） */
     DrawShardSprite();
 }
 

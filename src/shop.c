@@ -425,7 +425,11 @@ void ShopActivate(void) {
         if (shopRow == 2) {
             int nb = (bottles > 0) + (flares > 0) + (bricks > 0)
                    + (acids > 0) + (smokeBombs > 0);
-            char msg[96];
+            /* v2.3.7 修复悬空指针：
+               原来是栈上的 char msg[96]，函数一返回 msg 就失效，
+               而 pickupMsg 是全局指针，ui.c 会在之后 1.6 秒持续读它 —— 读到的是已释放的栈。
+               同文件其它同类处都加了 static，唯独这里漏了。 */
+            static char msg[96];
             snprintf(msg, sizeof(msg),
                      Tr("BOTTLES %d  FLARES %d  OTHERS %d",
                         "瓶子 %d  照明弹 %d  其它 %d"),

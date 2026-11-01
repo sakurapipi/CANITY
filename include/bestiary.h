@@ -16,7 +16,7 @@ typedef struct {
     const char* counter; /* 怎么对付 */
 } BestiaryEntry;
 
-#define BESTIARY_COUNT 2   /* v6.4：只留听声 / 追光（其余随战斗系统删除） */
+#define BESTIARY_COUNT 6   /* v2.3.7: 6 monsters */
 
 extern const BestiaryEntry bestiary[BESTIARY_COUNT];
 extern int bestiarySel;

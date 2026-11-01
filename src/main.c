@@ -34,7 +34,30 @@ static int FileExists(const char* path) {
     return 1;
 }
 
+
+/* ===== 崩溃定位器 =====
+   崩溃时把「异常地址 - 模块基址」写进 canity_crash.txt。
+   canity.exe 没有 strip，拿到 RVA 就能用 nm 反查到函数名。 */
+#include <stdio.h>
+static LONG WINAPI CanityCrashHandler(EXCEPTION_POINTERS* ep) {
+    FILE* f = fopen("canity_crash.txt", "a");
+    if (f) {
+        unsigned long base = (unsigned long)(size_t)GetModuleHandleA(NULL);
+        unsigned long addr = 0, code = 0;
+        if (ep && ep->ExceptionRecord) {
+            addr = (unsigned long)(size_t)ep->ExceptionRecord->ExceptionAddress;
+            code = (unsigned long)ep->ExceptionRecord->ExceptionCode;
+        }
+        fprintf(f, "code=0x%08lX base=0x%08lX addr=0x%08lX rva=0x%08lX\n",
+                code, base, addr, addr - base);
+        fclose(f);
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    SetUnhandledExceptionFilter(CanityCrashHandler);
+
     /* v1.8：声明 DPI 感知。
        不声明的话，125%/150% 缩放的笔记本上 Windows 会把窗口"虚拟放大"，
        800x600 的窗口占掉更多像素，画面糊、还可能放不进屏幕。 */

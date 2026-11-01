@@ -94,6 +94,7 @@ void WardenSpawnIfPowered(void) {
     warden.ty = exitY;
     warden.headingToExit = 1;
     warden.active = 1;
+    { extern void BestiaryMarkSeen(int); BestiaryMarkSeen(5); }
     PlaySfx(SFX_STEP, 0.5f);
 }
 
@@ -114,11 +115,13 @@ static void SendPlayerToStart(void) {
     AddHitFlash(0.6f);
     AddShake(0.20f, 0.16f);
     PlaySfx(SFX_SCREAM, 0.55f);
-    sprintf(pickupMsg, g_lang == LANG_ZH ? "被送回了起点" : "SENT BACK TO START");
+    pickupMsg = (g_lang == LANG_ZH) ? "被送回了起点" : "SENT BACK TO START";
     pickupMsgTimer = 2.0f;
 }
 
 void UpdateWarden(float dt) {
+    /* v2.3.9：训练营里当静态标本，不跑 AI */
+    { extern int trainingMode; if (trainingMode) return; }
     if (!warden.active) return;
 
     extern float posX, posY;
@@ -176,7 +179,7 @@ void UpdateWarden(float dt) {
                 warden.ty = exitY;
                 PlaySfx(SFX_HEART, 0.8f);
                 {
-                    sprintf(pickupMsg, g_lang == LANG_ZH ? "守卫堵住了出口" : "THE WARDEN BLOCKS THE EXIT");
+                    pickupMsg = (g_lang == LANG_ZH) ? "守卫堵住了出口" : "THE WARDEN BLOCKS THE EXIT";
                     pickupMsgTimer = 2.0f;
                 }
             }
@@ -205,4 +208,11 @@ void UpdateWarden(float dt) {
             AIMoveToward(&warden.x, &warden.y, warden.tx, warden.ty, WARDEN_SPEED, dt);
         }
     }
+}
+
+/* v2.3.9：训练营用 —— 强制把Warden摆到指定位置当标本 */
+void WardenForcePlace(float x, float y) {
+    warden.active = 1;
+    warden.x = x;
+    warden.y = y;
 }

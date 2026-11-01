@@ -118,6 +118,8 @@ void CollectorHitByWrench(float hx, float hy) {
 }
 
 void UpdateCollector(float dt) {
+    /* v2.3.9：训练营里当静态标本，不跑 AI */
+    { extern int trainingMode; if (trainingMode) return; }
     if (!collector.active) return;
 
     collector.hitTimer += dt;
@@ -143,7 +145,7 @@ void UpdateCollector(float dt) {
     float tx = posX, ty = posY;
     int bagIdx = -1;
     float bestD = 1e9f;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < MAX_MONEYBAG; i++) {
         if (MoneyBagAmount(i) <= 0) continue;
         float dx = MoneyBagX(i) - collector.x, dy = MoneyBagY(i) - collector.y;
         float d = dx * dx + dy * dy;
@@ -197,4 +199,11 @@ void UpdateCollector(float dt) {
             if (findSpotFar(&ox, &oy)) { collector.x = ox; collector.y = oy; }
         }
     }
+}
+
+/* v2.3.9：训练营用 —— 强制把Collector摆到指定位置当标本 */
+void CollectorForcePlace(float x, float y) {
+    collector.active = 1;
+    collector.x = x;
+    collector.y = y;
 }

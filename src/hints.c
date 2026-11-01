@@ -27,7 +27,7 @@ void HintOnceText(int id, const char* zh, const char* en) {
     if (id < 0 || id >= HINT_COUNT) return;
     if (hintSeen[id]) return;
     hintSeen[id] = 1;
-    sprintf(pickupMsg, "%s", (g_lang == LANG_ZH) ? zh : en);
+    pickupMsg = (g_lang == LANG_ZH) ? zh : en;
     pickupMsgTimer = 3.0f;
     PlaySfx(SFX_PICKUP, 0.5f);
 }
@@ -65,7 +65,7 @@ void HintOnce(int id) {
     default:
         return;
     }
-    sprintf(pickupMsg, "%s", (g_lang == LANG_ZH) ? zh : en);
+    pickupMsg = (g_lang == LANG_ZH) ? zh : en;
     pickupMsgTimer = 3.0f;
     PlaySfx(SFX_PICKUP, 0.5f);
 }

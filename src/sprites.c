@@ -641,6 +641,10 @@ static void Limb(float x0, float y0, float x1, float y1, float w0, float w1,
     cvPolyGrad(b, 4, hi, body, 1.0f);
 }
 
+/* v2.4.3: 回响的竖直中心。原来误用了 c(=CANVAS_W*0.5) 当 Y，
+   导致绘制跑到画布外、越界写，把后续精灵烘焙一起搞坏。 */
+#define ECHO_CY 150.0f
+
 static void BakeMonster(int id, int kind, int pose) {
     cvClear();
     float c = CANVAS_W * 0.5f;
@@ -669,6 +673,17 @@ static void BakeMonster(int id, int kind, int pose) {
         edge = 0x0006040Cu; body = 0x001C1628u; hi = 0x002E2444u; heightK = 1.05f; break;
     case 5:  /* 盲螨：土黄，极扁 */
         edge = 0x000C0A04u; body = 0x00322914u; hi = 0x00503820u; heightK = 0.45f; break;
+    /* v2.4.4 **统一暗色**（用户要求）：身体不再各自上色 ——
+       多彩会削弱模型本身的明暗精度。现在三只怪的身体都是中性暗灰，
+       只留极小的色相偏移；**颜色只留给识别特征**（口袋 / 爪 / 眼 / 灯）。 */
+    case 7:  /* 拾荒者：中性暗灰，略暖 */
+        edge = 0x00080A0Au; body = 0x00292A2Cu; hi = 0x0045474Cu; heightK = 0.74f; break;
+    case 8:  /* 清道夫：中性暗灰，略冷绿 */
+        edge = 0x00070A08u; body = 0x00282E2Au; hi = 0x00444C46u; heightK = 1.26f; break;
+    case 9:  /* 守门人：中性暗灰，略冷蓝 */
+        edge = 0x00080A0Cu; body = 0x002A2E36u; hi = 0x00464C58u; heightK = 0.96f; break;
+    case 10: /* 回声：不是生物，是「正在发声的东西」—— 冷白偏青 */
+        edge = 0x00020A0Eu; body = 0x001A3848u; hi = 0x005AA8C8u; heightK = 0.90f; break;
     default: /* 回响：钟形 */
         edge = 0x000A080Cu; body = 0x002A2234u; hi = 0x00443850u; heightK = 1.00f; break;
     }
@@ -679,8 +694,46 @@ static void BakeMonster(int id, int kind, int pose) {
     float cx = c + lean;
 
     /* ================= 人形：寻声鬼 / 追光鬼 / 偷电怪 ================= */
-    if (kind == 0 || kind == 1 || kind == 2) {
+    /* ===== v2.4.2 回声（按 include/art_direction.h 设计）=====
+       它不是生物，所以：**没有眼睛、没有四肢**（避免和第怪物混淆）。
+       地标 = 三层同心环 + 中心一个尖角菱形核心。
+       同心环 = 「正在向外广播声音」，尖角 = 恐怖该有的锐利感。
+       玩家一眼就知道「那是个声源标记」，不会当成怪。 */
+    if (kind == 10) {
+        /* 三层同心环，越外越暗 */
+        for (int r3 = 3; r3 >= 1; r3--) {
+            float rr = 10.0f + (float)r3 * 14.0f;
+            int seg = 26;
+            for (int i2 = 0; i2 < seg; i2++) {
+                float a0 = (float)i2 / (float)seg * 6.2831853f;
+                float a1 = (float)(i2 + 1) / (float)seg * 6.2831853f;
+                float x0 = cx + cosf(a0) * rr, y0 = c + cosf(a0) * 0.0f + 250.0f + sinf(a0) * rr * 0.55f;
+                float x1 = cx + cosf(a1) * rr, y1 = ECHO_CY + sinf(a1) * rr * 0.55f;
+                float al = (r3 == 1) ? 0.85f : (r3 == 2 ? 0.45f : 0.22f);
+                cvLine(x0, y0, x1, y1, (r3 == 1) ? 3.0f : 2.0f, hi, al);
+            }
+        }
+        /* 中心尖角菱形核心 */
+        {
+            float cy2 = ECHO_CY;
+            float d[8] = { cx, cy2 - 26.0f,
+                           cx + 17.0f, cy2,
+                           cx, cy2 + 26.0f,
+                           cx - 17.0f, cy2 };
+            cvPoly(d, 4, edge, 1.0f);
+            cvPolyGrad(d, 4, hi, body, 1.0f);
+            /* 核心高光 */
+            cvEllipse(cx, cy2, 6.0f, 9.0f, 0x00FFFFFFu, 0.9f);
+        }
+        /* 上下各一缕外泄的尖刺（不对称：上面长、下面短） */
+        cvLine(cx, ECHO_CY - 26.0f, cx - 4.0f, ECHO_CY - 62.0f, 3.0f, hi, 0.5f);
+        cvLine(cx, ECHO_CY + 26.0f, cx + 3.0f, ECHO_CY + 44.0f, 3.0f, hi, 0.5f);
+    } else if (kind == 0 || kind == 1 || kind == 2 || kind == 7 || kind == 8 || kind == 9) {
         float narrow = (kind == 1) ? 0.82f : (kind == 2 ? 1.35f : 1.0f);   /* 体型胖瘦 */
+        /* v2.4.1 审美规范：体型必须和移速一致（见 include/art_direction.h 铁律四） */
+        if (kind == 7) narrow = 1.42f;   /* 拾荒者：最宽，负重 */
+        if (kind == 8) narrow = 0.60f;   /* 清道夫：最瘦 */
+        if (kind == 9) narrow = 1.62f;   /* 守门人：宽肩立柱 */
         float shoulderW = 30.0f * narrow;
         if (side) shoulderW *= 0.68f;
 
@@ -769,6 +822,89 @@ static void BakeMonster(int id, int kind, int pose) {
         cvEllipse(cx, hy, hrx + 2.0f, hry + 2.0f, edge, 1.0f);
         cvEllipse(cx, hy - 1.0f, hrx, hry, body, 1.0f);
         cvEllipse(cx - hrx * 0.30f, hy - hry * 0.30f, hrx * 0.45f, hry * 0.40f, hi, 0.75f);
+
+        /* ===== v2.4.1 三只新怪的脸与地标（审美规范见 art_direction.h）===== */
+        if (kind == 7) {
+            /* --- 拾荒者：独眼 + 背上的大麻袋 --- */
+            /* 麻袋：一个大圆，最高点超过头顶（地标 #1） */
+            float bagX = cx - shoulderW * 1.55f;
+            float bagY = shoulderY + H * 0.02f;
+            /* 口袋是唯一的大面积色块 —— 暗金，让「那是钱袋」一眼可辨 */
+            cvEllipse(bagX, bagY, shoulderW * 1.25f, H * 0.20f, 0x00140C04u, 1.0f);
+            cvEllipse(bagX, bagY, shoulderW * 1.10f, H * 0.175f, 0x00704814u, 1.0f);
+            cvEllipse(bagX - shoulderW * 0.28f, bagY - H * 0.05f,
+                      shoulderW * 0.42f, H * 0.065f, 0x00C08A28u, 0.9f);
+            /* 袋口绳子 */
+            cvLine(bagX + shoulderW * 0.9f, bagY - H * 0.13f,
+                   cx - shoulderW * 0.5f, shoulderY + H * 0.06f, 3.0f, edge, 0.9f);
+            /* 独眼（铁律五：eye-count wrong） */
+            cvEllipse(cx + hrx * 0.10f, hy - 2.0f, hrx * 0.52f, hry * 0.46f, 0x00040206u, 1.0f);
+            cvEllipse(cx + hrx * 0.12f, hy - 2.0f, hrx * 0.26f, hry * 0.24f, 0x00FFD070u, 0.95f);
+            /* 护着口袋的那只手已经由手臂画出，这里加一只更靠前的 */
+            Limb(cx + shoulderW * 0.95f, shoulderY + H * 0.18f,
+                 bagX + shoulderW * 0.85f, bagY + H * 0.02f,
+                 10.0f, 7.0f, edge, body, hi);
+        } else if (kind == 8) {
+            /* --- 清道夫：无眼 + 两条垂到地上的长臂（地标 #1）--- */
+            for (int a2 = -1; a2 <= 1; a2 += 2) {
+                /* 不对称：右侧手臂更长（铁律二 ASYMMETRY） */
+                float extra = (a2 > 0) ? 18.0f : 0.0f;
+                float ax0 = cx + (float)a2 * shoulderW * 1.05f;
+                float ay0 = shoulderY + H * 0.10f;
+                float ax1 = cx + (float)a2 * (shoulderW * 1.35f);
+                float ay1 = footY + extra;           /* 垂到地面以下 */
+                Limb(ax0, ay0, ax1, ay1, 11.0f, 6.0f, edge, body, hi);
+                /* 爪 */
+                for (int f = -1; f <= 1; f++) {
+                    /* 爪尖给一点病绿 —— 小面积点缀，不破坏整体暗色 */
+                    Limb(ax1, ay1 + 8.0f, ax1 + (float)f * 5.0f, ay1 + 14.0f,
+                         2.2f, 1.0f, 0x00101810u, 0x004A7040u, 0x0070A060u);
+                }
+            }
+            /* 无眼：只在脸上留两个深到看不见底的凹坑 */
+            cvEllipse(cx - hrx * 0.34f, hy - 3.0f, hrx * 0.40f, hry * 0.34f, 0x00000000u, 1.0f);
+            cvEllipse(cx + hrx * 0.34f, hy - 3.0f, hrx * 0.40f, hry * 0.34f, 0x00000000u, 1.0f);
+            /* 咧开的裂缝嘴 */
+            cvLine(cx - hrx * 0.55f, hy + hry * 0.55f,
+                   cx + hrx * 0.55f, hy + hry * 0.40f, 3.0f, 0x00020303u, 0.95f);
+        } else if (kind == 9) {
+            /* --- 守门人：三只横排眼 + 长袍 + 提灯（地标 #1）--- */
+            /* 长袍：下半身一整块梯形，盖住腿 */
+            float robe[8] = {
+                cx - shoulderW * 0.95f, shoulderY + H * 0.30f,
+                cx + shoulderW * 0.95f, shoulderY + H * 0.30f,
+                cx + shoulderW * 1.45f, footY + 6.0f,
+                cx - shoulderW * 1.45f, footY + 6.0f
+            };
+            cvPoly(robe, 4, edge, 1.0f);
+            cvPolyGrad(robe, 4, hi, body, 1.0f);
+            /* 平直宽肩 */
+            float sh[8] = {
+                cx - shoulderW * 1.55f, shoulderY - 4.0f,
+                cx + shoulderW * 1.55f, shoulderY - 4.0f,
+                cx + shoulderW * 1.30f, shoulderY + H * 0.06f,
+                cx - shoulderW * 1.30f, shoulderY + H * 0.06f
+            };
+            cvPoly(sh, 4, edge, 1.0f);
+            cvPolyGrad(sh, 4, hi, body, 1.0f);
+            /* 三只横排眼（铁律五：too many） */
+            for (int e = -1; e <= 1; e++) {
+                cvEllipse(cx + (float)e * hrx * 0.62f, hy - 2.0f,
+                          hrx * 0.22f, hry * 0.26f, 0x00000204u, 0.9f);
+                cvEllipse(cx + (float)e * hrx * 0.62f, hy - 2.0f,
+                          hrx * 0.13f, hry * 0.15f, 0x0080C0FFu, 0.95f);
+            }
+            /* 提灯：右侧一个亮圆，唯一的圆形地标 */
+            {
+                float lx = cx + shoulderW * 1.85f;
+                float ly = shoulderY + H * 0.42f;
+                cvLine(cx + shoulderW * 1.25f, shoulderY + H * 0.14f,
+                       lx, ly - 14.0f, 4.0f, edge, 0.9f);
+                cvEllipse(lx, ly, 16.0f, 20.0f, 0x00101A28u, 1.0f);
+                cvEllipse(lx, ly, 11.0f, 14.0f, 0x00FFE8A0u, 1.0f);
+                cvEllipse(lx - 3.0f, ly - 4.0f, 5.0f, 6.0f, 0x00FFFFFFu, 0.9f);
+            }
+        }
 
         if (kind == 0) {
             /* 寻声鬼：没有眼睛 —— 它靠听。取而代之的是一张咧开的下颌。 */
@@ -1190,12 +1326,12 @@ void SpritesInit(void) {
     for (int p = 0; p < 4; p++) {
         BakeMonster(SPR_MON_HUNTER + p, 0, p);
         BakeMonster(SPR_MON_LIGHT  + p, 1, p);
-        BakeMonster(SPR_MON_LEECH  + p, 2, p);
+        BakeMonster(SPR_MON_LEECH  + p, 7, p);   /* v2.4.1: 槽位复用 -> 拾荒者 */
     }
     BakeMonster(SPR_MON_JUMPER, 3, 0);
-    BakeMonster(SPR_MON_SHADE, 4, 0);
-    BakeMonster(SPR_MON_SPIDER, 5, 0);
-    BakeMonster(SPR_MON_ECHO, 6, 0);
+    BakeMonster(SPR_MON_SHADE, 8, 0);   /* v2.4.1: 槽位复用 -> 清道夫 */
+    BakeMonster(SPR_MON_SPIDER, 9, 0);   /* v2.4.1: 槽位复用 -> 守门人 */
+    BakeMonster(SPR_MON_ECHO, 10, 0);   /* v2.4.2: 槽位复用 -> 回声标记 */
     BakeProp(SPR_PROP_CRATE, 0);
     BakeProp(SPR_PROP_BREAKER, 1);
     BakeProp(SPR_PROP_EXIT, 2);
