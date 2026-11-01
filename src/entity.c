@@ -71,6 +71,7 @@ void ClearFx(void) {
 }
 Monster monster;
 Monster lightBeast;      /* 只看光 */
+Monster monster2;        /* v2.4.12：第二只听声怪（训练营测双怪用） */
 Monster parasite;   /* 复用 Monster 结构体（只需要位置和几个状态字段） */
 
 /* QTE 运行时状态 */
@@ -714,6 +715,42 @@ static void MonsterWander(void) {
 }
 
 void UpdateMonster(float dt) {
+    /* ===== v2.4.14 **怪物扑到玩偶上** =====
+       用户反馈：怪贴到玩偶上之后「不消失、没有实际反应、直接走开了」。
+       这里补上：怪进入 0.7 格内 → 玩偶当场炸掉（消失）+ 怪顿一下 +
+       接下来 10 秒不再刷新目标（suspCool = 10），所以它会原地乱走而不是立刻改追别的。
+    */
+    {
+        extern Decoy decoysArr[];
+        for (int di = 0; di < MAX_DECOY; di++) {
+            if (!decoysArr[di].active || !decoysArr[di].armed) continue;
+            float ddx = monster.x - decoysArr[di].x;
+            float ddy = monster.y - decoysArr[di].y;
+            if (ddx * ddx + ddy * ddy > 0.49f) continue;   /* 0.7 格内 */
+
+            decoysArr[di].active = 0;      /* 玩偶被扑碎 */
+            decoysArr[di].armed  = 0;
+            monster.stun = 10.0f;             /* v2.4.15：**定身 10 秒**（用户要求） */
+            monster.state = 0;
+            monster.suspCool = 10.0f;           /* **10 秒内不再刷新目标** */
+            monster.suspTarget = -1;
+            monster.pathLen = 0;
+            monster.pathIdx = 0;
+            monster.repath = 0.0f;
+            PlaySfx(SFX_GLASS, 1.0f);
+            {
+                extern const char* pickupMsg;
+                extern float pickupMsgTimer;
+                extern int   uiDirty;
+                extern int   g_lang;
+                pickupMsg = (g_lang == 1) ? "玩偶被扑碎了" : "DECOY SHREDDED";
+                pickupMsgTimer = 1.4f;
+                uiDirty = 1;
+            }
+            break;
+        }
+    }
+
     /* v3.0：**寻声怪要能看见玩家** ——
        原来它只对噪音有反应（MakeNoise 是唯一的 state=1 入口），
        于是玩家站在它面前 2 米，它依然在"游荡"，看起来像坏了。
@@ -974,7 +1011,7 @@ void UpdateMonster(float dt) {
                 monster.state = 0;
                 monster.pathLen = 0;
                 monster.hitCooldown = 2.5f;
-                pickupMsg = "PLAYED DEAD";
+                /* v2.4.26：用户要求删掉这条黄字（「把那个假死给去掉」） */
                 pickupMsgTimer = 2.0f;
                 PlaySfx(SFX_HEART, 1.0f);
                 uiDirty = 1;
@@ -1033,6 +1070,367 @@ void UpdateMonster(float dt) {
         monster.prevY = monster.y;
     }
 }
+
+/* ===== v2.4.12 第二只听声怪 =====
+   训练营要同时放两只听声怪做行为测试。
+   这段是从 UpdateMonster 机械复制出来的，唯一的差别是操作 monster2。
+   两只怪逻辑完全一致 —— 所以测出来的行为可以直接代表正式关卡。 */
+void UpdateMonster2(float dt) {
+    /* ===== v2.4.14 **怪物扑到玩偶上** =====
+       用户反馈：怪贴到玩偶上之后「不消失、没有实际反应、直接走开了」。
+       这里补上：怪进入 0.7 格内 → 玩偶当场炸掉（消失）+ 怪顿一下 +
+       接下来 10 秒不再刷新目标（suspCool = 10），所以它会原地乱走而不是立刻改追别的。
+    */
+    {
+        extern Decoy decoysArr[];
+        for (int di = 0; di < MAX_DECOY; di++) {
+            if (!decoysArr[di].active || !decoysArr[di].armed) continue;
+            float ddx = monster2.x - decoysArr[di].x;
+            float ddy = monster2.y - decoysArr[di].y;
+            if (ddx * ddx + ddy * ddy > 0.49f) continue;   /* 0.7 格内 */
+
+            decoysArr[di].active = 0;      /* 玩偶被扑碎 */
+            decoysArr[di].armed  = 0;
+            monster2.stun = 10.0f;             /* v2.4.15：**定身 10 秒**（用户要求） */
+            monster2.state = 0;
+            monster2.suspCool = 10.0f;           /* **10 秒内不再刷新目标** */
+            monster2.suspTarget = -1;
+            monster2.pathLen = 0;
+            monster2.pathIdx = 0;
+            monster2.repath = 0.0f;
+            PlaySfx(SFX_GLASS, 1.0f);
+            {
+                extern const char* pickupMsg;
+                extern float pickupMsgTimer;
+                extern int   uiDirty;
+                extern int   g_lang;
+                pickupMsg = (g_lang == 1) ? "玩偶被扑碎了" : "DECOY SHREDDED";
+                pickupMsgTimer = 1.4f;
+                uiDirty = 1;
+            }
+            break;
+        }
+    }
+
+    /* v3.0：**寻声怪要能看见玩家** ——
+       原来它只对噪音有反应（MakeNoise 是唯一的 state=1 入口），
+       于是玩家站在它面前 2 米，它依然在"游荡"，看起来像坏了。
+       这里补视线检测：视野内 + HasLOS 通 → 切追捕并把目标锁定到玩家。
+       手电关着时视野减半，这样"关灯潜行"才有实际收益。 */
+    if (monster2.active && !playerInSafe) {
+        float sdx = posX - monster2.x, sdy = posY - monster2.y;
+        float sd2 = sdx * sdx + sdy * sdy;
+        /* v3.0：BLACKOUT 生效期间追捕者完全失明 */
+        extern float ultTimer;
+        extern int ultKind;
+        float sight = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
+        if (ultTimer > 0.0f) sight = 0.0f;
+        if (sd2 < sight * sight && HasLOS(monster2.x, monster2.y, posX, posY)) {
+            /* v3.0 削弱：**连续看见 0.6 秒才真的发现** ——
+               原来只要一帧视线通就立刻切追捕，玩家连反应的机会都没有。
+               现在有 0.6 秒的「察觉期」，这段时间内跑出视野就能断开。 */
+            monster2.sightHold += dt;
+            if (monster2.state != 1 && monster2.sightHold >= 0.6f) {
+                monster2.state = 1;
+        { extern int floorSpotted, runSpotted; floorSpotted = 1; runSpotted = 1; }
+                monster2.repath = 0.0f;
+                monster2.stateTimer = 0.0f;
+                PlaySfx(SFX_HEART, 0.55f);   /* 心跳：它发现你了 */
+            }
+            /* 追捕中持续刷新目标（不然它只会跑向"最后一次听到的位置"） */
+            monster2.tx = posX;
+            monster2.ty = posY;
+        } else {
+            monster2.sightHold = 0.0f;    /* 视线断开 → 察觉计时清零 */
+        }
+    }
+
+    /* ===== v7 **听声怪从可疑点表里挑目标** =====
+       只在「没在追人」的时候挑，而且要求强度够高（>28），
+       否则刚走到就会因为一条 15 强度的走路噪音又改向，来回抖。
+
+       distPenalty 0.9：越近的点越容易被选，
+       避免它一直跑去地图另一头追一条早就过期的线索。 */
+    /* v2.3.1 崩溃+闪烁修复：
+       原来条件是 state != 1，于是**每一帧**都会重新设 state=1 并清空路径，
+       而状态机自己又会把 state 打回 0/2 —— 两者打架，导致
+         · HUD 右侧的追击状态在 WANDERING / HUNTING 之间来回闪
+         · 路径被每帧强制重算，A* 反复写 monster2.path[]
+           → msvcrt 里 memcpy/memset 越界，c0000005 崩溃
+       现在：只在「游荡中」才接新线索，且冷却 1.5 秒，路径只在真正换目标时清。 */
+    if (monster2.active && monster2.state == 0) {
+        if (monster2.suspCool > 0.0f) {
+            monster2.suspCool -= dt;
+        } else {
+            int idx = SuspicionBest(monster2.x, monster2.y, 0.9f);
+            if (idx >= 0 && susp[idx].strength > 28.0f) {
+                monster2.state = 1;
+                monster2.tx = susp[idx].x;
+                monster2.ty = susp[idx].y;
+                monster2.repath = 0.0f;
+                monster2.stateTimer = 0.0f;
+                monster2.sightHold = 0.0f;
+                monster2.suspTarget = idx;
+                monster2.suspCool = 1.5f;
+            } else {
+                monster2.suspTarget = -1;
+            }
+        }
+    }
+
+    /* 到达可疑点 → 消费掉（不然它会一直站在那儿） */
+    if (monster2.active && monster2.state == 1 && monster2.suspTarget >= 0 &&
+        monster2.suspTarget < SUSP_MAX) {
+        float ddx = monster2.x - susp[monster2.suspTarget].x;
+        float ddy = monster2.y - susp[monster2.suspTarget].y;
+        if (ddx * ddx + ddy * ddy < 0.64f) {
+            SuspicionConsume(monster2.suspTarget);
+            monster2.suspTarget = -1;
+        }
+    }
+
+    /* v3.0 消失：隐身时追捕者立刻丢失目标 */
+    {
+        extern int vanished;
+        if (vanished && monster2.active) {
+            monster2.state = 0;
+            monster2.pathLen = 0;
+            monster2.pathIdx = 0;
+        }
+    }
+
+    /* v3.0：噪音显示衰减 */
+    {
+        extern float noiseDisplay, noiseDisplayTimer;
+        if (noiseDisplayTimer > 0.0f) {
+            noiseDisplayTimer -= dt;
+            if (noiseDisplayTimer <= 0.0f) noiseDisplay = 0.0f;
+        }
+    }
+    /* v3.0：进入函数时先把**上一帧位置**推进 —— 函数末尾用它算位移，
+       从而得到「怪自己面朝哪」和「走了多远」。
+       原来朝向用的是屏幕方位角（16:9 下恒为正面，6 张侧面帧全废），
+       走路帧用的是全局时钟（静止也踏步、所有怪同相）。 */
+    {
+        extern Monster monster2;
+        monster2.prevX = monster2.x;
+        monster2.prevY = monster2.y;
+    }
+    if (!monster2.active) return;
+    /* v1.8：玩家进安全屋 → 怪物立刻丢目标 */
+    if (playerInSafe && monster2.state != 0) { monster2.state = 0; monster2.pathLen = 0; monster2.pathIdx = 0; }
+    if (monster2.hitCooldown > 0.0f) monster2.hitCooldown -= dt;
+    if (monster2.growlTimer > 0.0f) monster2.growlTimer -= dt;
+
+    /* 硬直：被玻璃瓶砸中后短暂不能动，也不能抓人 */
+    if (monster2.stun > 0.0f) {
+        monster2.stun -= dt;
+        if (monster2.stun < 0.0f) monster2.stun = 0.0f;
+        return;
+    }
+
+    if (monster2.state == 1) {
+        monster2.repath -= dt;
+        if (monster2.repath <= 0.0f) {
+            monster2.repath = 0.45f;
+            MonPath((int)monster2.x, (int)monster2.y, (int)monster2.tx, (int)monster2.ty);
+        }
+        if (Dist2(monster2.x, monster2.y, monster2.tx, monster2.ty) < 0.45f) {
+            monster2.state = 2;
+                /* v3.4：甩脱追捕给金币 —— 这是逃生玩法的核心动作，
+                   但它原来是零奖励，玩家没有「主动甩怪」的动力。 */
+                {
+                    extern int pendingShards, totalShardsEarned;
+                    extern const char* pickupMsg;
+                    extern float pickupMsgTimer;
+                    pendingShards += GOLD_ESCAPE;
+                    totalShardsEarned += GOLD_ESCAPE;
+                    pickupMsg = "ESCAPED  +GOLD";
+                    pickupMsgTimer = 1.2f;
+                }          /* 到了声源，原地搜一圈 */
+            monster2.stateTimer = 3.5f;
+            monster2.pathLen = 0;
+            monster2.pathIdx = 0;
+        }
+            /* v3.0：**追捕要有超时** ——
+           用户实测「怪物不会离开」：只要视线通就一直贴着，
+           永远不放弃也永远抓不到（抓取要求 0.74 格内）。
+           追 8 秒还没抓到就降级为搜寻（3 秒），给玩家脱身窗口。 */
+        monster2.huntTimer += dt;
+        if (monster2.huntTimer > 8.0f) {
+            /* v3.0：**超时后要真的走开，不能原地搜** ——
+               用户截图「还是在堵门」：原来超时只切到 state=2「原地搜寻」，
+               而原地就在玩家旁边，于是它永远堵在那儿。
+               现在给它一个「背离玩家 10 格」的撤退目标，走远了再变游荡。 */
+            float ax = monster2.x - posX, ay = monster2.y - posY;
+            float al = sqrtf(ax * ax + ay * ay);
+            if (al < 0.01f) { ax = 1.0f; ay = 0.0f; al = 1.0f; }
+            ax /= al; ay /= al;
+            float rx = monster2.x + ax * 10.0f;
+            float ry = monster2.y + ay * 10.0f;
+            /* 夹在地图内 */
+            if (rx < 1.5f) rx = 1.5f;
+            if (ry < 1.5f) ry = 1.5f;
+            if (rx > MAP_WIDTH - 1.5f) rx = MAP_WIDTH - 1.5f;
+            if (ry > MAP_HEIGHT - 1.5f) ry = MAP_HEIGHT - 1.5f;
+
+            monster2.state = 2;              /* 搜寻（会走开） */
+            monster2.stateTimer = 6.0f;
+            monster2.tx = rx;
+            monster2.ty = ry;
+            monster2.huntTimer = 0.0f;
+            monster2.repath = 0.0f;
+            monster2.pathLen = 0;
+            monster2.pathIdx = 0;
+        }
+} else if (monster2.state == 2) {
+        monster2.stateTimer -= dt;
+        if (monster2.pathLen == 0 || monster2.pathIdx >= monster2.pathLen) {
+            if (monster2.stateTimer <= 0.0f) {
+                monster2.state = 0;
+                monster2.wanderTimer = 0.5f;
+            } else {
+                MonsterWander();
+            }
+        }
+    } else {
+        monster2.wanderTimer -= dt;
+        if (monster2.wanderTimer <= 0.0f) {
+            monster2.wanderTimer = 2.5f + (float)(rand() % 25) / 10.0f;
+            MonsterWander();
+        }
+    }
+
+    /* 沿路径走 */
+    if (monster2.pathIdx < monster2.pathLen) {
+        float tx = monster2.path[monster2.pathIdx][0] + 0.5f;
+        float ty = monster2.path[monster2.pathIdx][1] + 0.5f;
+        float dx = tx - monster2.x, dy = ty - monster2.y;
+        float d = sqrtf(dx * dx + dy * dy);
+        if (d < 0.12f) {
+            monster2.pathIdx++;
+        } else {
+            /* v3.3：踩到胶水 → 移速 x0.20（-80%）。还在动，只是变成慢动作。 */
+    float step = monster2.speed * dt * (InGlue(monster2.x, monster2.y) ? GLUE_MONSTER_MUL : 1.0f) * GoldSpeedMul();
+            if (step > d) step = d;
+            monster2.x += dx / d * step;
+            monster2.y += dy / d * step;
+        }
+    }
+
+    /* 靠近时发出低吼（也是给玩家的听觉提示） */
+    float pd2 = Dist2(monster2.x, monster2.y, posX, posY);
+    if (pd2 < 36.0f && monster2.growlTimer <= 0.0f) {
+        monster2.growlTimer = 2.6f;
+        if (!monsterMuted) PlaySfx(SFX_SCREAM, pd2 < 9.0f ? 0.55f : 0.28f);
+    }
+
+    /* 抓到玩家：掉理智 + 怪被弹开（以后可以换成真正的地图事件） */
+    /* v3.3：**诱饵先替玩家挨这一下** ——
+       附近有激活的玩偶就抵掉，玩家不掉理智，怪物还会转向玩偶。 */
+    /* v3.4 CATCH BREAK（局内树 id 14）：每局 2 次，被抓时自动挣脱不掉理智。
+       优先级：诱饵 > CATCH BREAK > 正常受伤。 */
+    extern int catchBreakUsed;   /* v3.4 CATCH BREAK 计数 */
+    if (!playerInSafe && monster2.hitCooldown <= 0.0f && pd2 < 0.55f &&
+        BenchCatchBreak() && catchBreakUsed < 2) {
+        catchBreakUsed++;
+        monster2.state = 2;
+        monster2.pathLen = 0;
+        monster2.pathIdx = 0;
+        pickupMsg = "BROKE FREE!";
+        pickupMsgTimer = 1.2f;
+        PlaySfx(SFX_GLASS, 0.9f);
+    } else     if (!playerInSafe && monster2.hitCooldown <= 0.0f && pd2 < 0.55f && DecoyIntercept()) {
+        monster2.hitCooldown = HitCooldownFor(currentLevel);
+        for (int di = 0; di < MAX_DECOY; di++) {
+            if (decoysArr[di].active && decoysArr[di].armed) {
+                monster2.state = 1;
+                monster2.tx = decoysArr[di].x;
+                monster2.ty = decoysArr[di].y;
+                monster2.repath = 0.0f;
+                monster2.pathLen = 0;
+                monster2.pathIdx = 0;
+                break;
+            }
+        }
+    } else if (!playerInSafe && monster2.hitCooldown <= 0.0f && pd2 < 0.55f) {
+        /* v1.8：被抓的惩罚随层数增长，且受局内"铁皮"减免 */
+        float catchLoss = CATCH_SANITY_BASE *
+                          (1.0f + CATCH_SANITY_STEP * (float)(currentLevel > 0 ? currentLevel - 1 : 0));
+        /* v3.0：**藏在柜子里 = 完全抓不到**。
+           原来只包住了扣理智那一行，后面的红屏/尖叫/tookDamage/
+           怪物重生全在 if 外照跑 —— 怪贴到 0.55 格内照样红屏，
+           而且 tookDamage=1 会让 PERFECT ESCAPE 成就失效。 */
+        /* v3.0 改造树「假死」：每局一次，被抓住时骗过怪物 */
+        {
+            extern int playDeadUsed;
+            extern int BenchPlayDead(void);
+            /* v3.0：假死现在技能树和改造树任一拥有都可用 */
+            if (PlayDeadAvailable() && !playDeadUsed) {
+                playDeadUsed = 1;
+                monster2.stun = 2.5f;
+                monster2.state = 0;
+                monster2.pathLen = 0;
+                monster2.hitCooldown = 2.5f;
+                pickupMsgTimer = 2.0f;
+                PlaySfx(SFX_HEART, 1.0f);
+                uiDirty = 1;
+                return;
+            }
+        }
+
+        if (hiddenIn < 0) {
+            /* v3.0：厚皮三层叠加 —— 改造树 -15%、局内 THICK HIDE -35% */
+            sanity -= catchLoss * RunDamageTakenMul() * BenchFearDamageMul() * ThickHideMul();
+
+    AddHitFlash(0.85f);          /* v2.1：被抓的红闪 */
+    AddShake(0.30f, 0.22f);
+    PlaySfx(SFX_HEART, 0.95f);
+        if (sanity < 0.0f) sanity = 0.0f;
+        extern int tookDamage;
+        { extern int floorTookDamage; floorTookDamage = 1; }
+        tookDamage = 1;
+        healFlash = 0.18f;
+        if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
+        SpawnMonster();
+        }
+    }
+    /* v3.0：用实际位移更新朝向和走路相位（全局 monster2 单例） */
+    {
+        float mdx = monster2.x - monster2.prevX;
+        float mdy = monster2.y - monster2.prevY;
+        float d2 = mdx * mdx + mdy * mdy;
+        if (d2 > 1e-7f) {
+            monster2.facing = atan2f(mdy, mdx);
+            monster2.walkPhase += sqrtf(d2) * 3.5f;   /* v3.0：1.2 太慢，腿看起来是滑行；3.5 步频自然又不闪 */
+            if (monster2.walkPhase > 1000.0f) monster2.walkPhase -= 1000.0f;
+        }
+
+        /* ===== v3.0：**站着不动 2 秒就丢失目标** =====
+           用户实测「老是堵门」：怪物卡在门口不移动，却一直保有你的位置，
+           于是它永远站在那儿等你出来。
+           现在统计「连续没移动」的时长，超过 2 秒就当作它跟丢了：
+           清空目标、回到游荡、并给一个新的漫游点，逼它走开。 */
+        if (d2 > 0.0004f) {          /* 这一帧动了（约 2cm） */
+            monster2.stillTimer = 0.0f;
+        } else {
+            monster2.stillTimer += dt;
+            if (monster2.stillTimer > 2.0f && monster2.state != 0) {
+                monster2.state = 0;
+                monster2.pathLen = 0;
+                monster2.pathIdx = 0;
+                monster2.sightHold = 0.0f;
+                monster2.huntTimer = 0.0f;
+                monster2.stillTimer = 0.0f;
+                monster2.wanderTimer = 0.0f;   /* 立刻挑新漫游点，别又站着 */
+            }
+        }
+
+        monster2.prevX = monster2.x;
+        monster2.prevY = monster2.y;
+    }
+}
+
 
 
 /* ------------------------------------------------------------------ */

@@ -28,13 +28,13 @@
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 26         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_NUM 27         /* 整数版本，进存档做记录 */
 /* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
    置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
    置 0 = 回到旧的战斗版本。 */
 #define NO_COMBAT 1
 
-#define CANITY_VERSION_STR "2.3.1"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_STR "2.3.2"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -411,6 +411,7 @@ typedef struct {
     float x, y;
     int active;
     int kind;         /* 0=衣柜 1=床底 2=桌下 */
+    int broken;       /* v2.4.17：被清道夫撬坏过，要花钱修 */
 } HideSpot;
 
 typedef struct {
@@ -535,7 +536,7 @@ typedef struct { float x, y; int active; } Breaker;
                                     身体边缘蹭到就该减速，否则「有时候不生效」 */
 #define ECHO_RADIUS     15.0f
 #define ECHO_LIFE       5.0f
-#define DECOY_SHOUT_EVERY 3.0f   /* 诱饵每 3 秒叫一次 */
+#define DECOY_SHOUT_EVERY 1.5f   /* v2.4.14：每 1.5 秒叫一次（原来 3 秒太慢） */
 #define DECOY_SHOUT_R    20.0f   /* 叫声半径（比投石最大噪音还大） */
 #define DECOY_HP         2       /* 能挡两次伤害 */
 
@@ -864,3 +865,14 @@ static inline float Dist2(float ax, float ay, float bx, float by) {
 }
 
 #endif /* CANITY_COMMON_H */
+
+/* ===== v2.4.17 **藏身点修复** =====
+   清道夫每撬坏一个藏身点，修复成本就涨一档。
+   设计意图：
+     · 藏身点是核心资源，坏掉不能自动好 —— 否则清道夫没有威慑
+     · 但也不能永久失去 —— 否则一局玩到后期就没得躲了
+     · 所以用「钱」当中间层：越往后修越贵，玩家要权衡「修柜子还是买道具」
+   成本曲线：600 → 960 → 1536 → 2458 → 3932（每次 ×1.6） */
+#define HIDESPOT_REPAIR_BASE  400.0f   /* v2.4.40 平调：450→400 */   /* v2.4.19：600→450（理智也已经扣过） */
+#define HIDESPOT_REPAIR_STEP  1.55f   /* v2.4.19：1.6→1.55，曲线稍缓 */
+#define HIDESPOT_REPAIR_MAX   6      /* 同一局最多修 6 次（再往上就贵得离谱） */

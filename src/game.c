@@ -170,6 +170,7 @@ Container containers[MAX_CONTAINERS];
 /* v3.0：藏身点 */
 HideSpot hideSpots[HIDESPOT_MAX];
 int hideSpotCount = 0;
+int hideRepairCount = 0;   /* v2.4.17：本局已修复次数 */
 int hiddenIn = -1;          /* >=0 表示藏在第几个点里 */
 int hideSpotNear = -1;      /* 当前离得最近、可以钻的点 */
 int lockedThisFloor = 0;   /* v3.0：本层已上锁的箱子数 */
@@ -276,8 +277,10 @@ float weaponAtkCharge = 0.0f;  /* 武器蓄力 0..1 */
    次数制（0/1 级）与冷却制（2/3 级）共存：
      wrenchCharges 只在次数制下有意义，每层开始重置
      wrenchCd      只在冷却制下有意义 */
+float gameTime = 0.0f;   /* v2.4.3: 全局秒表（出口脉冲等用） */
 int   shopContractUsed = 0;   /* v7 B3: 本局是否已经签过协议 */
-float playerMoveSpeedNow = 0.0f;   /* v8: 本帧玩家移速（守门人用） */
+float playerMoveSpeedNow = 0.0f;
+
 int   wrenchCharges  = 2;
 float wrenchCd       = 0.0f;
 int   wrenchLastUsed = 0;      /* 本层已经用掉几次（次数制显示用） */
@@ -550,7 +553,7 @@ void PlaceDecoy(float x, float y) {
     if (slot < 0) return;
     decoysArr[slot].x = x;
     decoysArr[slot].y = y;
-    decoysArr[slot].life = 30.0f;
+    decoysArr[slot].life = 10.0f;   /* v2.4.14：只活 10 秒 */
     decoysArr[slot].shoutT = DECOY_SHOUT_EVERY;
     decoysArr[slot].hp = DECOY_HP;
     decoysArr[slot].active = 1;
@@ -1037,7 +1040,7 @@ static void BuildTrainingArena(void) {
             explored[y][x] = 1;          /* 长廊全图可见，方便看提示 */
         }
 
-    /* 一条 3 格高、从 x=2 到 x=21 的直走廊，y 中心 12 */
+    /* 一条 3 格高、从 x=2 到 x=21 的直走廊，y 中心 12（作者原版，已恢复） */
     int y0 = MAP_HEIGHT / 2 - 1, y1 = MAP_HEIGHT / 2 + 1;
     for (int y = y0; y <= y1; y++)
         for (int x = 2; x <= MAP_WIDTH - 3; x++)
@@ -1047,14 +1050,23 @@ static void BuildTrainingArena(void) {
     posY = (float)(MAP_HEIGHT / 2) + 0.5f;
     dirX = 1.0f; dirY = 0.0f;
 
-    /* 靶子：走廊靠后，固定不动，只用来试投掷/敲击 */
+    /* 听声怪：标本模式冻结在原地看着，实战模式给正常参数让它真的追声 */
     monster.x = 18.5f;
     monster.y = (float)(MAP_HEIGHT / 2) + 0.5f;
     monster.active = 1;
     monster.state = 2;
     monster.hp = 9999;
     monster.stun = 0.0f;
-    monster.speed = 0.0f;
+    monster.speed = 0.0f;          /* 标本：完全不动 */
+
+    monster.x = 18.5f;
+    monster.y = (float)(MAP_HEIGHT / 2) + 0.5f;
+    monster.active = 1;
+    monster.state = 2;
+    monster.hp = 9999;
+    monster.stun = 0.0f;
+    monster.speed = 0.0f;          /* 标靶：不动 */
+    { extern Monster monster2; monster2.active = 0; }
 
     lightBeast.active = 0;
     parasite.active = 0;
@@ -1063,6 +1075,7 @@ static void BuildTrainingArena(void) {
     /* 教程里没有藏身点；必须清掉上一局留下的 active 标记，
        否则走廊里会凭空冒出「按 E 躲藏」提示。 */
     hideSpotCount = 0;
+    hideRepairCount = 0;
     hiddenIn = -1;
     hideSpotNear = -1;
     for (int i = 0; i < HIDESPOT_MAX; i++) hideSpots[i].active = 0;
@@ -2486,6 +2499,7 @@ void SpawnShards(float x, float y, float vx, float vy, float charge) {
 void Update(float dt) {
     { extern float playerMoveSpeedNow; playerMoveSpeedNow = 0.0f; }   /* v8: 守门人判断「在动/冲刺」用 */
     /* v7：可疑点表每帧衰减 / 过期 */
+    { extern float gameTime; gameTime += dt; }   /* v2.4.3 全局秒表 */
     SuspicionTick(dt);
     {   /* v7 B4：第一次携带超过 8000 时提一句 */
         extern void HintOnce(int);
@@ -2799,6 +2813,33 @@ void Update(float dt) {
                 keyPressed[g_bindings[ACT_INTERACT]] = 0;
                 uiDirty = 1;
             }
+        } else if (hideSpotNear >= 0 && hideSpots[hideSpotNear].broken) {
+            /* ===== v2.4.17 **修复藏身点** =====
+               清道夫撬坏的点按 E 花钱修。每修一次更贵。 */
+            extern int hideRepairCount;
+            float cost = HIDESPOT_REPAIR_BASE;
+            for (int rc = 0; rc < hideRepairCount; rc++) cost *= HIDESPOT_REPAIR_STEP;
+            if (cost > 99999.0f) cost = 99999.0f;
+
+            if (IsActionPressed(ACT_INTERACT)) {
+                hideKeyLatch = 1;
+                keyPressed[g_bindings[ACT_INTERACT]] = 0;
+                if (carryGold >= cost && hideRepairCount < HIDESPOT_REPAIR_MAX) {
+                    carryGold -= cost;
+                    hideSpots[hideSpotNear].broken = 0;
+                    hideRepairCount++;
+                    pickupMsg = (g_lang == LANG_ZH) ? "藏身点修好了" : "HIDE SPOT REPAIRED";
+                    pickupMsgTimer = 1.6f;
+                    PlaySfx(SFX_GLASS, 0.6f);
+                } else if (hideRepairCount >= HIDESPOT_REPAIR_MAX) {
+                    pickupMsg = (g_lang == LANG_ZH) ? "修不了了（太破了）" : "TOO BROKEN TO REPAIR";
+                    pickupMsgTimer = 1.6f;
+                } else {
+                    pickupMsg = (g_lang == LANG_ZH) ? "金币不够修这个" : "NOT ENOUGH GOLD";
+                    pickupMsgTimer = 1.6f;
+                }
+                uiDirty = 1;
+            }
         } else if (hideSpotNear >= 0 && hoverKind == 0 && hideBlockTimer <= 0.0f) {
             /* v3.0 修复：**附近有可交互的箱子时，藏身点不抢 E** ——
                原来藏身点无条件抢在容器前面消费按键
@@ -2898,6 +2939,9 @@ void Update(float dt) {
         pickupMsg = (g_lang == LANG_ZH) ? "商店只在安全屋" : "SHOP: SAFE HOUSE ONLY";
         pickupMsgTimer = 1.4f;
     }
+
+
+
 
     if (currentState == STATE_PLAYING && trainingMode && keyPressed['B']) {
         keyPressed['B'] = 0;
@@ -3736,6 +3780,7 @@ void Update(float dt) {
     EnsureThrowSelectedValid();   /* v1.14：手里不能是空的 */
     if (lastHitTimer > 0.0f) lastHitTimer -= dt;   /* v1.15：命中数字淡出 */
     UpdateMonster(dt);
+    { extern void UpdateMonster2(float); UpdateMonster2(dt); }   /* v2.4.12 第二只 */
     UpdateLightBeast(dt);
     UpdateParasite(dt);
     UpdateLeech(dt);

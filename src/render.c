@@ -7,6 +7,7 @@
 #include <math.h>
 #include "render.h"
 #include "suspicion.h"
+#include "art.h"
 #include "bench.h"
 #include "weapons.h"
 #include "extras.h"
@@ -590,6 +591,15 @@ static void DrawBreakerSprite(void) {
 /* ------------------------------------------------------------------ */
 
 /* v2.1：场景道具统一走烘焙精灵（原来是 relX/relY 硬编码的字符画） */
+/* ===== v2.4.3 **道具的距离衰减** =====
+   用户要求：道具也要「远处看不清、近处才看得清」。
+   但道具比怪物**温和一档** —— 太黑会让玩家找不到箱子/配电箱。
+     · 怪物：2.5 格全亮，11 格外只剩 5%
+     · 道具：3.5 格全亮，13 格外剩 12%
+   调参在这里改。 */
+/* v2.4.3: 距离曲线已统一到 src/art.c 的 ArtPropLight() */
+static float PropProximityLight(float wx, float wy) { return ArtPropLight(wx, wy); }
+
 static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK) {
     SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
     if (!s.ok) return;
@@ -606,7 +616,7 @@ static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK
     int size = h;
     int x = (s.x0 + s.x1) / 2 - size / 2;
     int y = s.y1 - size;
-    float light = SpriteShade(s.ty, 0.12f);
+    float light = SpriteShade(s.ty, 0.12f) * PropProximityLight(wx, wy);   /* v2.4.3 距离衰减 */
     DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
     DrawSprite(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty);
 }
@@ -738,22 +748,8 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
 
    为什么这样有压迫感：看不清才是最恐怖的。
    8 格外只剩黑影，你直到 4~5 格才确定那是什么 —— 那时候已经晚了。 */
-static float ProximityLight(float wx, float wy) {
-    #define NPROX_NEAR  2.5f     /* 这个距离内 = 全亮 */
-    #define NPROX_FAR  11.0f     /* 这个距离外 = 几乎全黑 */
-    #define NPROX_FLOOR 0.05f    /* 最暗也不完全消失 */
-    #define NPROX_POW   1.9f     /* 越大衰减越急 */
-
-    float dx = wx - posX, dy = wy - posY;
-    float dist = sqrtf(dx * dx + dy * dy);
-    if (dist <= NPROX_NEAR) return 1.0f;
-    if (dist >= NPROX_FAR)  return NPROX_FLOOR;
-    float k = 1.0f - (dist - NPROX_NEAR) / (NPROX_FAR - NPROX_NEAR);
-    if (k < 0.0f) k = 0.0f;
-    k = powf(k, NPROX_POW);
-    if (k < NPROX_FLOOR) k = NPROX_FLOOR;
-    return k;
-}
+/* v2.4.3: 距离曲线已统一到 src/art.c 的 ArtMonsterLight() */
+static float ProximityLight(float wx, float wy) { return ArtMonsterLight(wx, wy); }
 
 static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
     if (!m->active) return;
@@ -812,6 +808,11 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
     }
 }
 
+static void DrawMonster2Sprite(void) {
+    extern Monster monster2;
+    if (!monster2.active) return;
+    DrawBeastSprite(&monster2, 0x00ff0000);
+}
 static void DrawMonsterSprite(void) { DrawBeastSprite(&monster, 0x00ff4020u); }
 
 /* v1.8 偷电怪：体型 55%，暗色，只有被手电光锥照到才可见。
@@ -1910,13 +1911,124 @@ static void DrawFlowerSprite(void) {
 }
 
 
+/* ===== v2.4.4 **出口重新设计 v2**（按 art_direction.h + art.c）=====
+   v2.4.3 那版还是太平：一整块灰 + 一条黑缝，没有体积感。
+
+   这一版加了四层细节，全部用 src/art.c 的仿 3D 原语：
+
+   ① 斜角边框   ArtBevelK —— 左上受光、右下背光，1~2 像素的明暗差就出厚度
+   ② 内凹门板   ArtRecessK —— 门框里再嵌一层，上壁暗、下壁亮，读作「凹进去」
+   ③ 门缝透视   缝从上往下加宽（近大远小），两侧被光溢出的边逐级变亮
+   ④ 光柱抖动   用 ArtDitherOn 做有序抖动，渐层是分级清晰的像素画，不是糊成一团
+
+   地标仍然是「门上方那道竖向光柱」，只有出口有。
+*/
 static void DrawExitBeamSprite(void) {
-    if (!breakerOpen) {
-        /* 没通电：门只画个暗框 */
-        DrawBakedProp(SPR_PROP_EXIT, exitX, exitY, 0.62f, 0.22f);
-        return;
+    float halfH = breakerOpen ? 1.05f : 0.72f;
+    SpriteBox s = ProjectSprite(exitX, exitY, 0.0f, halfH);
+    if (!s.ok) return;
+    if (s.ty < 0.55f) return;
+
+    int w = s.x1 - s.x0, h = s.y1 - s.y0;
+    if (w < 3 || h < 3) return;
+
+    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, w / 3, s.ty);
+
+    float light = SpriteShade(s.ty, 0.12f) * ArtPropLight(exitX, exitY);
+
+    /* 呼吸脉冲：通电时让远处注意到「那边在动」 */
+    float pulse = 1.0f;
+    if (breakerOpen) {
+        extern float gameTime;
+        pulse = 0.82f + 0.18f * sinf(gameTime * 2.4f);
     }
-    DrawBakedProp(SPR_PROP_EXIT, exitX, exitY, 1.05f, 1.0f);
+
+    for (int x = s.x0; x < s.x1; x++) {
+        if (x < 0 || x >= renderW) continue;
+        if (s.ty >= zBuffer[x]) continue;
+        float u = (float)(x - s.x0) / (float)w;
+
+        for (int y = s.y0; y < s.y1; y++) {
+            if (y < 0 || y >= renderH) continue;
+            float v = (float)(y - s.y0) / (float)h;
+
+            /* ---- 外框范围：四角切掉，像嵌在墙里 ---- */
+            if (u < 0.06f || u > 0.94f || v < 0.04f) continue;
+
+            /* ---- 门缝：上窄下宽（近大远小） ---- */
+            float gapW = (breakerOpen ? 0.26f : 0.055f) * (0.72f + 0.28f * v);
+            float du = (u - 0.5f) * 2.0f;
+            int isGap = (du > -gapW && du < gapW);
+
+            unsigned int c;
+            float k;
+
+            if (isGap) {
+                /* 门缝内部：通电亮青，断电几乎全黑 */
+                c = breakerOpen ? ART_EXIT_GAP_ON : ART_EXIT_GAP_OFF;
+                k = light * (breakerOpen ? pulse : 0.5f);
+                /* 缝的深处更暗（往里看是黑的） */
+                k *= 0.55f + 0.45f * fabsf(du) / (gapW > 0.001f ? gapW : 0.001f);
+            } else {
+                /* ---- 门框：斜角 + 内凹两层光照 ---- */
+                float lit = ArtBevelK(u, v, 0.045f, 0.55f)
+                          * ArtRecessK(u, v, 0.10f, 0.42f);
+
+                /* 三段材质：外框暗灰 / 内板中灰 / 靠缝的受光边更亮 */
+                float distToGap = fabsf(du) - gapW;
+                if (distToGap < 0.10f) {
+                    c = ART_GREY_HOT;                 /* 被门缝的光照亮的内边 */
+                } else if (u > 0.14f && u < 0.86f) {
+                    c = ART_GREY_LIT;                 /* 内凹门板 */
+                } else {
+                    c = ART_GREY_BODY;                /* 外框 */
+                }
+                k = light * lit;
+
+                /* 通电时，门缝的光会往外溢出一圈 */
+                if (breakerOpen && distToGap < 0.26f) {
+                    float spill = 1.0f - distToGap / 0.26f;
+                    k *= 1.0f + spill * 0.55f * pulse;
+                }
+
+                /* 竖向拉丝纹理：每 5 像素一条极淡的暗线，给出表面质感 */
+                if (((y - s.y0) % 5) == 0) k *= 0.93f;
+            }
+
+            pixels[(size_t)y * renderW + x] = ArtScale(c, k);
+        }
+    }
+
+    /* ---- 光柱：地标。有序抖动让它像像素画的光，不是模糊渐变 ---- */
+    if (breakerOpen) {
+        int cxp = (s.x0 + s.x1) / 2;
+        int beamHalf = (w / 8 > 2) ? w / 8 : 2;
+        int beamH = (int)((s.y1 - s.y0) * 1.15f);
+        int beamTop = s.y0 - beamH;
+        if (beamTop < 0) beamTop = 0;
+
+        for (int x = cxp - beamHalf - 2; x <= cxp + beamHalf + 2; x++) {
+            if (x < 0 || x >= renderW) continue;
+            if (s.ty >= zBuffer[x]) continue;
+
+            float dxp = (float)(x - cxp) / (float)(beamHalf + 3);
+            float edge = 1.0f - dxp * dxp;            /* 中间最亮，两侧衰减 */
+            if (edge <= 0.0f) continue;
+
+            for (int y = beamTop; y < s.y0; y++) {
+                if (y < 0 || y >= renderH) continue;
+                /* t: 0 = 光柱顶端（最淡）  1 = 接地处（最亮） */
+                float t = (float)(y - beamTop) / (float)(beamH + 1);
+                float a = edge * t * t * pulse;
+
+                /* 有序抖动：a 越小，落点的像素越稀疏 —— 像真正的光束 */
+                if (!ArtDitherOn(a, x, y, 1.35f)) continue;
+
+                float k = light * (0.45f + 0.55f * a);
+                pixels[(size_t)y * renderW + x] = ArtScale(ART_BEAM, k);
+            }
+        }
+    }
 }
 
 
@@ -1987,6 +2099,16 @@ void RenderSprites(void) {
         if (n < MAX_SPRITES) {
             list[n].d2 = Dist2(monster.x, monster.y, posX, posY);
             list[n].kind = 2;
+            list[n].idx = 0;
+            n++;
+        }
+    }
+    /* v2.4.12：第二只听声怪也进渲染列表 */
+    {
+        extern Monster monster2;
+        if (monster2.active && n < MAX_SPRITES) {
+            list[n].d2 = Dist2(monster2.x, monster2.y, posX, posY);
+            list[n].kind = 13;
             list[n].idx = 0;
             n++;
         }
@@ -2083,6 +2205,7 @@ void RenderSprites(void) {
             case 0: DrawCrateSprite(list[i].idx); break;
             case 1: DrawBreakerSprite(); break;
             case 2: DrawMonsterSprite(); break;
+            case 13: DrawMonster2Sprite(); break;   /* v2.4.12 第二只听声怪 */
         case 9: DrawLeechSprite(list[i].idx); break;
             case 5: DrawLightBeastSprite(); break;
             case 6: DrawFlareSprite(list[i].idx); break;
@@ -3044,10 +3167,27 @@ void RenderMap(void) {
         int px = mapStartX + hxi * cellSize + cellSize / 2;
         int py = mapStartY + hyi * cellSize + cellSize / 2;
         /* 菱形：比箱子的 5x5 方块小一点，一眼能分开 */
-        for (int d = -2; d <= 2; d++) {
-            int span = 2 - (d < 0 ? -d : d);
-            for (int e = -span; e <= span; e++)
-                PutPixel(px + e, py + d, 0x0090E0FF);
+        /* v2.4.23：**坏掉的藏身点画红色 + 叉** ——
+           用户要求「维修点要在地图上显示为红色」。
+           坏了但还没修的点是最要紧的信息：它决定你还有没有退路。 */
+        if (hideSpots[i].broken) {
+            /* 红色菱形（比正常的更暗一档，不抢眼但一眼能认） */
+            for (int d = -2; d <= 2; d++) {
+                int span = 2 - (d < 0 ? -d : d);
+                for (int e = -span; e <= span; e++)
+                    PutPixel(px + e, py + d, 0x00FF3020);
+            }
+            /* 打一个叉：坏掉 = 不可用，形状上也要变 */
+            for (int d = -3; d <= 3; d++) {
+                PutPixel(px + d, py + d, 0x00FF6050);
+                PutPixel(px + d, py - d, 0x00FF6050);
+            }
+        } else {
+            for (int d = -2; d <= 2; d++) {
+                int span = 2 - (d < 0 ? -d : d);
+                for (int e = -span; e <= span; e++)
+                    PutPixel(px + e, py + d, 0x0090E0FF);
+            }
         }
     }
 

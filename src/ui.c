@@ -342,6 +342,46 @@ void DrawTextWin(int xWin, int yWin, const char* t, unsigned int color) {
     }
 }
 
+
+/* v2.4.26：**小号字**（scale 固定 1）。
+   全局点阵字只有一档大小（TextScale 跟窗口缩放走），
+   这条通道给「角落的次要提示」用 —— 不抢画面、不压住功能 UI。 */
+void DrawTextSmallWin(int xWin, int yWin, const char* t, unsigned int color) {
+    t = Transl(t);
+    if (CjkHasNonAscii(t)) {
+        CjkDrawRaw(xWin * renderW / winW, yWin * renderH / winH, t, color);
+        return;
+    }
+    int s = 1;
+    int px = xWin * renderW / winW;
+    int py = yWin * renderH / winH;
+    for (const char* p = t; *p; p++) {
+        int ch = (unsigned char)*p;
+        if (ch < 32 || ch > 126) ch = '?';
+        const unsigned char* g = fontData[ch - 32];
+        for (int r = 0; r < FONT_H; r++) {
+            unsigned char bits = g[r];
+            if (!bits) continue;
+            for (int c = 0; c < FONT_W; c++) {
+                if (!(bits & (1u << (FONT_W - 1 - c)))) continue;
+                int y = py + r * s;
+                if (y < 0 || y >= renderH) continue;
+                unsigned int* row = pixels + (size_t)y * renderW;
+                int x = px + c * s;
+                if (x >= 0 && x < renderW) row[x] = color;
+            }
+        }
+        px += FONT_W * s;
+    }
+}
+
+int DrawTextSmallWidth(const char* t) {
+    t = Transl(t);
+    int n = 0;
+    for (const char* p = t; *p; p++) n++;
+    return n * FONT_W + 2;
+}
+
 void DrawTextCenterWin(int cxWin, int yWin, const char* t, unsigned int color) {
     DrawTextWin(cxWin - TextWidthWin(t) / 2, yWin, t, color);
 }
@@ -3337,12 +3377,28 @@ void DrawHUD(void) {
     {
         extern int carryGold, bankHistMax;
         int hudY3 = hudY2 + hudTH + UIS(4);
-        /* ===== v2.4.7 **新怪状态行** =====
-           原来 HUD 右侧只有听声怪的 WANDERING/HUNTING。
-           清道夫正在翻你的箱子时，那里还写着 WANDERING，非常容易误读。
-           现在把三只新怪的状态单独显示。 */
+        /* ===== v2.4.30 **新怪状态行（只保留能改变玩家决定的）** =====
+           用户问「这行字有没有实用价值，没有就删掉」，判断标准定成一条：
+
+             **这条状态出现时，玩家会因此做一件不同的事吗？**
+
+               会  → 留
+               不会 → 删
+
+           按这条标准砍掉三条：
+
+             SCAVENGER APPROACHING   删 —— 生成时已经有「有东西在靠近…」，
+                                          而且它会自动找过来，知道了也做不了什么
+             THE COLLECTOR IS NEAR   删 —— 同上，纯粹是「有个东西存在」的信息
+             WARDEN PATROLLING       删 —— 巡逻状态不影响任何操作，纯噪音
+
+           保留两条，因为它们分别对应一个**具体动作**：
+
+             WARDEN BLOCKS EXIT      留 —— 出口被堵，要么等 25 秒，要么绕开
+             SCAVENGER RIFLING ...   留 —— 你的箱子正在被吃掉，赶紧回去
+        */
         {
-            extern int   CollectorActive(void), ScavengerActive(void), ScavengerRifling(void);
+            extern int   ScavengerRifling(void);
             extern int   WardenActive(void), WardenBlocking(void);
             const char* st = NULL;
             unsigned int stc = 0x00D0D0D0u;
@@ -3351,12 +3407,6 @@ void DrawHUD(void) {
                 st = Tr("WARDEN BLOCKS EXIT", "守门人堵住了出口"); stc = 0x00FF6050u;
             } else if (ScavengerRifling()) {
                 st = Tr("SCAVENGER RIFLING YOUR CRATES", "清道夫在翻你的箱子"); stc = 0x00FFB040u;
-            } else if (ScavengerActive()) {
-                st = Tr("SCAVENGER APPROACHING", "清道夫正在靠近"); stc = 0x00FFB040u;
-            } else if (CollectorActive()) {
-                st = Tr("THE COLLECTOR IS NEAR", "拾荒者在你附近"); stc = 0x00FFD070u;
-            } else if (WardenActive()) {
-                st = Tr("WARDEN PATROLLING", "守门人在巡逻"); stc = 0x0080A0D0u;
             }
             if (st) {
                 int sw = TextWidthWin(st);
@@ -3405,7 +3455,13 @@ void DrawHUD(void) {
          196 FLARE / BOTTLE */
     {
         static const char* fxName[FX_COUNT] = { "BLINDED", "SLOWED", "DRAINING" };
-        int fy = UIS(18) + TextHeightWin() * 3 + UIS(8);   /* v2.9：跟 FUSES 累加 */
+        /* v2.4.36：**按真实行距算** ——
+           HUD 用的是 hudTH + UIS(4) 当行距，不是 TextHeightWin()。
+           我上一版按 TextHeightWin()*5 算，比真实高度小，
+           所以 SLOWED 还是压在 BOOST 上（用户截图）。
+           现在直接跟 BOOST 那一行对齐：
+             BOOST 在 hudY3 + hudTH + UIS(4)，效果就从下一行开始。 */
+        int fy = UIS(18) + (hudTH + UIS(4)) * 6 + UIS(6);   /* 6 行 HUD 之后的下一行 */
         for (int i = 0; i < FX_COUNT; i++) {
             float s = FxStrength(i);
             if (s <= 0.0f) continue;
@@ -3624,22 +3680,11 @@ void DrawHUD(void) {
         DrawTextWin(winW - UIS(20) - TextWidthWin(buf), UIS(18), buf, 0x00C8C8C8u);
     }
 
-    /* 拾取提示：屏幕中央上方，2秒后淡出 */
-    if (pickupMsg && pickupMsgTimer > 0.0f) {
-        /* 提示文本统一走窗口内绘制，长文本会被 ClampRowText 之外的地方撑出屏幕 */
-        int tw = TextWidthWin(pickupMsg);
-        int tx = (winW - tw) / 2;
-        /* v3.0：**用「屏幕高度的百分比」而不是 UIS 固定值** ——
-           UIS 会跟 renderH 缩放，小窗口时 150 换算出来仍会和藏身提示撞
-           （验证报告：800×600 下 "HOLD E - HIDE" 与 "NEED 2 MORE FUSE" 重叠 2408 px²）。
-           改成贴在 LEVEL/SANITY/FUSES 那几行下面，永远不碰下半屏。 */
-        int ty = UIS(150);
-        if (ty < TextHeightWin() * 5) ty = TextHeightWin() * 5;   /* 至少在第 5 行文字以下 */
-
-        float alpha = pickupMsgTimer / 2.0f;
-        if (alpha > 1.0f) alpha = 1.0f;
-        DrawTextWin(tx, ty, pickupMsg, 0x00E8E060u);
-    }
+    /* v2.4.20：拾取提示**从这里移走** —— 见 DrawPickupToast()。
+       原因：藏身遮罩是在 RenderFrame 末尾才画的，
+       而 DrawHUD 早于它，所以躲进柜子时这条黄字会被 94% 黑遮罩盖掉
+       （用户截图：「中间那条黄色的重要提示会丢失」）。
+       现在它作为**最后一层**单独绘制，永远在最上面。 */
 
     /* 手电电量 / 体力：左下两条细条，标签按实际文字宽度排版 */
     int barW = UIS(180), barH = UIS(12);
@@ -3763,8 +3808,42 @@ void DrawHUD(void) {
             DrawTextWin(UIS(20), hy + lh,
                         Tr("T  -  OPEN SHOP", "T  -  打开商店"), 0x00E8C040u);
         } else if (hideSpotNear >= 0 && currentState == STATE_PLAYING) {
-            DrawTextWin(UIS(20), winH - UIS(150),
-                        Tr("PRESS E  -  HIDE", "按 E 躲进去"), 0x0090D0F0u);
+            /* ===== v2.4.21 **坏掉的藏身点要报修复金额** =====
+               用户反馈：柜子坏了之后只提示 "NOT ENOUGH GOLD"，
+               根本不知道要多少钱 —— 等于让玩家盲赌。
+               现在靠近就直接把金额和你的持有量一起报出来：
+                 PRESS E - REPAIR 450   (YOU HAVE 60)      ← 钱够：正常色
+                 PRESS E - REPAIR 450   (SHORT 390)        ← 钱不够：红色
+            */
+            extern HideSpot hideSpots[];
+            extern int hideRepairCount;
+
+            if (hideSpotNear < HIDESPOT_MAX && hideSpots[hideSpotNear].broken) {
+                extern int carryGold;   /* 它是 int，见 game.c */
+                float cost = HIDESPOT_REPAIR_BASE;
+                for (int rc = 0; rc < hideRepairCount; rc++) cost *= HIDESPOT_REPAIR_STEP;
+                if (cost > 99999.0f) cost = 99999.0f;
+
+                char rb[96];
+                if (hideRepairCount >= HIDESPOT_REPAIR_MAX) {
+                    sprintf(rb, Tr("BROKEN  -  TOO DAMAGED TO REPAIR",
+                                   "柜子坏了  -  破得太狠，修不了"));
+                    DrawTextWin(UIS(20), winH - UIS(150), rb, 0x00806060u);
+                } else if ((float)carryGold >= cost) {
+                    sprintf(rb, Tr("PRESS E  -  REPAIR  %d   (YOU HAVE %d)",
+                                   "按 E 修理  %d 金币   （你有 %d）"),
+                            (int)(cost + 0.5f), (int)(carryGold + 0.5f));
+                    DrawTextWin(UIS(20), winH - UIS(150), rb, 0x0060FF90u);
+                } else {
+                    sprintf(rb, Tr("REPAIR COST  %d   (SHORT %d)",
+                                   "修复需要  %d 金币   （还差 %d）"),
+                            (int)(cost + 0.5f), (int)(cost - (float)carryGold + 0.5f));
+                    DrawTextWin(UIS(20), winH - UIS(150), rb, 0x00FF6050u);
+                }
+            } else {
+                DrawTextWin(UIS(20), winH - UIS(150),
+                            Tr("PRESS E  -  HIDE", "按 E 躲进去"), 0x0090D0F0u);
+            }
         }
 
         /* ② 敌人状态（三态雷达）—— 怪不可杀后这是唯一的威胁指标 */
@@ -4221,6 +4300,59 @@ static void DrawSaveStatusBanner(void) {
 /* ------------------------------------------------------------------ */
 /* 一帧的呈现                                                          */
 /* ------------------------------------------------------------------ */
+
+/* ===== v2.4.20 **拾取/事件提示，最顶层** =====
+   用户实测：躲进藏身点后，中间那条黄色提示被藏身遮罩吃掉。
+   根因是绘制顺序：DrawHUD → ... → 藏身遮罩（最后画，盖住一切）。
+
+   现在这条提示单独拿出来，在 RenderFrame 的**最后**调用，
+   所以它永远压在所有东西上面。位置分两档：
+     · 正常游玩：屏幕上方第 5 行以下（原位置）
+     · 躲藏中：**下移到观察缝下方**，并加半透明底，
+               避免和缝里的画面抢注意力
+*/
+void DrawPickupToast(void) {
+    extern const char* pickupMsg;
+    extern float pickupMsgTimer;
+    extern int hiddenIn;
+
+    if (!pickupMsg || pickupMsgTimer <= 0.0f) return;
+
+    int tw = TextWidthWin(pickupMsg);
+    int tx = (winW - tw) / 2;
+    int ty;
+
+    if (hiddenIn >= 0) {
+        /* v2.4.26：**躲藏时用小号字，贴在最左下角** ——
+           用户两次反馈：先压到方框下沿，字号又太大。
+           现在：scale=1 的小字 + 左对齐 x=20 + y 贴状态面板上方，
+           画的宽度按小号字重新算，绝不会伸到中间的方框里。 */
+        int sw2 = DrawTextSmallWidth(pickupMsg);
+        int shH = FONT_H + 2;
+        tx = UIS(16);
+        /* v2.4.27：**再往上挪 70** ——
+           原来 y = winH-150 正好压在左下状态面板的上边框上
+           （用户截图：黄框和 SANITY 面板贴在一起）。
+           面板顶大约在 winH-160，留出 30 的空隙。 */
+        ty = winH - UIS(220);
+        if (ty < UIS(120)) ty = UIS(120);
+        BlendRectWin(tx - UIS(4), ty - UIS(3), tx + sw2 + UIS(4), ty + shH + UIS(3),
+                     0x00101010u, 0.80f);
+        FrameRectWin(tx - UIS(4), ty - UIS(3), tx + sw2 + UIS(4), ty + shH + UIS(3),
+                     0x00E8E060u, 0.55f, 1);
+        DrawTextSmallWin(tx, ty, pickupMsg, 0x00F0E870u);
+        return;
+    } else {
+        ty = UIS(150);
+        if (ty < TextHeightWin() * 5) ty = TextHeightWin() * 5;
+    }
+
+    DrawTextWin(tx, ty, pickupMsg, 0x00E8E060u);
+}
+
+
+
+
 void RenderFrame(void) {
     UiLayoutBegin();
     HDC hdc = GetDC(g_hwnd);
@@ -4551,6 +4683,14 @@ void RenderFrame(void) {
             dx = (cw - dw) / 2;
             dy = (ch - dh) / 2;
         }
+
+        /* ===== v2.4.24 **拾取/事件提示：最顶层（但在呈现之前）** =====
+           上一版插错了位置 —— 插在 StretchDIBits 之后，
+           那时 pixels 已经贴到屏幕了，再画像素没有任何效果，
+           所以黄字直接消失（用户：「连黄字都不见了」）。
+           现在放在**藏身遮罩之后、呈现之前**，既压住所有遮罩，又能真的显示。 */
+        DrawPickupToast();
+
 
         /* 离屏合成：黑底 + 缩放后的画面先在内存 DC 里拼好，
            再一次性 BitBlt 到窗口。直接往窗口 DC 先填黑再画内容会闪

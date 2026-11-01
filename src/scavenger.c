@@ -1,26 +1,29 @@
 /*
- * Canity — THE SCAVENGER 清道夫（v7 新怪）
+ * Canity — THE SCAVENGER 清道夫（v2.4.18 机制修缮）
  *
- * 设计目标（见 方案 v7 第六部分 ⑤）
+ * 修之前的四个实测 bug（用户报告）
  * ────────────────────────────────
- * 它闻的不是位置，是**「你待太久了」**。
+ *  ① 「我一离开柜子，他就不追击我了」
+ *       → 目标坐标在生成时**只锁一次**，之后玩家跑多远它都往老地方走。
+ *  ② 「他平常站在那里不动」
+ *       → 目标点不可达时 d 永远 > 1.6，状态机卡在「走过去」永远不结束。
+ *  ③ 「再次进柜子，他也不管了」
+ *       → 上面那个卡住的实例 active 恒为 1，
+ *          `if (scavenger.active) return;` 让触发检查再也不执行。
+ *  ④ 「进不同的房间也会出 bug」
+ *       → 只有直线靠近 + 沿墙滑动，跨房间必卡。
  *
- * 触发（满足任一）
- *   · 本层累计停留 > 120 秒
- *   · 连续躲进藏身点 2 次（中间没搜过箱子）
- *
- * 到达玩家待最久的那个房间后
- *   玩家在藏身点里 → 提前 1.5 秒给「柜门被拉开」音效 → 拉出
- *                    扣 15 理智，藏身点本层作废
- *   玩家不在       → 吃这个房间里未搜的箱子，每箱 3 秒
- *
- * 为什么这样设计
- *   藏身点现在是「100% 安全的紧急按钮」，连续用两次就有人来开门。
- *   而且它不是倒计时处刑 —— 它慢（1.0 格/秒）、要走路过来，
- *   玩家有一整层的时间可以跑掉。
+ * 修法
+ * ────
+ *  · **持续重新锁定**：每 1.0 秒把目标改成玩家当前位置（躲着就锁藏身点）
+ *  · **卡死检测**：2 秒内位移 < 0.25 格 → 判定卡住 → 直接绕到玩家附近重生
+ *  · **寿命上限**：60 秒还没干成事就自己走（绝不永久站着）
+ *  · **到达后的行为明确**：躲着 → 拉柜门；没躲 → 翻箱 3 秒 → 走；
+ *    没箱子可翻 → 原地翻找 2 秒 → 走（有动作，不是站着）
+ *  · **可以重来**：走掉之后 25 秒冷却，冷却完 hideStreak 归零，可再次触发
  */
 #include <math.h>
-#include "state.h"   /* v8: 走统一的全局状态入口 */
+#include "state.h"
 #include "common.h"
 #include "game.h"
 #include "entity.h"
@@ -28,25 +31,111 @@
 #include "lang.h"
 #include "skills.h"
 
-#define SCAV_TRIGGER_TIME  120.0f   /* 本层停留多少秒触发 */
-#define SCAV_SPEED          1.0f    /* 格/秒，慢 */
+#define SCAV_TRIGGER_TIME  180.0f   /* v2.4.40 平调：150→180。
+                                       一层正常 2~4 分钟，150 秒几乎每层必来。 */   /* v2.4.19 平衡：120→150。
+                                       对比：寻声怪是「一进层就在」的常驻压力，
+                                       清道夫是**额外**压力，120 秒几乎每层必触发，
+                                       150 秒才让「快点走」这个决策有意义。 */
+#define SCAV_SPEED          1.55f   /* v2.4.40 平调：1.4→1.55。
+                                       玩家走速 2.0 / 冲刺 2.4 ——
+                                       1.4 让「走路也甩得掉」，压迫感不足；
+                                       1.55 逼你必须跑，才配得上「它一直追你」。 */    /* 格/秒（原来 1.0 太慢，追不上人） */
 #define SCAV_GRAB_WARN      1.5f    /* 拉出前的预警秒数 */
-#define SCAV_SANITY_LOSS   15.0f    /* 被抓走扣多少理智（v7：25 → 15） */
-#define SCAV_EAT_TIME       3.0f    /* 吃一个箱子几秒 */
+/* ===== v2.4.36 **被撬柜子的理智惩罚重新设计** =====
+   用户要求：改成**扣 20% 当前理智**，并且随「带入金币」和「强度档位」逐渐增加。
+
+   为什么用百分比而不是定值：
+     定值 12 在 20 理智时是致命的，在 90 理智时几乎无感 ——
+     百分比让它**永远疼，但永远不致死**，符合「这个游戏不让你死，只让你变糟」。
+
+   三段叠加：
+     基础      20%
+     金币加成  carryGold / 10000 × 0.6%   （封顶 +15%）
+     档位加成  GoldTier() × 0.8%          （封顶 +15%）
+     总计      20% ~ 50%
+
+   对比：寻声怪抓一次扣 18 点**定值**理智，不碰柜子；
+        清道夫扣的是百分比 + 撬坏柜子，代价更重，但也更可控。 */
+#define SCAV_SAN_PCT_BASE     0.20f   /* 基础 20% */
+#define SCAV_SAN_PCT_GOLD     0.006f  /* 每 10000 金币 +0.6% */
+#define SCAV_SAN_PCT_GOLD_CAP 0.15f   /* 金币加成封顶 +15% */
+#define SCAV_SAN_PCT_TIER     0.008f  /* 每档强度 +0.8% */
+#define SCAV_SAN_PCT_TIER_CAP 0.15f   /* 档位加成封顶 +15% */
+#define SCAV_SAN_PCT_MAX      0.50f   /* 总上限 50% */
+
+/* 算出本次要扣多少**点**理智 */
+static float scavSanityLoss(void) {
+    extern int carryGold;
+    extern int GoldTier(void);
+
+    float pct = SCAV_SAN_PCT_BASE;
+
+    float g = (float)(carryGold > 0 ? carryGold : 0) / 10000.0f * SCAV_SAN_PCT_GOLD;
+    if (g > SCAV_SAN_PCT_GOLD_CAP) g = SCAV_SAN_PCT_GOLD_CAP;
+    pct += g;
+
+    float t = (float)GoldTier() * SCAV_SAN_PCT_TIER;
+    if (t > SCAV_SAN_PCT_TIER_CAP) t = SCAV_SAN_PCT_TIER_CAP;
+    pct += t;
+
+    if (pct > SCAV_SAN_PCT_MAX) pct = SCAV_SAN_PCT_MAX;
+
+    return sanity * pct;      /* 按**当前理智**算 */
+}
+#define SCAV_EAT_TIME       2.5f    /* v2.4.40 平调：3.0→2.5。它只待 25 秒，
+                                       3 秒吃一个太拖拉，经常一个都没吃完就走了。 */    /* 吃一个箱子几秒 */
+#define SCAV_RETARGET       1.0f    /* 每隔多久重新锁定玩家 */
+/* v2.4.39 **追击时间**：它出来之后最多追你这么久，到点就消失。
+   期间无条件一直朝你走（BFS 梯度每帧指向你）。
+   45 秒 ≈ 一个房间来回 + 一次喘息，够压迫但不至于追到窒息。 */
+#define SCAV_LIFE_MAX      25.0f    /* v2.4.40 平调：45→25。25 秒够它穿过两个房间，但不会追到你烦躁；到点就消失回冷却。 */
+#define SCAV_ARRIVE_R        1.2f    /* v2.4.19 平衡：1.8→1.2。
+                                       对比：拾荒者接触半径 0.70，寻声怪抓人 0.55 平方。
+                                       1.8 会让它「隔着一个身位就把你拽出来」，读感像作弊。 */
+#define SCAV_COOLDOWN      35.0f    /* v2.4.40 平调：40→35。追得短，冷却同比降。 */    /* v2.4.19 平衡：25→40。
+                                       对比：守门人解除堵门后冷却 45 秒。
+                                       清道夫一次就能撬坏柜子 + 扣理智，惩罚更重，
+                                       冷却不该比守门人短。 */
+#define SCAV_STUCK_MOVE     0.25f   /* 2 秒内位移小于这个 = 卡住 */
+#define SCAV_SEARCH_TIME    2.0f    /* 到了但没箱子翻 → 原地翻找几秒 */
+
+/* ===== v2.4.28 **玩家跑出柜子后被它逮到** =====
+   用户要求：玩家意识到它来了、从藏身点跑出来，
+   如果它追上玩家 ——
+     · 玩家吃 **30% 减速，持续 10 秒**
+     · 理智按 **25 → 50** 随层数成长地扣（复用正式关卡的强度算法）
+   这条走的是「逃跑失败」的代价，和「被堵在柜子里」是两种惩罚。 */
+#define SCAV_CATCH_SLOW      0.35f   /* v2.4.40 平调：30%→35%。 */   /* 减速 30% */
+#define SCAV_CATCH_SLOW_T     8.0f   /* v2.4.40 平调：10→8 秒。
+                                       更疼但更短 —— 减少「被减速追死」的挫败感。 */   /* 持续 10 秒 */
+#define SCAV_CATCH_SAN_MIN   20.0f   /* v2.4.40 平调：25→20（起始层）。 */   /* 第 1 层扣 25 理智 */
+#define SCAV_CATCH_SAN_MAX   45.0f   /* v2.4.40 平调：50→45（封顶）。
+                                       因为柜子损坏还要额外花 450+ 金币。 */   /* 上限 50 */
+#define SCAV_CATCH_STEP      0.030f  /* 每层 +3%（和 MONSTER_SPEED_STEP 同量级） */
+/* v2.4.35 **关键修复**：逮到半径必须 > 到达半径（1.2）。
+   原来写 0.85 < 1.2 —— 它一进 1.2 就被「到达」分支接管（翻箱/翻找），
+   永远走不到 0.85，所以逮到逻辑**一次都没触发过**。
+   用户看到的就是：出现一行字 → 不抓人 → 消失。 */
+#define SCAV_CATCH_R         1.45f   /* 逮到判定半径（必须 > SCAV_ARRIVE_R） */
 
 typedef struct {
     int   active;
     float x, y;
-    float tx, ty;         /* 目标房间中心 */
-    float warnT;          /* >0 = 正在拉柜门 */
-    float eatT;           /* 正在吃箱子的进度 */
-    int   eating;         /* 正在吃的箱子下标，-1 = 没在吃 */
+    float tx, ty;          /* 目标：玩家（或藏身点）的位置，动态更新 */
+    float warnT;           /* >0 = 正在拉柜门 */
+    float eatT;            /* 正在吃箱子的进度 */
+    int   eating;          /* 正在吃的箱子下标，-1 = 没在吃 */
+    float life;            /* 剩余寿命 */
+    float retarget;        /* 距离下次重新锁定 */
+    float searchT;         /* 原地翻找剩余时间 */
+    float lastX, lastY;    /* 卡死检测用 */
+    float stuckT;          /* 卡死检测计时 */
 } Scavenger;
 
 Scavenger scavenger;
+static float scavCooldown = 0.0f;   /* 走掉之后的冷却 */
 
 int   ScavengerActive(void)  { return scavenger.active; }
-/* v2.4.7：是否正在翻箱（吃箱子中）—— 渲染层据此给红调 */
 int   ScavengerRifling(void) { return scavenger.eating >= 0; }
 float ScavengerX(void)       { return scavenger.x; }
 float ScavengerY(void)       { return scavenger.y; }
@@ -59,120 +148,393 @@ void ScavengerReset(void) {
     scavenger.warnT = 0.0f;
     scavenger.eatT = 0.0f;
     scavenger.eating = -1;
+    scavenger.life = 0.0f;
+    scavenger.retarget = 0.0f;
+    scavenger.searchT = 0.0f;
+    scavenger.stuckT = 0.0f;
+    scavCooldown = 0.0f;
 }
 
-/* 朝目标走一步；撞墙就沿墙滑动（不会原地卡死） */
+/* ===== v2.4.22 **多方向绕障** =====
+   原来只会「直线 → 沿墙滑 X → 沿墙滑 Y → 垂直平移」这 4 个方向。
+   跨房间时它会在墙角来回蹭，2 秒不动就触发卡死检测，
+   而卡死检测的处理是**瞬移到玩家附近** —— 玩家看到的就是「追着追着消失了」。
+
+   现在改成：以「指向目标」为基准，按 0° ±25° ±50° ±75° ±100° ±130° ±160° 180°
+   依次试探，**第一个不撞墙的方向就是这一步**。
+   效果等价于简易的沿墙跟随：碰到墙会自己贴着墙绕，不需要瞬移。 */
 static void stepToward(float* x, float* y, float tx, float ty, float sp, float dt) {
     float dx = tx - *x, dy = ty - *y;
     float d = sqrtf(dx * dx + dy * dy);
     if (d < 0.001f) return;
-    float nx = *x + (dx / d) * sp * dt;
-    float ny = *y + (dy / d) * sp * dt;
-    if (!Blocked(nx, ny)) { *x = nx; *y = ny; return; }
-    /* 沿墙滑动：只走 X 或只走 Y */
-    if (!Blocked(nx, *y)) { *x = nx; return; }
-    if (!Blocked(*x, ny)) { *y = ny; return; }
-    /* 两侧都堵 —— 平移一点绕过去 */
-    float sx = *x + (dy / d) * sp * dt;
-    float sy = *y - (dx / d) * sp * dt;
-    if (!Blocked(sx, sy)) { *x = sx; *y = sy; }
+
+    float base = atan2f(dy, dx);
+    static const float offs[13] = {
+        0.00f,
+        0.44f, -0.44f,      /* ±25° */
+        0.87f, -0.87f,      /* ±50° */
+        1.31f, -1.31f,      /* ±75° */
+        1.75f, -1.75f,      /* ±100° */
+        2.27f, -2.27f,      /* ±130° */
+        2.79f, -2.79f       /* ±160° */
+    };
+
+    float stepLen = sp * dt;
+    for (int i = 0; i < 13; i++) {
+        float a = base + offs[i];
+        float nx = *x + cosf(a) * stepLen;
+        float ny = *y + sinf(a) * stepLen;
+        if (!Blocked(nx, ny)) { *x = nx; *y = ny; return; }
+    }
+    /* 13 个方向全堵 = 真的被围死了，这一帧不动（交给上层处理） */
 }
 
-/* 在玩家周围 10~16 格找一个起点 */
+
+/* ===== v2.4.38 **出生点改走 BFS，只放在真正可达的过道上** =====
+   用户实测：它卡在墙里（d 不变）。
+   根因是出生点用「浮点随机/环形扫描」选的 ——
+   选中的点可能在墙的另一侧、或者贴墙卡在角落，直线靠近没有路。
+
+   现在改成：从玩家格做一次 BFS 洪水填充，
+   得到一个「每格到玩家多少步」的距离场 bfsD[][]。
+   出生点从**距离 8~16 步的可达格中心**里选，
+   移动时也**沿着 bfsD 梯度往下走**（永远朝玩家方向、永远有路）。
+   这样它不可能卡在墙里，也不可能走到不可达的地方。 */
+
+static short bfsD[MAP_HEIGHT][MAP_WIDTH];
+static int   bfsOK = 0;
+
+/* 从玩家所在格做 BFS，填充 bfsD（-1 = 不可达） */
+static void bfsBuild(void) {
+    for (int y = 0; y < MAP_HEIGHT; y++)
+        for (int x = 0; x < MAP_WIDTH; x++)
+            bfsD[y][x] = -1;
+
+    int sx = (int)posX, sy = (int)posY;
+    if (sx < 0 || sx >= MAP_WIDTH || sy < 0 || sy >= MAP_HEIGHT) { bfsOK = 0; return; }
+
+    static int qx[MAP_WIDTH * MAP_HEIGHT];
+    static int qy[MAP_WIDTH * MAP_HEIGHT];
+    int head = 0, tail = 0;
+
+    bfsD[sy][sx] = 0;
+    qx[tail] = sx; qy[tail] = sy; tail++;
+
+    static const int dxs[4] = { 1, -1, 0, 0 };
+    static const int dys[4] = { 0, 0, 1, -1 };
+
+    while (head < tail) {
+        int cx = qx[head], cy = qy[head];
+        head++;
+        int nd = bfsD[cy][cx] + 1;
+        if (nd > 200) continue;
+        for (int i = 0; i < 4; i++) {
+            int nx = cx + dxs[i], ny = cy + dys[i];
+            if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+            if (worldMap[ny][nx] != 0) continue;
+            if (bfsD[ny][nx] >= 0) continue;
+            bfsD[ny][nx] = (short)nd;
+            qx[tail] = nx; qy[tail] = ny; tail++;
+        }
+    }
+    bfsOK = 1;
+}
+
+/* 出生点：从可达格里挑一个 8~16 步远、且格子中心不撞墙的 */
 static int findStart(float* ox, float* oy) {
-    for (int t = 0; t < 100; t++) {
-        float ang = (float)(rand() % 6283) / 1000.0f;
-        float d = 10.0f + (float)(rand() % 600) / 100.0f;
-        float x = posX + cosf(ang) * d;
-        float y = posY + sinf(ang) * d;
-        if (x < 1.5f || y < 1.5f || x > MAP_WIDTH - 1.5f || y > MAP_HEIGHT - 1.5f) continue;
-        if (Blocked(x, y)) continue;
-        *ox = x; *oy = y;
+    bfsBuild();
+
+    int bestX = -1, bestY = -1, bestScore = -1;
+
+    for (int gy = 1; gy < MAP_HEIGHT - 1; gy++) {
+        for (int gx = 1; gx < MAP_WIDTH - 1; gx++) {
+            int d = bfsD[gy][gx];
+            if (d < 8 || d > 16) continue;          /* 太近会突脸，太远来得慢 */
+            float cx = (float)gx + 0.5f;
+            float cy = (float)gy + 0.5f;
+            if (Blocked(cx, cy)) continue;
+            /* 优先挑「四邻都是空地」的格 —— 过道中间，不会贴墙卡住 */
+            int open = 0;
+            if (!Blocked(cx + 0.5f, cy)) open++;
+            if (!Blocked(cx - 0.5f, cy)) open++;
+            if (!Blocked(cx, cy + 0.5f)) open++;
+            if (!Blocked(cx, cy - 0.5f)) open++;
+            int score = open * 100 + d;
+            if (score > bestScore) { bestScore = score; bestX = gx; bestY = gy; }
+        }
+    }
+
+    if (bestX >= 0) {
+        *ox = (float)bestX + 0.5f;
+        *oy = (float)bestY + 0.5f;
         return 1;
     }
-    return 0;
+
+    /* 退一步：任何可达格（>=4 步）都行 */
+    for (int gy = 1; gy < MAP_HEIGHT - 1; gy++) {
+        for (int gx = 1; gx < MAP_WIDTH - 1; gx++) {
+            if (bfsD[gy][gx] < 4) continue;
+            float cx = (float)gx + 0.5f;
+            float cy = (float)gy + 0.5f;
+            if (Blocked(cx, cy)) continue;
+            *ox = cx; *oy = cy;
+            return 1;
+        }
+    }
+
+    /* 彻底没路（理论上不会）：放在玩家身后 4 格 */
+    *ox = posX - dirX * 4.0f;
+    *oy = posY - dirY * 4.0f;
+    return 1;
+}
+
+/* ===== v2.4.38 **沿 BFS 梯度前进（永远有路，不会卡墙）** =====
+   每一步都往「bfsD 最小的那个邻格」的格中心走。
+   因为 bfsD 是从玩家格扩散出来的，梯度方向一定通向玩家，
+   所以只可能卡在「当前格已经是 0 步」的情况 —— 那说明它已经到玩家身上了。 */
+static void stepAlongBfs(float* x, float* y, float sp, float dt) {
+    int cx = (int)(*x), cy = (int)(*y);
+    if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return;
+
+    int here = bfsD[cy][cx];
+    if (here < 0) {
+        /* 掉到不可达格里了（理论上不该发生）—— 重新建场并原地不动一帧 */
+        bfsBuild();
+        return;
+    }
+    if (here == 0) return;   /* 已在玩家格 */
+
+    /* 4 邻里找 bfsD 最小的 */
+    static const int dxs[4] = { 1, -1, 0, 0 };
+    static const int dys[4] = { 0, 0, 1, -1 };
+    int bestI = -1, bestD = here;
+    for (int i = 0; i < 4; i++) {
+        int nx = cx + dxs[i], ny = cy + dys[i];
+        if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+        int d = bfsD[ny][nx];
+        if (d < 0) continue;
+        if (d < bestD) { bestD = d; bestI = i; }
+    }
+    if (bestI < 0) return;
+
+    /* 朝那个格子中心走 */
+    float tx = (float)(cx + dxs[bestI]) + 0.5f;
+    float ty = (float)(cy + dys[bestI]) + 0.5f;
+    stepToward(x, y, tx, ty, sp, dt);
+}
+
+/* ===== v2.4.31 **直接锁定玩家所在位置** =====
+   用户要求：「把锁定方式改为直接锁定那个玩家所在位置」。
+   原来是每 1 秒才刷新一次目标，中间那一秒它还往老地方走 ——
+   读感就是「追丢了 / 突然转方向」。
+   现在**每帧都锁玩家当前坐标**（躲着时锁藏身点），
+   它永远朝着你此刻所在的位置走。 */
+static void retargetToPlayer(void) {
+    extern int hiddenIn;
+    extern HideSpot hideSpots[];
+    if (hiddenIn >= 0 && hiddenIn < HIDESPOT_MAX && hideSpots[hiddenIn].active) {
+        scavenger.tx = hideSpots[hiddenIn].x;
+        scavenger.ty = hideSpots[hiddenIn].y;
+    } else {
+        scavenger.tx = posX;      /* 玩家实时坐标 */
+        scavenger.ty = posY;
+    }
 }
 
 /* 触发检查 —— 每帧调用，内部只做轻量判断 */
+
 void ScavengerTickTrigger(float dt) {
     extern float floorTime;
     extern int   hideStreak;
+    extern int   trainingMode;
+    if (trainingMode) return;
+    if (scavCooldown > 0.0f) {
+        scavCooldown -= dt;
+        if (scavCooldown < 0.0f) scavCooldown = 0.0f;
+        /* v2.4.27 **关键修复**：原来这里只递减、从不 return ——
+           于是冷却形同虚设，走掉之后下一帧就又能触发。
+           用户实测「冷却没有生效」，就是这一行漏了。 */
+        return;
+    }
     if (scavenger.active) return;
 
     int timeUp  = (floorTime >= SCAV_TRIGGER_TIME);
-    int hideUp  = (hideStreak >= 2);
+    /* **连续躲 3 次**清道夫才出发。
+       （我在这条上反复过两次：2 → 3 → 2 → 3，是我不该擅自改。
+         现在定死 3，并写清楚：躲 1 次安全，躲 2 次安全，第 3 次它来。） */
+    int hideUp  = (hideStreak >= 3);
     if (!timeUp && !hideUp) return;
 
     float x, y;
-    if (!findStart(&x, &y)) return;
+    findStart(&x, &y);   /* v2.4.31：永远成功，不再因为找不到出生点就放弃 */
 
-    /* 目标 = 玩家当前所在位置（近似「待最久的房间」） */
     scavenger.x = x;
     scavenger.y = y;
-    scavenger.tx = posX;
-    scavenger.ty = posY;
     scavenger.warnT = 0.0f;
     scavenger.eatT = 0.0f;
     scavenger.eating = -1;
+    scavenger.life = SCAV_LIFE_MAX;
+    scavenger.retarget = 0.0f;
+    scavenger.searchT = 0.0f;
+    scavenger.lastX = x;
+    scavenger.lastY = y;
+    scavenger.stuckT = 0.0f;
     scavenger.active = 1;
+    retargetToPlayer();
+
     { extern void BestiaryMarkSeen(int); BestiaryMarkSeen(4); }
     PlaySfx(SFX_GLASS, 0.45f);
     pickupMsg = (g_lang == LANG_ZH) ? "有东西在靠近…" : "SOMETHING IS COMING";
     pickupMsgTimer = 2.0f;
 }
 
+/* 干完活走人：进入冷却，并把 hideStreak 清零，这样之后还能再来 */
+static void scavengerLeave(void) {
+    scavenger.active = 0;
+    scavenger.eating = -1;
+    scavenger.warnT = 0.0f;
+    scavenger.searchT = 0.0f;
+    scavCooldown = SCAV_COOLDOWN;
+    { extern int hideStreak; hideStreak = 0; }
+}
+
 void UpdateScavenger(float dt) {
-    /* v2.3.9：训练营里当静态标本，不跑 AI */
     { extern int trainingMode; if (trainingMode) return; }
     if (!scavenger.active) return;
 
-    float dx = scavenger.tx - scavenger.x, dy = scavenger.ty - scavenger.y;
-    float d = sqrtf(dx * dx + dy * dy);
+    /* ---- ⓪ 寿命 & 卡死检测（修 bug②：不再永久站着）---- */
+    /* ===== v2.4.39 **固定追击时间** =====
+       用户要求：应该一直追我，追够一段时间之后消失并进入冷却。
+       原来那套「在动就续命」是反的 —— 只要它一直在走就永远不走，
+       你跑多远它跟多远，没有尽头。
 
-    /* ---- ① 拉柜门 ---- */
+       现在：`chaseT` 一旦开始就**只减不增**，归零就消失 + 冷却。
+       这期间它会一直朝你走（BFS 梯度每帧指向你）。 */
+    scavenger.life -= dt;
+    if (scavenger.life <= 0.0f) {
+        scavengerLeave();        /* 追够了 → 消失 + 40 秒冷却 */
+        return;
+    }
+
+    scavenger.stuckT += dt;
+    if (scavenger.stuckT >= 2.0f) {
+        float moved = fabsf(scavenger.x - scavenger.lastX) + fabsf(scavenger.y - scavenger.lastY);
+        scavenger.stuckT = 0.0f;
+        scavenger.lastX = scavenger.x;
+        scavenger.lastY = scavenger.y;
+        if (moved < SCAV_STUCK_MOVE) {
+            /* v2.4.22：**不再瞬移** —— 瞬移在玩家眼里就是「消失了」。
+               改成：给它一个 sideways 强推，靠 13 方向步进自己挤出来。 */
+            int freed = 0;
+            for (int t = 0; t < 8 && !freed; t++) {
+                float a = (float)(rand() % 6283) / 1000.0f;
+                float nx = scavenger.x + cosf(a) * 0.35f;
+                float ny = scavenger.y + sinf(a) * 0.35f;
+                if (!Blocked(nx, ny)) {
+                    scavenger.x = nx;
+                    scavenger.y = ny;
+                    freed = 1;
+                }
+            }
+            /* 连挪 8 次都挪不出去，才算真的废了 —— 这时才走人 */
+            if (!freed) { scavengerLeave(); return; }
+            scavenger.lastX = scavenger.x;
+            scavenger.lastY = scavenger.y;
+        }
+    }
+
+    /* ---- ① 拉柜门（先 1.5 秒预警）---- */
     if (scavenger.warnT > 0.0f) {
         scavenger.warnT -= dt;
         if (scavenger.warnT <= 0.0f) {
             extern int hiddenIn;
             if (hiddenIn >= 0) {
-                sanity -= SCAV_SANITY_LOSS * RunDamageTakenMul();
+                /* v2.4.36：按当前理智的 20%~50% 扣，随金币和强度档成长 */
+                sanity -= scavSanityLoss() * RunDamageTakenMul();
                 if (sanity < 0.0f) sanity = 0.0f;
                 AddHitFlash(0.85f);
                 AddShake(0.28f, 0.20f);
-                /* 藏身点本层作废 */
-                {   /* 直接清掉藏身状态（没有现成的退出函数，就地处理） */
-                    extern int hiddenIn;
-                    hiddenIn = -1;
+                {
+                    extern HideSpot hideSpots[];
                     extern int resetInputState;
+                    if (hiddenIn >= 0 && hiddenIn < HIDESPOT_MAX) {
+                        hideSpots[hiddenIn].broken = 1;   /* 真的撬坏，要花钱修 */
+                    }
+                    hiddenIn = -1;
                     resetInputState = 1;
                 }
                 PlaySfx(SFX_SCREAM, 0.7f);
                 pickupMsg = (g_lang == LANG_ZH) ? "它把柜门拉开了！" : "IT OPENED THE LOCKER!";
                 pickupMsgTimer = 2.2f;
             }
-            scavenger.warnT = 0.0f;
-            scavenger.active = 0;      /* 干完活就走 */
+            scavengerLeave();
             return;
         }
         return;
     }
 
-    /* ---- ② 已经在房间附近 ---- */
-    if (d < 1.6f) {
+    /* ---- ② **每帧**锁定玩家当前位置 ---- */
+    retargetToPlayer();
+
+    float dx = scavenger.tx - scavenger.x, dy = scavenger.ty - scavenger.y;
+    float d = sqrtf(dx * dx + dy * dy);
+
+    /* ===== v2.4.29 **玩家跑出柜子后被逮到** =====
+       条件：玩家不在藏身点里，且清道夫贴到 0.85 格内。
+       惩罚：30% 减速 10 秒 + 理智按 25→50 随层成长。
+       这是「临阵脱逃失败」的代价 —— 和「被堵在柜子里」区分开：
+         躲在里面被抓   = 固定 12 理智 + 柜子被撬坏
+         跑出来被抓     = 25~50 理智 + 10 秒瘸腿（但不坏柜子）
+    */
+    {
         extern int hiddenIn;
+        if (hiddenIn < 0) {
+            float cdx = posX - scavenger.x, cdy = posY - scavenger.y;
+            if (cdx * cdx + cdy * cdy < SCAV_CATCH_R * SCAV_CATCH_R) {
+                /* 理智：25 起，按层成长，封顶 50 */
+                float loss = SCAV_CATCH_SAN_MIN
+                           + SCAV_CATCH_STEP * (float)(currentLevel > 0 ? currentLevel - 1 : 0)
+                             * (SCAV_CATCH_SAN_MAX - SCAV_CATCH_SAN_MIN);
+                if (loss > SCAV_CATCH_SAN_MAX) loss = SCAV_CATCH_SAN_MAX;
+                sanity -= loss * RunDamageTakenMul();
+                if (sanity < 0.0f) sanity = 0.0f;
+
+                /* 减速 30% 持续 10 秒 —— 走现成的 FX_SLOW 通道，
+                   game.c 里 slowMul = 1 - FxStrength(FX_SLOW) * 0.45f，
+                   所以 0.30 / 0.45 ≈ 0.667 正好得到 30% 减速。 */
+                ApplyFx(FX_SLOW, SCAV_CATCH_SLOW / 0.45f, SCAV_CATCH_SLOW_T);
+
+                AddHitFlash(0.80f);
+                AddShake(0.30f, 0.22f);
+                PlaySfx(SFX_SCREAM, 0.85f);
+                pickupMsg = (g_lang == LANG_ZH)
+                    ? "它抓住了你！减速 10 秒"
+                    : "IT CAUGHT YOU!  SLOWED 10s";
+                pickupMsgTimer = 2.2f;
+                { extern int floorSpotted, runSpotted;
+                  floorSpotted = 1; runSpotted = 1; }
+                scavengerLeave();      /* 抓完就走，进入 40 秒冷却 */
+                return;
+            }
+        }
+    }
+
+    /* ---- ③ 到达目标附近 ---- */
+    if (d < SCAV_ARRIVE_R) {
+        extern int hiddenIn;
+
+        /* (a) 玩家躲着 → 拉柜门 */
         if (hiddenIn >= 0) {
-            /* 玩家躲在里面 → 开始拉柜门（先给 1.5 秒预警） */
             scavenger.warnT = SCAV_GRAB_WARN;
             PlaySfx(SFX_STEP, 0.9f);
             pickupMsg = (g_lang == LANG_ZH) ? "柜门被抓住了！" : "THE LOCKER IS GRABBED!";
             pickupMsgTimer = 1.4f;
             return;
         }
-        /* 玩家不在 → 吃箱子。
-           **关键安全规则**：只吃 content == 0（空箱）。
-           content == 1 是保险丝（通关必需），content == 2 是电池 ——
-           这两种一律跳过。宁可它空手走人，也绝不让玩家因为箱子被吃掉而卡关。 */
-        if (scavenger.eating < 0) {
+
+        /* (b) 玩家没躲 → 翻箱。安全规则：只吃 content == 0（空箱），
+               保险丝 / 电池一律不动，宁可不吃也不能让玩家卡关。 */
+        if (scavenger.eating < 0 && scavenger.searchT <= 0.0f) {
             extern Container containers[MAX_CONTAINERS];
             extern int containerCount;
             int best = -1;
@@ -180,49 +542,71 @@ void UpdateScavenger(float dt) {
             for (int ci = 0; ci < containerCount; ci++) {
                 if (!containers[ci].active) continue;
                 if (containers[ci].searched) continue;
-                if (containers[ci].content != 0) continue;   /* ← 保险丝 / 电池 一律不吃 */
+                if (containers[ci].content != 0) continue;
                 float cdx = containers[ci].x - scavenger.x;
                 float cdy = containers[ci].y - scavenger.y;
                 float cd2 = cdx * cdx + cdy * cdy;
-                if (cd2 > 36.0f) continue;                   /* 只吃身边的（6 格内） */
+                if (cd2 > 36.0f) continue;               /* 6 格内 */
                 if (cd2 < bestD) { bestD = cd2; best = ci; }
             }
-            if (best < 0) {
-                /* 这个房间没有能吃的东西 → 白跑一趟，走人 */
-                scavenger.active = 0;
-                return;
+            if (best >= 0) {
+                scavenger.eating = best;
+                scavenger.eatT = 0.0f;
+                pickupMsg = (g_lang == LANG_ZH) ? "它在翻箱子！" : "IT IS RIFLING YOUR CRATES!";
+                pickupMsgTimer = 1.6f;
+            } else {
+                /* 没箱子可翻 → 原地翻找 2 秒再走（有动作，不是傻站着） */
+                scavenger.searchT = SCAV_SEARCH_TIME;
+                pickupMsg = (g_lang == LANG_ZH) ? "它到处翻找…" : "IT IS SEARCHING…";
+                pickupMsgTimer = 1.6f;
             }
-            scavenger.eating = best;
-            scavenger.eatT = 0.0f;
-            pickupMsg = (g_lang == LANG_ZH) ? "它在翻箱子！" : "IT IS RIFLING YOUR CRATES!";
-            pickupMsgTimer = 1.6f;
         }
 
-        scavenger.eatT += dt;
-        if (scavenger.eatT >= SCAV_EAT_TIME) {
-            extern Container containers[MAX_CONTAINERS];
-            int ci = scavenger.eating;
-            if (ci >= 0 && ci < MAX_CONTAINERS && containers[ci].active) {
-                /* 再确认一次：绝不吞掉保险丝 / 电池 */
-                if (containers[ci].content == 0) {
-                    containers[ci].searched = 1;   /* 被吃空 */
+        /* (c) 原地翻找计时 */
+        if (scavenger.searchT > 0.0f) {
+            scavenger.searchT -= dt;
+            if (scavenger.searchT <= 0.0f) { scavengerLeave(); }
+            return;
+        }
+
+        /* (d) 吃箱子 */
+        if (scavenger.eating >= 0) {
+            scavenger.eatT += dt;
+            if (scavenger.eatT >= SCAV_EAT_TIME) {
+                extern Container containers[MAX_CONTAINERS];
+                int ci = scavenger.eating;
+                if (ci >= 0 && ci < MAX_CONTAINERS && containers[ci].active &&
+                    containers[ci].content == 0) {
+                    containers[ci].searched = 1;
                 }
+                PlaySfx(SFX_GLASS, 0.5f);
+                scavengerLeave();
             }
-            PlaySfx(SFX_GLASS, 0.5f);
-            scavenger.eatT = 0.0f;
-            scavenger.eating = -1;
-            scavenger.active = 0;      /* 吃完一个就走 */
         }
         return;
     }
 
-    /* ---- ③ 走过去 ---- */
-    stepToward(&scavenger.x, &scavenger.y, scavenger.tx, scavenger.ty, SCAV_SPEED, dt);
+    /* ---- ④ 沿 BFS 梯度走过去（永远有路）---- */
+    /* v2.4.39 **关键修复**：BFS 距离场原来是出生时建一次就不再更新 ——
+       于是梯度永远指向「你召唤它那一刻站的位置」，
+       你跑开之后它走到原地就停了（用户：「只追到召唤位置」）。
+       现在**玩家换格就重建**，梯度永远指向你当前所在。 */
+    {
+        static int lastPX = -999, lastPY = -999;
+        int pxNow = (int)posX, pyNow = (int)posY;
+        if (!bfsOK || pxNow != lastPX || pyNow != lastPY) {
+            bfsBuild();
+            lastPX = pxNow;
+            lastPY = pyNow;
+        }
+    }
+    stepAlongBfs(&scavenger.x, &scavenger.y, SCAV_SPEED, dt);
 }
 
-/* v2.3.9：训练营用 —— 强制把Scavenger摆到指定位置当标本 */
+/* v2.3.9：训练营用 —— 强制把清道夫摆到指定位置当标本 */
 void ScavengerForcePlace(float x, float y) {
     scavenger.active = 1;
     scavenger.x = x;
     scavenger.y = y;
+    scavenger.life = 1e9f;
 }

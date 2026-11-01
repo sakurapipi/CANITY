@@ -1040,6 +1040,37 @@ static void BakeMonster(int id, int kind, int pose) {
     cvFinish(&g_sprites[id]);
 }
 
+/* ===== v2.4.6 烘焙用的「斜角」原语（按 art_direction.h 铁律七/十）=====
+   光从左上方来：
+     上边缘 + 左边缘 → 提亮（受光）
+     下边缘 + 右边缘 → 压暗（背光）
+   只在贴图上叠 1~3 像素的明暗线，**物体轮廓完全不动** ——
+   这是「升级光照 ≠ 换掉形状」的直接实现。 */
+static void cvBevel(float x0, float y0, float x1, float y1,
+                    float t, float strength) {
+    unsigned int hiC = 0x00FFFFFFu;
+    unsigned int loC = 0x00000000u;
+    float hiA = strength;
+    float loA = strength * 0.85f;
+    /* 上：亮 */
+    cvLine(x0, y0 + t * 0.5f, x1, y0 + t * 0.5f, t, hiC, hiA);
+    /* 左：亮（弱一点，主光在上） */
+    cvLine(x0 + t * 0.5f, y0, x0 + t * 0.5f, y1, t, hiC, hiA * 0.6f);
+    /* 下：暗 */
+    cvLine(x0, y1 - t * 0.5f, x1, y1 - t * 0.5f, t, loC, loA);
+    /* 右：暗（弱一点） */
+    cvLine(x1 - t * 0.5f, y0, x1 - t * 0.5f, y1, t, loC, loA * 0.7f);
+}
+
+/* 内凹：上壁暗、下壁亮 —— 读作「凹进去一层」 */
+static void cvRecess(float x0, float y0, float x1, float y1,
+                     float inset, float t, float strength) {
+    cvLine(x0 + inset, y0 + inset, x1 - inset, y0 + inset, t, 0x00000000u, strength);
+    cvLine(x0 + inset, y1 - inset, x1 - inset, y1 - inset, t, 0x00FFFFFFu, strength * 0.7f);
+    cvLine(x0 + inset, y0 + inset, x0 + inset, y1 - inset, t, 0x00FFFFFFu, strength * 0.35f);
+    cvLine(x1 - inset, y0 + inset, x1 - inset, y1 - inset, t, 0x00000000u, strength * 0.5f);
+}
+
 static void BakeProp(int id, int kind) {
     cvClear();
     float c = CANVAS_W * 0.5f;
@@ -1055,16 +1086,60 @@ static void BakeProp(int id, int kind) {
         cvLine(c - 40, baseY - 90, c - 40, baseY - 4, 8.0f, 0x00605848u, 1.0f);
         cvLine(c + 40, baseY - 90, c + 40, baseY - 4, 8.0f, 0x00605848u, 1.0f);
         cvSpeckle((int)c, (int)baseY - 50, 36, 50, 0x00301808u, 0.4f);
-    } else if (kind == 1) {     /* 配电箱：铁柜 + 警示条 */
-        float b[8] = { c - 34, baseY - 108, c + 34, baseY - 108, c + 34, baseY, c - 34, baseY };
+        /* v2.4.6 斜角：木箱的立体感来自「上沿受光、下沿背光」 */
+        cvBevel(c - 40, baseY - 90, c + 40, baseY - 4, 3.0f, 0.42f);
+        /* 铁角：四角各再点一块高光，让包角读作金属而不是木纹 */
+        cvLine(c - 40, baseY - 90, c - 30, baseY - 90, 4.0f, 0x00A89880u, 0.55f);
+        cvLine(c + 30, baseY - 4, c + 40, baseY - 4, 4.0f, 0x00201810u, 0.6f);
+    } else if (kind == 1) {     /* 配电箱（v2.4.7 重新建模） */
+        /* 按 art_direction.h 重设计：
+             地标 ① 顶部两根**瓷瓶 + 垂下的导线**（剪影上凸出柜体上沿）
+             地标 ② 右侧伸出的**闸刀拉杆 + 红球手柄**（剪影上唯一的斜出物）
+             特征 ③ 面板内凹 + 散热格栅
+           填黑测试：一个竖柜 + 顶上两个柱 + 右边一根斜杆 —— 一眼是配电箱。
+           旧版只有「方柜 + 警示条 + 圆按钮」，填黑就是一个方块。 */
+
+        /* ---- ① 柜体（比旧版窄一点、高一点，显得是立式机柜） ---- */
+        float b[8] = { c - 30, baseY - 116, c + 30, baseY - 116, c + 30, baseY, c - 30, baseY };
         cvPoly(b, 4, 0x000A0C10u, 1.0f);
-        float b2[8] = { c - 29, baseY - 102, c + 29, baseY - 102, c + 29, baseY - 4, c - 29, baseY - 4 };
-        cvPolyGrad(b2, 4, 0x00586068u, 0x00202830u, 1.0f);
-        /* 黄黑警示条 */
+        float b2[8] = { c - 25, baseY - 110, c + 25, baseY - 110, c + 25, baseY - 4, c - 25, baseY - 4 };
+        cvPolyGrad(b2, 4, 0x00606870u, 0x00181E24u, 1.0f);
+
+        /* ---- ② 顶部瓷瓶（地标①）---- */
+        cvLine(c - 14, baseY - 116, c - 14, baseY - 138, 5.0f, 0x00404850u, 1.0f);
+        cvEllipse(c - 14, baseY - 136, 7.0f, 5.5f, 0x00A0A8B0u, 1.0f);
+        cvEllipse(c - 14, baseY - 131, 9.0f, 3.5f, 0x00889098u, 0.95f);
+        cvLine(c + 14, baseY - 116, c + 14, baseY - 138, 5.0f, 0x00404850u, 1.0f);
+        cvEllipse(c + 14, baseY - 136, 7.0f, 5.5f, 0x00A0A8B0u, 1.0f);
+        cvEllipse(c + 14, baseY - 131, 9.0f, 3.5f, 0x00889098u, 0.95f);
+
+        /* ---- ③ 垂下的导线（接着瓷瓶往外弯，剪影更宽）---- */
+        cvLine(c - 14, baseY - 141, c - 27, baseY - 152, 2.5f, 0x00302A20u, 1.0f);
+        cvLine(c + 14, baseY - 141, c + 29, baseY - 147, 2.5f, 0x00302A20u, 1.0f);
+
+        /* ---- ④ 面板内凹 + 一道横向分型线 ---- */
+        cvRecess(c - 20, baseY - 104, c + 20, baseY - 14, 3.0f, 2.0f, 0.34f);
+        cvLine(c - 20, baseY - 58, c + 20, baseY - 58, 2.0f, 0x00000000u, 0.35f);
+
+        /* ---- ⑤ 闸刀拉杆（地标②）：从右侧斜着伸出来，红球手柄 ---- */
+        cvLine(c + 20, baseY - 52, c + 38, baseY - 72, 5.0f, 0x00505A62u, 1.0f);
+        cvLine(c + 20, baseY - 52, c + 38, baseY - 72, 2.0f, 0x00A8B4C0u, 0.6f);
+        cvEllipse(c + 39, baseY - 74, 5.5f, 5.5f, 0x00801810u, 1.0f);
+        cvEllipse(c + 39, baseY - 75, 3.0f, 3.0f, 0x00E03818u, 0.95f);
+
+        /* ---- ⑥ 散热格栅（左下）---- */
         for (int i = 0; i < 4; i++)
-            cvLine(c - 24, baseY - 92 + (float)i * 8, c + 24, baseY - 88 + (float)i * 8, 5.0f, 0x00D8B020u, 0.85f);
-        cvEllipse(c, baseY - 40, 8.0f, 8.0f, 0x00A02010u, 1.0f);
-        cvLine(c, baseY - 40, c, baseY - 52, 3.0f, 0x00F0F0F0u, 0.6f);
+            cvLine(c - 18, baseY - 46 + (float)i * 7, c - 5, baseY - 46 + (float)i * 7,
+                   2.0f, 0x00000000u, 0.42f);
+
+        /* ---- ⑦ 状态灯（面板上，两颗：电源 + 告警）---- */
+        cvEllipse(c + 3, baseY - 90, 6.0f, 6.0f, 0x00201A12u, 1.0f);
+        cvEllipse(c + 3, baseY - 91, 3.2f, 3.2f, 0x00FFB030u, 0.95f);   /* 电源：琥珀 */
+        cvEllipse(c + 3, baseY - 76, 4.5f, 4.5f, 0x00201A12u, 1.0f);
+        cvEllipse(c + 3, baseY - 77, 2.2f, 2.2f, 0x00FF4020u, 0.9f);    /* 告警：红 */
+
+        /* ---- ⑧ 斜角（体积感）---- */
+        cvBevel(c - 25, baseY - 110, c + 25, baseY - 4, 3.0f, 0.42f);
     } else if (kind == 2) {     /* 出口：门框 + 光 */
         float b[8] = { c - 40, baseY - 150, c + 40, baseY - 150, c + 40, baseY, c - 40, baseY };
         cvPoly(b, 4, 0x000A0C10u, 1.0f);
@@ -1094,6 +1169,8 @@ static void BakeProp(int id, int kind) {
             cvLine(c - 40, baseY - 74 + (float)i * 26, c + 40, baseY - 74 + (float)i * 26, 3.0f, 0x00301C0Cu, 0.8f);
         cvLine(c - 40, baseY - 90, c - 40, baseY - 4, 8.0f, 0x00605848u, 1.0f);
         cvLine(c + 40, baseY - 90, c + 40, baseY - 4, 8.0f, 0x00605848u, 1.0f);
+        /* v2.4.6 斜角（和普通箱子同一套光照，保持家族一致） */
+        cvBevel(c - 40, baseY - 90, c + 40, baseY - 4, 3.0f, 0.42f);
         /* 锁体 + 锁梁 */
         float lock[8] = { c - 18, baseY - 58, c + 18, baseY - 58, c + 18, baseY - 22, c - 18, baseY - 22 };
         cvPoly(lock, 4, 0x006A4E10u, 1.0f);
@@ -1115,6 +1192,15 @@ static void BakeProp(int id, int kind) {
         cvLine(c - 38, baseY - 158, c - 34, baseY - 168, 4.0f, 0x00607858u, 0.8f);
         cvLine(c + 38, baseY - 158, c + 34, baseY - 168, 4.0f, 0x00607858u, 0.8f);
         cvLine(c - 34, baseY - 168, c + 34, baseY - 168, 4.0f, 0x00809878u, 0.85f);
+        /* v2.4.6 **圆柱受光**（不是斜角 —— 垃圾桶是圆的，斜角会把它读成方块）
+           左侧 1/3 打亮、右侧 1/3 压暗，中间过渡，就读成「圆桶」了。 */
+        cvLine(c - 26, baseY - 140, c - 20, baseY - 8, 7.0f, 0x00FFFFFFu, 0.26f);
+        cvLine(c - 16, baseY - 142, c - 12, baseY - 8, 5.0f, 0x00FFFFFFu, 0.14f);
+        cvLine(c + 16, baseY - 142, c + 22, baseY - 8, 7.0f, 0x00000000u, 0.30f);
+        cvLine(c + 24, baseY - 140, c + 30, baseY - 8, 5.0f, 0x00000000u, 0.18f);
+        /* 桶口内壁：上沿受光、内圈暗 */
+        cvLine(c - 30, baseY - 152, c + 30, baseY - 152, 2.0f, 0x00FFFFFFu, 0.30f);
+        cvLine(c - 28, baseY - 146, c + 28, baseY - 146, 2.0f, 0x00000000u, 0.35f);
     } else {
         /* 安全屋（v2.2 第三次重做）
            第一版是营火 -> 一颗蛋。第二版是沙袋+立杆+油灯 -> 一根路灯 + 两块鹅卵石 + 一张饼。
