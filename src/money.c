@@ -66,6 +66,22 @@ void MoneyBagsResetForNewFloor(void) {
 }
 
 
+/* ===== v2.4.91 **脚下有没有钱袋** =====
+   给 HUD 用：返回玩家附近（1.6 格内）最近那个钱袋的金额，
+   没有就返回 0。UI 靠这个决定要不要显示「按 E 拾取」。 */
+int MoneyBagNearestToPlayer(void) {
+    int best = 0;
+    float bestD = 1.6f * 1.6f;
+    for (int i = 0; i < MAX_MONEYBAG; i++) {
+        if (!moneyBags[i].active) continue;
+        float dx = posX - moneyBags[i].x;
+        float dy = posY - moneyBags[i].y;
+        float d2 = dx * dx + dy * dy;
+        if (d2 < bestD) { bestD = d2; best = moneyBags[i].amount; }
+    }
+    return best;
+}
+
 void MoneyTick(float dt) {
     {
         int kNow = (currentState == STATE_PLAYING) ? ActionIsDown(ACT_DROP_GOLD) : 0;
@@ -107,7 +123,7 @@ void MoneyTick(float dt) {
                             moneyBags[slot].amount = amt;
                             moneyBags[slot].life = 45.0f;
                             moneyBags[slot].active = 1;
-                            carryGold -= amt;
+                            { extern int WalletSpendRun(int); WalletSpendRun(amt); }
                             if (carryGold < 0) carryGold = 0;
                             /* 吸引强度 = 金额 / 1000 × 5，封顶 100
                                丢 2000 → 10；丢 20000 → 100（比玩偶的 75 还高） */

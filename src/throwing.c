@@ -217,17 +217,83 @@ void UpdateShots(float dt) {
                 PlaySfx(SFX_GLUE, 0.85f);   /* v3.3：黏稠噗叽 */
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
             } else if (shot[i].kind == 10) {
-                /* 回声弹：不发光、不出声，只把 15 格内怪物位置暴露 5 秒 */
+                /* ===== v2.4.58 **回声弹重做：声呐扫描** =====
+                   原来只是「把 15 格内怪物位置暴露 5 秒」——
+                   可怪本来就在屏幕上看得见（而且有声音提示），
+                   这个效果等于什么都没有。用户说的「没什么用」就是它。
+
+                   新定位：**它是唯一的"信息道具"，负责揭开迷雾。**
+                     ① 把落点周围 14 格的地图**永久标记为已探索**
+                        （小地图从此显示那一块的地形）
+                     ② 小地图上**高亮所有箱子 / 配电箱 / 出口** 6 秒
+                     ③ 仍然暴露怪物位置（免费附赠）
+
+                   为什么这样有用：
+                     这游戏的核心是「没有地图 → 找不到保险丝 → 待太久 → 出怪」。
+                     回声弹把"找路"的时间压下来，直接对抗那套压力循环。 */
                 extern float echoScanT;
                 extern float echoScanX, echoScanY;
-                echoScanT = 5.0f;
+                extern int explored[MAP_HEIGHT][MAP_WIDTH];   /* 真实类型：int，见 game.c:91 */
+
+                echoScanT = 6.0f;
                 echoScanX = shot[i].x;
                 echoScanY = shot[i].y;
-                pickupMsg = (g_lang == LANG_ZH) ? "回声扫过" : "ECHO SCAN";
-                pickupMsgTimer = 1.4f;
-                PlaySfx(SFX_ECHO, 0.80f);   /* v3.3：短叮 + 回响 */
+
+                /* ① 揭示落点周围 14 格地形 */
+                {
+                    int cx0 = (int)shot[i].x, cy0 = (int)shot[i].y;
+                    int rad = 14;
+                    for (int gy = cy0 - rad; gy <= cy0 + rad; gy++) {
+                        if (gy < 0 || gy >= MAP_HEIGHT) continue;
+                        for (int gx = cx0 - rad; gx <= cx0 + rad; gx++) {
+                            if (gx < 0 || gx >= MAP_WIDTH) continue;
+                            int ddx = gx - cx0, ddy = gy - cy0;
+                            if (ddx * ddx + ddy * ddy > rad * rad) continue;
+                            explored[gy][gx] = 1;
+                        }
+                    }
+                }
+
+                /* v2.4.62：**记录落点 3 格内的怪物**，本层永久显示在小地图上 */
+                {
+                    extern void EchoMarksScan(float, float, float);
+                    EchoMarksScan(shot[i].x, shot[i].y, 3.0f);
+                }
+                pickupMsg = (g_lang == LANG_ZH) ? "声呐扫描：地图已揭示"
+                                                : "SONAR: MAP REVEALED";
+                pickupMsgTimer = 1.8f;
+                PlaySfx(SFX_ECHO, 0.85f);
             } else {
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+            }
+
+            /* ===== v2.4.58 **投石（瓶子）打拾荒者 → 赃款直接爆出来** =====
+               用户要求：「拾荒者被瓶子命中，也会把钱爆出来」。
+               瓶子本来就该是"从远处打断它"的手段 —— 比扳手安全得多，
+               代价是瓶子要花一个投掷格。
+               命中半径 1.2 格（比扳手的 0.7 宽），因为瓶子有溅射。 */
+            if (shot[i].kind == 1) {
+                extern int   CollectorActive(void);
+                extern float CollectorX(void), CollectorY(void);
+                extern void  CollectorBurstBounty(void);
+                if (CollectorActive()) {
+                    float cdx = CollectorX() - shot[i].x;
+                    float cdy = CollectorY() - shot[i].y;
+                    if (cdx * cdx + cdy * cdy < 1.44f) {      /* 1.2 格 */
+                        CollectorBurstBounty();
+                    }
+                }
+                /* v2.4.58 瓶子增强：落点附近的普通怪被震一下（硬直 0.35 秒） */
+                {
+                    extern Monster monster;
+                    extern int trainingMode;
+                    if (!trainingMode && monster.active) {
+                        float mdx = monster.x - shot[i].x, mdy = monster.y - shot[i].y;
+                        if (mdx * mdx + mdy * mdy < 2.25f) {  /* 1.5 格 */
+                            if (monster.stun < 0.35f) monster.stun = 0.35f;
+                        }
+                    }
+                }
             }
             {
                 float nz = 14.0f;
@@ -238,7 +304,10 @@ void UpdateShots(float dt) {
                 else if (shot[i].kind == 4) nz = 5.0f;
                 else if (shot[i].kind == 10) nz = 0.0f;                          /* 静音 */
                 if (BenchSilentThrow()) nz = 0.0f;   /* v3.4：静投压过所有分支 */
-                if (nz > 0.0f) MakeNoise(shot[i].x, shot[i].y, nz);
+                /* v6 第 ㉟ 轮：**诱饵**（改造树第 2 列的第二顶点）
+           投掷物噪音 ×3 —— 纯引怪流。第 ⑩ 轮加了没接。 */
+        { extern int BenchLure(void); if (BenchLure()) nz *= 3.0f; }
+        if (nz > 0.0f) MakeNoise(shot[i].x, shot[i].y, nz);
             }
             shot[i].active = 0;
             continue;

@@ -6,6 +6,7 @@
 #include "game.h"
 #include "lang.h"
 #include "audio.h"
+#include "bench.h"
 
 static int upg[RUN_UPG_COUNT];
 
@@ -34,8 +35,8 @@ int RunUpgTryBuy(int kind) {
     if (upg[kind] >= RUN_UPG_MAX) return 2;
     int cost = RunUpgCost(kind);
     if (cost < 0) return 2;
-    if (shards < cost) return 4;
-    shards -= cost;
+    if (carryGold < cost) return 4;
+    { extern int WalletSpendRun(int); WalletSpendRun(cost); }
     upg[kind]++;
     PlaySfx(SFX_POWER, 0.9f);
     return 0;
@@ -108,7 +109,7 @@ float RunUpgWrenchCooldown(void) {
     return (lv == 2) ? 6.0f : 3.0f;
 }
 int RunUpgWrenchCharges(void) {
-    return (RunUpgWrenchLevel() <= 0) ? 2 : 4;
+    return ((RunUpgWrenchLevel() <= 0) ? 2 : 4)+BenchKnockCharges();
 }
 float RunUpgWrenchRange(void) {
     int lv = RunUpgWrenchLevel();

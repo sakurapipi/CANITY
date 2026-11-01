@@ -1,0 +1,505 @@
+/* ==================================================================
+ *  STEAM 专区 —— 实现
+ * ==================================================================
+ *
+ *  为什么用「运行时动态加载」而不是链接 steam_api64.lib
+ *  ────────────────────────────────────────────────────
+ *  Steamworks SDK 只提供 MSVC 的 .lib。我们是 w64devkit（MinGW）单 exe 构建，
+ *  直接链 .lib 要走 dlltool 生成 .a，而且一旦玩家机器上没有 DLL 就整个起不来。
+ *
+ *  改成 LoadLibrary("steam_api64.dll") + GetProcAddress：
+ *    · 不需要任何导入库
+ *    · 没有 DLL → 自动降级成单机模式，游戏照常
+ *    · 不需要把 SDK 目录加进 include 路径
+ *
+ *  代价：函数名是字符串，写错了编译期查不出来 —— 所以
+ *  下面每个符号都在 Init 里**全部解析一遍并统一检查**，
+ *  缺一个就把状态标成"符号不全"，而不是半个功能能用。
+ * ================================================================== */
+#include <windows.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#include "steam_zone.h"
+#include "steam_ach.h"
+#include "common.h"
+#include "achievements.h"
+#include <stdbool.h>
+
+/* ---------------- 状态 ---------------- */
+static int          s_ready = 0;          /* 1 = 完全可用 */
+static int          s_status = 0;         /* 0 未初始化 1 就绪 2 无 DLL 3 符号缺 4 Init 失败 */
+#if CANITY_STEAM
+static HMODULE      s_dll = NULL;
+#endif
+static char         s_statusText[96] = "Steam: off";
+
+/* ---------------- 扁平 C API 函数指针 ---------------- */
+#if CANITY_STEAM
+
+typedef void* HSteamUser;
+typedef void* HSteamPipe;
+
+static HSteamUser  (*p_SteamAPI_GetHSteamUser)(void);
+static HSteamPipe  (*p_SteamAPI_GetHSteamPipe)(void);
+static bool        (*p_SteamAPI_Init)(void);
+static void        (*p_SteamAPI_Shutdown)(void);
+static void        (*p_SteamAPI_RunCallbacks)(void);
+static int         (*p_SteamAPI_RestartAppIfNecessary)(unsigned int);
+
+/* UserStats（成就 / 统计） */
+static void*       (*p_SteamUserStats)(void);
+static int         (*p_ISteamUserStats_SetAchievement)(void*, const char*);
+static int         (*p_ISteamUserStats_GetAchievement)(void*, const char*, int*);
+static int         (*p_ISteamUserStats_StoreStats)(void*);
+static int         (*p_ISteamUserStats_SetStatInt32)(void*, const char*, int);
+
+/* RemoteStorage（云存档） */
+static void*       (*p_SteamRemoteStorage)(void);
+static int         (*p_ISteamRemoteStorage_FileWrite)(void*, const char*, const void*, int);
+static int         (*p_ISteamRemoteStorage_FileRead)(void*, const char*, void*, int);
+static int         (*p_ISteamRemoteStorage_GetFileSize)(void*, const char*);
+static int         (*p_ISteamRemoteStorage_FileExists)(void*, const char*);
+static int         (*p_ISteamRemoteStorage_GetQuota)(void*, unsigned long long*, unsigned long long*);
+
+/* Music */
+static void*       (*p_SteamMusic)(void);
+static void        (*p_ISteamMusic_Pause)(void*);
+static void        (*p_ISteamMusic_Play)(void*);
+static int         (*p_ISteamMusic_IsPlaying)(void*);
+
+/* Friends（覆盖层） */
+static void*       (*p_SteamFriends)(void);
+static void        (*p_ISteamFriends_ActivateGameOverlay)(void*, const char*);
+static int         (*p_ISteamFriends_SetRichPresence)(void*, const char*, const char*);
+static void        (*p_ISteamFriends_ClearRichPresence)(void*);
+
+#endif   /* CANITY_STEAM：函数指针声明结束 */
+
+/* ---------------- 已有成就去重表 ---------------- */
+#define STEAM_ACH_CACHE_MAX 64
+static char s_achCache[STEAM_ACH_CACHE_MAX][64];
+static int  s_achCount = 0;
+
+static int achCached(const char* name) {
+    for (int i = 0; i < s_achCount; i++) {
+        if (strcmp(s_achCache[i], name) == 0) return 1;
+    }
+    return 0;
+}
+#if CANITY_STEAM
+static void achRemember(const char* name) {
+    if (s_achCount >= STEAM_ACH_CACHE_MAX) return;
+    strncpy(s_achCache[s_achCount], name, 63);
+    s_achCache[s_achCount][63] = '\0';
+    s_achCount++;
+}
+#endif
+
+/* ---------------- 符号解析 ---------------- */
+#define RESOLVE(type, var, name)                                   \
+    do {                                                           \
+        var = (type)GetProcAddress(s_dll, name);                   \
+        if (!var) { missing++; }                                   \
+    } while (0)
+
+int SteamZoneInit(void) {
+    if (s_ready) return 1;
+
+    /* 没开编译开关 → 直接说"关着" */
+#if !CANITY_STEAM
+    s_status = 0;
+    snprintf(s_statusText, sizeof(s_statusText), "Steam: off (built without CANITY_STEAM)");
+    return 0;
+#else
+    s_dll = LoadLibraryA("steam_api64.dll");
+    if (!s_dll) s_dll = LoadLibraryA("steam_api.dll");
+    if (!s_dll) {
+        s_status = 2;
+        snprintf(s_statusText, sizeof(s_statusText), "Steam: steam_api64.dll not found");
+        return 0;
+    }
+
+    int missing = 0;
+    RESOLVE(HSteamUser (*)(void),        p_SteamAPI_GetHSteamUser, "SteamAPI_GetHSteamUser");
+    RESOLVE(HSteamPipe (*)(void),        p_SteamAPI_GetHSteamPipe, "SteamAPI_GetHSteamPipe");
+    RESOLVE(bool (*)(void),              p_SteamAPI_Init,          "SteamAPI_Init");
+    RESOLVE(void (*)(void),              p_SteamAPI_Shutdown,      "SteamAPI_Shutdown");
+    RESOLVE(void (*)(void),              p_SteamAPI_RunCallbacks,  "SteamAPI_RunCallbacks");
+    RESOLVE(int (*)(unsigned int),       p_SteamAPI_RestartAppIfNecessary, "SteamAPI_RestartAppIfNecessary");
+
+    RESOLVE(void* (*)(void),             p_SteamUserStats,         "SteamAPI_SteamUserStats_v012");
+    RESOLVE(int (*)(void*, const char*), p_ISteamUserStats_SetAchievement,
+            "SteamAPI_ISteamUserStats_SetAchievement");
+    RESOLVE(int (*)(void*, const char*, int*), p_ISteamUserStats_GetAchievement,
+            "SteamAPI_ISteamUserStats_GetAchievement");
+    RESOLVE(int (*)(void*),              p_ISteamUserStats_StoreStats,
+            "SteamAPI_ISteamUserStats_StoreStats");
+    RESOLVE(int (*)(void*, const char*, int), p_ISteamUserStats_SetStatInt32,
+            "SteamAPI_ISteamUserStats_SetStatInt32");   /* 可选，缺了不影响主功能 */
+
+    RESOLVE(void* (*)(void),             p_SteamRemoteStorage,     "SteamAPI_SteamRemoteStorage_v016");
+    RESOLVE(int (*)(void*, const char*, const void*, int),
+            p_ISteamRemoteStorage_FileWrite, "SteamAPI_ISteamRemoteStorage_FileWrite");
+    RESOLVE(int (*)(void*, const char*, void*, int),
+            p_ISteamRemoteStorage_FileRead, "SteamAPI_ISteamRemoteStorage_FileRead");
+    RESOLVE(int (*)(void*, const char*),
+            p_ISteamRemoteStorage_GetFileSize, "SteamAPI_ISteamRemoteStorage_GetFileSize");
+    RESOLVE(int (*)(void*, const char*),
+            p_ISteamRemoteStorage_FileExists, "SteamAPI_ISteamRemoteStorage_FileExists");
+    RESOLVE(int (*)(void*, unsigned long long*, unsigned long long*),
+            p_ISteamRemoteStorage_GetQuota, "SteamAPI_ISteamRemoteStorage_GetQuota");
+
+    RESOLVE(void* (*)(void),             p_SteamMusic,             "SteamAPI_SteamMusic_v001");
+    RESOLVE(void (*)(void*),             p_ISteamMusic_Pause,      "SteamAPI_ISteamMusic_Pause");
+    RESOLVE(void (*)(void*),             p_ISteamMusic_Play,       "SteamAPI_ISteamMusic_Play");
+    RESOLVE(int (*)(void*),              p_ISteamMusic_IsPlaying,  "SteamAPI_ISteamMusic_IsPlaying");
+
+    RESOLVE(void* (*)(void),             p_SteamFriends,           "SteamAPI_SteamFriends_v017");
+    RESOLVE(void (*)(void*, const char*), p_ISteamFriends_ActivateGameOverlay,
+            "SteamAPI_ISteamFriends_ActivateGameOverlay");
+    RESOLVE(int (*)(void*, const char*, const char*), p_ISteamFriends_SetRichPresence,
+            "SteamAPI_ISteamFriends_SetRichPresence");   /* 可选 */
+    RESOLVE(void (*)(void*), p_ISteamFriends_ClearRichPresence,
+            "SteamAPI_ISteamFriends_ClearRichPresence"); /* 可选 */
+
+    if (missing > 0) {
+        s_status = 3;
+        snprintf(s_statusText, sizeof(s_statusText),
+                 "Steam: dll found, %d symbols missing", missing);
+        return 0;
+    }
+
+    if (!p_SteamAPI_Init()) {
+        s_status = 4;
+        snprintf(s_statusText, sizeof(s_statusText), "Steam: SteamAPI_Init failed (not running via Steam?)");
+        return 0;
+    }
+
+    s_ready = 1;
+    s_status = 1;
+    snprintf(s_statusText, sizeof(s_statusText), "Steam: connected");
+    return 1;
+#endif
+}
+
+void SteamZoneShutdown(void) {
+#if CANITY_STEAM
+    if (s_ready && p_SteamAPI_Shutdown) p_SteamAPI_Shutdown();
+#endif
+    s_ready = 0;
+    s_status = 0;
+    snprintf(s_statusText, sizeof(s_statusText), "Steam: off");
+}
+
+void SteamZoneTick(float dt) {
+    static float retry=0.0f;
+    retry-=dt;
+    if(s_ready && retry<=0.0f) {
+        retry=10.0f;
+        for(int i=0;i<ACH_COUNT;++i) if(g_achievements[i].unlocked) SteamZoneUnlockAchievement(kAchDefs[i].steamId);
+    }
+#if CANITY_STEAM
+    if (s_ready && p_SteamAPI_RunCallbacks) p_SteamAPI_RunCallbacks();
+#endif
+}
+
+int SteamZoneReady(void) { return s_ready; }
+
+/* ---------------- 成就 ---------------- */
+int SteamZoneUnlockAchievement(const char* apiName) {
+    if (!s_ready || !apiName || !apiName[0]) return 0;
+    if (achCached(apiName)) return 0;
+#if CANITY_STEAM
+    void* stats = p_SteamUserStats ? p_SteamUserStats() : NULL;
+    if (!stats) return 0;
+    if (!p_ISteamUserStats_SetAchievement(stats, apiName)) return 0;
+    p_ISteamUserStats_StoreStats(stats);     /* 必须 Store 才会真正提交 */
+    achRemember(apiName);
+    return 1;
+#else
+    (void)apiName;
+    return 0;
+#endif
+}
+
+int SteamZoneHasAchievement(const char* apiName) {
+    if (!s_ready || !apiName) return 0;
+    if (achCached(apiName)) return 1;
+#if CANITY_STEAM
+    void* stats = p_SteamUserStats ? p_SteamUserStats() : NULL;
+    if (!stats) return 0;
+    int got = 0;
+    if (p_ISteamUserStats_GetAchievement(stats, apiName, &got)) {
+        if (got) { achRemember(apiName); return 1; }
+    }
+#endif
+    return 0;
+}
+
+/* ---------------- 云存档 ---------------- */
+int SteamZoneCloudUpload(const char* name, const void* data, int bytes) {
+    if (!s_ready || !name || !data || bytes <= 0) return 0;
+#if CANITY_STEAM
+    void* rs = p_SteamRemoteStorage ? p_SteamRemoteStorage() : NULL;
+    if (!rs) return 0;
+    return p_ISteamRemoteStorage_FileWrite(rs, name, data, bytes) ? 1 : 0;
+#else
+    (void)name; (void)data; (void)bytes;
+    return 0;
+#endif
+}
+
+int SteamZoneCloudDownload(const char* name, void* buf, int bufSize) {
+    if (!s_ready || !name || !buf || bufSize <= 0) return 0;
+#if CANITY_STEAM
+    void* rs = p_SteamRemoteStorage ? p_SteamRemoteStorage() : NULL;
+    if (!rs) return 0;
+    int sz = p_ISteamRemoteStorage_GetFileSize(rs, name);
+    if (sz <= 0 || sz > bufSize) return 0;
+    int got = p_ISteamRemoteStorage_FileRead(rs, name, buf, bufSize);
+    return got > 0 ? got : 0;
+#else
+    (void)name; (void)buf; (void)bufSize;
+    return 0;
+#endif
+}
+
+int SteamZoneCloudExists(const char* name) {
+    if (!s_ready || !name) return 0;
+#if CANITY_STEAM
+    void* rs = p_SteamRemoteStorage ? p_SteamRemoteStorage() : NULL;
+    if (!rs) return 0;
+    return p_ISteamRemoteStorage_FileExists(rs, name) ? 1 : 0;
+#else
+    (void)name;
+    return 0;
+#endif
+}
+
+long long SteamZoneCloudQuotaFree(void) {
+    if (!s_ready) return -1;
+#if CANITY_STEAM
+    void* rs = p_SteamRemoteStorage ? p_SteamRemoteStorage() : NULL;
+    if (!rs) return -1;
+    unsigned long long total = 0, avail = 0;
+    if (!p_ISteamRemoteStorage_GetQuota(rs, &total, &avail)) return -1;
+    return (long long)avail;
+#else
+    return -1;
+#endif
+}
+
+/* ---------------- 音乐 ---------------- */
+void SteamZoneMusicPause(int pause) {
+    if (!s_ready) return;
+#if CANITY_STEAM
+    void* mu = p_SteamMusic ? p_SteamMusic() : NULL;
+    if (!mu) return;
+    if (pause) p_ISteamMusic_Pause(mu);
+    else       p_ISteamMusic_Play(mu);
+#else
+    (void)pause;
+#endif
+}
+
+int SteamZoneMusicPlaying(void) {
+    if (!s_ready) return 0;
+#if CANITY_STEAM
+    void* mu = p_SteamMusic ? p_SteamMusic() : NULL;
+    if (!mu) return 0;
+    return p_ISteamMusic_IsPlaying(mu) ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
+/* ---------------- 覆盖层 ---------------- */
+void SteamZoneOpenOverlay(const char* dialog) {
+    if (!s_ready) return;
+#if CANITY_STEAM
+    void* fr = p_SteamFriends ? p_SteamFriends() : NULL;
+    if (!fr) return;
+    p_ISteamFriends_ActivateGameOverlay(fr, dialog ? dialog : "");
+#else
+    (void)dialog;
+#endif
+}
+
+
+/* ==================================================================
+ *  v5 新增实现
+ * ================================================================== */
+
+/* ---- 云存档冲突解决 ----
+ *
+ * 调研结论：**时间戳单独不能决定用哪一边**。
+ * 所以我们在文件头塞一个 16 字节的小结构：
+ *
+ *    magic      'CSAV'
+ *    version    存档格式版本
+ *    stamp      写入时的 time()
+ *    sum        FNV-1a 校验和（覆盖 payload）
+ *
+ * 判定顺序：
+ *   ① 云端没有            → 上传本地
+ *   ② 校验和相同          → 内容一致，什么都不做
+ *   ③ 云端 stamp 更新     → 云端赢（返回 CLOUDWIN，调用方先备份本地）
+ *   ④ 否则                → 本地赢，上传
+ *
+ * 注意：**永远不删本地**。云端赢的时候也是先备份再覆盖。
+ */
+typedef struct {
+    unsigned int magic;
+    int          version;
+    unsigned int stamp;
+    unsigned int sum;
+    int          payload;
+} SteamCloudHead;
+
+#define STEAM_CLOUD_MAGIC 0x56415343u   /* 'CSAV' 小端 */
+
+static unsigned int fnv1a(const unsigned char* p, int n) {
+    unsigned int h = 2166136261u;
+    for (int i = 0; i < n; i++) {
+        h ^= (unsigned int)p[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+
+int SteamZoneCloudSync(const char* name, void* localBuf, int bufSize) {
+    if (!s_ready || !name || !localBuf || bufSize <= (int)sizeof(SteamCloudHead)) {
+        return STEAM_SYNC_ERROR;
+    }
+
+    int payload = bufSize - (int)sizeof(SteamCloudHead);
+    unsigned char* localPayload = (unsigned char*)localBuf + sizeof(SteamCloudHead);
+    unsigned int localSum = fnv1a(localPayload, payload);
+
+    /* ① 云端没有 → 上传 */
+    if (!SteamZoneCloudExists(name)) {
+        return SteamZoneCloudUpload(name, localBuf, bufSize)
+             ? STEAM_SYNC_NOCLOUD : STEAM_SYNC_ERROR;
+    }
+
+    unsigned char* remote=(unsigned char*)malloc((size_t)bufSize);
+    if(!remote) return STEAM_SYNC_ERROR;
+    int got=SteamZoneCloudDownload(name,remote,bufSize);
+    if(got!=bufSize) {free(remote);return STEAM_SYNC_ERROR;}
+    SteamCloudHead ch; memcpy(&ch,remote,sizeof(ch));
+    SteamCloudHead* lh=(SteamCloudHead*)localBuf;
+    if(ch.magic!=STEAM_CLOUD_MAGIC || ch.version!=lh->version || ch.payload!=payload ||
+       ch.sum!=fnv1a(remote+sizeof(ch),payload)) {free(remote);return STEAM_SYNC_ERROR;}
+    if(ch.sum==localSum) {free(remote);return STEAM_SYNC_SAMECL;}
+    if(ch.stamp>lh->stamp) {memcpy(localBuf,remote,(size_t)bufSize);free(remote);return STEAM_SYNC_CLOUDWIN;}
+    free(remote);
+
+    /* ⑤ 本地更新 → 上传 */
+    return SteamZoneCloudUpload(name, localBuf, bufSize)
+         ? STEAM_SYNC_LOCALWIN : STEAM_SYNC_ERROR;
+}
+
+/* ---- 统计 ---- */
+void SteamZoneSetStatInt(const char* statName, int value) {
+    if (!s_ready || !statName) return;
+#if CANITY_STEAM
+    void* stats = p_SteamUserStats ? p_SteamUserStats() : NULL;
+    if (!stats || !p_ISteamUserStats_SetStatInt32) return;
+    p_ISteamUserStats_SetStatInt32(stats, statName, value);
+#else
+    (void)statName; (void)value;
+#endif
+}
+
+void SteamZoneStoreStats(void) {
+    if (!s_ready) return;
+#if CANITY_STEAM
+    void* stats = p_SteamUserStats ? p_SteamUserStats() : NULL;
+    if (stats && p_ISteamUserStats_StoreStats) p_ISteamUserStats_StoreStats(stats);
+#endif
+}
+
+/* ---- 富状态 ---- */
+void SteamZoneSetRichPresence(const char* key, const char* value) {
+    if (!s_ready || !key) return;
+#if CANITY_STEAM
+    void* fr = p_SteamFriends ? p_SteamFriends() : NULL;
+    if (!fr || !p_ISteamFriends_SetRichPresence) return;
+    p_ISteamFriends_SetRichPresence(fr, key, value ? value : "");
+#else
+    (void)key; (void)value;
+#endif
+}
+
+/* ---- 音乐闪避 ---- */
+static float s_duckT = 0.0f;
+static int   s_ducked = 0;
+
+void SteamZoneMusicDuck(float seconds) {
+    if (seconds <= 0.0f) return;
+    s_duckT = seconds;
+    if (!s_ducked && SteamZoneMusicPlaying()) {
+        SteamZoneMusicPause(1);
+        s_ducked = 1;
+    }
+}
+
+void SteamZoneMusicDuckTick(float dt) {
+    if (s_duckT <= 0.0f) return;
+    s_duckT -= dt;
+    if (s_duckT <= 0.0f) {
+        s_duckT = 0.0f;
+        if (s_ducked) {
+            SteamZoneMusicPause(0);
+            s_ducked = 0;
+        }
+    }
+}
+
+/* ---- 按表下标解锁（比传字符串安全）---- */
+int SteamZoneUnlockAchievementIndex(int index) {
+    if (index < 0 || index >= kSteamAchievementCount) return 0;
+    return SteamZoneUnlockAchievement(kSteamAchievements[index].apiName);
+}
+
+const char* SteamZoneStatusText(void) { return s_statusText; }
+
+static void* ReadLocalEnvelope(const char* path,int* bytes) {
+    FILE* f=fopen(path,"rb");if(!f) return NULL;
+    fseek(f,0,SEEK_END);long n=ftell(f);rewind(f);
+    if(n<=0 || n>1024*1024) {fclose(f);return NULL;}
+    unsigned char* p=(unsigned char*)malloc(sizeof(SteamCloudHead)+(size_t)n);
+    if(!p) {fclose(f);return NULL;}
+    if(fread(p+sizeof(SteamCloudHead),1,(size_t)n,f)!=(size_t)n) {free(p);fclose(f);return NULL;}
+    fclose(f);WIN32_FILE_ATTRIBUTE_DATA info;unsigned stamp=0;
+    if(GetFileAttributesExA(path,GetFileExInfoStandard,&info)) {
+        ULARGE_INTEGER t;t.LowPart=info.ftLastWriteTime.dwLowDateTime;t.HighPart=info.ftLastWriteTime.dwHighDateTime;
+        stamp=(unsigned)(t.QuadPart/10000000ULL-11644473600ULL);
+    }
+    SteamCloudHead h={STEAM_CLOUD_MAGIC,26,stamp,fnv1a(p+sizeof(h),(int)n),(int)n};memcpy(p,&h,sizeof(h));
+    *bytes=(int)(sizeof(h)+n);return p;
+}
+void SteamZoneUploadSave(const char* path) {
+    if(!s_ready || !path) return;
+    int bytes=0;void* p=ReadLocalEnvelope(path,&bytes);if(!p) return;
+    const char* name=strrchr(path,'\\');name=name?name+1:path;
+    SteamZoneCloudUpload(name,p,bytes);free(p);
+}
+void SteamZoneSyncLocalSaves(void) {
+    if(!s_ready) return;
+    char path[MAX_PATH];GetModuleFileNameA(NULL,path,sizeof(path));char* name=strrchr(path,'\\');if(!name) return;
+    ++name;
+    for(int slot=0;slot<3;++slot) {
+        snprintf(name,sizeof(path)-(size_t)(name-path),"canity%d.sav",slot);
+        int bytes=0;void* p=ReadLocalEnvelope(path,&bytes);if(!p) continue;
+        if(SteamZoneCloudSync(name,p,bytes)==STEAM_SYNC_CLOUDWIN) {
+            char bak[MAX_PATH+32];snprintf(bak,sizeof(bak),"%s.pre-cloud.bak",path);
+            if(CopyFileA(path,bak,FALSE)) {
+                FILE* f=fopen(path,"wb");if(f) {SteamCloudHead* h=(SteamCloudHead*)p;fwrite((char*)p+sizeof(*h),1,(size_t)h->payload,f);fclose(f);}
+            }
+        }
+        free(p);
+    }
+}

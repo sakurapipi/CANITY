@@ -13,6 +13,7 @@
  */
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 #include "sprites.h"
 #include "common.h"
@@ -554,49 +555,195 @@ static void BakeItem(int id, int kind) {
     cvClear();
     float c = CANVAS_W * 0.5f, cy = 128.0f;
     unsigned int main = 0x0040A060u, dark = 0x00102818u, hi = 0x0080E0A0u;
-    int tall = 1, wide = 0;
-    switch (kind) {
-    case 0: main = 0x00E04020u; dark = 0x00300808u; hi = 0x00FFC080u; tall = 1; break; /* 荧光棒 */
-    case 1: main = 0x0030A850u; dark = 0x000A2010u; hi = 0x00A0F0C0u; tall = 1; break; /* 玻璃瓶 */
-    case 2: main = 0x00805038u; dark = 0x00181010u; hi = 0x00C08060u; tall = 0; wide = 1; break; /* 砖头 */
-    case 3: main = 0x00A0C020u; dark = 0x00182008u; hi = 0x00E0F060u; tall = 1; break; /* 酸瓶 */
-    case 4: main = 0x00808088u; dark = 0x00181820u; hi = 0x00C8C8D0u; tall = 1; break; /* 烟雾弹 */
-    case 5: main = 0x00C04818u; dark = 0x00301008u; hi = 0x00FFA040u; tall = 1; break; /* 燃烧瓶 */
-    case 6: main = 0x00C8C040u; dark = 0x00302810u; hi = 0x00F0F080u; tall = 1; break; /* 胶水瓶 */
-    default: main = 0x00B0C8D8u; dark = 0x00203040u; hi = 0x00F0FFFFu; tall = 0; wide = 0; break; /* 镜片 */
-    }
-    /* 手 */
-    cvEllipse(c, cy + 40, 40.0f, 26.0f, 0x000A0C10u, 1.0f);
-    cvEllipse(c, cy + 38, 36.0f, 22.0f, 0x00382C26u, 1.0f);
 
-    if (wide) {
-        /* 砖头：一块带缺口的方砖 */
-        float b[8] = { c - 42, cy - 26, c + 40, cy - 32, c + 44, cy + 20, c - 38, cy + 26 };
-        cvPoly(b, 4, 0x000A0C10u, 1.0f);
-        float b2[8] = { c - 36, cy - 20, c + 34, cy - 25, c + 37, cy + 14, c - 32, cy + 19 };
-        cvPolyGrad(b2, 4, hi, main, 1.0f);
-        cvSpeckle((int)c, (int)cy, 30, 40, dark, 0.5f);
-    } else if (kind == 7) {
-        /* 镜片：一片斜置的薄圆盘 */
-        cvEllipse(c, cy, 44.0f, 18.0f, 0x000A0C10u, 1.0f);
-        cvEllipse(c, cy, 40.0f, 14.0f, main, 0.9f);
-        cvEllipse(c - 10, cy - 5, 18.0f, 6.0f, hi, 0.75f);
-        cvLine(c - 34, cy + 6, c + 30, cy - 8, 3, 0x00F0FFFFu, 0.5f);
-    } else {
-        /* 瓶子/棒：柱体 + 瓶颈 + 标签 */
-        float h = tall ? 74.0f : 46.0f;
-        cvLine(c, cy - h, c, cy + 26, 46, 0x000A0C10u, 1.0f);
-        cvLine(c, cy - h, c, cy + 24, 40, main, 1.0f);
-        cvLine(c - 10, cy - h + 6, c - 10, cy + 20, 10, hi, 0.55f);
-        /* 瓶颈 */
-        cvLine(c, cy - h - 18, c, cy - h + 4, 22, 0x000A0C10u, 1.0f);
-        cvLine(c, cy - h - 16, c, cy - h + 2, 16, main, 1.0f);
-        /* 标签 */
-        cvLine(c, cy - 20, c, cy + 6, 42, dark, 0.85f);
-        cvLine(c, cy - 16, c, cy + 2, 34, hi, 0.45f);
-        /* 高光 */
-        cvEllipse(c - 12, cy - h + 22, 4.0f, 10.0f, 0x00FFFFFFu, 0.22f);
+    switch (kind) {
+    case 0: main = 0x00E04020u; dark = 0x00300808u; hi = 0x00FFC080u;  break; /* 光球 */
+    case 2: main = 0x00808088u; dark = 0x00181820u; hi = 0x00C8C8D0u;   break; /* 烟雾 */
+    case 5: main = 0x00C04818u; dark = 0x00301008u; hi = 0x00FFA040u;  break; /* 玩偶 */
+    case 6: main = 0x00C8C040u; dark = 0x00302810u; hi = 0x00F0F080u;  break; /* 胶水 */
+    default: main = 0x00B0C8D8u; dark = 0x00203040u; hi = 0x00F0FFFFu;   break; /* 石弹 / 音叉 */
     }
+    /* ===== v2.4.60 **左手（手套）重画** =====
+       原来只是一个扁椭圆 —— 在 3D 场景里读起来像"一团棕色"，
+       而且尺寸 36×22 太小，缩到 69px 之后几乎看不见（用户：「左手没有东西」）。
+
+       手是**托举**的姿态，所以剪影要能看出来：
+         · 掌根：一个宽的圆角块（比原来大 1.6 倍）
+         · 四指：从掌根往上伸，**包住物体下半部** —— 这是"托着"的关键
+         · 拇指：单独一块，压在物体右下前方
+       手的颜色压得很暗（0x2A2420），这样上面托的东西永远是亮的一方。 */
+    {
+        unsigned int gloveLo = 0x0016120Eu;
+        unsigned int gloveMid = 0x00332B24u;
+        unsigned int gloveHi = 0x0052483Cu;
+
+        /* 掌根 */
+        cvEllipse(c, cy + 56, 62.0f, 34.0f, gloveLo, 1.0f);
+        cvEllipse(c, cy + 54, 57.0f, 30.0f, gloveMid, 1.0f);
+        /* 掌根受光边（左上） */
+        cvLine(c - 48, cy + 40, c - 20, cy + 30, 6.0f, gloveHi, 0.55f);
+
+        /* 四指：从掌根往上，包住物体下半 */
+        for (int f = 0; f < 4; f++) {
+            float fx = c - 34.0f + (float)f * 22.0f;
+            cvLine(fx, cy + 44, fx, cy + 12, 15.0f, gloveLo, 1.0f);
+            cvLine(fx, cy + 42, fx, cy + 14, 11.0f, gloveMid, 1.0f);
+            cvLine(fx - 4, cy + 40, fx - 4, cy + 16, 3.0f, gloveHi, 0.45f);
+        }
+        /* 拇指：右侧一块，压在前面 */
+        cvLine(c + 30, cy + 58, c + 40, cy + 30, 18.0f, gloveLo, 1.0f);
+        cvLine(c + 30, cy + 56, c + 39, cy + 32, 13.0f, gloveMid, 1.0f);
+        cvLine(c + 25, cy + 54, c + 33, cy + 34, 3.0f, gloveHi, 0.4f);
+    }
+
+    if (kind == 8) {
+        /* ===== v2.4.59 **投石（石弹）** =====
+           地标：**不规则的多边形石头 + 手心里的裂口**
+           旧版是一根绿玻璃瓶 —— 和"投石"两个字完全没关系，
+           而且和胶水瓶/酸瓶共用同一个剪影，填黑分不出来。
+
+           剪影规格（art_direction.h 铁律二）：
+             · 主体是一块**多棱石**（6 边，宽度 > 高度，读作"重"）
+             · 左上一道**亮棱**（受光面）
+             · 右下一条**暗裂缝**（唯一的细节，也是地标）
+             · 手里托着 —— 底部被手掌挡住一小块 */
+        unsigned int rockHi  = 0x00A8A49Cu;
+        unsigned int rockMid = 0x00605C58u;
+        unsigned int rockLo  = 0x00282420u;
+
+        /* 石头外轮廓：6 边，故意不对称 */
+        float r1[12] = {
+            c - 44, cy - 10,
+            c - 26, cy - 34,
+            c + 12, cy - 38,
+            c + 42, cy - 18,
+            c + 38, cy + 22,
+            c - 22, cy + 28
+        };
+        cvPoly(r1, 6, 0x000A0806u, 1.0f);          /* 外描边 */
+
+        float r2[12] = {
+            c - 38, cy - 11,
+            c - 22, cy - 30,
+            c + 10, cy - 33,
+            c + 36, cy - 16,
+            c + 32, cy + 18,
+            c - 19, cy + 23
+        };
+        cvPolyGrad(r2, 6, rockHi, rockMid, 1.0f);  /* 主体渐变：上亮下暗 */
+
+        /* 左上受光亮棱 —— 仿 3D 的主光 */
+        cvLine(c - 30, cy - 16, c + 6, cy - 28, 6.0f, rockHi, 0.85f);
+
+        /* 右下暗裂缝 —— **唯一的地标** */
+        cvLine(c + 4, cy - 20, c + 26, cy + 12, 4.0f, rockLo, 0.9f);
+        cvLine(c + 26, cy + 12, c + 34, cy + 16, 3.0f, rockLo, 0.7f);
+
+        /* 底部阴影（压在手掌上） */
+        cvLine(c - 18, cy + 20, c + 30, cy + 16, 7.0f, 0x00000000u, 0.35f);
+
+    } else if (kind == 9) {
+        /* ===== v2.4.59 **回声（音叉）** =====
+           地标：**两根平行叉股 + 底部一个圆形共鸣腔**
+           旧版是烟雾弹换色（灰圆柱）—— 完全看不出"声"。
+           音叉是全世界通用的"声音"符号，剪影独特，
+           填黑之后两根竖线 + 一个圆球，绝对不会认错。
+
+           剪影规格：
+             · 两根**竖直叉股**（上端略微外张）—— 最主要的识别特征
+             · 底部一个**圆球共鸣腔**（带一点高光）
+             · 叉股之间透空（负空间），所以填黑也能分出两根 */
+        unsigned int metHi  = 0x00E8E4D8u;
+        unsigned int metMid = 0x00908C82u;
+        unsigned int metLo  = 0x00444038u;
+
+        /* 两根叉股：先描边再填 */
+        /* 左股 */
+        cvLine(c - 22, cy - 58, c - 26, cy + 12, 16.0f, 0x000A0C10u, 1.0f);
+        cvLine(c - 22, cy - 58, c - 26, cy + 12, 11.0f, metMid, 1.0f);
+        cvLine(c - 27, cy - 56, c - 30, cy + 10, 3.0f, metHi, 0.75f);   /* 左缘受光 */
+        /* 右股 */
+        cvLine(c + 22, cy - 58, c + 26, cy + 12, 16.0f, 0x000A0C10u, 1.0f);
+        cvLine(c + 22, cy - 58, c + 26, cy + 12, 11.0f, metMid, 1.0f);
+        cvLine(c + 27, cy - 56, c + 30, cy + 10, 3.0f, metLo, 0.6f);    /* 右缘背光 */
+
+        /* 底部共鸣腔：圆球 */
+        cvEllipse(c, cy + 20, 30.0f, 26.0f, 0x000A0C10u, 1.0f);
+        cvEllipse(c, cy + 20, 26.0f, 22.0f, metMid, 1.0f);
+        cvEllipse(c - 8, cy + 12, 12.0f, 8.0f, metHi, 0.55f);           /* 球面高光 */
+        cvEllipse(c + 10, cy + 30, 8.0f, 6.0f, metLo, 0.45f);           /* 球面暗部 */
+
+        /* 球上一个发光的缝 —— "它在响" */
+        cvLine(c - 12, cy + 20, c + 12, cy + 20, 3.0f, 0x00A0E8FFu, 0.9f);
+
+    } else if (kind == 0) {
+        /* ===== 光球 / 荧光棒 =====
+           地标：**一根细长直棒 + 顶端一团发光球**
+           填黑 = 一条竖线 + 一个圆点，最简也最好认。 */
+        cvLine(c, cy - 64, c, cy + 34, 18.0f, 0x000A0C10u, 1.0f);
+        cvLine(c, cy - 62, c, cy + 32, 13.0f, main, 1.0f);
+        cvLine(c - 4, cy - 58, c - 4, cy + 28, 4.0f, hi, 0.7f);
+        /* 顶端发光球 */
+        cvEllipse(c, cy - 66, 26.0f, 24.0f, 0x000A0C10u, 1.0f);
+        cvEllipse(c, cy - 66, 22.0f, 20.0f, main, 1.0f);
+        cvEllipse(c - 6, cy - 72, 10.0f, 8.0f, 0x00FFFFFFu, 0.55f);
+        cvGlow(c, cy - 66, 46.0f, 0x00FF8040u, 0.30f);
+
+    } else if (kind == 2) {
+        /* ===== 烟雾弹 =====
+           地标：**粗短圆柱 + 顶部一圈拉环 + 两侧出烟孔**
+           和瓶子最大的区别是"矮胖"，填黑是个方墩子。 */
+        cvLine(c, cy - 34, c, cy + 40, 70.0f, 0x000A0C10u, 1.0f);
+        cvLine(c, cy - 32, c, cy + 38, 62.0f, main, 1.0f);
+        /* 顶部拉环 */
+        cvEllipse(c, cy - 44, 16.0f, 12.0f, 0x000A0C10u, 1.0f);
+        cvEllipse(c, cy - 44, 12.0f, 9.0f, hi, 0.85f);
+        cvEllipse(c, cy - 44, 6.0f, 4.5f, 0x00000000u, 1.0f);
+        /* 两侧出烟孔 */
+        cvLine(c - 22, cy - 6, c - 22, cy + 18, 6.0f, dark, 0.9f);
+        cvLine(c + 22, cy - 6, c + 22, cy + 18, 6.0f, dark, 0.9f);
+        /* 筒身受光 */
+        cvLine(c - 18, cy - 26, c - 18, cy + 30, 8.0f, hi, 0.45f);
+
+    } else if (kind == 5) {
+        /* ===== 玩偶（诱饵）=====
+           地标：**圆头 + 两只尖耳朵 + 两条垂腿**
+           唯一的"生物形"投掷物 —— 填黑像一个坐着的小人。 */
+        /* 身体 */
+        cvEllipse(c, cy + 6, 40.0f, 34.0f, 0x000A0C10u, 1.0f);
+        cvEllipse(c, cy + 6, 35.0f, 29.0f, main, 1.0f);
+        /* 头 */
+        cvEllipse(c, cy - 44, 27.0f, 25.0f, 0x000A0C10u, 1.0f);
+        cvEllipse(c, cy - 44, 23.0f, 21.0f, main, 1.0f);
+        /* 两只尖耳朵 */
+        cvLine(c - 20, cy - 56, c - 30, cy - 78, 14.0f, 0x000A0C10u, 1.0f);
+        cvLine(c - 20, cy - 55, c - 29, cy - 76, 10.0f, main, 1.0f);
+        cvLine(c + 20, cy - 56, c + 30, cy - 78, 14.0f, 0x000A0C10u, 1.0f);
+        cvLine(c + 20, cy - 55, c + 29, cy - 76, 10.0f, main, 1.0f);
+        /* 两条垂腿 */
+        cvLine(c - 16, cy + 28, c - 20, cy + 54, 14.0f, 0x000A0C10u, 1.0f);
+        cvLine(c - 16, cy + 28, c - 20, cy + 52, 10.0f, main, 1.0f);
+        cvLine(c + 16, cy + 28, c + 20, cy + 54, 14.0f, 0x000A0C10u, 1.0f);
+        cvLine(c + 16, cy + 28, c + 20, cy + 52, 10.0f, main, 1.0f);
+        /* 眼睛：两颗亮点，让它读作"会叫的娃娃" */
+        cvEllipse(c - 9, cy - 46, 4.0f, 4.0f, 0x00FFF0A0u, 0.95f);
+        cvEllipse(c + 9, cy - 46, 4.0f, 4.0f, 0x00FFF0A0u, 0.95f);
+
+    } else if (kind == 6) {
+        /* ===== 胶水瓶 =====
+           地标：**矮胖罐 + 一根斜出的粗滴管嘴**
+           读作"会挤的东西"。 */
+        cvLine(c, cy - 20, c, cy + 40, 64.0f, 0x000A0C10u, 1.0f);
+        cvLine(c, cy - 18, c, cy + 38, 56.0f, main, 1.0f);
+        /* 滴管嘴：一根斜出来的粗管 */
+        cvLine(c + 8, cy - 18, c + 26, cy - 48, 20.0f, 0x000A0C10u, 1.0f);
+        cvLine(c + 8, cy - 16, c + 25, cy - 46, 14.0f, main, 1.0f);
+        cvEllipse(c + 27, cy - 50, 9.0f, 8.0f, hi, 0.9f);
+        /* 罐身受光 */
+        cvLine(c - 16, cy - 10, c - 16, cy + 30, 8.0f, hi, 0.45f);
+        cvLine(c - 20, cy + 22, c + 20, cy + 22, 4.0f, dark, 0.5f);
+    }
+
     cvFinish(&g_sprites[id]);
 }
 
@@ -831,9 +978,10 @@ static void BakeMonster(int id, int kind, int pose) {
             float bagY = shoulderY + H * 0.02f;
             /* 口袋是唯一的大面积色块 —— 暗金，让「那是钱袋」一眼可辨 */
             cvEllipse(bagX, bagY, shoulderW * 1.25f, H * 0.20f, 0x00140C04u, 1.0f);
-            cvEllipse(bagX, bagY, shoulderW * 1.10f, H * 0.175f, 0x00704814u, 1.0f);
+            /* v2.4.66：麻袋用洋红 key 画 —— 运行时按「有没有赃款」换成白/金 */
+            cvEllipse(bagX, bagY, shoulderW * 1.10f, H * 0.175f, 0x00FF00FFu, 1.0f);
             cvEllipse(bagX - shoulderW * 0.28f, bagY - H * 0.05f,
-                      shoulderW * 0.42f, H * 0.065f, 0x00C08A28u, 0.9f);
+                      shoulderW * 0.42f, H * 0.065f, 0x00FF40FFu, 0.9f);
             /* 袋口绳子 */
             cvLine(bagX + shoulderW * 0.9f, bagY - H * 0.13f,
                    cx - shoulderW * 0.5f, shoulderY + H * 0.06f, 3.0f, edge, 0.9f);
@@ -868,44 +1016,148 @@ static void BakeMonster(int id, int kind, int pose) {
             cvLine(cx - hrx * 0.55f, hy + hry * 0.55f,
                    cx + hrx * 0.55f, hy + hry * 0.40f, 3.0f, 0x00020303u, 0.95f);
         } else if (kind == 9) {
-            /* --- 守门人：三只横排眼 + 长袍 + 提灯（地标 #1）--- */
-            /* 长袍：下半身一整块梯形，盖住腿 */
-            float robe[8] = {
-                cx - shoulderW * 0.95f, shoulderY + H * 0.30f,
-                cx + shoulderW * 0.95f, shoulderY + H * 0.30f,
-                cx + shoulderW * 1.45f, footY + 6.0f,
-                cx - shoulderW * 1.45f, footY + 6.0f
-            };
-            cvPoly(robe, 4, edge, 1.0f);
-            cvPolyGrad(robe, 4, hi, body, 1.0f);
-            /* 平直宽肩 */
-            float sh[8] = {
-                cx - shoulderW * 1.55f, shoulderY - 4.0f,
-                cx + shoulderW * 1.55f, shoulderY - 4.0f,
-                cx + shoulderW * 1.30f, shoulderY + H * 0.06f,
-                cx - shoulderW * 1.30f, shoulderY + H * 0.06f
-            };
-            cvPoly(sh, 4, edge, 1.0f);
-            cvPolyGrad(sh, 4, hi, body, 1.0f);
-            /* 三只横排眼（铁律五：too many） */
-            for (int e = -1; e <= 1; e++) {
-                cvEllipse(cx + (float)e * hrx * 0.62f, hy - 2.0f,
-                          hrx * 0.22f, hry * 0.26f, 0x00000204u, 0.9f);
-                cvEllipse(cx + (float)e * hrx * 0.62f, hy - 2.0f,
-                          hrx * 0.13f, hry * 0.15f, 0x0080C0FFu, 0.95f);
-            }
-            /* 提灯：右侧一个亮圆，唯一的圆形地标 */
+            /* ================================================================
+             * v2.4.86 **守门人：按审美铁律重做（第 3 版）**
+             * ----------------------------------------------------------------
+             * 上一版被用户批「像水桶、没有特征、头部错乱」。
+             * 复盘：
+             *   · 身体是一个没有收放的矩形 → 填黑就是个桶
+             *   · 肩膀是一条水平横杠 → 和别的怪的横线没区别
+             *   · 脸是盒子 + 横排眼 → 沉默、无表情
+             *
+             * 这一版按 art_direction.h 的三条硬指标重画：
+             *
+             *   铁律一 填黑测试：剪影必须是「尖顶 + 双角 + 收腰长袍 + 长杖」
+             *   铁律二 地标：**头上那根竖直的提灯杖**是全场唯一的超长直线
+             *   铁律三 只三个特征：尖顶 / 双角肩 / 竖排三眼
+             *
+             * 特意避开的东西：
+             *   · 不再用横条形肩膀（那是"桶"的来源）
+             *   · 眼睛改成**竖排**（全场唯一），横排太普通
+             *   · 身体做成上窄下宽的**收腰长袍**，剪影有方向
+             * ================================================================ */
             {
-                float lx = cx + shoulderW * 1.85f;
-                float ly = shoulderY + H * 0.42f;
-                cvLine(cx + shoulderW * 1.25f, shoulderY + H * 0.14f,
-                       lx, ly - 14.0f, 4.0f, edge, 0.9f);
-                cvEllipse(lx, ly, 16.0f, 20.0f, 0x00101A28u, 1.0f);
-                cvEllipse(lx, ly, 11.0f, 14.0f, 0x00FFE8A0u, 1.0f);
-                cvEllipse(lx - 3.0f, ly - 4.0f, 5.0f, 6.0f, 0x00FFFFFFu, 0.9f);
+                /* ---- 五个色值，全部蓝灰（没有一个绿）---- */
+                unsigned int wEdge = 0x0006080Bu;
+                unsigned int wDeep = 0x00161A21u;
+                unsigned int wBody = 0x00283039u;
+                unsigned int wLite = 0x0046505Eu;
+                unsigned int wEye  = (pose == 2) ? 0x00FF2A18u : 0x0058B8F0u;
+
+                float topY = headY - 16.0f;          /* 尖顶最高点 */
+
+                /* ---------- ① 尖顶兜帽：三角，剪影的最高点 ---------- */
+                {
+                    float hood[8] = {
+                        cx, topY,
+                        cx + hrx * 1.15f, topY + 20.0f,
+                        cx,              topY + 26.0f,
+                        cx - hrx * 1.15f, topY + 20.0f
+                    };
+                    cvPoly(hood, 4, wEdge, 1.0f);
+                    float hood2[8] = {
+                        cx, topY + 3.0f,
+                        cx + hrx * 0.95f, topY + 19.0f,
+                        cx,              topY + 23.0f,
+                        cx - hrx * 0.95f, topY + 19.0f
+                    };
+                    cvPolyGrad(hood2, 4, wLite, wBody, 1.0f);
+                    /* 兜帽中缝 —— 一条竖线，把三角分成左右两片 */
+                    cvLine(cx, topY + 4.0f, cx, topY + 22.0f, 2.0f, wDeep, 0.9f);
+                }
+
+                /* ---------- ② 脸：窄长竖条，**三只眼竖排**（全场唯一） ---------- */
+                {
+                    float fw = hrx * 0.72f;
+                    float f0 = topY + 18.0f;
+                    float f1 = topY + 44.0f;
+                    float face[8] = { cx - fw, f0, cx + fw, f0, cx + fw, f1, cx - fw, f1 };
+                    cvPoly(face, 4, wEdge, 1.0f);
+                    cvPoly(face, 4, wDeep, 1.0f);
+
+                    /* 竖排三眼 */
+                    for (int e = 0; e < 3; e++) {
+                        float ey = f0 + 5.0f + (float)e * 7.0f;
+                        cvLine(cx - fw * 0.62f, ey, cx + fw * 0.62f, ey, 3.0f, wEye, 1.0f);
+                    }
+                }
+
+                /* ---------- ③ 双角肩：左右各一个**向上的尖角** ---------- */
+                {
+                    float sw = shoulderW * 1.55f;
+                    /* 左角 */
+                    float lh[8] = { cx - sw, shoulderY + 4.0f,
+                                    cx - sw * 0.30f, shoulderY - 2.0f,
+                                    cx - sw * 0.55f, shoulderY + 12.0f,
+                                    cx - sw * 0.95f, shoulderY + 14.0f };
+                    cvPoly(lh, 4, wEdge, 1.0f);
+                    cvPolyGrad(lh, 4, wLite, wBody, 1.0f);
+                    /* 右角（不对称：略高 —— 铁律二 ASYMMETRY） */
+                    float rh[8] = { cx + sw, shoulderY - 2.0f,
+                                    cx + sw * 0.30f, shoulderY + 2.0f,
+                                    cx + sw * 0.55f, shoulderY + 14.0f,
+                                    cx + sw * 0.95f, shoulderY + 12.0f };
+                    cvPoly(rh, 4, wEdge, 1.0f);
+                    cvPolyGrad(rh, 4, wLite, wBody, 1.0f);
+                }
+
+                /* ---------- ④ 收腰长袍：上窄下宽，剪影有方向 ---------- */
+                {
+                    float r0 = shoulderY + 8.0f;
+                    float r1 = footY + 6.0f;
+                    float wTop = shoulderW * 0.72f;
+                    float wMid = shoulderW * 0.62f;     /* 腰最细 */
+                    float wBot = shoulderW * 1.30f;     /* 下摆最宽 */
+
+                    /* 上半段（肩 → 腰） */
+                    float up[8] = { cx - wTop, r0, cx + wTop, r0,
+                                    cx + wMid, r0 + (r1 - r0) * 0.42f,
+                                    cx - wMid, r0 + (r1 - r0) * 0.42f };
+                    cvPoly(up, 4, wEdge, 1.0f);
+                    cvPolyGrad(up, 4, wLite, wBody, 1.0f);
+
+                    /* 下半段（腰 → 下摆） */
+                    float dn[8] = { cx - wMid, r0 + (r1 - r0) * 0.42f,
+                                    cx + wMid, r0 + (r1 - r0) * 0.42f,
+                                    cx + wBot, r1,
+                                    cx - wBot, r1 };
+                    cvPoly(dn, 4, wEdge, 1.0f);
+                    cvPolyGrad(dn, 4, wLite, wBody, 1.0f);
+
+                    /* 腰带：一条横线，把上下两段分开 */
+                    cvLine(cx - wMid - 1.0f, r0 + (r1 - r0) * 0.42f,
+                           cx + wMid + 1.0f, r0 + (r1 - r0) * 0.42f,
+                           4.0f, wDeep, 1.0f);
+
+                    /* 下摆三道褶 —— 让"袍"读得出来，不是平板 */
+                    for (int f = -1; f <= 1; f++) {
+                        float fx = cx + (float)f * wBot * 0.45f;
+                        cvLine(fx, r1 - (r1 - r0) * 0.30f, fx, r1 - 2.0f,
+                               2.0f, wDeep, 0.75f);
+                    }
+                }
+
+                /* ---------- ⑤ 提灯杖：右侧**一根超长竖杖**（地标 #1） ---------- */
+                {
+                    float sx = cx + shoulderW * 2.15f;
+                    float s0 = topY + 6.0f;              /* 高过头顶 */
+                    float s1 = footY - 4.0f;
+
+                    /* 杖身 */
+                    cvLine(sx, s0, sx, s1, 5.0f, wEdge, 1.0f);
+                    cvLine(sx, s0 + 2.0f, sx, s1 - 2.0f, 3.0f, 0x005A4A32u, 1.0f);
+
+                    /* 杖顶的灯 */
+                    cvEllipse(sx, s0 - 2.0f, 11.0f, 13.0f, wEdge, 1.0f);
+                    cvEllipse(sx, s0 - 2.0f, 7.0f, 9.0f, 0x00FFE8A0u, 1.0f);
+                    cvEllipse(sx - 2.0f, s0 - 5.0f, 3.0f, 4.0f, 0x00FFFFFFu, 0.9f);
+
+                    /* 杖下端的配重球 */
+                    cvEllipse(sx, s1, 6.0f, 7.0f, wEdge, 1.0f);
+                    cvEllipse(sx, s1, 4.0f, 5.0f, wBody, 1.0f);
+                }
             }
         }
-
         if (kind == 0) {
             /* 寻声鬼：没有眼睛 —— 它靠听。取而代之的是一张咧开的下颌。 */
             float jaw[8] = { cx - hrx * 0.85f, hy + 4,
@@ -929,8 +1181,17 @@ static void BakeMonster(int id, int kind, int pose) {
             cvEllipse(cx - hrx * 0.40f, hy - 2, 5.0f, 4.2f, 0x00D8F4FFu, 1.0f);
             cvEllipse(cx + hrx * 0.40f, hy - 2, 5.0f, 4.2f, 0x00D8F4FFu, 1.0f);
             cvGlow(cx, hy - 2, 26.0f, 0x0060C0FFu, 0.30f);
-        } else {
-            /* 偷电怪：一簇小眼睛 + 背上的导管 */
+        } else if (kind == 2) {
+            /* ===== v2.4.85 **这是绿色残留的真凶** =====
+               原来这里是 `} else {`（没有条件）——
+               于是**任何不是 kind 0/1 的怪都会被画上三只绿色小眼睛**，
+               包括守门人（kind 9）。
+               它在我重做的面甲之后执行，正好盖在脸上，
+               所以不管我把 kind 9 的代码改多少遍，绿眼睛永远在。
+
+               现在限定只给 kind 2（偷电怪）画。
+               —— 这也解释了用户说的"头部错乱"：
+                 一张脸上叠了两套眼睛。 */
             for (int i = -1; i <= 1; i++) {
                 cvEllipse(cx + (float)i * 7.0f, hy - 4, 3.6f, 3.0f, 0x00080A08u, 1.0f);
                 cvEllipse(cx + (float)i * 7.0f, hy - 4, 2.4f, 1.9f, 0x0070FFA0u, 1.0f);
@@ -1408,7 +1669,13 @@ void SpritesInit(void) {
     BakeWrench();
     BakePistol();
     BakeSigil();
-    for (int i = 0; i < 8; i++) BakeItem(SPR_ITEM_FLARE + i, i);
+    /* v2.4.82：六个槽位，一一对应，不再有"复用空闲槽位"这种事 */
+    BakeItem(SPR_ITEM_FLARE, 0);   /* 光球 */
+    BakeItem(SPR_ITEM_SLING, 8);   /* 投石（石弹） */
+    BakeItem(SPR_ITEM_SMOKE, 2);   /* 烟雾 */
+    BakeItem(SPR_ITEM_GLUE,  6);   /* 胶水 */
+    BakeItem(SPR_ITEM_ECHO,  9);   /* 回声（音叉） */
+    BakeItem(SPR_ITEM_DECOY, 5);   /* 玩偶 */
     for (int p = 0; p < 4; p++) {
         BakeMonster(SPR_MON_HUNTER + p, 0, p);
         BakeMonster(SPR_MON_LIGHT  + p, 1, p);
@@ -1416,8 +1683,15 @@ void SpritesInit(void) {
     }
     BakeMonster(SPR_MON_JUMPER, 3, 0);
     BakeMonster(SPR_MON_SHADE, 8, 0);   /* v2.4.1: 槽位复用 -> 清道夫 */
-    BakeMonster(SPR_MON_SPIDER, 9, 0);   /* v2.4.1: 槽位复用 -> 守门人 */
-    BakeMonster(SPR_MON_ECHO, 10, 0);   /* v2.4.2: 槽位复用 -> 回声标记 */
+    BakeMonster(SPR_MON_SPIDER, 9, 0);   /* v2.4.1: 槽位复用 -> 守门人（三眼） */
+    BakeMonster(SPR_MON_LEECH_W, 9, 2);   /* v2.4.81: 守门人 **追击变体**（红眼直接烘，不用 key） */
+    BakeMonster(SPR_MON_ECHO, 10, 0);
+    /* v2.4.84 调试导出 */
+    if (getenv("CANITY_DUMP")) {
+        SpriteDumpPPM(SPR_MON_SPIDER,  "dump_warden_patrol.ppm");
+        SpriteDumpPPM(SPR_MON_LEECH_W, "dump_warden_chase.ppm");
+        exit(0);   /* 导完直接退出，方便脚本调用 */
+    }   /* v2.4.2: 槽位复用 -> 回声标记 */
     BakeProp(SPR_PROP_CRATE, 0);
     BakeProp(SPR_PROP_BREAKER, 1);
     BakeProp(SPR_PROP_EXIT, 2);
@@ -1441,7 +1715,55 @@ int SpritesReady(void) { return g_ready; }
 
 /* ------------------------------------------------------------------ */
 /* 运行时 blit：双线性 + 亮度查表 + alpha + 深度测试                      */
+/* ===== v2.4.84 **调试：把烘焙好的精灵写成 PPM** =====
+   设置环境变量 CANITY_DUMP=1 启动，会把守门人两个变体写到 exe 同目录。
+   这样能直接看到烘焙结果，不用靠游戏截图猜。 */
+void SpriteDumpPPM(int id, const char* path) {
+    Sprite* sp = &g_sprites[id];
+    if (!sp->px || sp->w <= 0 || sp->h <= 0) return;
+    FILE* f = fopen(path, "wb");
+    if (!f) return;
+    fprintf(f, "P6\n%d %d\n255\n", sp->w, sp->h);
+    for (int y = 0; y < sp->h; y++) {
+        for (int x = 0; x < sp->w; x++) {
+            unsigned int c = sp->px[y * sp->w + x];
+            int a = (c >> 24) & 0xFF;
+            int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+            /* 透明处用棋盘格，方便看剪影 */
+            if (a < 8) {
+                int chk = ((x / 8) + (y / 8)) & 1;
+                r = g = b = chk ? 90 : 130;
+            }
+            unsigned char px[3] = { (unsigned char)r, (unsigned char)g, (unsigned char)b };
+            fwrite(px, 1, 3, f);
+        }
+    }
+    fclose(f);
+}
+
 /* ------------------------------------------------------------------ */
+
+/* ===== v2.4.66 **局部换色（palette swap）** =====
+   调研结论（像素画的标准做法）：整体叠加色调是最差的做法 ——
+   它会把整只怪的明暗关系洗掉，观感立刻变廉价。
+   正确做法是「调色板映射」：只把**特定源色**换成目标色，其余不动。
+
+   实现：烘焙时用**洋红 0xFF00FF 当 key** 画那些要换色的部件
+   （拾荒者的麻袋、守门人的眼睛和提灯），
+   绘制时如果像素接近洋红，就换成 accentCol，其余像素完全不动。
+
+   这样：身体保持原本的三层暗灰，只有"那个部件"变色。 */
+static int g_accentOn = 0;
+static unsigned int g_accentCol = 0x00FFFFFFu;
+
+void SpriteAccentSet(unsigned int col) {
+    g_accentOn = 1;
+    g_accentCol = col & 0x00FFFFFFu;
+}
+void SpriteAccentClear(void) {
+    g_accentOn = 0;
+}
+
 void DrawSpriteTint(int id, int x, int y, int w, int h,
                     float light, float alpha, int zTest, float zDist,
                     unsigned int tint, float tintMix) {
@@ -1493,6 +1815,13 @@ void DrawSpriteTint(int id, int x, int y, int w, int h,
                           ((p01 >> 8) & 0xFF) * w01 + ((p11 >> 8) & 0xFF) * w11);
             int b = (int)((p00 & 0xFF) * w00 + (p10 & 0xFF) * w10 +
                           (p01 & 0xFF) * w01 + (p11 & 0xFF) * w11);
+            /* v2.4.66：**局部换色** —— 只有接近洋红 key 的像素被替换，
+               其余像素完全保持原样（身体、阴影、高光都不受影响）。 */
+            if (g_accentOn && r > 150 && b > 150 && g < 110) {
+                r = (int)((g_accentCol >> 16) & 0xFF);
+                g = (int)((g_accentCol >> 8) & 0xFF);
+                b = (int)(g_accentCol & 0xFF);
+            }
             /* 亮度查表（一次乘法替代三次浮点除） */
             r = (r * lr) >> 8;
             g = (g * lr) >> 8;

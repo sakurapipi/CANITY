@@ -13,6 +13,8 @@
  *   gcc tests/test_canity.c -std=c99 -Wall -Wextra -o tests/test_canity
  */
 
+#include "../include/common.h"
+#include "../include/steam_ach.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +23,7 @@
 #define MAP_WIDTH 24
 #define MAP_HEIGHT 24
 #define HIDESPOT_MAX 6
-#define BENCH_COUNT 12
+#define BENCH_COUNT 16
 #define LOCK_TUNE_KNOBS 3
 #define LOCK_TUNE_STEPS 8
 
@@ -76,29 +78,171 @@ static int hide_candidate_clear(const int map[MAP_HEIGHT][MAP_WIDTH],
     return dx * dx + dy * dy >= 6.0f * 6.0f;
 }
 
-static void test_bench_contract(void) {
-    /* v3.4（方案 v5 §3.2）：12 节点 → 16 节点，4 列 × 4 层。
-       价格四档 150 / 350 / 700 / 1200；新增 THROWING 列。 */
-    static const int costs[BENCH_COUNT] = {
-        150, 350, 700, 1200,   150, 350, 700, 1200,
-        150, 350, 700, 1200,   150, 350, 700, 1200
-    };
-    static const char* names[BENCH_COUNT] = {
-        "LIGHT STEP", "QUIET LID", "SILENT THROW", "VANISH",
-        "ENDURANCE", "CRANK WALK", "SLIDE", "SECOND WIND",
-        "DEEP POCKET", "STEADY HAND", "SALVAGE", "TWIN THROW",
-        "THICK SKIN", "SPARE CELL", "CATCH BREAK", "PLAY DEAD"
-    };
-    const char* source = read_file("src/bench.c");
-    int i;
-    for (i = 0; i < BENCH_COUNT; i++) {
-        char cost[32];
-        snprintf(cost, sizeof(cost), "%d,", costs[i]);
-        check(contains(source, names[i]), "bench node missing");
-        check(contains(source, cost), "bench tier cost missing");
+/* 把 C 源码里的注释替换成空格（保持长度，避免误判） */
+static void strip_comments(char* s) {
+    int i = 0;
+    while (s[i]) {
+        if (s[i] == '/' && s[i + 1] == '*') {
+            while (s[i] && !(s[i] == '*' && s[i + 1] == '/')) { s[i] = ' '; i++; }
+            if (s[i]) { s[i] = ' '; s[i + 1] = ' '; i += 2; }
+        } else if (s[i] == '/' && s[i + 1] == '/') {
+            while (s[i] && s[i] != '\n') { s[i] = ' '; i++; }
+        } else {
+            i++;
+        }
     }
-    check(count_contains(source, "{ \"") >= BENCH_COUNT, "bench node count changed");
-    free((void*)source);
+}
+
+
+/* ==================================================================
+ * v6 铁律二十：**公开函数必须有调用点**
+ * ==================================================================
+ * 2026-11-02 连续踩了两次同一个坑：
+ *
+ *   ① 遥测用了 catchCountThisFloor（每层清零）当"本局被抓次数"
+ *   ② daily.c 写了 11 个修正/限制函数，**一个调用点都没有**
+ *
+ * 两次都是：**编译通过、自检通过、功能是死的。**
+ * 玩家看到的是"这个功能不存在"，而开发看到的是"写完了"。
+ *
+ * 这条测试把"写完 ≠ 接上"变成一条机器能查的规矩。
+ * ================================================================== */
+static void test_no_unwired_api(void) {
+    /* 这些函数定义在某个模块里，但**必须**在游戏主循环/UI 里被调用 */
+    static const struct { const char* fn; const char* where; } must[] = {
+        /* 每日任务：修正与限制 */
+        { "DailyMonsterSpeedMul",    "src/game.c" },
+        { "DailyBatteryDrainMul",    "src/game.c" },
+        { "DailyGoldMul",            "src/game.c" },
+        { "DailyNoiseMul",           "src/game.c" },
+        { "DailyForbidSprint",       "src/game.c" },
+        { "DailyForbidLight",        "src/game.c" },
+        { "DailySecondSpawnOffset",  "src/entity.c" },
+        { "DailyGoldTierBonus",      "src/economy.c" },   /* 强度档在 economy.c */
+        { "DailyForbidHide",         "src/game.c" },
+        { "DailyForbidWrench",       "src/game.c" },
+        { "DailyForbidMonsterMap",   "src/ui.c" },
+        /* 每日任务本身 */
+        { "DailyTick",               "src/game.c" },
+        { "DailySetProgress",        "src/game.c" },
+        /* 威胁值：五项效果 */
+        { "ThreatSpeedCap",          "src/entity.c" },
+        { "ThreatHearMul",           "src/entity.c" },
+        { "ThreatChaseBonus",        "src/entity.c" },
+        { "ThreatSpawnAdvance",      "src/entity.c" },
+        { "ThreatReset",             "src/game.c" },
+        { "ThreatAddForTier",        "src/bench.c" },
+        /* 战绩 / 图鉴 */
+        { "BestiaryMarkEscaped",     "src/entity.c" },
+        { "BestiaryMarkCaught",      "src/entity.c" },
+        { "BestiaryDanger",          "src/ui.c" },
+        /* 每日修正上一条遥测 */
+        { "CatchCountThisRun",       "src/game.c" },
+        /* 战役 5 关的规则（第 ⑧ 轮写好，第 ㉓ 轮才接上） */
+        { "CampaignFlashlightLocked", "src/game.c" },
+        { "CampaignNoiseAlertMul",    "src/entity.c" },
+        { "CampaignNoGiveUp",         "src/entity.c" },
+        { "CampaignWardenImmediate",  "src/warden.c" },
+        { "CampaignExitDistNow",      "src/game.c" },
+        /* v6 第 24 轮：出口必须真的按配电箱坐标算 */
+        { "FindFarthestFromCell",    "src/game.c" },
+        /* v6 round 35: bench capstone B (added round 10, never wired) */
+        { "BenchBullRush",           "src/game.c" },
+        { "BenchBurst",              "src/game.c" },
+        { "BenchLure",               "src/throwing.c" },
+        { "BenchRecover",            "src/game.c" },
+        /* v6 round 36: THREAT 5th effect + daily modifier display */
+        { "ThreatCooldownDelta",     "src/entity.c" },
+        { "DailyModTextEn",          "src/game.c" },
+        { "DailyRestrictTextEn",     "src/game.c" },
+        /* v6 round 37: the whole in-run skill draft was unreachable */
+        { "OpenSkillPick",           "src/game.c" },
+        /* v6 round 41: daily progress is now shown in the HUD */
+        { "DailyCurrent",            "src/ui.c" },
+        { "CampaignTierMul",          "src/economy.c" },
+    };
+
+    for (unsigned i = 0; i < sizeof(must) / sizeof(must[0]); i++) {
+        char* t = read_file(must[i].where);
+        if (!t) {
+            check(0, "unwired check: file missing");
+            continue;
+        }
+        /* 只查函数名 + 左括号，避免把定义本身算成调用 */
+        char needle[128];
+        snprintf(needle, sizeof(needle), "%s(", must[i].fn);
+        check(contains(t, needle), must[i].fn);
+        free(t);
+    }
+}
+
+static void test_wallet_single_source(void) {
+    /* v6 铁律十八：只有一个钱包。
+       除了 wallet.c，任何 .c 里不许出现 carryGold -= / bankGold -=。
+       **先剥注释再查**，否则一句解释性注释就会误报。 */
+    static const char* files[] = {
+        "src/game.c", "src/shop.c", "src/bench.c", "src/skills.c",
+        "src/upgrade_run.c", "src/money.c", "src/collector.c", "src/ui.c"
+    };
+    for (unsigned i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+        const char* t = read_file(files[i]);
+        if (!t) continue;
+        char* buf = (char*)malloc(strlen(t) + 1);
+        if (buf) {
+            strcpy(buf, t);
+            strip_comments(buf);
+            check(!contains(buf, "carryGold -="), "spend bypasses wallet (carryGold -=)");
+            check(!contains(buf, "bankGold -="), "spend bypasses wallet (bankGold -=)");
+            free(buf);
+        }
+        free((void*)t);
+    }
+}
+
+static void test_steam_zone(void) {
+    /* v5.0：Steam 专区铁律 —— 任何 .c 里不许直接出现 SteamAPI_ 字符串，
+       必须走 steam_zone.h 的包装。这样以后改 Steam 逻辑只改一个文件。 */
+    static const char* files[] = {
+        "src/game.c", "src/ui.c", "src/entity.c", "src/render.c",
+        "src/save.c", "src/audio.c"
+    };
+    for (unsigned i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+        const char* t = read_file(files[i]);
+        if (!t) continue;
+        check(!contains(t, "SteamAPI_"), "SteamAPI_ used outside steam zone");
+        free((void*)t);
+    }
+    /* 成就表必须正好 24 条（和 v4 方案一致） */
+    check(kSteamAchievementCount == 32, "steam achievement table must have 32 entries");
+}
+
+static void test_input_contract(void) {
+    /* ===== v2.4.77 键位契约（用户要求"验证完整性"）=====
+       ACT_CANCEL_CHARGE 必须绑左键（= 扳手击退）
+       ACT_THROW 必须绑右键（= 投掷）
+       这两个一错，游戏里左右键就是反的，而且很难看出来。 */
+    {
+        const char* h = read_file("src/../include/common.h");
+        check(h != NULL, "common.h not readable");
+        if (h) {
+            check(contains(h, "[ACT_THROW] = VK_RBUTTON"),
+                  "ACT_THROW must be the RIGHT mouse button");
+            check(contains(h, "[ACT_CANCEL_CHARGE] = VK_LBUTTON"),
+                  "ACT_CANCEL_CHARGE must be the LEFT mouse button");
+            free((void*)h);
+        }
+    }
+    {
+        const char* g = read_file("src/game.c");
+        check(g != NULL, "game.c not readable");
+        if (g) {
+            check(contains(g, "IsActionDown(ACT_CANCEL_CHARGE)"),
+                  "attack reads the wrong action");
+            check(contains(g, "IsActionDown(ACT_THROW)"),
+                  "throw reads the wrong action");
+            free((void*)g);
+        }
+    }
 }
 
 static void test_hide_contract(void) {
@@ -176,7 +320,10 @@ static void test_stable_visuals_and_input(void) {
 }
 
 int main(void) {
-    test_bench_contract();
+    test_no_unwired_api();
+    test_wallet_single_source();
+    test_steam_zone();
+    test_input_contract();
     test_hide_contract();
     test_tune_geometry();
     test_stable_visuals_and_input();

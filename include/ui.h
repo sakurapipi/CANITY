@@ -25,6 +25,7 @@ int MainMenuCount(void);
 /* v2 技能树：逻辑画布坐标命中测试，返回节点 id，没点中返回 -1。
    game.c 的鼠标悬停/点击要用 —— 技能树不是行列表，不能按行高去猜。 */
 int SkillNodeHitTest(int mx, int my);
+RECT SkillNodeRect(int id);
 
 /* 渲染坐标上的点阵字（小地图标题用）/ UI 尺寸缩放：
    实现留在 ui.c，但 render.c 与 game.c 也要用，所以在这里导出。 */

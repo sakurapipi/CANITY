@@ -8,6 +8,8 @@ const char* LangName(int id) {
     return (id == LANG_ZH) ? "中文" : "ENGLISH";
 }
 
+/* v6 第 38 轮：设置菜单的 Language 行直接绑 g_lang（列表循环），
+   所以不经过这个函数。保留它给未来的快捷键 / 控制台用。 */
 void LangToggle(void) {
     g_lang = (g_lang + 1) % LANG_COUNT;
 }
@@ -15,7 +17,7 @@ void LangToggle(void) {
 /* ------------------------------------------------------------------ */
 /* 绘制层翻译表                                                         */
 /*   在 DrawTextWin / TextWidthWin 里统一替换，调用点一行都不用改。      */
-/*   找不到精确条目时按前缀做模式翻译（动态字符串如 "SHARDS 123"）。      */
+/*   找不到精确条目时按前缀做模式翻译（动态字符串如 "GOLD 123"）。      */
 /* ------------------------------------------------------------------ */
 typedef struct { const char* en; const char* zh; } TrEntry;
 
@@ -82,7 +84,7 @@ static const TrEntry kTrTable[] = {
     { "IF IT LANDS ON YOUR FACE, PRESS THE KEY.", "如果扑到脸上，按提示的键。" },
     { "MISS BOTH AND YOU LOSE SANITY.", "两次都错过就掉理智。" },
     { "THE THING MOVES FASTER", "它变快了" },
-    { "120 SHARDS", "120 碎片" },
+    { "120 GOLD", "120 碎片" },
 
     /* 技能树节点 */
     { "LIGHT STEP", "轻步" }, { "QUIET LID", "静盖" }, { "GHOST STEP", "幽步" },
@@ -100,7 +102,7 @@ static const TrEntry kTrTable[] = {
     { "Sanity loss burns battery (1:3)", "理智流失转为耗电（1:3）" },
     { "Full charge +1 dmg, slow charge", "满蓄力 +1 伤害，蓄力变慢" },
     { "Bottle stun +0.2s per rank", "瓶子硬直 +0.2 秒/级" },
-    { "Search also drops loot, shards -25%", "翻箱额外掉道具，碎片 -25%" },
+    { "Search also drops loot, gold -25%", "翻箱额外掉道具，碎片 -25%" },
     { "Q: sword wave, 60s cd", "Q：发射剑气，冷却 60 秒" },
     { "Fuse need -1 (min 2)", "保险丝需求 -1（最低 2）" },
     { "40% chance to return on hit", "命中后 40% 概率返还" },
@@ -149,7 +151,7 @@ static const TrEntry kTrTable[] = {
     { "HANDS EMPTY", "空手而归" },
     { "SURVIVOR", "幸存者" },
     { "ESCAPE ARTIST", "逃生专家" },
-    { "SHARD HUNTER", "碎片猎手" },
+    { "GOLD HUNTER", "碎片猎手" },
     { "SILENT SHADOW", "无声之影" },
     { "BOTTLE MASTER", "瓶子大师" },
     { "FACE DODGER", "闪避高手" },
@@ -172,7 +174,7 @@ static const TrEntry kTrTable[] = {
     { "RELIC HOARDER", "遗物囤积者" },
     { "FULL LOADOUT", "满配" },
     { "BESTIARY DONE", "图鉴全开" },
-    { "SHARD TYCOON", "碎片大亨" },
+    { "GOLD TYCOON", "碎片大亨" },
     { "CRANK ADDICT", "摇电成瘾" },
     { "KNIFE ONLY", "只用扳手" },
     { "BOTTLE RAIN", "瓶雨" },
@@ -224,7 +226,7 @@ static const TrEntry kTrTable[] = {
     { "Complete level 1", "通过第 1 层" },
     { "Reach level 5", "到达第 5 层" },
     { "Beat the game (reach level 10 exit)", "通关（走进最终出口）" },
-    { "Collect 500 shards total", "累计收集 500 碎片" },
+    { "Collect 500 gold total", "累计收集 500 碎片" },
     { "Reach level 5 without sprinting", "不冲刺到达第 5 层" },
     { "Kill 10 monsters with bottles", "用瓶子击杀 10 只怪" },
     { "Dodge 5 face jumpers successfully", "成功躲开 5 次跳脸虫" },
@@ -248,7 +250,7 @@ static const TrEntry kTrTable[] = {
     { "Hold 8 relics at once", "同时持有 8 个遗物" },
     { "Fill both weapon slots", "两个武器槽都装上配件" },
     { "Unlock every bestiary entry", "解锁全部图鉴" },
-    { "Collect 3000 shards total", "累计收集 3000 碎片" },
+    { "Collect 3000 gold total", "累计收集 3000 碎片" },
     { "Crank for 300 seconds total", "累计摇电 300 秒" },
     { "Kill 25 monsters with the wrench", "用扳手击杀 25 只怪" },
     { "Kill 25 monsters with bottles", "用瓶子击杀 25 只怪" },
@@ -280,7 +282,7 @@ static const TrEntry kTrTable[] = {
     { "<25% HP targets take +80% damage", "目标血量 <25% 时伤害 +80%" },
     { "Preview next modifier, reroll 150", "预览下一层词条，150 碎片重掷" },
     { "Sanity 0 saves you once (4s)", "理智归零时免死一次" },
-    { "Keep 50% pending shards on death", "死亡时保留 50% 待上缴碎片" },
+    { "Keep 50% carried gold on death", "死亡时保留 50% 待上缴碎片" },
     { "MAX 3 RANKS", "最多 3 级" },
     { "Lv 0/3", "0/3 级" },
     { "SILENCE", "沉寂" },
@@ -355,7 +357,7 @@ const char* Transl(const char* en) {
 
     /* 动态字符串：按前缀造 */
     static char buf[160];
-    if (!strncmp(en, "SHARDS ", 7))  { snprintf(buf, sizeof(buf), "碎片 %s", en + 7); return buf; }
+    if (!strncmp(en, "GOLD ", 7))  { snprintf(buf, sizeof(buf), "碎片 %s", en + 7); return buf; }
     if (!strncmp(en, "CORES ", 6))   { snprintf(buf, sizeof(buf), "核心 %s", en + 6); return buf; }
     if (!strncmp(en, "BEST LEVEL ", 11)) { snprintf(buf, sizeof(buf), "最高层 %s", en + 11); return buf; }
     if (!strncmp(en, "PENDING ", 8)) { snprintf(buf, sizeof(buf), "待上缴 %s", en + 8); return buf; }
@@ -365,9 +367,9 @@ const char* Transl(const char* en) {
     if (!strncmp(en, "SCORE ", 6))   { snprintf(buf, sizeof(buf), "得分 %s", en + 6); return buf; }
     if (!strncmp(en, "RUN FAILED", 10)) return "本局失败";
     if (!strncmp(en, "KNIFE", 5))    { snprintf(buf, sizeof(buf), "锈刃 %s", en + 5); return buf; }
-    {   /* "100 SHARDS" -> "100 碎片" */
+    {   /* "100 GOLD" -> "100 碎片" */
         int n = 0; char tail[24];
-        if (sscanf(en, "%d SHARDS%23s", &n, tail) == 1) { snprintf(buf, sizeof(buf), "%d 碎片", n); return buf; }
+        if (sscanf(en, "%d GOLD%23s", &n, tail) == 1) { snprintf(buf, sizeof(buf), "%d 碎片", n); return buf; }
         if (sscanf(en, "%d CORES%23s", &n, tail) == 1)  { snprintf(buf, sizeof(buf), "%d 核心", n); return buf; }
     }
 

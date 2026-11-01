@@ -14,6 +14,9 @@ enum { SFX_STEP = 0, SFX_HEART, SFX_PICKUP, SFX_POWER, SFX_GATE, SFX_CRANK,
        SFX_GLUE,     /* 胶水落地：黏稠的「噗叽」 */
        SFX_ECHO,     /* 回声弹：短促「叮」+ 尾音回响 */
        SFX_DECOY,    /* 诱饵玩偶：木头/金属的「嘎吱」 */
+       SFX_WARDEN,   /* v2.4.89 守门人：极低频压迫 */
+       SFX_SCAVENGER,/* v2.4.89 清道夫：刺耳刮擦（拆东西）*/
+       SFX_SCAV_STEP,/* v2.4.92 清道夫：走路的高速摩擦 */
        SFX_COUNT };
 
 void PlaySfx(int id, float vol);

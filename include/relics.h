@@ -27,7 +27,7 @@ typedef struct {
     float maxSanAdd;       /* 理智上限增减（负数 = 削上限） */
 } RelicDef;
 
-extern const RelicDef relicDefs[RELIC_COUNT];
+extern const RelicDef relicDefs[];
 
 /* 本局持有（每层叠加） */
 extern int relicOwned[RELIC_COUNT];

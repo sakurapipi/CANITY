@@ -4,6 +4,9 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "art_direction.h"
+#include "achievements.h"
+#include "events.h"
 #include "ui.h"
 #include "lang.h"
 #include "weapons.h"
@@ -213,41 +216,18 @@ static const char* SkillNameZh(const char* en) {
 
 
 static void ClampRowText(char* buf, int availPx) {
-    int adv = TextAdvWin();
-    if (adv <= 0) return;
-    /* v2：原来多减了 1 个字符，"THROW POWER" 这种 11 字符的名字明明放得下
-       却被截成 "THROW PO.."。这里按实际能容纳的字符数算，
-       截断时最后两位写 ".."，总宽度仍然不超 availPx。 */
-    /* v2.0 修复：原来按字节数切，中文行尾会切在汉字中间 →
-        MultiByteToWideChar 得到 U+FFFD，屏幕上就是一个「▯」。
-       现在按 UTF-8 码点数，并且只在完整字符边界处截断。 */
-    if (CjkHasNonAscii(buf)) {
-        int limit = availPx - adv * 2;          /* 留 ".." 的位置 */
-        if (limit < adv * 4) limit = adv * 4;
-        int didTrim = 0;
-        while (CjkTextWidth(buf) * winW / renderW > limit) {
-            size_t n = strlen(buf);
-            if (n == 0) break;
-            size_t k = n - 1;
-            while (k > 0 && (buf[k] & 0xC0) == 0x80) k--;
-            buf[k] = 0;
-            didTrim = 1;
-            if (k == 0) break;
-        }
-        /* v6 **补上 ".."** —— 原来的 truncated 判据在循环后恒为 false，
-           中文超长时静默吞字、没有任何省略提示。改成用 didTrim 标志。 */
-        if (didTrim && CjkTextWidth(buf) * winW / renderW + adv * 2 <= availPx) {
-            strncat(buf, "..", 4);
+    if (availPx<=0) { buf[0]=0; return; }
+    if (TextWidthWin(buf)<=availPx) return;
+    size_t n=strlen(buf);
+    while(n>0) {
+        size_t k=n-1;
+        while(k>0 && ((unsigned char)buf[k]&0xC0)==0x80) --k;
+        buf[k]=0; n=k;
+        if(TextWidthWin(buf)+TextWidthWin("..")<=availPx) {
+            strcat(buf,".."); return;
         }
     }
-    int maxc = availPx / adv;
-    if (maxc < 8) maxc = 8;
-    int n = (int)strlen(buf);
-    if (n > maxc) {
-        buf[maxc - 2] = '.';
-        buf[maxc - 1] = '.';
-        buf[maxc] = 0;
-    }
+    if(TextWidthWin("..")<=availPx) strcpy(buf,"..");
 }
 
 int TextHeightWin(void) {
@@ -462,19 +442,19 @@ typedef struct {
 } SkillTreeLayout;
 
 /* 分支主色：只用在标题、进度条、连线上，不参与节点状态色 */
-static const unsigned int kBranchColor[5] = {   /* v6：5 项（branch=4 = 跨支行） */
+static const unsigned int kBranchColor[7] = {   /* v6：5 项（branch=4 = 跨支行） */
     0x0040D8FFu,   /* A 潜行 青 */
     0x0050E070u,   /* B 续航 绿 */
     0x00FF6050u,   /* C 反击 红 */
     0x00B080FFu,   /* 跨支   紫 */
-    0x00C080FFu  /* v6：跨支行 */
+    0x00FF9050u, 0x00C080FFu, 0x00808088u /* risk, cross, origin */
 };
 /* v2.9：分支名走翻译（原来只有英文） */
 /* v3.3：第 3 列从「伤害交付」改成「藏匿脱身」后，表头没跟着改 ——
    界面上写 DELIVERY，里面却是 HOLD BREATH / STILL FACE / SLIP AWAY /
    PLAY DEAD（见 skills.c 的「列 2：隐」）。改成 CONCEAL。 */
-static const char* kBranchName[5] = { "SILENCE", "ECONOMY", "CONCEAL", "SHAPE", "CROSS" };
-static const char* kBranchNameZh[5] = { "沉寂", "节流", "投放", "塑形", "跨支" };
+static const char* kBranchName[7] = { "SILENCE", "ECONOMY", "CONCEAL", "SHAPE", "RISK", "CROSS", "ORIGIN" };
+static const char* kBranchNameZh[7] = { "沉寂", "节流", "藏匿", "塑形", "冒险", "跨支", "起点" };
 
 /* 面板内竖向预算，单位 = TH/10。
  *   TEXT 部分（文字行 + 跨支行高度）不吃压缩
@@ -506,47 +486,18 @@ static const char* kBranchNameZh[5] = { "沉寂", "节流", "投放", "塑形", 
    ② 原来只有 12 个活节点（8 个被置为退役）→ 现在全部启用，共 20 个。
 
    网格：4 列 × 4 行 + 第 5 行 3 个 + 底部跨支行 SILENT RUN */
-typedef struct { int id, col, row; } SkillPosDef;
-static const SkillPosDef kSkillPos[] = {
-    /* 列 0 · SILENCE */
-    {  0, 0, 0 },   /* LIGHT STEP  */
-    {  1, 0, 1 },   /* QUIET LID   */
-    {  2, 0, 2 },   /* GHOST STEP  */
-    {  3, 0, 3 },   /* DECOY       */
-    { 17, 0, 4 },   /* WEATHERMAN  */
-    /* 列 1 · ECONOMY */
-    {  4, 1, 0 },   /* SIPHON      */
-    {  5, 1, 1 },   /* CRANK WALK  */
-    {  6, 1, 2 },   /* REST        */
-    {  7, 1, 3 },   /* METABOLISM  */
-    { 18, 1, 4 },   /* LAST RES    */
-    /* 列 2 · CONCEAL */
-    {  8, 2, 0 },   /* BREATH      */
-    {  9, 2, 1 },   /* STILL FACE  */
-    { 10, 2, 2 },   /* SLIP AWAY   */
-    { 11, 2, 3 },   /* PLAY DEAD   */
-    { 19, 2, 4 },   /* SALVAGE     */
-    /* 列 3 · SHAPE */
-    { 12, 3, 0 },   /* CARTO       */
-    { 13, 3, 1 },   /* BREAKER     */
-    { 14, 3, 2 },   /* FUSE SMITH  */
-    { 15, 3, 3 },   /* SHORTCUT    */
-    /* 跨支行 */
-    { 16, 4, 0 },   /* SILENT RUN  */
-};
-#define SKILL_POS_COUNT ((int)(sizeof(kSkillPos) / sizeof(kSkillPos[0])))
+
 
 /* 活节点列表 = 坐标表的顺序（用于 owned 统计和初始光标） */
+/* v6：**26 个节点全部上图**（原来是 20 个手写列表 + 一个跨支行）。
+   现在直接按 0..SKILL_COUNT-1 生成，加节点不用改这里。 */
 static const int kSkillList[] = {
-     0,  1,  2,  3, 17,
-     4,  5,  6,  7, 18,
-     8,  9, 10, 11, 19,
-    12, 13, 14, 15,
-    16,
+     0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13,
+    14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,27,28,29
 };
 #define SKILL_LIST_COUNT ((int)(sizeof(kSkillList) / sizeof(kSkillList[0])))
-#define SKILL_CROSS_ID 16
-#define SKILL_LIST_COUNT ((int)(sizeof(kSkillList) / sizeof(kSkillList[0])))
+/* v6：中心节点取代原来的"跨支行" */
+#define SKILL_CROSS_ID 25
 
 /* 某个节点在列表里的位置；-1 = 不在列表里（退役节点） */
 static int SkillListIndex(int id) {
@@ -821,14 +772,14 @@ static int WrapText(const char* text, int availPx, char lines[][96], int maxLine
         if (len > 47) len = 47;
         memcpy(word, p, (size_t)len);
         word[len] = 0;
-        char cand[96];
+        char cand[160];
         if (cur[0]) snprintf(cand, sizeof(cand), "%s %s", cur, word);
         else        snprintf(cand, sizeof(cand), "%s", word);
         if (cur[0] && TextWidthWin(cand) > availPx) {
             snprintf(lines[n++], 96, "%s", cur);
             snprintf(cur, sizeof(cur), "%s", word);
         } else {
-            snprintf(cur, sizeof(cur), "%s", cand);
+            snprintf(cur, sizeof(cur), "%.95s", cand);
         }
         p += len;
         while (*p == ' ') p++;
@@ -959,8 +910,27 @@ MenuGeo GetMenuGeo(void) {
              SHOP 9 行 / BENCH 4 行 / REST 5 行 → 面板高度每页都不一样。
            改成固定用最大行数（9），所有页共用同一块面板，
            切页时面板纹丝不动。 */
-        case STATE_SAFEHOUSE: return MakeGeo("", 9, UIS(50), UIS(32), UIS(720), UIS(58), STATE_SAFEHOUSE);
-        case STATE_BESTIARY:  return MakeGeo("BESTIARY", BESTIARY_COUNT + 1, UIS(38), UIS(26), UIS(900), UIS(46), STATE_BESTIARY);
+        case STATE_SAFEHOUSE: {
+            MenuGeo g; memset(&g,0,sizeof(g));
+            g.panel=(RECT){UIS(16),UIS(16),winW-UIS(16),winH-UIS(16)};
+            g.title=""; g.count=ShopRowCount(); g.maxVisibleRows=g.count;
+            g.firstY=g.panel.top+TextHeightWin()*2+UIS(24);
+            int available=g.panel.bottom-g.firstY-UIS(58);
+            g.rowH=available/9;
+            if(g.rowH<TextHeightWin()+UIS(6)) g.rowH=TextHeightWin()+UIS(6);
+            g.titleY=g.panel.top+UIS(8); g.scrollOffset=0;
+            return g;
+        }
+        case STATE_BESTIARY: {
+            MenuGeo g; memset(&g,0,sizeof(g));
+            g.title=Tr("BESTIARY","怪物图鉴");
+            g.panel=(RECT){UIS(20),UIS(20),winW-UIS(20),winH-UIS(20)};
+            g.titleY=g.panel.top+UIS(14);
+            g.firstY=g.titleY+TextHeightWin()+UIS(32);
+            g.count=g.maxVisibleRows=BESTIARY_COUNT+1;
+            g.rowH=(g.panel.bottom-g.firstY-TextHeightWin()*3-UIS(20))/g.count;
+            g.scrollOffset=0; return g;
+        }
         case STATE_HELP:      return MakeGeo(helpPage == 1 ? Tr("HELP  -  RULES", "帮助  -  规则") : Tr("HELP  -  CONTROLS", "帮助  -  按键"),
                                             HELP_PAGE_ROWS, UIS(29), UIS(22), UIS(1000), UIS(30), STATE_HELP);
         case STATE_PAUSED:    return MakeGeo("PAUSED", 3, UIS(56), UIS(38), UIS(520), UIS(56), STATE_PAUSED);
@@ -974,7 +944,9 @@ MenuGeo GetMenuGeo(void) {
             MenuGeo g;
             memset(&g, 0, sizeof(g));
             g.title = "ACHIEVEMENTS";
-            g.count = A.count;
+            /* v6：行数按当前分类筛选后的数量（否则会滚到空白行） */
+            { extern int AchVisibleCount(void); g.count = AchVisibleCount(); }
+            if (g.count < 1) g.count = 1;
             g.rowH = A.rowH;
             g.panel = A.panel;
             g.titleY = A.titleY;
@@ -1062,16 +1034,30 @@ RECT RowRect(MenuGeo g, int i) {
        否则第一列文字会被 sidebar 盖住。 */
     int leftPad = UIS(18);
     if (currentState == STATE_SAFEHOUSE) {
-        int tx0, ty0, tx1, ty1;
-        PageTabRect(0, &tx0, &ty0, &tx1, &ty1);
-        leftPad = (tx1 - g.panel.left) + UIS(60);   /* v3.0：30 → 60，商品名不再压到页签上 */
+        int sideW=(g.panel.right-g.panel.left)*26/100;
+        if(sideW<UIS(140)) sideW=UIS(140);
+        if(sideW>UIS(220)) sideW=UIS(220);
+        leftPad=UIS(14)+sideW+UIS(20);
     }
+    /* v7 第 ㊾ 轮：**坐标必须夹住**
+       商店一进就崩，而 demo3（只调 ShopOpen、不进这一页）能活 ——
+       说明崩在这条渲染路径。最可能的原因是某个坐标算成了
+       巨大值 / 负数，BlendRectWin 拿着它去写像素缓冲。
+       这里把 leftPad 和行高都夹进合理范围。 */
+    if (leftPad < UIS(18)) leftPad = UIS(18);
+    if (leftPad > UIS(400)) leftPad = UIS(400);
     r.left = g.panel.left + leftPad;
     r.right = g.panel.right - UIS(18);
+    if (r.right <= r.left) r.right = r.left + 1;
+
+    int rowH = g.rowH;
+    if (rowH < 4) rowH = 4;
+
     /* 应用滚动偏移：只绘制可见范围内的行 */
     int visibleIndex = i - g.scrollOffset;
-    r.top = g.firstY + visibleIndex * g.rowH;
-    r.bottom = r.top + g.rowH - UIS(8);
+    r.top = g.firstY + visibleIndex * rowH;
+    r.bottom = r.top + rowH - UIS(8);
+    if (r.bottom <= r.top) r.bottom = r.top + 1;
     return r;
 }
 
@@ -1132,7 +1118,8 @@ static const char* MenuLabel(int i) {
             if (!BestiaryIsSeen(i)) {
                 sprintf(bb, "???   [LOCKED]");
             } else {
-                sprintf(bb, "%s  [%s]", bestiary[i].name, bestiary[i].tag);
+                sprintf(bb, "%s  [%s]", (g_lang == LANG_ZH) ? bestiary[i].nameZh : bestiary[i].nameEn,
+                                    (g_lang == LANG_ZH) ? bestiary[i].tagZh : bestiary[i].tagEn);
             }
             return bb;
         }
@@ -1250,12 +1237,15 @@ static const char* MenuLabel(int i) {
                         sprintf(hb, "*%s  ULT %c %d/%d", d->name,
                                 'A' + d->branch, pts, SKILL_POINTS_FOR_KEYSTONE);
                     } else {
-                        sprintf(hb, "*%s  ULT %dSH %dC", d->name, cost, d->coreCost);
+                        sprintf(hb, "*%s  ULT %d G %dC", d->name, cost, d->coreCost);
                     }
                 } else if (cost < 0) {
-                    sprintf(hb, "%s  MAX", d->name);
+                    sprintf(hb, "[%s]  %s  MAX",
+                            Tr(kBranchName[d->branch], kBranchNameZh[d->branch]), d->name);
                 } else {
-                    sprintf(hb, "%s  %d/%d  %dSH", d->name, r, d->maxRank, cost);
+                        sprintf(hb, "[%s]  %s  %d/%d  %d G",
+                                Tr(kBranchName[d->branch], kBranchNameZh[d->branch]),
+                                d->name, r, d->maxRank, cost);   /* v7: 加分支标签 */
                 }
                 {
                     MenuGeo g = GetMenuGeo();
@@ -1289,15 +1279,26 @@ static const char* MenuLabel(int i) {
         }
         case STATE_GAMEOVER: return "Return to Menu";
         case STATE_ACHIEVEMENTS: {
-            if (i >= ACH_COUNT) return "Back";
+            /* v6：**按分类筛选 + 用表里的真实奖励**
+               原来这里写着 "+1C/250S" —— 那是已删除的「核心 / 碎片」，
+               玩家看到的是两个不存在的货币。现在从 kAchDefs 读。 */
+            extern int  AchVisibleCount(void), AchIdAtRow(int);
+            extern const AchDef kAchDefs[ACH_COUNT];
+            if (i >= AchVisibleCount()) return "Back";
+            int id = AchIdAtRow(i);
+            if (id < 0) return "Back";
             static char ab[256];
-            if (g_achievements[i].unlocked) {
-                sprintf(ab, "[*] %s  (%d/%d)", g_achievements[i].name,
-                        g_achievements[i].progress, g_achievements[i].target);
+            const AchDef* d = &kAchDefs[id];
+            if (g_achievements[id].unlocked) {
+                sprintf(ab, "[*] %s  +%d GOLD", g_achievements[id].name, d->reward);
+            } else if (d->hidden) {
+                sprintf(ab, "[ ] ???");
             } else {
-                /* 简短显示：只显示名字和进度，描述放在右侧列（通过 DrawMenuText 处理） */
-                sprintf(ab, "[ ] %s  %d/%d  +1C/250S", g_achievements[i].name,
-                        g_achievements[i].progress, g_achievements[i].target);
+                sprintf(ab, "[ ] %s  %d/%d  +%d",
+                        g_achievements[id].name,
+                        g_achievements[id].progress,
+                        g_achievements[id].target,
+                        d->reward);
             }
             return ab;
         }
@@ -1462,28 +1463,14 @@ void PageTabRect(int idx, int* x0, int* y0, int* x1, int* y1) {
        布局：
           面板左边 26% 宽的一列放 5 个页签
           右边 74% 是内容区 */
-    int th = TextHeightWin();
-    int panelW = winW - UIS(32);
-    int sideW  = panelW * 26 / 100;
-    if (sideW < UIS(140)) sideW = UIS(140);
-    if (sideW > UIS(220)) sideW = UIS(220);
-
-    /* v3.0：**必须贴着面板左边界** ——
-       原来用 UIS(16)+UIS(10) 这种绝对定位，而安全屋面板是居中的，
-       1280x720 / 1080p 下整列 5 个页签挂在面板框外 32px（兼容性审查 #2）。 */
-    int bx0;
-    {
-        MenuGeo pg = GetMenuGeo();
-        bx0 = pg.panel.left + UIS(14);
-    }
-    int tabH = th + UIS(14);
-    int gap  = UIS(8);
-    int by0 = UIS(16) + th + UIS(28) + idx * (tabH + gap);
-
-    *x0 = bx0;
-    *y0 = by0;
-    *x1 = bx0 + sideW;
-    *y1 = by0 + tabH;
+    MenuGeo pg=GetMenuGeo();
+    int th=TextHeightWin();
+    int sideW=(pg.panel.right-pg.panel.left)*26/100;
+    if(sideW<UIS(140)) sideW=UIS(140);
+    if(sideW>UIS(220)) sideW=UIS(220);
+    int tabH=th+UIS(14), gap=UIS(8);
+    *x0=pg.panel.left+UIS(14); *x1=*x0+sideW;
+    *y0=pg.panel.top+th+UIS(28)+idx*(tabH+gap); *y1=*y0+tabH;
 }
 
 
@@ -1509,7 +1496,7 @@ static void DrawPageTabs(void) {
                      active ? 0x00C8A040 : (hover ? 0x00303838 : 0x00161C1C),
                      active ? 0.95f : 0.85f);
         FrameRectWin(x0, y0, x1, y1,
-                     active ? 0x00FFE070u : (hover ? 0x00A0C0C0u : 0x00505858u),
+                     active ? PAL_GOLD : (hover ? PAL_CYAN : PAL_DIM),
                      0.9f, active ? 2 : 1);
 
         /* 选中时左侧加一根粗竖条，扫一眼就知道在哪一页 */
@@ -1534,7 +1521,7 @@ static void DrawBenchTree(MenuGeo g) {
         static int treeCentred = 0;
         if (!treeCentred) {
             treeCentred = 1;
-            BenchFocusNode(shopNodeSel);
+            BenchResetView();
         }
         if (currentState != STATE_SAFEHOUSE) treeCentred = 0;
     }
@@ -1548,7 +1535,11 @@ static void DrawBenchTree(MenuGeo g) {
     DrawPageTabs();
     {
         static char sb[64];
-        { extern int pendingShards; sprintf(sb, "GOLD %d", shards + pendingShards); }
+        /* v6 第 ㊵ 轮：**这里原来显示双倍金币**
+         * 第 ① 轮货币统一时，`carryGold + shards` 被机械替换成
+         * `carryGold + carryGold` —— 界面显示的是真实值的两倍。
+         * 玩家看到 GOLD 2000，实际只有 1000，进商店什么都买不起。 */
+        { extern int carryGold; sprintf(sb, "GOLD %d", carryGold); }
         DrawTextWin(winW - M - UIS(16) - TextWidthWin(sb), UIS(14), sb, 0x00E8C040u);
         /* 缩放指示 */
         sprintf(sb, "%.1fx", treeVK);
@@ -1565,7 +1556,7 @@ static void DrawBenchTree(MenuGeo g) {
     if (boxW < 26) boxW = 26;
     if (boxH < 16) boxH = 16;
     /* 但高度至少要放得下一行字 */
-    if (boxH < th / 2) boxH = th / 2;
+    if (boxH < th) boxH = th;
 
     for (int id = 0; id < BENCH_COUNT; id++) {
         float wx = BenchNodeWorldX(id);
@@ -1576,16 +1567,16 @@ static void DrawBenchTree(MenuGeo g) {
         int bx = cx - boxW / 2, by = cy - boxH / 2;
 
         /* 屏幕外的直接跳过（节点多了也不掉帧） */
-        if (bx > winW || by > winH || bx + boxW < 0 || by + boxH < 0) continue;
+        if (bx < winW*30/100 || by < UIS(70) || bx+boxW>winW-UIS(20) || by+boxH>winH-UIS(135)) continue;
 
         int owned = BenchHas(id);
         int prereq = BenchPrereqOk(id);
-        int affordable = (shards >= benchNodes[id].cost);
+        int affordable = (carryGold >= benchNodes[id].cost);
         int sel = (id == shopNodeSel);
 
         /* 同列竖连线（画在节点下面） */
-        if (id % BENCH_ROWS > 0) {
-            int pid = id - 1;
+        if (benchNodes[id].row>0) {
+            int pid = id>=16 ? (id-16)*4+2 : id-1;
             int pcx = (int)(BenchNodeWorldX(pid) * treeVK + treeVX);
             int pcy = (int)(BenchNodeWorldY(pid) * treeVK + treeVY);
             int upOwned = BenchHas(pid);
@@ -1634,7 +1625,7 @@ static void DrawBenchTree(MenuGeo g) {
         /* v2.9：原来 dy=winH-96，三行累加后第三行 570 撞提示行 574。
            现在从下往上倒推：留出提示行 + 三行正文。 */
         int lineH = th + UIS(4);
-        /* v6：底部还有一条 WHEEL ZOOM 操作提示，
+        /* v6：底部还有一条 R x2 RESET / WHEEL ZOOM 操作提示，
            详情行不能画到它上面去（用户截图：SHORT BY 和 WHEEL 重叠） */
         int detailMaxY = winH - UIS(16) - th - UIS(6) - th - UIS(6);
         int dy = winH - UIS(10) - th - 3 * lineH;
@@ -1644,7 +1635,20 @@ static void DrawBenchTree(MenuGeo g) {
 
         if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, Tr(benchNodes[id].name, benchNodes[id].nameZh), 0x00FFFFFFu);
         sprintf(l2, "%d %s", benchNodes[id].cost, Tr("GOLD", "金币"));
-        DrawTextWin(UIS(240), dy, l2, shards >= benchNodes[id].cost ? 0x00A0E0A0u : 0x00E06060u);
+        DrawTextWin(UIS(240), dy, l2, carryGold >= benchNodes[id].cost ? 0x00A0E0A0u : 0x00E06060u);
+        /* v7 第 51 轮：**把 THREAT 代价写出来**
+           改造树的代价是 THREAT，但整棵树从没显示过它 ——
+           玩家买了节点、怪变凶了，却不知道是谁干的。
+           现在价格旁边直接写 +N THREAT。 */
+        {
+            static char tb[48];
+            extern int BenchThreatCostOf(int);
+            int tc = BenchThreatCostOf(id);
+            if (tc > 0) {
+                sprintf(tb, "+%d THREAT", tc);
+                DrawTextWin(UIS(400), dy, tb, 0x00FF8050u);
+            }
+        }
 
         dy += lineH;
         {
@@ -1659,15 +1663,15 @@ static void DrawBenchTree(MenuGeo g) {
             if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, Tr("OWNED", "已拥有"), 0x00C8A040u);
         } else if (!BenchPrereqOk(id)) {
             if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, Tr("REQUIRES THE NODE ABOVE IT", "需要先买同一列的上一层"), 0x00E0A040u);
-        } else if (shards < benchNodes[id].cost) {
-            sprintf(l2, "%s %d", Tr("SHORT BY", "还差"), benchNodes[id].cost - shards);
+        } else if (carryGold < benchNodes[id].cost) {
+            sprintf(l2, "%s %d", Tr("SHORT BY", "还差"), benchNodes[id].cost - carryGold);
             if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, l2, 0x00E06060u);
         } else {
             if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, Tr("ENTER TO BUY", "回车购买"), 0x0060FF90u);
         }
 
         {
-            const char* kh = Tr("WHEEL ZOOM  DRAG PAN  HOME  ESC",
+            const char* kh = Tr("R x2 RESET / WHEEL ZOOM  DRAG PAN  HOME  ESC",
                                 "滚轮缩放  拖拽平移  HOME  ESC");
             DrawTextWin(winW - UIS(24) - TextWidthWin(kh), winH - UIS(16) - th - UIS(6), kh, 0x009AA8A8u);
         }
@@ -1688,7 +1692,7 @@ void DrawMenuPanels(void) {
         UiPanel9(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, 0);
     } else {
         BlendRectWin(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, 0x000a1016, 0.94f);
-        FrameRectWin(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, 0x00801818, 0.85f, UIS(2));
+        FrameRectWin(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, PAL_PANEL, 0.85f, UIS(2));
     }
 
     /* v2.8：安全屋的**所有**页都要显示页签（不只改造树那一页） */
@@ -1698,14 +1702,14 @@ void DrawMenuPanels(void) {
            5 个页签变宽后右端会压到余额（截图里 GOLD 被 UPGRADE 盖住）。 */
         {
             static char sb2[64];
-            { extern int pendingShards; sprintf(sb2, "GOLD %d", shards + pendingShards); }
+            { extern int carryGold; sprintf(sb2, "GOLD %d", carryGold); }   /* v6 第 40 轮：同 1567 行，双倍 */
             int bx0, by0, bx1, by1;
             PageTabRect(0, &bx0, &by0, &bx1, &by1);
             /* v6 **余额必须锚在面板右边缘，不是窗口右边缘** ——
                用 winW 算的话，窗口比面板宽时 GOLD 会跑到面板外面，
                看起来就是「字幕漂移到屏幕最右边」。 */
             DrawTextWin(g.panel.right - UIS(20) - TextWidthWin(sb2),
-                        by1 + UIS(6), sb2, 0x00E8C040u);
+                        g.panel.top + UIS(12), sb2, 0x00E8C040u);
         }
     }
 
@@ -1816,7 +1820,7 @@ void DrawPopupPanel(void) {
     const SettingItem* it = &settings[popupItem];
 
     BlendRectWin(p.panel.left, p.panel.top, p.panel.right, p.panel.bottom, 0x0004080c, 1.0f);
-    FrameRectWin(p.panel.left, p.panel.top, p.panel.right, p.panel.bottom, 0x00b02020, 0.95f, UIS(2));
+    FrameRectWin(p.panel.left, p.panel.top, p.panel.right, p.panel.bottom, PAL_PANEL, 0.95f, UIS(2));
 
     if (it->kind == SET_SLIDER) {
         RECT t = SliderTrackRect(p);
@@ -1854,33 +1858,6 @@ static void DrawTextInRowLeft(const char* text, RECT row, unsigned int color) {
  * ============================================================ */
 
 /* 节点四档状态色（用户定的顺序）：无色透明 -> 白 -> 金 -> keystone 彩色流转 */
-static void SkillNodeColors(int id, unsigned int* fill, unsigned int* border,
-                            unsigned int* text, float* alpha) {
-    const SkillDef* d = &skillDefs[id];
-    int rank = skillRank[id];
-    if (d->isKeystone && rank > 0) {
-        static const unsigned int rb[6] = {
-            0x00FF6060u, 0x00FFB040u, 0x00FFF060u,
-            0x0060FF80u, 0x0060C0FFu, 0x00C080FFu
-        };
-        int k = (int)(g_timeSec * 6.0f) % 6;
-        if (k < 0) k += 6;
-        *fill = rb[k]; *border = rb[k]; *text = 0x000A0A0Au; *alpha = 0.95f;
-        return;
-    }
-    /* 四级色阶：未买（暗） → 1 级（白）→ 2 级（金）→ 满级（钻石） */
-    if (rank > 0 && rank >= d->maxRank) {
-        /* 钻石：冰蓝色 + 极慢的呼吸，和 gold 一眼区分 */
-        int ph = (int)(g_timeSec * 2.2f) & 1;
-        *fill = ph ? 0x00A8F0FFu : 0x0090E4FFu;
-        *border = 0x00E8FFFFu;
-        *text = 0x00081018u;
-        *alpha = 0.97f;
-    }
-    else if (rank >= 2) { *fill = 0x00FFD040u; *border = 0x00FFE880u; *text = 0x00101010u; *alpha = 0.95f; }
-    else if (rank == 1) { *fill = 0x00E8E8E8u; *border = 0x00FFFFFFu; *text = 0x00101010u; *alpha = 0.92f; }
-    else                { *fill = 0x00101010u; *border = 0x00303030u; *text = 0x00606A70u; *alpha = 0.55f; }
-}
 
 /* 这一步能不能买（含"花 3 核心换 keystone"） */
 static int SkillNodeBuyable(int id) {
@@ -1888,45 +1865,13 @@ static int SkillNodeBuyable(int id) {
     return SkillSwitchable(id) ? 1 : 0;
 }
 
-/* 锁住的原因；NULL = 现在就能买（已满也返回 NULL，由调用方显示 MAXED） */
-static const char* SkillNodeLockText(int id) {
-    const SkillDef* d = &skillDefs[id];
-    int cost = SkillCost(id);
-    if (cost < 0) return NULL;
-    if (d->prereq >= 0 && skillRank[d->prereq] <= 0) return "BUY THE NODE ABOVE";
-    if (d->isKeystone && skillRank[id] <= 0) {
-        if (!SkillKeystoneUnlocked(id))
-            return (d->branch == 3) ? "NEEDS A BRANCH ULT" : "NEEDS 6 PTS IN BRANCH";
-        if (activeKeystone >= 0 && activeKeystone != id) {
-            if (SkillSwitchable(id)) return "ENTER-SWAP 3000 GOLD";
-            return "ANOTHER ULT IS ACTIVE";
-        }
-    }
-    if (shards < cost) return "NOT ENOUGH GOLD";
-    if (d->coreCost > 0 && shards < d->coreCost * GOLD_PER_CORE) return "NOT ENOUGH GOLD";
-    return NULL;
-}
+
 
 /* 虚线框。th 必须跟着文字高度缩放：
    绘制用的是**窗口坐标**，但真正落笔在 renderW x renderH 的缓冲里，
    1440p 全屏时 1 个窗口像素只有 0.27 个缓冲像素 —— 1px 的线会
    直接消失（第一版在全屏下虚线框整个不见了）。 */
-static void SkillDrawDashFrame(int x0, int y0, int x1, int y1,
-                               unsigned int col, float a, int dash, int gap, int th) {
-    if (dash < 2) dash = 2;
-    if (gap < 2) gap = 2;
-    if (th < 2) th = 2;
-    for (int x = x0; x < x1; x += dash + gap) {
-        int xe = x + dash; if (xe > x1) xe = x1;
-        BlendRectWin(x, y0, xe, y0 + th, col, a);
-        BlendRectWin(x, y1 - th, xe, y1, col, a);
-    }
-    for (int y = y0; y < y1; y += dash + gap) {
-        int ye = y + dash; if (ye > y1) ye = y1;
-        BlendRectWin(x0, y, x0 + th, ye, col, a);
-        BlendRectWin(x1 - th, y, x1, ye, col, a);
-    }
-}
+
 
 /* 同列上下节点之间的连线：走线颜色 = 该分支主色，越往下点亮越实 */
 /* ===== v6 **技能树相机（和局内改造树同一套模型）** =====
@@ -1947,20 +1892,30 @@ static int   skDragging = 0;
 static float skDragMouseX = 0.0f, skDragMouseY = 0.0f;
 static float skDragVX = 0.0f, skDragVY = 0.0f;
 
-/* 节点在世界里的左上角（跨支行单独一行） */
+/* ==================================================================
+ * v6 **辐射布局**：四个方向各一条支线，联动节点在两支之间
+ * ==================================================================
+ * 原来：4 列 × 4 行的网格，视觉上是"表格"，不是"树"。
+ *
+ * 现在：坐标来自 skills.c 的 SkillNodeX/Y（归一化 0..1）：
+ *         中心 (0.5, 0.5)
+ *         静 = 向上   筹 = 向右   隐 = 向下   途 = 向左
+ *         keystone 在各自支线更远处
+ *         联动节点在两支之间的对角
+ *
+ * 这样连线画出来就是一张**放射状蜘蛛网**，
+ * 而不是四条互不相干的竖线。
+ * ================================================================== */
 static void SkillWorldPos(int id, float* wx, float* wy) {
-    for (int k = 0; k < SKILL_POS_COUNT; k++) {
-        if (kSkillPos[k].id != id) continue;
-        if (kSkillPos[k].col == 4) {          /* 跨支行：横跨四列，单独一行 */
-            *wx = 0.0f;
-            *wy = 5.0f * SK_WY;
-        } else {
-            *wx = (float)kSkillPos[k].col * SK_WX;
-            *wy = (float)kSkillPos[k].row * SK_WY;
-        }
-        return;
-    }
-    *wx = 0.0f; *wy = 0.0f;
+    extern float SkillNodeX(int), SkillNodeY(int);
+    /* 把 0..1 映射到世界坐标的宽高 */
+    /* 世界尺度 ×6：
+       归一化间距 0.10 → 世界 0.60·SK_WX，而节点宽 0.55·SK_WX，
+       间距 > 宽度，节点才不会叠在一起。
+       （×4 时间距只有 0.40·SK_WX < 0.78·SK_WX —— 实测截图里
+         节点全糊成一片大矩形，这次修掉。） */
+    *wx = SkillNodeX(id) * SK_WX * 6.0f;
+    *wy = SkillNodeY(id) * SK_WY * 6.0f;
 }
 void SkillCenterOn(int id);   /* v6：摆到视野中心（定义在下面） */
 
@@ -1972,7 +1927,7 @@ int  SkillViewZoom(void)  { return (int)(skVK * 100.0f); }
 void SkillCenterOn(int id) {
     float wx, wy;
     SkillWorldPos(id, &wx, &wy);
-    int nodeW = (int)(SK_WX * 0.78f * skVK);
+    int nodeW = (int)(SK_WX * 0.55f * skVK);
     int nodeH = (int)(SK_WY * 0.62f * skVK);
     skVX = (float)winW * 0.50f - (wx * skVK + (float)nodeW * 0.5f);
     skVY = (float)winH * 0.42f - (wy * skVK + (float)nodeH * 0.5f);
@@ -1984,7 +1939,7 @@ void SkillResetView(void) {
        那是原来 HOME 的行为，按一下整棵树跑到屏幕左上角。
        现在 HOME = 回到当前选中的技能，缩放回到 0.85。 */
     extern int hubSelection;
-    skVK = 0.85f;
+    skVK = 0.78f;
     SkillCenterOn(hubSelection);
 }
 void SkillPanBy(float dx, float dy) { skVX += dx; skVY += dy; uiDirty = 1; }
@@ -2016,30 +1971,7 @@ int  SkillIsDragging(void) { return skDragging; }
 static int SkSX(float wx) { return (int)(wx * skVK + skVX); }
 static int SkSY(float wy) { return (int)(wy * skVK + skVY); }
 
-static void SkillDrawConnectors(const SkillTreeLayout* L) {
-    int TH = TextHeightWin();
-    int bw = TH / 8; if (bw < 2) bw = 2;
-    for (int c = 0; c < SKILL_GRID_COLS; c++) {
-        for (int r = 0; r < 3; r++) {
-            int a = SkillNodeIdAt(c, r);
-            int b = SkillNodeIdAt(c, r + 1);
-            if (a < 0 || b < 0) continue;
-            int x = L->colCX[c];
-            int y0 = L->node[a].bottom;
-            int y1 = L->node[b].top;
-            if (y1 <= y0 + 2) continue;
-            int ownA = skillRank[a] > 0;
-            int ownB = skillRank[b] > 0;
-            unsigned int col = kBranchColor[skillDefs[b].branch];
-            float al = ownA ? (ownB ? 0.90f : 0.55f) : 0.16f;
-            BlendRectWin(x - bw / 2, y0, x - bw / 2 + bw, y1, col, al);
-            /* 中段一颗小方块，看起来像"节点之间的一道锁" */
-            int mid = (y0 + y1) / 2;
-            BlendRectWin(x - bw, mid - bw, x + bw, mid + bw,
-                         ownA ? col : 0x00343434u, ownA ? 0.9f : 0.55f);
-        }
-    }
-}
+
 
 /* ===== v6 **技能树节点卡片（重写）** =====
    旧版：一个方块 + 居中的名字 + 底部等级点。
@@ -2052,110 +1984,7 @@ static void SkillDrawConnectors(const SkillTreeLayout* L) {
      ③ 底部：等级点 + 状态徽标（OWNED / BUY / LOCKED）
    配色仍按分支走，但「可买」用呼吸金边、「已拥有」用实心绿，
    一眼能扫出「哪些我已经有、下一个该点哪」。 */
-static void SkillDrawNode(const SkillTreeLayout* L, int id, int isSel) {
-    RECT r = L->node[id];
-    if (r.right <= r.left) return;          /* 退役节点不画 */
-    int TH = TextHeightWin();
-    unsigned int fill, border, text;
-    float a;
-    SkillNodeColors(id, &fill, &border, &text, &a);
 
-    const SkillDef* d = &skillDefs[id];
-    int owned = (skillRank[id] > 0);
-    int canBuy = SkillNodeBuyable(id);
-
-    /* ---- 外框状态色 ---- */
-    if (owned) {
-        border = 0x0060FF90u;               /* 已拥有：实心绿边 */
-    } else if (canBuy) {
-        int ph = (int)(g_timeSec * 2.0f) & 1;
-        border = ph ? 0x00FFE070u : 0x00807030u;   /* 可买：呼吸金边 */
-        text = 0x00FFF0C0u;
-    } else {
-        border = 0x00404040u;               /* 锁住：灰边 */
-        text = 0x00808080u;
-        a *= 0.85f;
-    }
-
-    BlendRectWin(r.left, r.top, r.right, r.bottom, fill, a);
-    int bt = TH / 12; if (bt < 2) bt = 2;
-    FrameRectWin(r.left, r.top, r.right, r.bottom, border, 0.95f, bt);
-
-    int cx = (r.left + r.right) / 2;
-    int cardW = r.right - r.left;
-
-    /* ---- ① 名字 ---- */
-    char nm[40];
-    sprintf(nm, "%s", Tr(d->name, SkillNameZh(d->name)));
-    ClampRowText(nm, cardW - TH / 2);
-    int nameY = r.top + (r.bottom - r.top) * 22 / 100;
-    DrawTextCenterWin(cx, nameY, nm, text);
-
-    /* ---- ② 效果摘要（一行，压暗）----
-       从 desc 里取前一段，太长自动截断 —— 这样不选中也能大致知道它干嘛。 */
-    {
-        char ds[96];
-        sprintf(ds, "%s", d->desc);
-        /* 去掉句尾的细节，只留前半句（更容易扫） */
-        for (int k = 0; ds[k]; k++) { if (ds[k] == ',') { ds[k] = 0; break; } }
-        ClampRowText(ds, cardW - TH / 2);
-        int dsY = nameY + TH + TH / 4;
-        if (dsY + TH < r.bottom - TH / 2) {
-            DrawTextCenterWin(cx, dsY, ds,
-                              owned ? 0x0090C0A0u : 0x00888888u);
-        }
-    }
-
-    /* ---- ③ 底部：等级点 + 状态 ---- */
-    int pw = TH / 6; if (pw < 3) pw = 3;
-    int py = r.bottom - pw - (TH * 16) / 100;
-    if (py < nameY + TH * 2) py = nameY + TH * 2;
-    if (py > r.bottom - pw) py = r.bottom - pw;
-
-    if (d->isKeystone) {
-        int s = pw + 1;
-        unsigned int col = owned ? 0x0060FFA0u : kBranchColor[3];
-        for (int dy = -s; dy <= s; dy++) {
-            int span = s - (dy < 0 ? -dy : dy);
-            BlendRectWin(cx - span, py + dy, cx + span + 1, py + dy + 1,
-                         col, owned ? 0.95f : 0.55f);
-        }
-    } else {
-        int n = d->maxRank;
-        int sp = pw / 2; if (sp < 2) sp = 2;
-        int totalW = n * pw + (n - 1) * sp;
-        int x0 = cx - totalW / 2;
-        unsigned int onCol = owned ? 0x0060FF90u : kBranchColor[d->branch];
-        for (int k = 0; k < n; k++) {
-            int sx = x0 + k * (pw + sp);
-            if (k < skillRank[id]) BlendRectWin(sx, py, sx + pw, py + pw, onCol, 0.95f);
-            else                   FrameRectWin(sx, py, sx + pw, py + pw, onCol, 0.55f, 2);
-        }
-    }
-
-    /* ---- 状态徽标（右上角小字）---- */
-    {
-        const char* tag = owned ? "OWN" : (canBuy ? "BUY" : "---");
-        unsigned int tc = owned ? 0x0060FF90u : (canBuy ? 0x00FFE070u : 0x00505050u);
-        int tw = TextWidthWin(tag);
-        DrawTextWin(r.right - tw - TH / 4, r.top + TH / 6, tag, tc);
-    }
-
-    /* ---- 选中框：黑隔离环 + 金框 + 四角加粗 ---- */
-    if (isSel) {
-        int gap = 2;
-        FrameRectWin(r.left - gap, r.top - gap, r.right + gap, r.bottom + gap,
-                     0x00000000u, 0.90f, 2);
-        int o = gap + 3;
-        unsigned int sc = 0x00FFE080u;
-        FrameRectWin(r.left - o, r.top - o, r.right + o, r.bottom + o, sc, 0.95f, 2);
-        int arm = TH / 3;
-        BlendRectWin(r.left - o - 2, r.top - o - 2, r.left - o + arm, r.top - o + 1, sc, 1.0f);
-        BlendRectWin(r.right + o - arm, r.top - o - 2, r.right + o + 2, r.top - o + 1, sc, 1.0f);
-        BlendRectWin(r.left - o - 2, r.bottom + o - 1, r.left - o + arm, r.bottom + o + 2, sc, 1.0f);
-        BlendRectWin(r.right + o - arm, r.bottom + o - 1, r.right + o + 2, r.bottom + o + 2, sc, 1.0f);
-    }
-}
 
 
 /* ===== v3.4 **BANK 页**（用户要求）=====
@@ -2164,9 +1993,10 @@ static void SkillDrawNode(const SkillTreeLayout* L, int id, int isSel) {
 static void DrawBankPage(void) {
     SkillTreeLayout L;
     SkillTreeCompute(&L);
+
     int TH = TextHeightWin();
     extern int bankGold, bankHistMax, bankCarryPct, carryGold;
-    extern int shards;
+    extern int carryGold;
 
     DrawTitleWin("BANK", L.titleY, 0x00FFC040u);
 
@@ -2259,7 +2089,7 @@ static void DrawBankPage(void) {
                          "携带比例只在下一局生效"), 0x00606060u);
 
     DrawTextCenterWin((L.panel.left + L.panel.right) / 2, L.hintY,
-                      "ENTER SWITCH   ESC BACK", 0x00707070u);
+                      Tr("ENTER SWITCH   ESC BACK", "回车切换   ESC 返回"), 0x00707070u);
 }
 
 
@@ -2267,61 +2097,117 @@ static void DrawBankPage(void) {
    「带着这些钱走人，还是再贪一层？」—— 这是整个经济链的情绪核心。
    面板上必须写清楚：撤离能拿多少、深入大概能多赚多少。 */
 static void DrawExitChoice(void) {
-    extern int exitChoiceOpen, carryGold, shards, currentLevel;
-    extern float ExtractDepthMul(int level);   /* v6：深度倍数 */
-    extern float exitChoiceT;
+    extern int exitChoiceOpen, carryGold, carryGold, currentLevel;
+    extern float ExtractDepthMul(int level);
     if (!exitChoiceOpen) return;
 
-    int TH = TextHeightWin();
-    float fade = exitChoiceT / 0.25f;
-    if (fade > 1.0f) fade = 1.0f;
+    /* ===== v2.4.45 **出口二选一面板重做** =====
+       用户：「这个明显太粗糙了」。旧版问题（对照 /design 论坛的 UI 评审清单）：
 
-    int w = UIS(560);
-    if (w > winW - UIS(40)) w = winW - UIS(40);
-    int h = TH * 8 + UIS(60);
+         ① 只有一圈细边框 + 纯文字浮在场景上 → 没有"面板"的存在感
+         ② 高度按 TH*8 硬算，但只有 5 行内容 → 大片空白
+         ③ 每行间距三种（6 / 10 / 14），最右和最左对不齐 → 视觉噪音
+         ④ 六行六种颜色（金/白/绿/橙/红/灰）→ 没有主次，全是重点
+         ⑤ 「带的钱越多怪物听得越清」是**全局提示**，塞进选择面板里
+            等于在决定面前多一句废话 —— 移出
+
+       新规则（对齐调研结论）：
+         · **像素风双层边框**：外暗底 + 内金框 + 四角短标
+         · **高度按内容算**，不再留空
+         · **一个行距常量**，所有行等距
+         · **最多两个强调色**：绿=安全（撤离）/ 橙=风险（深入）；其余中性
+         · **左标签 + 右数值**两列对齐，方便横向比较
+         · 只保留一句脚注：死在里面保留 35%
+    */
+    int TH  = TextHeightWin();
+    int GAP = UIS(8);                 /* **唯一行距** */
+    int PAD = UIS(20);                /* **唯一内边距** */
+    int ROW = TH + GAP;
+
+    /* ===== v2.4.46 **背景不显示的根因** =====
+       原来用 exitChoiceT 做淡入：`fade = exitChoiceT / 0.25f`，
+       而 exitChoiceT 只在 UpdateSmokes() 里累加 ——
+       面板打开时 Update() 提前 return，UpdateSmokes 根本不会被调用，
+       于是 exitChoiceT 永远是 0 → **fade = 0 → 所有矩形 alpha 都是 0**，
+       而文字没走 fade，所以画面上只剩裸文字、没有面板。
+       （用户：「连个背景都没有，裸着的」。）
+
+       修：面板一律不透明。淡入这点动画不值得拿"面板可能完全消失"去换。*/
+    float fade = 1.0f;
+
+    int w = UIS(540);
+    if (w > winW - UIS(60)) w = winW - UIS(60);
+
+    /* 内容行数：标题 1 + 空 1 + 选项 2 + 空 1 + 脚注 1 = 6 行 */
+    int h = PAD * 2 + ROW * 6;
     int x = (winW - w) / 2;
     int y = (winH - h) / 2;
 
-    BlendRectWin(0, 0, winW, winH, 0x00000000u, 0.70f * fade);
-    BlendRectWin(x, y, x + w, y + h, 0x00141A1Cu, 0.97f * fade);
-    FrameRectWin(x, y, x + w, y + h, 0x00E8C040u, 0.90f * fade, 1);
+    /* ---- 全屏压暗 + 双层边框（像素风）---- */
+    BlendRectWin(0, 0, winW, winH, 0x00000000u, 0.72f * fade);
+    BlendRectWin(x - UIS(3), y - UIS(3), x + w + UIS(3), y + h + UIS(3),
+                 0x00000000u, 0.55f * fade);
+    BlendRectWin(x, y, x + w, y + h, 0x0012181Bu, 0.98f * fade);
+    FrameRectWin(x, y, x + w, y + h, 0x00E8C040u, 0.95f * fade, UIS(2));
 
-    int cx = winW / 2;
-    int ty = y + UIS(20);
-    DrawTextCenterWin(cx, ty, Tr("THE EXIT IS OPEN", "出口已开"), 0x00FFD040u);
-    ty += TH + UIS(10);
+    /* 四角短标：像素面板的标志性细节 */
+    {
+        int arm = UIS(12), t = UIS(2);
+        unsigned int cc = 0x00FFD040u;
+        BlendRectWin(x, y, x + arm, y + t, cc, 0.9f * fade);
+        BlendRectWin(x, y, x + t, y + arm, cc, 0.9f * fade);
+        BlendRectWin(x + w - arm, y, x + w, y + t, cc, 0.9f * fade);
+        BlendRectWin(x + w - t, y, x + w, y + arm, cc, 0.9f * fade);
+        BlendRectWin(x, y + h - t, x + arm, y + h, cc, 0.9f * fade);
+        BlendRectWin(x, y + h - arm, x + t, y + h, cc, 0.9f * fade);
+        BlendRectWin(x + w - arm, y + h - t, x + w, y + h, cc, 0.9f * fade);
+        BlendRectWin(x + w - t, y + h - arm, x + w, y + h, cc, 0.9f * fade);
+    }
 
-    /* 撤离能拿多少 */
+    int leftX  = x + PAD;
+    int rightX = x + w - PAD;
+    int curY   = y + PAD;
+
+    /* ---- 标题 ---- */
+    DrawTextWin(leftX, curY, Tr("THE EXIT IS OPEN", "出口已开"), 0x00FFD040u);
+    curY += ROW * 2;          /* 标题后空一行 */
+
+    /* ---- 选项 1：撤离 ---- */
+    {
+        extern int BankPreviewGain(int);
+        int quit=BankPreviewGain(1);
+
+        char kb[16], lb[64], vb[48];
+        snprintf(kb, sizeof(kb), "[1]");
+        snprintf(lb, sizeof(lb), "%s", Tr("LEAVE NOW", "现在撤离"));
+        snprintf(vb, sizeof(vb), "+%d GOLD", quit);
+
+        DrawTextWin(leftX, curY, kb, 0x00E8C040u);
+        DrawTextWin(leftX + TextWidthWin("[1] ") + UIS(6), curY, lb, 0x00E0E0E0u);
+        DrawTextWin(rightX - TextWidthWin(vb), curY, vb, 0x0060FF90u);
+        curY += ROW;
+    }
+
+    /* ---- 选项 2：深入 ---- */
     {
         extern float ExtractDepthMul(int);
-        float dm = ExtractDepthMul(currentLevel);
-        int carry = carryGold;
-        int profit = shards - carry;
-        if (profit < 0) profit = 0;
-        int quit = carry + (int)((float)profit * dm + 0.5f);
-        char b[96];
-        snprintf(b, sizeof(b),
-                 Tr("[1] EXIT NOW    +%d GOLD", "[1] 现在撤离    +%d 金币"), quit);
-        DrawTextCenterWin(cx, ty, b, 0x0060FF90u);
-        ty += TH + UIS(6);
-    }
-
-    /* 深入提示 */
-    {
-        char b[96];
-        snprintf(b, sizeof(b),
-                 Tr("[2] GO DEEPER   level %d  (x%.2f)",
-                    "[2] 继续深入    第 %d 层  (x%.2f)"),
+        char kb[16], lb[64], vb[64];
+        snprintf(kb, sizeof(kb), "[2]");
+        snprintf(lb, sizeof(lb), "%s", Tr("GO DEEPER", "继续深入"));
+        snprintf(vb, sizeof(vb), Tr("LV %d   x%.2f", "第 %d 层   x%.2f"),
                  currentLevel + 1, ExtractDepthMul(currentLevel + 1));
-        DrawTextCenterWin(cx, ty, b, 0x00FFA040u);
-        ty += TH + UIS(14);
+
+        DrawTextWin(leftX, curY, kb, 0x00E8C040u);
+        DrawTextWin(leftX + TextWidthWin("[1] ") + UIS(6), curY, lb, 0x00E0E0E0u);
+        DrawTextWin(rightX - TextWidthWin(vb), curY, vb, 0x00FFA040u);
+        curY += ROW * 2;      /* 选项后空一行 */
+
     }
 
-    DrawTextCenterWin(cx, ty, Tr("DIE INSIDE AND YOU KEEP 35%",
-                                 "死在里面只保留 35%"), 0x00C86868u);
-    ty += TH + UIS(6);
-    DrawTextCenterWin(cx, ty, Tr("THE MORE YOU CARRY, THE BETTER THEY HEAR YOU",
-                                 "带的钱越多，怪物听得越清"), 0x00909090u);
+    /* ---- 脚注：唯一保留的一句 ---- */
+    DrawTextWin(leftX, curY, Tr("DIE INSIDE - YOU KEEP 35%",
+                                "死在里面 - 只保留 35%"),
+                0x00908880u);
 }
 
 /* ===== v6 **技能树（列表式，整体重写）** =====
@@ -2345,12 +2231,23 @@ void DrawSkillTree(void) {
         if (!skTested) {
             skTested = 1;
             extern int SkillsSelfTest(void);
-            extern const char* pickupMsg;
-            extern float pickupMsgTimer;
             /* v6 **自检失败不再弹窗给玩家** ——
                这是给开发看的护栏，玩家看到 "SKILL DATA ERROR: 35"
                只会以为游戏坏了。改成静默（需要排查时加 DSH_SKILL_DEBUG）。 */
-            { int r = SkillsSelfTest(); (void)r; }
+            /* v7 第 ㊿ 轮：**结果不再丢掉**
+               原来 `(void)r;` 把返回值扔了 —— 护栏装了没插电。
+               现在失败时写进 output debug 字符串，开发能看到，
+               玩家不受打扰。 */
+            {
+                int r = SkillsSelfTest();
+                if (r) {
+                    char m[96];
+                    snprintf(m, sizeof(m),
+                             "[CANITY] SKILL DATA SELF-TEST FAILED: code=%d "
+                             "(SKILL_TOTAL_COST vs real table)", r);
+                    OutputDebugStringA(m);
+                }
+            }
         }
     }
     SkillTreeLayout L;
@@ -2370,14 +2267,14 @@ void DrawSkillTree(void) {
         if (!(skVK >= SK_K_MIN && skVK <= SK_K_MAX)) bad = 1;
         if (!(skVX > -20000.0f && skVX < 20000.0f)) bad = 1;
         if (!(skVY > -20000.0f && skVY < 20000.0f)) bad = 1;
-        if (bad) { skVK = 0.85f; SkillCenterOn(hubSelection); }
+        if (bad) { skVK = 0.78f; SkillCenterOn(hubSelection); }
     }
     /* 首次进入：居中到第一行 */
     {
         static int skCentred = 0;
         if (!skCentred) {
             skCentred = 1;
-            skVK = 0.85f;
+            skVK = 0.78f;
             SkillCenterOn(hubSelection);
         }
     }
@@ -2391,14 +2288,6 @@ void DrawSkillTree(void) {
        详情条三行从 panel.bottom - TH*4 开始，而节点高 0.62*SK_WY*skVK，
        原来 gBot 正好等于详情首行 y，第 3 行的节点会压上去。
        再让出「一个节点高 + 半行」，保证压不到。 */
-    {
-        int nodeHNow = (int)(SK_WY * 0.62f * skVK);
-        if (nodeHNow < 18) nodeHNow = 18;
-        int gBot2 = L.panel.bottom - TH * 4 - nodeHNow - TH / 2;
-        if (gBot2 < L.curY + TH * 2) gBot2 = L.curY + TH * 2;
-        (void)gBot2;
-        gBot = gBot2;
-    }
     /* ---------- 顶部固定栏 ---------- */
     DrawTitleWin("SKILL TREE", L.titleY, 0x00D23C3Cu);
     {
@@ -2414,26 +2303,49 @@ void DrawSkillTree(void) {
 
     /* ---------- 图区（可缩放/平移） ---------- */
     {
-        int nodeW = (int)(SK_WX * 0.78f * skVK);
+        int nodeW = (int)(SK_WX * 0.55f * skVK);
         int nodeH = (int)(SK_WY * 0.62f * skVK);
         if (nodeW < 24) nodeW = 24;
         if (nodeH < 18) nodeH = 18;
 
-        /* 连线先画（在节点下面） */
+
+        /* 连线先画（在节点下面）
+           v6：**改成读邻接表** —— 原来只画 d->prereq 一条线，
+           新增的联动节点（两个邻居）根本画不出来。
+           现在遍历每个节点的所有邻居，有几个画几条。 */
         for (int k = 0; k < SKILL_LIST_COUNT; k++) {
             int id = kSkillList[k];
             const SkillDef* d = &skillDefs[id];
-            if (d->prereq < 0 || d->prereq >= SKILL_COUNT) continue;
-            if (SkillListIndex(d->prereq) < 0) continue;
+            (void)d;
+            if (SkillEdgeCount(id) <= 0) continue;
             float wx1, wy1, wx2, wy2;
-            SkillWorldPos(d->prereq, &wx1, &wy1);
+            SkillWorldPos(SkillEdgeNeighbor(id, 0), &wx1, &wy1);
             SkillWorldPos(id, &wx2, &wy2);
             int x1 = SkSX(wx1) + nodeW / 2, y1 = SkSY(wy1) + nodeH;
             int x2_ = SkSX(wx2) + nodeW / 2, y2 = SkSY(wy2);
-            unsigned int lc = (skillRank[id] > 0) ? 0x0060FF90u : 0x00484848u;
-            BlendRectWin(x1, y1, x1 + 2, (y1 + y2) / 2, lc, 0.85f);
-            BlendRectWin(x2_ , (y1 + y2) / 2, x2_ + 2, y2, lc, 0.85f);
+            /* ============================================================
+             * v6 第 ㉖ 轮：**连线重画**
+             * ============================================================
+             * 原来：颜色 0x484848、宽度 2px、alpha 0.85，还分成两段 L 形。
+             * 实测截图：整张网看起来是散的 —— 节点之间像没关系。
+             *
+             * 现在：
+             *   · 已点亮 = PAL_GOLD（和节点同一个语言）
+             *   · 未点亮 = 明显可见的灰蓝（不再是 0x484848）
+             *   · 宽度随缩放放大（缩小时看得见）
+             *   · 直角折线保留（赛博朋克电路感），但两段接得更紧
+             * ============================================================ */
+            int lit = (skillRank[id] > 0) && (skillRank[SkillEdgeNeighbor(id, 0)] > 0);
+            unsigned int lc = lit ? PAL_GOLD : 0x00708098u;
+            int lw = (int)(3.0f * skVK);
+            if (lw < 2) lw = 2;
+            if (lw > 8) lw = 8;
+            int midY = (y1 + y2) / 2;
+            BlendRectWin(x1 - lw / 2, y1, x1 + lw / 2, midY + lw / 2, lc, 0.95f);
+            BlendRectWin(x2_ - lw / 2, midY - lw / 2, x2_ + lw / 2, y2, lc, 0.95f);
+            BlendRectWin(x1 - lw / 2, midY - lw / 2, x2_ + lw / 2, midY + lw / 2, lc, 0.95f);
         }
+
 
         /* 节点 */
         for (int k = 0; k < SKILL_LIST_COUNT; k++) {
@@ -2447,19 +2359,29 @@ void DrawSkillTree(void) {
             SkillWorldPos(id, &wx, &wy);
             int x0 = SkSX(wx), y0 = SkSY(wy);
             /* 跨支行横跨四列 */
-            int nw2 = (id == SKILL_CROSS_ID)
-                    ? (int)(SK_WX * 3.9f * skVK)
-                    : nodeW;
+            /* v6：去掉「跨支行横跨四列」的特例 ——
+               第 ⑨ 轮把 SKILL_CROSS_ID 改成了 25（= 中心 ORIGIN），
+               于是**中心节点被画成一条横跨四列的大绿条**，盖住整个中间。
+               现在所有节点一律等宽。 */
+            int nw2 = nodeW;
             int x1 = x0 + nw2, y1 = y0 + nodeH;
 
             /* 图区裁剪：超出上下界的整个跳过（不裁剪像素，省开销） */
             if (y1 < gTop || y0 > gBot) continue;
 
-            unsigned int fill = owned ? 0x00203A28u : 0x00181A1Eu;
+            /* ============================================================
+             * v6 第 ㉕ 轮：**这里原来绕过调色盘自己写死了一套颜色**
+             * ============================================================
+             * 上面那个 SkillNodeColors() 改了半天，这一段根本没用它 ——
+             * 未拥有的节点 fill=0x181A1E / border=0x404040，
+             * 画在 0x0a1016 的面板上等于**隐形**。
+             * 实测截图：26 个节点只看得见名字，看不见框。
+             * ============================================================ */
+            unsigned int fill = owned ? 0x00384858u : 0x00222834u;
             unsigned int bd;
-            if (owned)        bd = 0x0060FF90u;
-            else if (canBuy)  bd = (((int)(g_timeSec * 2.0f) & 1)) ? 0x00FFE070u : 0x007A6830u;
-            else              bd = 0x00404040u;
+            if (owned)        bd = PAL_CYAN;
+            else if (canBuy)  bd = (((int)(g_timeSec * 2.0f) & 1)) ? PAL_GOLD : 0x008A7830u;
+            else              bd = 0x008090A0u;      /* 明显可见的灰蓝，不再是 0x404040 */
 
             BlendRectWin(x0, y0, x1, y1, fill, 0.92f);
             FrameRectWin(x0, y0, x1, y1, bd, 0.95f, isSel ? 3 : 2);
@@ -2467,7 +2389,9 @@ void DrawSkillTree(void) {
             /* 名字（缩得太小时只画名字） */
             {
                 char nm[40];
-                sprintf(nm, "%s", Tr(d->name, SkillNameZh(d->name)));
+                /* v6：节点里画短名，详情条才用全长名 */
+                { extern const char* SkillShortName(int);
+                  sprintf(nm, "%s", SkillShortName(id)); }
                 ClampRowText(nm, nw2 - TH / 4);
                 unsigned int tc = owned ? 0x0090FFB0u : (canBuy ? 0x00FFE080u : 0x00787878u);
                 DrawTextCenterWin((x0 + x1) / 2, y0 + nodeH / 2 - TH / 2, nm, tc);
@@ -2510,21 +2434,44 @@ void DrawSkillTree(void) {
         ClampRowText(b, innerR - innerL);
         DrawTextWin(innerL, dy, b, 0x00E8E8E8u);
 
-        sprintf(b, "%s", d->desc);
-        ClampRowText(b, innerR - innerL);
-        DrawTextWin(innerL, dy + TH, b, 0x008A8A8Au);
+        /* ================================================================
+         * v6 第 48 轮：**技能树从来没显示过价格**
+         * ================================================================
+         * 用户实机反馈：「技能树那里面升级所需要的钱，你没标明出来」。
+         *
+         * 顺手挖出第二个 bug：下面那个「够不够钱」用的是
+         * **carryGold（局内金币）**，而技能树花的是 **bankGold（银行）**。
+         * 主菜单里 carryGold 恒为 0 —— 所以永远显示「金币不够」，
+         * 哪怕银行里躺着十万。
+         * ================================================================ */
+        int costNow = SkillCost(sel);
+        if(costNow>=0)costNow+=d->coreCost*GOLD_PER_CORE;
+
+        {   /* 第二行：描述左，价格右 */
+            static char cb[32];
+            int cw = 0;
+            if (costNow >= 0) {
+                sprintf(cb, "%s %d", Tr("COST", "价格"), costNow);
+                cw = TextWidthWin(cb) + UIS(16);
+                DrawTextWin(innerR - TextWidthWin(cb), dy + TH, cb, PAL_GOLD);
+            }
+            sprintf(b, "%s", d->desc);
+            ClampRowText(b, innerR - innerL - cw);
+            DrawTextWin(innerL, dy + TH, b, 0x008A8A8Au);
+        }
 
         {
             const char* st; unsigned int sc;
+            extern int WalletCanPayBank(int);
             if (skillRank[sel] >= d->maxRank) { st = Tr("ALREADY MAXED", "已满级"); sc = 0x0060FF90u; }
-            else if (!(d->prereq < 0 || skillRank[d->prereq] > 0)) { st = Tr("REQUIRES THE NODE ABOVE IT", "需要先买上面的节点"); sc = 0x00E0A040u; }
-            else if (shards < SkillCost(sel)) { st = Tr("NOT ENOUGH GOLD", "金币不够"); sc = 0x00C86868u; }
+            else if (!(d->prereq < 0 || skillRank[d->prereq] > 0)) { st = Tr("REQUIRES THE NODE ABOVE IT", "需要先点亮上面的节点"); sc = 0x00FF8080u; }
+            else if (!WalletCanPayBank(costNow)) { st = Tr("NOT ENOUGH GOLD", "金币不够"); sc = 0x00FF8080u; }
             else { st = Tr("ENTER TO BUY", "回车购买"); sc = 0x0060FF90u; }
             DrawTextWin(innerL, dy + TH * 2, st, sc);
         }
     }
     DrawTextCenterWin((L.panel.left + L.panel.right) / 2, L.panel.bottom - TH,
-                      Tr("WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY",
+                      Tr("R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY",
                          "滚轮缩放   拖拽平移   HOME 复位   回车购买"),
                       0x00707070u);
 }
@@ -2543,7 +2490,7 @@ void SkillFocusNode(int id) {
        之外就把它拉回中心，轴间独立，不会来回抖。 */
     float wx, wy;
     SkillWorldPos(id, &wx, &wy);
-    int nodeW = (int)(SK_WX * 0.78f * skVK);
+    int nodeW = (int)(SK_WX * 0.55f * skVK);
     int nodeH = (int)(SK_WY * 0.62f * skVK);
     float cx = wx * skVK + (float)nodeW * 0.5f;
     float cy = wy * skVK + (float)nodeH * 0.5f;
@@ -2555,10 +2502,16 @@ void SkillFocusNode(int id) {
     if (moved) uiDirty = 1;
 }
 
+RECT SkillNodeRect(int id) {
+    RECT r={0,0,0,0}; if(id<0 || id>=SKILL_COUNT) return r;
+    float wx,wy;SkillWorldPos(id,&wx,&wy);
+    r.left=SkSX(wx);r.top=SkSY(wy);
+    r.right=r.left+(int)(SK_WX*0.55f*skVK);r.bottom=r.top+(int)(SK_WY*0.62f*skVK);return r;
+}
 int SkillNodeHitTest(int mx, int my) {
     /* v6：**逆变换命中** —— 屏幕坐标先反解回世界坐标，再判矩形。 */
     int TH = TextHeightWin();
-    int nodeW = (int)(SK_WX * 0.78f * skVK);
+    int nodeW = (int)(SK_WX * 0.55f * skVK);
     int nodeH = (int)(SK_WY * 0.62f * skVK);
     if (nodeW < 24) nodeW = 24;
     if (nodeH < 18) nodeH = 18;
@@ -2674,7 +2627,7 @@ static void DrawMainMenu(const MainMenuLayout* M) {
         }
         /* 极端情况：左侧也收一点，保证不重叠 */
         if (wl + wr + gapMin > avail && wl > avail / 2) {
-            sprintf(lstr, "%d", shards);
+            sprintf(lstr, "%d", carryGold);
             wl = TextWidthWin(lstr);
         }
         DrawTextWin(lx, M->footY, lstr, 0x0060D0FFu);
@@ -2686,6 +2639,18 @@ static void DrawMainMenu(const MainMenuLayout* M) {
 }
 
 static void DrawMenuText(void) {
+    /* ==================================================================
+     * v7 第 ㊿ 轮：**商店必须在 GetMenuGeo() 之前分派**
+     * ==================================================================
+     * 上一版我把分派放在 GetMenuGeo() 之��—— 结果永远是
+     * GetMenuGeo() → MakeGeo(SAFEHOUSE) 先崩，我那个独立面板
+     * 一次都没跑到。
+     *
+     * 现在把它提到最前面：安全屋这一页完全不碰通用几何。
+     * ================================================================ */
+    /* v7 第 ㊿ 轮：安全屋回到通用菜单渲染 —— 它会画页签、
+       改造树、局内强化、休息页。之前那条路径的崩溃已随
+       ShopPriceAt() 的递归修复而消失。 */
     MenuGeo g = GetMenuGeo();
     int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
 
@@ -2704,10 +2669,18 @@ static void DrawMenuText(void) {
         DrawBankPage();
         return;
     }
-    if (currentState == STATE_HUB) {   /* v6：Hub 只有技能树一页 */
-        DrawSkillTree();
-        return;
+    if (currentState == STATE_HUB) {
+        /* v7 第 54 轮：**技能树临时降级**
+           git checkout -- src/skills.c 把 264 行未提交改动冲掉之后，
+           切到 Hub 会直接崩溃（无崩溃日志 = 栈耗尽或死循环）。
+           我重写的 SkillNodeX/Y 几何和原版不一致，连线也画不出来。
+           在重写整个技能树之前，先保证**界面能进、不崩**，
+           并且把列表版购买入口留着（Hub 走通用列表渲染）。 */
+        int kHubFallbackTree = 0;   /* v7 第 58 轮：6 个空节点补回后技能树正常，永久启用 */   /* v7 第 57 轮：几何修了两次仍然崩，尊重事实——回到列表 */   /* v7 第 57 轮：几何修好后重新启用技能树 */   /* v7 第 54 轮：1=列表降级 0=技能树（树崩溃中） */
+        if (!kHubFallbackTree) { DrawSkillTree(); return; }
+        /* 降级：走通用列表渲染（下面会画 MenuLabel 行） */
     }
+
 
     /* v2.2 主菜单：自己的布局（标题 / 行 / 页脚） */
     if (currentState == STATE_MAIN_MENU) {
@@ -2729,7 +2702,7 @@ static void DrawMenuText(void) {
         int y2 = winH - th - UIS(10);
         int y1 = y2 - th - UIS(6);
         /* v1.8：货币不再是裸文字 —— 前面加一颗菱形水晶图标 */
-        sprintf(sb, "GOLD  %d", shards);
+        sprintf(sb, "GOLD  %d", carryGold);
         {
             int tw = TextWidthWin(sb);
             int tx = (winW - tw) / 2;
@@ -2784,13 +2757,56 @@ static void DrawMenuText(void) {
         char l1[192], l2[192];
         MenuGeo bg = GetMenuGeo();
         int avail = (bg.panel.right - bg.panel.left) - UIS(56);
+        /* ===== v6 **三阶揭示** =====
+           见过 1 次 → 名字 + 危险度
+           逃 3 次   → + 行为 + 实时数值
+           逃 5 次   → + 对策 + 你的战绩
+
+           数值来自 bestiary[sel].getSpeed() 等函数指针，
+           读的是真实常量 —— 改怪物参数，这里自动变。 */
         if (!BestiaryIsSeen(sel)) {
+            /* v6 第 ㉘ 轮：**这一行画到面板外面去了**
+               其它分支都锚在 bg.panel.bottom，只有这条用 winH ——
+               实测截图：「UNKNOWN...」压在面板下边框之外的黑色背景上。 */
             sprintf(l1, "UNKNOWN. ENCOUNTER IT IN A RUN TO UNLOCK.");
             ClampRowText(l1, avail);
-            DrawTextCenterWin(winW / 2, winH - UIS(46), l1, 0x00808080u);
+            /* ==================================================================
+             * v7 第 64 轮：**这一行删掉**
+             * ==================================================================
+             * 实测截图：面板只有 6 行高度，第 6 个条目恰好画在这个位置，
+             * 于是变成「UNKNOWN. ENCOUNTE??? [LOCKED]UN TO UNLOCK.」。
+             * 上面试过 -52 / -88 两个位置，都会和列表或被裁掉。
+             *
+             * 而 `??? [LOCKED]` 这五个字本身就把话说清楚了 ——
+             * 一条放不下的说明不如不放。
+             * ================================================================ */
+            (void)l1;
         } else {
-            sprintf(l1, "THREAT: %s", bestiary[sel].threat);
-            sprintf(l2, "COUNTER: %s", bestiary[sel].counter);
+            int stage = BestiaryStage(sel);
+            int danger = BestiaryDanger(sel);
+
+            /* 第一行：危险度 + 实时数值（逃 3 次后才显示数值） */
+            if (stage >= BST_BEHAVED) {
+                float sp = bestiary[sel].getSpeed ? bestiary[sel].getSpeed() : 0.0f;
+                float hr = bestiary[sel].getHear  ? bestiary[sel].getHear()  : 0.0f;
+                float ch = bestiary[sel].getChase ? bestiary[sel].getChase() : 0.0f;
+                sprintf(l1, "DANGER %d/5   SPEED %.2f   HEAR %.1f   CHASE %.1fs",
+                        danger, (double)sp, (double)hr, (double)ch);
+            } else {
+                sprintf(l1, "DANGER %d/5   (%s TO REVEAL MORE)",
+                        danger, "3 FLOORS / 2 ESCAPES");
+            }
+
+            /* 第二行：行为（逃 3 次）或对策（逃 5 次） */
+            if (stage >= BST_COUNTER) {
+                sprintf(l2, "COUNTER: %s",
+                        (g_lang == LANG_ZH) ? bestiary[sel].counterZh : bestiary[sel].counterEn);
+            } else if (stage >= BST_BEHAVED) {
+                sprintf(l2, "%s",
+                        (g_lang == LANG_ZH) ? bestiary[sel].behaviorZh : bestiary[sel].behaviorEn);
+            } else {
+                sprintf(l2, "%s", "???");
+            }
             ClampRowText(l1, avail);
             ClampRowText(l2, avail);
             /* v3.3 **锚到面板底边，不是窗口底边** ——
@@ -2841,23 +2857,39 @@ static void DrawMenuText(void) {
         else if (currentState == STATE_HUB && i < UPGRADE_COUNT) {
             int cost = UpgradeCost(i);
             if (cost < 0) c = 0x00707070u;
-            else if (shards >= cost) c = (i == sel) ? 0x008CFF8Cu : 0x00A0FFA0u;
+            else if (carryGold >= cost) c = (i == sel) ? 0x008CFF8Cu : 0x00A0FFA0u;
             else c = (i == sel) ? 0x00FF8080u : 0x00B06060u;
         }
         else c = (i == sel) ? 0x008CFF8Cu : 0x009B9B9Bu;
 
         if (currentState == STATE_GAMEOVER && i > 0) {
             /* 复盘：第 2、3 行放统计（通关与失败共用这一页，标题区分） */
-            char line[96];
+            char line[112];
             int mins = (int)(runTime / 60.0f);
             int secs = (int)runTime - mins * 60;
-            if (i == 1) sprintf(line, "LEVEL %d    TIME %d:%02d", currentLevel, mins, secs);
+            if (i == 1) { extern int lastRunCaught; snprintf(line,sizeof(line),"LEVEL %d  TIME %d:%02d  CAUGHT %d",currentLevel,mins,secs,lastRunCaught); }
             else if (gameWon)
                 sprintf(line, "SCORE %d  D%d C%d K%d T%d",
                         lastScore.score, lastScore.s_depth, lastScore.s_coll,
                         lastScore.s_kill, lastScore.s_time);
-            else
-                sprintf(line, "SCORE %d  RUN FAILED", lastScore.score);
+            else {
+                /* v7 第 ㊿ 轮：**死亡页必须能归因**
+                   原来只有 LEVEL / TIME / SCORE —— 玩家死了不知道为什么，
+                   也不知道身上 6,000 金只退回 2,100，
+                   走出这一局学不到任何东西，只会觉得"我明明很小心"。
+
+                   现在多给三行：被抓几次 / 金币损失 / 理智在哪层见底。 */
+                extern int CatchCountThisRun(void);
+                extern int lastRunGold,lastRunKept,lastRunCaught;
+                int caught = lastRunCaught;
+                if (i == 1) continue;   /* 第 1 行已被上面 LEVEL/TIME 占掉 */
+                sprintf(line, "CAUGHT %d  SCORE %d", caught, lastScore.score);
+                if (i == 2) {
+                    /* 金币：本金 → 实退（35%） */
+                    int kept = lastRunKept;
+                    sprintf(line, "GOLD %d  KEPT %d  (35%%)", lastRunGold, kept);
+                }
+            }
             DrawTextInRow(line, RowRect(g, i), (i == sel) ? 0x008CFF8Cu : 0x009B9B9Bu);
             continue;
         }
@@ -2920,7 +2952,7 @@ static void DrawMenuText(void) {
                 priceCol = 0x00E8C040u;
             } else {
                 sprintf(price, "%d GOLD", cost);
-                priceCol = (shards >= cost) ? 0x0060D0FFu : 0x00C86868u;
+                priceCol = (carryGold >= cost) ? 0x0060D0FFu : 0x00C86868u;
             }
             int pw = TextWidthWin(price);
             DrawTextWin(x1 - pw, y, price, priceCol);
@@ -2936,7 +2968,7 @@ static void DrawMenuText(void) {
             for (int k = 0; k < UPG_MAX; k++) {
                 int sx = lvX + k * (sq + sp);
                 if (k < lv) BlendRectWin(sx, sy, sx + sq, sy + sq, 0x00C8E8FFu, 0.95f);
-                else        FrameRectWin(sx, sy, sx + sq, sy + sq, 0x00485868u, 0.9f, 2);
+                else        FrameRectWin(sx, sy, sx + sq, sy + sq, PAL_DIM, 0.9f, 2);
             }
 
             /* 左列：名字，右边界卡到等级点左边 —— 放不下就 ".." 截断 */
@@ -2947,9 +2979,19 @@ static void DrawMenuText(void) {
             continue;
         }
 
-        DrawTextInRow(MenuLabel(i), RowRect(g, i), c);
+        if(currentState==STATE_SAFEHOUSE) {
+            RECT row=RowRect(g,i);
+            char text[256]; snprintf(text,sizeof(text),"%s",MenuLabel(i));
+            ClampRowText(text,row.right-row.left-UIS(8));
+            DrawTextInRowLeft(text,row,c);
+        } else DrawTextInRow(MenuLabel(i), RowRect(g, i), c);
     }
 
+    if(currentState==STATE_SAFEHOUSE && shopPage==SHP_SHOP) {
+        extern int shopRefreshUsed;
+        char hint[80];snprintf(hint,sizeof(hint),"R  REFRESH %d/1",shopRefreshUsed?0:1);
+        DrawTextInRowLeft(hint,RowRect(g,SHOP_OFFERS+1),PAL_CYAN);
+    }
     /* 绘制滚动指示器 */
     if (g.count > g.maxVisibleRows) {
         int barH = g.panel.bottom - g.firstY;
@@ -2973,6 +3015,7 @@ static void DrawMenuText(void) {
 /* ============================================================
  * 成就页面专用渲染：精确布局
  * ============================================================ */
+extern int AchIdAtRow(int row);
 static void DrawAchievementsWindow(MenuGeo g) {
     AchGeo A;
     AchCompute(&A);
@@ -2986,17 +3029,35 @@ static void DrawAchievementsWindow(MenuGeo g) {
                  0x00801818u, 0.85f, UIS(2));
 
     int cx = (A.panel.left + A.panel.right) / 2;
-    DrawTextCenterWin(cx, A.titleY, "ACHIEVEMENTS", 0x00C89632u);
+    DrawTextCenterWin(cx, A.titleY, "ACHIEVEMENTS", PAL_GOLD);
 
     int left  = A.panel.left + A.padX;
     int right = A.panel.right - A.padX;
 
-    /* 已解锁数量放标题行右侧 */
-    int unlockedCount = 0;
-    for (int i = 0; i < ACH_COUNT; i++) if (g_achievements[i].unlocked) unlockedCount++;
-    char cnt[32];
-    sprintf(cnt, "%d/%d", unlockedCount, ACH_COUNT);
-    DrawTextWin(right - TextWidthWin(cnt), A.titleY, cnt, 0x00C89632u);
+    /* ================================================================
+     * v6 第 ㉘ 轮：**标题行三块撞在一起**
+     * ================================================================
+     * 实测截图：「ALL 0/32」「ACHIEVEMENTS」「[TAB] CATEGORY」
+     * 三个文本叠在同一个 y 上，右边两段互相压住，读不出来。
+     *
+     * 现在：
+     *   左  = 分类名（ALL / PROGRESS / …）
+     *   中  = 标题
+     *   右  = 该类进度 12/32
+     *   TAB 提示挪到**底部操作栏**（那里本来就有 R x2 RESET / WHEEL ZOOM 之类）
+     * ================================================================ */
+    {
+        extern int achFilter, AchVisibleCount(void), AchUnlockedInFilter(void);
+        extern const char* AchCatNameEn(int);
+        static char cnt[48];
+
+        /* 左：分类名（短，不会被挤） */
+        DrawTextWin(left, A.titleY, AchCatNameEn(achFilter), PAL_CYAN);
+
+        /* 右：该类进度 */
+        sprintf(cnt, "%d/%d", AchUnlockedInFilter(), AchVisibleCount());
+        DrawTextWin(right - TextWidthWin(cnt), A.titleY, cnt, PAL_GOLD);
+    }
 
     int boxS = TH / 2;                  /* 状态小方块 */
     if (boxS < 6) boxS = 6;
@@ -3005,12 +3066,14 @@ static void DrawAchievementsWindow(MenuGeo g) {
     int progW = TextWidthWin(progSample);
 
     for (int i = 0; i < A.visible; i++) {
-        int idx = g.scrollOffset + i;
-        if (idx >= A.count) break;
+        int row = g.scrollOffset + i;
+        if (row >= A.count) break;
+        int idx = AchIdAtRow(row);      /* v6：行号 → 成就 id（受筛选影响） */
+        if (idx < 0) break;
         int top = A.firstY + i * A.rowH;
         if (top + A.rowH > A.stripRuleY) break;
         int y = top + (A.rowH - TH) / 2;
-        int isSel = (idx == sel);
+        int isSel = (row == sel);
 
         if (isSel) {
             int bt = top + A.rowH / 8, bb = top + A.rowH - A.rowH / 8;
@@ -3031,21 +3094,46 @@ static void DrawAchievementsWindow(MenuGeo g) {
         if (a->unlocked) {
             BlendRectWin(left, by, left + boxS, by + boxS, 0x0040D060u, 0.95f);
         } else {
-            FrameRectWin(left, by, left + boxS, by + boxS, 0x00545860u, 0.9f, 2);
+            FrameRectWin(left, by, left + boxS, by + boxS, PAL_DIM, 0.9f, 2);
         }
 
         unsigned int nameCol = a->unlocked ? 0x00E8E8E8u
                                            : (isSel ? 0x0098FF98u : 0x009A9A9Au);
-        char nm[64];
-        sprintf(nm, "%s", a->name);
-        ClampRowText(nm, (right - progW - TH) - nameX);
-        DrawTextWin(nameX, y, nm, nameCol);
+        /* ============================================================
+         * v6 第 ㉘ 轮：**行里从来没显示过奖励**
+         * ============================================================
+         * 第 ⑥ 轮我在 ShopRowText 那张表里写了 "+%d GOLD"，
+         * 但成就墙**根本不走那张表** —— 这里自己 sprintf 了一遍。
+         * 结果：玩家看不到任何一个成就能拿多少金币。
+         *
+         * 现在：奖励画在进度左边，金色；隐藏成就没解锁时连名字都不给。
+         * ============================================================ */
+        {
+            extern const AchDef kAchDefs[ACH_COUNT];
+            const AchDef* d = &kAchDefs[idx];
+            int locked = !a->unlocked;
 
-        /* 进度：右对齐，解锁后变绿 */
-        char pr[32];
-        sprintf(pr, "%d/%d", a->progress, a->target);
-        DrawTextWin(right - TextWidthWin(pr), y, pr,
-                    a->unlocked ? 0x0040D060u : (isSel ? 0x00C8C8C8u : 0x00747880u));
+            char nm[64];
+            if (locked && d->hidden)        sprintf(nm, "???");
+            else                            sprintf(nm, "%s", a->name);
+            ClampRowText(nm, (right - progW - TH * 4) - nameX);
+            DrawTextWin(nameX, y, nm, nameCol);
+
+            /* 奖励：金色，画在进度左边 */
+            if (locked) {
+                char rw[24];
+                sprintf(rw, "+%d", d->reward);
+                DrawTextWin(right - progW - TH / 2 - TextWidthWin(rw), y, rw,
+                            isSel ? PAL_GOLD : 0x00A08040u);
+            }
+
+            /* 进度：右对齐 */
+            char pr[32];
+            if (locked && d->hidden) sprintf(pr, "?");
+            else                     sprintf(pr, "%d/%d", a->progress, a->target);
+            DrawTextWin(right - TextWidthWin(pr), y, pr,
+                        a->unlocked ? 0x0040D060u : (isSel ? 0x00C8C8C8u : 0x00747880u));
+        }
     }
 
     /* 右侧滚动条 */
@@ -3077,7 +3165,7 @@ static void DrawAchievementsWindow(MenuGeo g) {
             if (n == 0)
                 DrawTextWin(left, A.stripY1, "-", 0x00808088u);
         } else {
-            DrawTextWin(left, A.stripY1, "BACK TO MENU", 0x00808088u);
+            DrawTextWin(left, A.stripY1, Tr("BACK TO MENU", "返回主菜单"), 0x00808088u);
         }
 
         /* 滚动位置提示（右侧，和说明分开放） */
@@ -3113,7 +3201,7 @@ static void DrawRebindOverlay(void) {
     int bottom = top + panelH;
 
     BlendRectWin(left, top, right, bottom, 0x0004080c, 1.0f);
-    FrameRectWin(left, top, right, bottom, 0x00b02020, 0.95f, UIS(2));
+    FrameRectWin(left, top, right, bottom, PAL_PANEL, 0.95f, UIS(2));
     DrawTitleWin("REBIND", top + pad, 0x00E65A5Au);
     DrawTextCenterWin(winW / 2, top + pad + titlePx + UIS(24), actionNames[rebindingAct], 0x00A0FFA0u);
     if (rebindConflict >= 0 && rebindConflict < ACT_COUNT) {
@@ -3121,10 +3209,10 @@ static void DrawRebindOverlay(void) {
         char cbuf[96];
         sprintf(cbuf, "%s USES THIS KEY", actionNames[rebindConflict]);
         DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin() * 2, cbuf, 0x00FFC040u);
-        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin(), "PRESS AGAIN TO REPLACE", 0x008C8C8Cu);
+        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin(), Tr("PRESS AGAIN TO REPLACE", "再按一次替换"), 0x008C8C8Cu);
     } else {
-        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin() * 2, "PRESS ANY KEY", 0x008C8C8Cu);
-        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin(), "ESC TO CANCEL", 0x006E6E6Eu);
+        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin() * 2, Tr("PRESS ANY KEY", "按任意键"), 0x008C8C8Cu);
+        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin(), Tr("ESC TO CANCEL", "ESC 取消"), 0x006E6E6Eu);
     }
 }
 
@@ -3196,15 +3284,7 @@ void DrawPopupText(void) {
     }
 }
 
-/* 进度条：底色 + 填充 + 细边框，和文字一样画在像素层 */
-static void DrawBar(int x, int y, int w, int h, float frac, unsigned int color) {
-    if (frac < 0.0f) frac = 0.0f;
-    if (frac > 1.0f) frac = 1.0f;
-    BlendRectWin(x, y, x + w, y + h, 0x00000000, 0.65f);
-    int fw = (int)(w * frac);
-    if (fw > 0) BlendRectWin(x, y, x + fw, y + h, color, 0.92f);
-    FrameRectWin(x, y, x + w, y + h, 0x00909090, 0.55f, 1);
-}
+
 /* v2.1：准星。直接写渲染缓冲像素，避免 UI 缩放把线算成 0 宽。
    散布随蓄力扩大 —— 玩家能看出"这一下有多重"。 */
 static void DrawCrosshair(void) {
@@ -3261,6 +3341,7 @@ void DrawHUD(void) {
        词条横幅在任何档位都只在进关后 5 秒出现（levelBanner 控制），
        因为它是「一次性信息」，常驻反而是噪音。 */
 
+    int goldRowEnd = 0;   /* v2.4.90 顶行金币栏的右边界 */
     sprintf(buf, Tr("LEVEL %d", "第 %d 层"), currentLevel);
         if (campaignMode) {
             char cb[64];
@@ -3275,6 +3356,59 @@ void DrawHUD(void) {
         }
     DrawTextWin(UIS(20), UIS(18), buf, 0x0000FF00u);
 
+    /* ===== v2.4.90 **LEVEL 右边显示当前持有的黄金** =====
+       用户要求：「在 level one 的右边新增 1 个 UI 显示当前持有的黄金数量。」
+       放在 LEVEL 同一行紧右边，不新增行 ——
+       顶部每一行都很贵，能并到既有行就并。
+
+       格式：GOLD 12345
+       颜色：暖金 0xFFC040（和 LEVEL 的绿色、词条的橙色都区分开）
+       宽度不够时退化成 G12.3k 这种缩写。 */
+    {
+        extern int carryGold;
+        static char gbuf[48];
+        int gx0 = UIS(20) + TextWidthWin(buf) + UIS(16);
+
+        if (carryGold >= 1000000)
+            snprintf(gbuf, sizeof(gbuf), "GOLD %.1fM", (double)carryGold / 1000000.0);
+        else if (carryGold >= 10000)
+            snprintf(gbuf, sizeof(gbuf), "GOLD %.1fk", (double)carryGold / 1000.0);
+        else
+            snprintf(gbuf, sizeof(gbuf), Tr("GOLD %d", "黄金 %d"), carryGold);
+
+        /* 放不下就缩成 G12345 */
+        if (gx0 + TextWidthWin(gbuf) > winW - UIS(12)) {
+            snprintf(gbuf, sizeof(gbuf), "G%d", carryGold);
+        }
+        DrawTextWin(gx0, UIS(18), gbuf, 0x00FFC040u);
+
+        /* ===== v6：金币右边再挂一个 THREAT =====
+           威胁值是这套设计的核心反馈 —— 玩家必须随时看到
+           "我点得越多，怪越凶"。所以它和金币同一行，紧挨着。
+
+           颜色：正常灰青；超过 12 时用品红呼吸（警告） */
+        {
+            extern float ThreatValue(void);
+            static char tbuf[32];
+            float tv = ThreatValue();
+            int tx0 = gx0 + TextWidthWin(gbuf) + UIS(14);
+            snprintf(tbuf, sizeof(tbuf), "THREAT %.1f", (double)tv);
+            {
+                /* v6 铁律十九：三态全部来自调色盘
+                     THREAT = 0   → PAL_DIM（灰，无威胁）
+                     0 < T < 12   → PAL_CYAN（青，正常）
+                     T >= 12      → PAL_MAGENTA（品红，警告）
+                   "品红 = 警告" 是所有页面共用的语言。 */
+                unsigned int tc;
+                if (tv >= 12.0f)      tc = PAL_MAGENTA;
+                else if (tv > 0.0f)   tc = PAL_CYAN;
+                else                  tc = PAL_DIM;
+                DrawTextWin(tx0, UIS(18), tbuf, tc);
+            }
+            goldRowEnd = tx0 + TextWidthWin(tbuf) + UIS(14);
+        }
+    }
+
     /* 当前词条：常驻显示在 LEVEL 那一行的右边 —— **不新增一行**。
        词条是难度曲线的一部分（HUNTED 怪更快、LEAKY 理智掉更快），
        玩家看不见就不知道自己在被什么惩罚。
@@ -3282,7 +3416,7 @@ void DrawHUD(void) {
        详细说明（"THE THING MOVES FASTER"）仍然只在进关 5 秒的横幅里出现，
        常驻的是「提醒」，横幅是「解释」。 */
     if (levelMod >= 0 && levelMod < MOD_COUNT) {
-        int lx = UIS(20) + TextWidthWin(buf) + UIS(14);
+        int lx = goldRowEnd;
         sprintf(buf, "%s", modNames[levelMod]);
         DrawTextWin(lx, UIS(18), buf, 0x00C08040u);
     }
@@ -3292,21 +3426,69 @@ void DrawHUD(void) {
        结果和 LEVEL / SANITY 叠在一起（截图里就是这样）。
        现在并到首行右侧，跟词条同一行，永远不会撞。 */
     if (levelEvent >= 0 && levelEvent < EVENT_COUNT) {
-        int ex = UIS(20) + TextWidthWin("LEVEL 99") + UIS(14);
+        int ex = goldRowEnd;
         if (levelMod >= 0 && levelMod < MOD_COUNT) {
             char mb[32];
             sprintf(mb, "%s", modNames[levelMod]);
             ex += TextWidthWin(mb) + UIS(14);
         }
         /* 宽度不够时自动缩写，别让文字被窗口裁掉 */
-        static const char* const evShort[EVENT_COUNT] = {"BLOOD", "POWER", "SILENT", "SUPPLY", "FLOOD", "WHISP", "MIRROR"};   /* v2.2: was 4 of 7 -> NULL in %s */
+        /* ==================================================================
+         * v7 第 61 轮：**EventNameZh / EventDescZh 全工程 0 调用点**
+         * ==================================================================
+         * 中文界面下事件横幅永远是英文名，而且**每一层的规则说明
+         * 从来没有显示过** —— 玩家只能靠死来学"这层到底怎么了"。
+         *
+         * 现在：中文用中文名；横幅放不下时，把说明塞进底部提示行。
+         * ================================================================ */
+        extern int g_lang;
+        extern const char* EventNameZh(int);
+        extern const char* EventDescZh(int);
+        extern const char* EventDescEn(int);
+
         int avail = winW - ex - UIS(12);
-        sprintf(buf, "EVENT: %s +%d", eventNames[levelEvent], EventScore(levelEvent));
+        {
+            const char* en = (g_lang == LANG_ZH) ? EventNameZh(levelEvent) : EventNameEn(levelEvent);
+            sprintf(buf, "EVENT: %s +%d", en, EventScore(levelEvent));
+        }
         if (TextWidthWin(buf) > avail) {
-            sprintf(buf, "EV: %s +%d", evShort[levelEvent] ? evShort[levelEvent] : "?", EventScore(levelEvent));
+            sprintf(buf, "EV: %s +%d", EventShortEn(levelEvent), EventScore(levelEvent));
             if (TextWidthWin(buf) > avail) sprintf(buf, "+%d", EventScore(levelEvent));
         }
         DrawTextWin(ex, UIS(18), buf, 0x00E060C0u);
+
+        /* v7 第 62 轮：CampaignRule 全工程 0 调用点 —— 每关改的规则从没告诉过玩家 */
+        {
+            extern int campaignMode, campaignStage;
+            extern float levelBanner;
+            extern const char* CampaignRule(int);
+            extern const char* CampaignRuleZh(int);
+            if (campaignMode && levelBanner > 3.0f) {
+                const char* r = (g_lang == LANG_ZH) ? CampaignRuleZh(campaignStage)
+                                                    : CampaignRule(campaignStage);
+                if (r && r[0]) {
+                    char rb[180];
+                    snprintf(rb, sizeof(rb), "%s", r);
+                    ClampRowText(rb, winW - UIS(32));
+                    DrawTextCenterWin(winW / 2, winH / 2 + UIS(40), rb, 0x0060D0FFu);
+                }
+            }
+        }
+
+        /* 规则说明：只在**本层刚开始的 6 秒**显示，不长期占屏 */
+        {
+            extern float levelBanner;
+            if (levelBanner > 3.0f) {
+                const char* desc = (g_lang == LANG_ZH) ? EventDescZh(levelEvent)
+                                                       : EventDescEn(levelEvent);
+                if (desc && desc[0]) {
+                    char db[160];
+                    snprintf(db, sizeof(db), "%s", desc);
+                    ClampRowText(db, winW - UIS(32));
+                    DrawTextCenterWin(winW / 2, winH / 2 + UIS(70), db, 0x00E060C0u);
+                }
+            }
+        }
     }
 
     /* v1.8：待上缴碎片 + 绣刀冷却。
@@ -3317,7 +3499,34 @@ void DrawHUD(void) {
         int hy = UIS(18);
         if (showFps) hy += TextHeightWin() + UIS(6);
         (void)hy;
-        /* v3.0：**删掉 HUD 上的 PENDING N** ——
+(void)hy;
+
+        /* ==================================================================
+         * v6 第 ㊶ 轮：**每日任务在局内终于可见了**
+         * ==================================================================
+         * daily.c 的 DailyCurrent / DailyGoalParam / DailyDone 一直是死代码 ——
+         * 玩家只在开局看到一行提示，之后完全不知道进度到哪。
+         * 这里用 PENDING 行删掉后腾出的位置，不占新空间。
+         * ================================================================ */
+        if (dailyMode) {
+            extern int DailyCurrent(void), DailyGoalParam(void), DailyDone(void);
+            extern const char* DailyGoalTextEn(void);
+            extern const char* DailyGoalTextZh(void);
+            extern int g_lang;
+            if (DailyDone()) {
+                sprintf(buf, "DAILY  COMPLETE");
+                DrawTextWin(UIS(12), hy, buf, PAL_GOLD);
+            } else {
+                int cur = DailyCurrent(), goal = DailyGoalParam();
+                int avail = winW - UIS(24);
+                /* v7 第 61 轮：**DailyGoalTextZh 全工程 0 调用点**
+                   中文界面下每日任务全程英文，玩家读不懂自己该干什么。 */
+                sprintf(buf, "DAILY %d/%d  %s", cur, goal,
+                        (g_lang == LANG_ZH) ? DailyGoalTextZh() : DailyGoalTextEn());
+                if (TextWidthWin(buf) > avail) sprintf(buf, "DAILY %d/%d", cur, goal);
+                DrawTextWin(UIS(12), hy, buf, PAL_CYAN);
+            }
+        }        /* v3.0：**删掉 HUD 上的 PENDING N** ——
        玩家实测「一整个小时都是 PENDING 12」，既看不懂又永远不变。
        待上缴碎片只在安全屋/结算页显示就够了。 */
 
@@ -3430,7 +3639,7 @@ void DrawHUD(void) {
         {
             extern int GoldTier(void);
             int tier = GoldTier();
-            sprintf(buf, Tr("CARRY  %d   TIER %d", "带入  %d   强度档 %d"), shards, tier);
+            sprintf(buf, Tr("CARRY  %d   TIER %d", "带入  %d   强度档 %d"), carryGold, tier);
             /* 档位越高颜色越烫：0~4 灰 / 5~9 黄 / 10~15 红 */
             unsigned int tc = (tier >= 10) ? 0x00FF6050u
                             : (tier >= 5  ? 0x00FFC040u : 0x00A0A0A0u);
@@ -3445,6 +3654,57 @@ void DrawHUD(void) {
         DrawTextWin(UIS(20), hudY3 + hudTH + UIS(4), buf,
                     boost >= 100 ? 0x0060FF90u
                                  : (boost >= 50 ? 0x00FFD040u : 0x00909090u));
+    }
+
+    /* ===== v2.4.56 **扳手状态**（用户要求补 UI）=====
+       扳手是「打断拾荒者 → 抢回赃款」的唯一手段，
+       但界面上从来没告诉玩家「还剩几次 / 冷却多久」。
+       放在 BOOST 下面一行，和左侧 HUD 同一列。 */
+    {
+        extern int   RunUpgWrenchLevel(void);
+        extern float RunUpgWrenchCooldown(void);
+        extern int   wrenchCharges, wrenchLastUsed;
+        extern float wrenchCd;
+
+        /* ===== v2.4.65 **等级 0 也要显示** =====
+           扳手在等级 0 就已经能用（2 次/层），
+           我原来写了 `if (lv > 0)` —— 于是默认状态下这一行**永远不显示**，
+           用户看到的就是「没有次数、没有功能」。 */
+        {
+            char wb[64];
+            float cdMax = RunUpgWrenchCooldown();
+            unsigned int wc = 0x00A0A0A0u;
+
+            if (cdMax < 0.0f) {
+                int left = wrenchCharges - wrenchLastUsed;
+                if (left < 0) left = 0;
+                snprintf(wb, sizeof(wb), Tr("WRENCH  %d/%d", "扳手  %d/%d"),
+                         left, wrenchCharges);
+                wc = (left > 0) ? 0x0060D0FFu : 0x00806060u;
+            } else if (wrenchCd > 0.0f) {
+                snprintf(wb, sizeof(wb), Tr("WRENCH  %.1fs", "扳手  %.1f秒"), wrenchCd);
+                wc = 0x00806060u;
+            } else {
+                snprintf(wb, sizeof(wb), "%s", Tr("WRENCH  READY", "扳手  就绪"));
+                wc = 0x0060D0FFu;
+            }
+            /* ============================================================
+             * v6 第 ㊼ 轮：**这一行压在别的东西上**
+             * ============================================================
+             * 用户实机截图：左上角出现一坨叠字
+             *   「WE0NHCA2F2」= "WRENCH 2/2" 和另一行文字糊在一起
+             *
+             * 原因：这里用**绝对行号 7** 算 y
+             *   UIS(18) + (TH+4)*7 + 4
+             * 而 HUD 其余部分用的是 hudTH 的累加。
+             * 窗口稍微一变，第 7 行就落到状态效果 / 提示文字上面。
+             *
+             * 现在改成**贴着底部的 LIGHT 条往上放** —— 那块区域永远是空的。
+             * ============================================================ */
+            {
+                DrawTextWin(UIS(20), winH - UIS(140), wb, wc);
+            }
+        }
     }
 
     /* 状态效果：常驻显示在 FUSES 下面。
@@ -3630,7 +3890,7 @@ void DrawHUD(void) {
             DrawTextCenterWin(winW / 2, ky + (keyH - TextHeightWin()) / 2, prompt, col);
             /* 英文说明只在 Full 档显示 */
             if (qteHint >= 1)
-                DrawTextCenterWin(winW / 2, ky - UIS(30), "IT IS ON YOUR FACE", 0x00FF6060u);
+                DrawTextCenterWin(winW / 2, ky - UIS(30), Tr("IT IS ON YOUR FACE", "它趴在你脸上"), 0x00FF6060u);
         } else {
             /* 阶段一：Minimal 档只显示一个躲开键图标（跟随绑定），
                Full 档才显示英文说明。 */
@@ -3662,6 +3922,43 @@ void DrawHUD(void) {
         if (frac < 0.35f) barCol = 0x00FF2020u;    /* 快没了 -> 变红 */
         BlendRectWin(bx, by, bx + (int)(barW * frac), by + barH, barCol, 0.95f);
         FrameRectWin(bx, by, bx + barW, by + barH, 0x00808080, 0.7f, 1);
+    }
+
+    /* ===== v2.4.91 **地上有钱袋 → 提示按 E 拾取** =====
+       用户要求：「偷钱罐被打跑之后，地上掉金的时候要多添一行提示词，
+       点 E 键拾取。」
+
+       放在和"搜索"提示**同一个位置**（屏幕下方居中），
+       所以玩家不需要学第二个位置；有搜索提示时让位给搜索。
+       文字会呼吸（alpha 脉动），因为这是"现在就能做"的动作。 */
+    {
+        extern int MoneyBagNearestToPlayer(void);
+        int bagAmt = MoneyBagNearestToPlayer();
+        if (bagAmt > 0 && hoverKind == 0) {
+            char mb[80];
+            sprintf(mb, Tr("PRESS %s  PICK UP  %d GOLD", "按 %s 拾取  %d 金币"),
+                    VkName(g_bindings[ACT_INTERACT]), bagAmt);
+
+            int tw2 = TextWidthWin(mb);
+            int px3 = (winW - tw2) / 2;
+            int py3 = winH - UIS(150);
+
+            /* 呼吸：0.55 ~ 1.0 */
+            float pulse = 0.55f + 0.45f * (0.5f + 0.5f * sinf((float)g_timeSec * 4.0f));
+
+            /* 背板：让金色字在任何背景上都读得出来 */
+            BlendRectWin(px3 - UIS(14), py3 - UIS(8),
+                         px3 + tw2 + UIS(14), py3 + UIS(30),
+                         0x00181008u, 0.72f);
+            FrameRectWin(px3 - UIS(14), py3 - UIS(8),
+                         px3 + tw2 + UIS(14), py3 + UIS(30),
+                         0x00B08030u, 0.85f, 1);
+
+            DrawTextWin(px3, py3, mb,
+                        ((unsigned int)(0xC0 + (int)(0x3F * pulse)) << 16) |
+                        ((unsigned int)(0x90 + (int)(0x40 * pulse)) << 8) |
+                        0x20u);
+        }
     }
 
     /* 词条横幅：只在进关后 5 秒出现。
@@ -3697,7 +3994,6 @@ void DrawHUD(void) {
     int rowGap = TextHeightWin() + UIS(8);
     int y1 = winH - UIS(60) - rowGap;
     int y2 = y1 + rowGap;
-    int y0 = y1 - rowGap;         /* v2.3：能量条在手电条**上方** */
 
 
     /* v2.5：站在安全区里 → 屏幕下方给一行提示（用户要求的那行字） */
@@ -3779,8 +4075,6 @@ void DrawHUD(void) {
     {
         extern int hideSpotNear, hiddenIn, hoverKind;
         extern Monster monster;
-        int hudTH3 = TextHeightWin();
-        int hy3 = winH - UIS(60) - rowGap * 2 - hudTH3 - UIS(6);
 
         /* ① 藏身提示 */
         if (hiddenIn >= 0) {
@@ -3895,6 +4189,9 @@ void DrawHUD(void) {
         extern float posX, posY;
         if (currentState == STATE_PLAYING) {
             /* ① 预知：怪物进 8 格 → 屏幕边缘泛红（不需要看见它） */
+            /* v6 每日限制：怪物不上小地图 —— 预知/心眼一起失效 */
+            { extern int DailyForbidMonsterMap(void);
+              if (DailyForbidMonsterMap()) goto skip_monster_hints; }
             if (BenchPremonition() && monster.active) {
                 float dx = monster.x - posX, dy = monster.y - posY;
                 float d2 = dx * dx + dy * dy;
@@ -3912,6 +4209,7 @@ void DrawHUD(void) {
                     }
                 }
             }
+            skip_monster_hints:
             /* ② 心眼：藏身时显示怪物距离 */
             if (BenchInnerEye() && hiddenIn >= 0 && monster.active) {
                 float dx = monster.x - posX, dy = monster.y - posY;
@@ -4005,7 +4303,7 @@ void DrawHUD(void) {
 
         char tb[48];
         int ty = py2 + pad;
-        DrawTextWin(px2 + pad, ty, "SPECIMEN DMG", 0x0060FFB0u);
+        DrawTextWin(px2 + pad, ty, Tr("SPECIMEN DMG", "训练场伤害"), 0x0060FFB0u);
         ty += th;
 
         sprintf(tb, "TOTAL %d", trainingTotal);
@@ -4213,6 +4511,7 @@ void DrawHUD(void) {
     /* 金币（GOLD）是大厅货币，游戏过程中用不到 —— 不放进 HUD。
        「M CLOSE MAP」也删掉了：地图标题上已经写着
        「M: FULL  M: CLOSE」，再在底部挂一行是重复的。 */
+
 }
 
 /* v3.1：新手教程的顶部提示条。步骤文案和推进逻辑都在 game.c，
@@ -4243,7 +4542,7 @@ static void DrawTutorialPanel(void) {
     char line[160];
 
     if (tutorialDone) {
-        DrawTextCenterWin(winW / 2, y + UIS(10), "TUTORIAL COMPLETE", 0x00FFE070u);
+        DrawTextCenterWin(winW / 2, y + UIS(10), Tr("TUTORIAL COMPLETE", "教程完成"), 0x00FFE070u);
     } else {
         sprintf(line, "TUTORIAL  %d / %d", TutorialStepNumber(), TutorialStepTotal());
         DrawTextCenterWin(winW / 2, y + UIS(10), line, 0x00FFE070u);
@@ -4318,6 +4617,24 @@ void DrawPickupToast(void) {
 
     if (!pickupMsg || pickupMsgTimer <= 0.0f) return;
 
+    /* ===== v2.4.52 **只在游玩中显示** =====
+       用户截图：暂停菜单上浮着一行 "AT THE EXIT: LEAVE, OR GO DEEPER."
+       —— 那是上一帧的事件提示，因为 toast 画在帧末（所有图层之上），
+       暂停菜单先画、toast 后画，于是压在菜单上。
+       现在非游玩状态直接不画。 */
+    if (currentState != STATE_PLAYING) return;   /* currentState 是本文件已有的全局 */
+
+    /* ===== v2.4.53 **模态面板打开时不画 toast** =====
+       用户截图：出口二选一面板上，toast 的 "AT THE EXIT: LEAVE, OR GO DEEPER."
+       和面板标题 "THE EXIT IS OPEN" 叠在一起。
+       按 art_direction.h 铁律十三：**事件提示不该和功能 UI 抢同一块区域**。
+       模态面板打开时它是最重要的东西，其他提示一律让路。 */
+    {
+        extern int exitChoiceOpen, settingsPopupOpen;
+        if (exitChoiceOpen) return;
+        if (settingsPopupOpen) return;
+    }
+
     int tw = TextWidthWin(pickupMsg);
     int tx = (winW - tw) / 2;
     int ty;
@@ -4349,6 +4666,7 @@ void DrawPickupToast(void) {
 
     DrawTextWin(tx, ty, pickupMsg, 0x00E8E060u);
 }
+
 
 
 
@@ -4612,7 +4930,6 @@ void RenderFrame(void) {
                现在完全不遮 —— 躲进去只是不能动、不会被抓，
                视野和平时一样。 */
             (void)0;
-    skip_hide_mask: ;
 
     /* ===== v3.0：**校准条画在所有图层之上** =====
        用户反复反馈「躲在柜子里看不到判定轴」。

@@ -4,7 +4,13 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "achievements.h"
 #include "save.h"
+#include <stddef.h>
+#include "daily.h"
+#include "threat.h"
+#include "steam_zone.h"
+extern int carryAtRunStart;
 #include "bench.h"
 #include "upgrade_run.h"
 #include "lang.h"
@@ -52,6 +58,11 @@ static void BackupSave(void) {
 
 static const char* SavePathCand(int i, char* buf, size_t n) {
     buf[0] = 0;
+    const char* isolated = getenv("CANITY_DATA_DIR");
+    if (isolated && isolated[0]) {
+        snprintf(buf, n, "%s\\canity%d.sav", isolated, g_saveSlot);
+        return buf;
+    }
     if (i == 0) {
         GetModuleFileNameA(NULL, buf, (DWORD)n);
         char* sl = strrchr(buf, '\\');
@@ -93,7 +104,8 @@ static const char* SavePathCand(int i, char* buf, size_t n) {
                 CreateDirectoryA(lvl1, NULL);
             }
         }
-        snprintf(buf, n, "%s\\canity%d.sav", dir, g_saveSlot);
+        char suffix[32]; snprintf(suffix,sizeof(suffix),"\\canity%d.sav",g_saveSlot);
+        if(strlen(dir)+strlen(suffix)<n) { strcpy(buf,dir); strcat(buf,suffix); }
     } else {
         snprintf(buf, n, "%s\\canity%d.sav", base, g_saveSlot);
     }
@@ -189,7 +201,7 @@ static void SaveSettingsOnly(void) {
         SavePathCand(i, p, sizeof(p));
         if (WriteWholeFile(p, &tmp, sizeof(tmp)) == 0) {
             g_save = tmp;
-            g_saveState = 1;
+            g_saveState = 1; SteamZoneUploadSave(p);
             g_saveError = 0;
             strncpy(g_savePath, p, sizeof(g_savePath) - 1);
             g_savePath[sizeof(g_savePath) - 1] = 0;
@@ -212,7 +224,7 @@ void SaveGame(void) {
     g_save.gameVersion = CANITY_VERSION_NUM;
 
     CopyDisplaySettings(&g_save);
-    g_save.shards = shards;
+    g_save.carryGold = carryGold;
     g_save.upgBattery = upgBattery;
     g_save.upgSpeed = upgSpeed;
     g_save.upgQuiet = upgQuiet;
@@ -262,9 +274,11 @@ void SaveGame(void) {
         g_save.bankGoldSave    = bankGold;
         g_save.bankHistMaxSave = bankHistMax;
         g_save.bankCarryPctSave= bankCarryPct;
+        g_save.runPrincipalSave = carryAtRunStart;
         g_save.carryGoldSave   = carryGold;   /* v6：本局本金 */
     }
-    for (int i = 0; i < 4; i++) g_save.runUpgSave[i] = RunUpgLevel(i);   /* v2.3 */
+    /* v7 第 ㊿ 轮：数组是 runUpgSave[5]，原来只存 4 个 → 第 5 项（扳手）永远丢 */
+    for (int i = 0; i < 5; i++) g_save.runUpgSave[i] = RunUpgLevel(i);
     g_save.flashlightOn = flashlightOn;
     g_save.posX = posX; g_save.posY = posY;
     g_save.dirX = dirX; g_save.dirY = dirY;
@@ -309,7 +323,7 @@ void SaveGame(void) {
     g_save.bricks = bricks;
     g_save.acids = acids;
     g_save.smokeBombs = smokeBombs;
-    g_save.pendingShards = pendingShards;
+    g_save.carryGold = carryGold;
     g_save.runSkillMask = runSkillMask;
     g_save.lang = g_lang;
     g_save.saveSlot = g_saveSlot;
@@ -317,6 +331,33 @@ void SaveGame(void) {
     for (int i = 0; i < RELIC_COUNT; i++) g_save.relicOwned[i] = relicOwned[i];
     g_save.relicTotal = relicTotal;
     g_save.dailyMode = dailyMode;
+    /* v7：每日任务进度存盘 */
+    { extern void DailySaveTo(int*);
+      int da[15] = {0};
+      DailySaveTo(da);
+      g_save.dailyGoalId    = da[0];
+      g_save.dailyGoalParam = da[1];
+      g_save.dailyProgress  = da[2];
+      g_save.dailyDone      = da[3];
+      g_save.dailyStreak    = da[4];
+      g_save.dailyQuestDate = (unsigned)da[5];
+      g_save.dailyLastCompletedDate = (unsigned)da[6];
+      for (int j=0;j<8;++j) g_save.dailySamples[j] = da[7+j]; }
+    { extern int knockCountRun,throwHitCountRun,echoCellsTotalRun,dailyEscapeCount;
+      extern int floorsNoSanityLoss,wardenCleanFloors,fullHideDone;
+      extern float doubleHuntSeconds;
+      extern int lastRunGold,lastRunKept,lastRunCaught;
+      g_save.knockRunSave=knockCountRun; g_save.throwHitRunSave=throwHitCountRun;
+      g_save.echoRunSave=echoCellsTotalRun; g_save.dailyEscapeRunSave=dailyEscapeCount;
+      g_save.cleanFloorsSave=floorsNoSanityLoss; g_save.wardenFloorsSave=wardenCleanFloors;
+      g_save.fullHideSave=fullHideDone; g_save.doubleHuntSave=doubleHuntSeconds;
+      g_save.lastRunGoldSave=lastRunGold; g_save.lastRunKeptSave=lastRunKept; g_save.lastRunCaughtSave=lastRunCaught; }
+    for(int i=26;i<SKILL_COUNT;++i) g_save.extraSkillRanks[i-26]=skillRank[i];
+    { extern int shopRefreshFloor,shopRefreshUsed,contractKind,shopContractUsed;
+      g_save.shopRefreshFloorSave=shopRefreshFloor; g_save.shopRefreshUsedSave=shopRefreshUsed;
+      g_save.contractKindSave=contractKind; g_save.contractLockedSave=shopContractUsed;
+      g_save.threatSave=ThreatValue(); }
+    BestiarySave(g_save.bestiaryKnowledge);
     g_save.dailySeed = dailySeed;
     g_save.campaignMode = campaignMode;
     g_save.campaignStage = campaignStage;
@@ -338,7 +379,7 @@ void SaveGame(void) {
     g_save.curWeapon = curWeapon;
     g_save.runUltimate = runUltimate;
 
-    for (int i = 0; i < SKILL_COUNT; i++) g_save.skillRank[i] = skillRank[i];
+    for (int i = 0; i < 26; i++) g_save.skillRank[i] = skillRank[i];
     g_save.cores = cores;
     g_save.activeKeystone = activeKeystone;
     g_save.bestMainScore = bestMainScore;
@@ -356,7 +397,7 @@ void SaveGame(void) {
         SavePathCand(i, p, sizeof(p));
         int err = WriteWholeFile(p, &g_save, sizeof(g_save));
         if (err == 0) {
-            g_saveState = 1;
+            g_saveState = 1; SteamZoneUploadSave(p);
             g_saveError = 0;
             strncpy(g_savePath, p, sizeof(g_savePath) - 1);
             g_savePath[sizeof(g_savePath) - 1] = 0;
@@ -397,7 +438,7 @@ static int FindNewestSaveSlot(void) {
             SavePathCand(i, p, sizeof(p));
             for (int bak = 0; bak < 2; bak++) {
                 char path[MAX_PATH];
-                if (bak) snprintf(path, sizeof(path), "%s.bak", p);
+                if (bak) { if(strlen(p)+4>=sizeof(path)) continue; strcpy(path,p); strcat(path,".bak"); }
                 else     snprintf(path, sizeof(path), "%s", p);
                 FILETIME ft;
                 if (!PathWriteTime(path, &ft)) continue;
@@ -440,10 +481,14 @@ static void RestoreBankFromSave(void) {
     if (bankHistMax < 1) bankHistMax = 1;
 
     /* v6：本局本金 —— 老档没有这个字段（读出 0），此时按当前金币兜底，
-       保证 profit = shards - carryGold 不会把全部余额当成利润。 */
+       保证 profit = carryGold - carryGold 不会把全部余额当成利润。 */
     carryGold = g_save.carryGoldSave;
-    { extern int shards; if (carryGold < 0) carryGold = 0;
-      if (carryGold > shards) carryGold = shards; }
+    carryAtRunStart = g_save.runPrincipalSave;
+    /* v7 第 65 轮：**这里原来是一句自比较**
+       `if (carryGold > carryGold) carryGold = carryGold;`
+       —— 局部 extern 把全局自己遮住，条件永远为假（编译器 -Wtautological-compare 直接报）。
+       本意应该是「夹到合法范围」，负值已经在上一条处理掉了，这句删掉即可。 */
+    { extern int carryGold; if (carryGold < 0) carryGold = 0; }
 }
 
 int LoadSettings(void) {
@@ -501,6 +546,10 @@ int LoadSettings(void) {
        真正安全的做法：不认识的版本**不解释**，把旧档改名归档，
        当作"没有存档"处理。玩家的数据一定还在盘上，可以回滚，
        而不是被一个错误的迁移静默毁掉。 */
+    if (g_save.version == 25 && fileSize >= offsetof(SaveBlob, dailyQuestDate)) {
+        g_save.version = SAVE_VERSION;
+        g_save.runPrincipalSave = g_save.carryGoldSave;
+    }
     if (g_save.version != SAVE_VERSION) {
         char oldp[MAX_PATH], arc[MAX_PATH + 24];   /* v3.0：留 ".v%d.bak" 的位置 */
         SavePathCand(0, oldp, sizeof(oldp));
@@ -554,7 +603,7 @@ int LoadSettings(void) {
     qteHint = g_save.qteHint;
     gammaValue = g_save.gamma;
     mouseSens = g_save.sens;
-    shards = g_save.shards;
+    carryGold = g_save.carryGold;
     upgBattery = g_save.upgBattery;
     upgSpeed = g_save.upgSpeed;
     upgQuiet = g_save.upgQuiet;
@@ -565,7 +614,7 @@ int LoadSettings(void) {
     volumeF = g_save.volume;
     /* v2.7：写成 !(x >= lo && x <= hi) 才能挡住 NaN（NaN 的所有比较都是假） */
     if (!(volumeF >= 0.0f && volumeF <= 1.0f)) volumeF = 0.8f;
-    if (shards < 0) shards = 0;
+    if (carryGold < 0) carryGold = 0;
     if (upgBattery < 0 || upgBattery > UPG_MAX) upgBattery = 0;
     if (upgSpeed < 0 || upgSpeed > UPG_MAX) upgSpeed = 0;
     if (upgQuiet < 0 || upgQuiet > UPG_MAX) upgQuiet = 0;
@@ -610,7 +659,7 @@ int LoadSettings(void) {
             g_achievements[i].progress = g_save.achProgress[i];
         }
         /* 1.8.0：技能树 / 核心 / keystone */
-        for (int i = 0; i < SKILL_COUNT; i++) {
+        for (int i = 0; i < 26; i++) {
             int r = g_save.skillRank[i];
             if (r < 0) r = 0;
             if (r > skillDefs[i].maxRank) r = skillDefs[i].maxRank;
@@ -643,13 +692,31 @@ int LoadSettings(void) {
     if (g_save.saveSlot >= 0 && g_save.saveSlot < SAVE_SLOTS)
         g_saveSlot = g_save.saveSlot;
 
-    return g_save.hasRun;
-    /* v6：**读设置成功后立刻恢复银行**，否则 SaveGame 会把 0 写回去 */
+    for(int i=26;i<SKILL_COUNT;++i) { int r=g_save.extraSkillRanks[i-26]; skillRank[i]=(r>=0 && r<=3)?r:0; }
+    SkillInitOnce();
+    BestiaryLoad(g_save.bestiaryKnowledge);
     RestoreBankFromSave();
+    { int da[15] = {g_save.dailyGoalId, g_save.dailyGoalParam, g_save.dailyProgress,
+        g_save.dailyDone, g_save.dailyStreak, (int)g_save.dailyQuestDate,
+        (int)g_save.dailyLastCompletedDate};
+      for (int j=0;j<8;++j) da[7+j]=g_save.dailySamples[j];
+      DailyLoadFrom(da); }
+    return g_save.hasRun;
 }
 
 /* 把存档里的进度灌回运行时 */
 void ContinueRun(void) {
+    { extern int knockCountRun,throwHitCountRun,echoCellsTotalRun,dailyEscapeCount;
+      extern int floorsNoSanityLoss,wardenCleanFloors,fullHideDone;
+      extern float doubleHuntSeconds;
+      knockCountRun=g_save.knockRunSave; throwHitCountRun=g_save.throwHitRunSave;
+      echoCellsTotalRun=g_save.echoRunSave; dailyEscapeCount=g_save.dailyEscapeRunSave;
+      floorsNoSanityLoss=g_save.cleanFloorsSave; wardenCleanFloors=g_save.wardenFloorsSave;
+      fullHideDone=g_save.fullHideSave; doubleHuntSeconds=g_save.doubleHuntSave; }
+    { extern int shopRefreshFloor,shopRefreshUsed,contractKind,shopContractUsed;
+      shopRefreshFloor=g_save.shopRefreshFloorSave; shopRefreshUsed=g_save.shopRefreshUsedSave;
+      contractKind=g_save.contractKindSave; shopContractUsed=g_save.contractLockedSave;
+      ThreatReset(); ThreatAdd(g_save.threatSave); }
     currentLevel = g_save.level;
     /* v3.0：**读档必须夹取** ——
        外部改过的档可能带 NaN：sanity=NaN 时 `sanity <= 0` 永不成立（死不掉），
@@ -702,6 +769,9 @@ void ContinueRun(void) {
         lowSanitySeconds   = g_save.achLowSanitySeconds;
     }
     /* v3.4/v6 银行：统一走 RestoreBankFromSave，只有一份逻辑 */
+    for(int i=26;i<SKILL_COUNT;++i) { int r=g_save.extraSkillRanks[i-26]; skillRank[i]=(r>=0 && r<=3)?r:0; }
+    SkillInitOnce();
+    BestiaryLoad(g_save.bestiaryKnowledge);
     RestoreBankFromSave();
     if (hiddenIn >= hideSpotCount) hiddenIn = -1;
     RunUpgLoadFromSave(g_save.runUpgSave);   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
@@ -795,12 +865,12 @@ void ContinueRun(void) {
     bricks      = g_save.bricks;      CLAMP_ITEM_RARE(bricks);
     acids       = g_save.acids;       CLAMP_ITEM_RARE(acids);
     smokeBombs  = g_save.smokeBombs;  CLAMP_ITEM_RARE(smokeBombs);
-    pendingShards = g_save.pendingShards < 0 ? 0 : g_save.pendingShards;
-    if (pendingShards > 999999) pendingShards = 0;      /* 明显是坏档 */
+    carryGold = g_save.carryGold < 0 ? 0 : g_save.carryGold;
+    if (carryGold > 999999) carryGold = 0;      /* 明显是坏档 */
     runSkillMask = g_save.runSkillMask;
     /* v3.1：界面固定英文。老存档里的 lang 字段仍保留，但不再覆盖运行时语言；
        否则中文存档一进来整页菜单/提示还是中文。 */
-    g_lang = LANG_EN;
+    g_lang = (g_save.lang==LANG_ZH) ? LANG_ZH : LANG_EN;
     /* v11：恢复武器局外成长 */
     for (int i = 0; i < 3; i++) {
         weaponRank[i] = (g_save.weaponRank[i] >= 0 && g_save.weaponRank[i] <= 3) ? g_save.weaponRank[i] : 0;

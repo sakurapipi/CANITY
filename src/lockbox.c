@@ -122,13 +122,7 @@ int LockCorrectCount(int code, const int* digits) {
     return n;
 }
 
-/* 掷密码：全 0 也是合法密码（有没有锁由 contLocked 决定，不看密码值） */
-static int RollLockCode(void) {
-    int code = 0;
-    for (int d = 0; d < LOCK_DIALS; d++)
-        code |= (rand() % LOCK_DIGITS) << (d * 4);
-    return code;
-}
+
 
 void LockAdjustDigit(int dial, int delta) {
     if (dial < 0 || dial >= LOCK_DIALS) return;
@@ -179,10 +173,10 @@ static void LockUnlock(int idx) {
     locksOpened++;              /* LOCKSMITH 成就 */
     /* v3.4：解谜给金币 —— 40 + 层数×5。解谜是主动技能，比搜箱子值钱。 */
     {
-        extern int pendingShards, totalShardsEarned, currentLevel;
+        extern int carryGold, totalGoldEarned, currentLevel;
         int gld = (int)(GOLD_LOCK_BASE + GOLD_LOCK_STEP * (float)currentLevel + 0.5f);
-        pendingShards += gld;
-        totalShardsEarned += gld;
+        carryGold += gld;
+        totalGoldEarned += gld;
         extern const char* pickupMsg;
         extern float pickupMsgTimer;
         pickupMsg = "LOCK +GOLD";

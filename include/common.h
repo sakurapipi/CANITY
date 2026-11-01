@@ -34,7 +34,7 @@
    置 0 = 回到旧的战斗版本。 */
 #define NO_COMBAT 1
 
-#define CANITY_VERSION_STR "2.3.2"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_STR "2.3.4"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -91,8 +91,6 @@ typedef enum {
 #define SAFE_HEAL_CAP     60.0f    /* v2.0：安全屋回智封顶（不再是满血点） */
 #define SAFE_REST_COST    25       /* v2.0：主动休息要花碎片 */
 #define LEVEL_CLEAR_SANITY 12.0f   /* 过关回智（配合 STEP 上调，奖励同步下调） */   /* 过关回智（原 30） */
-#define CATCH_SANITY_BASE 18.0f    /* 被抓扣智基础值 */
-#define CATCH_SANITY_STEP 0.015f   /* 每层额外 +1.5% */
 #define MOUSE_BASE_SENS 0.0035   /* v3.0：0.002→0.0035（玩家实测转身太慢） */ /* 弧度/像素（1.0x） */
 
 /* 无尽模式：首通后解锁，独立存档、独立难度曲线 */
@@ -171,7 +169,8 @@ extern int bestEndlessScore;
 #define PIXEL_BUDGET_MAX  900000
 
 /* 到达这一层并进出口 = 通关 */
-#define WIN_LEVEL 24     /* v2.1：主线 10 → 24 层（4 个区段） */
+#define WIN_LEVEL 8      /* v7 第 53 轮：A 方案 —— 24 层单局要 66 分钟，太长。
+                              8 层 × 约 2.75 分钟/层 ≈ 22 分钟/局。 */
 #define CAMPAIGN_STAGE_COUNT 5
 #define CAMPAIGN_LEVELS_PER_STAGE 3  /* 每段连续 3 层，再切换下一段规则 */
 
@@ -181,7 +180,10 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 37   /* v3.1：界面固定英文，移除 Language 项（原 38） */
+#define SETTING_COUNT 38   /* v6 第 38 轮：**Language 项加回来了**
+                               v3.1 曾把它删掉（界面固定英文），
+                               但全项目有 158 处 Tr() 双语代码，
+                               中文玩家却没有开关 —— 现在补上。 */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 
@@ -551,7 +553,7 @@ typedef struct { float x, y; int active; } Breaker;
 #define THEME_ENABLED THEME_COUNT   /* 7 种已全部启用（崩溃点是 themeNames[4] 越界） */
 
 /* ---- v1.8 随机事件（通过本层 → 本局结算加分） ---- */
-#define EVENT_COUNT 7     /* v2.0：事件 4→7 */
+#define EVENT_COUNT 10    /* v6：事件 7→10，表驱动（见 events.c） */
 #define EVENT_CHANCE 35          /* 每层触发概率（百分比），第 2 层起 */
 enum {
     EV_BLOOD_MOON = 0,   /* 血月：怪更快，+1500 */
@@ -560,11 +562,14 @@ enum {
     EV_SUPPLY,           /* 补给空投：多给瓶+棒，+600 */
     EV_FLOOD,            /* v2.0 涨水：耗电翻倍，+1200 */
     EV_WHISPER,          /* v2.0 低语：理智流失 +50%，但碎片 +50%，+1300 */
-    EV_MIRROR            /* v2.0 镜像：怪物成倍出现，+1600 */
+    EV_MIRROR,           /* v2.0 镜像：怪物成倍出现，+1600 */
+    EV_HEAT,             /* v6 热浪：电池上限 -30%，怪速 +10% */
+    EV_FOG,              /* v6 浓雾：视野 -40%，听觉 -20% */
+    EV_LUCKY             /* v6 幸运：本层金币 ×2（纯正面） */
 };
 extern int levelEvent;       /* 本层事件，-1 = 无 */
 extern int eventBonus;       /* 本局累计的事件加分 */
-extern const char* const eventNames[EVENT_COUNT];
+/* v6：事件名改用 events.c 的 kEvents 表（EventNameEn/EventNameZh） */
 
 /* 升级项：Battery / Speed / Quiet / Calm / Eco / Rest */
 #define UPGRADE_COUNT 6
@@ -579,10 +584,12 @@ extern const char* const eventNames[EVENT_COUNT];
    列 = 静（噪声的时与地）· 筹（风险与经济）· 锋（伤害交付方式）· 途（整局形状）
    前 4 行每列 4 个（3 个普通 + 1 个分支 keystone），第 5 行 = 4 个跨支 keystone。
    设计红线：每个节点必须能一句话说出「玩法怎么变」，不许卖常驻百分比。 */
-#define SKILL_COUNT 20
+#define SKILL_COUNT 30   /* v6：20 → 26（+5 联动 +1 中心）*/
 #define KEYSTONE_COUNT 8              /* 4 个分支 keystone + 4 个跨支 */
 #define SKILL_POINTS_FOR_KEYSTONE 5   /* 分支投入门槛（每列上限 7 点） */
-#define SKILL_TOTAL_COST 278500   /* v6：按现表重算 */        /* 满树碎片（自检会校验，按 20 节点新表算出来） */
+#define SKILL_TOTAL_COST 128000   /* v7 第 ㊿ 轮：按现表实算（26 节点 174,500 + 4 核 4,000 = 178,500）。
+                                    原来写 278,500，比实际多 104,000 → SkillsSelfTest 必然失败，
+                                    而那个返回值又被 ui.c 的 (void)r 丢掉了，护栏装了没插电。 */
 #define SKILL_TOTAL_CORES 4   /* v6：按现表重算 */          /* 满树核心 */
 #define SKILL_SWITCH_CORE_COST 3      /* 换 keystone 花费 */
 
@@ -597,7 +604,11 @@ enum {
     /* 途 —— 整局形状 */
     SK_CARTO,     SK_BREAKER,     SK_FUSE_LESS, SK_SHORTCUT,
     /* 第 5 行：跨支 keystone */
-    SK_SILENTRUN, SK_WEATHERMAN,  SK_LASTRESORT, SK_SALVAGE
+    SK_SILENTRUN, SK_WEATHERMAN,  SK_LASTRESORT, SK_SALVAGE,
+    /* v6 网状结构新增 6 个 */
+    SK_SILENTDEAL, SK_GOLDENESC, SK_APPRENTICE, SK_SHORTCUTJR,
+    SK_NIGHTWALKER, SK_ORIGIN,
+    SK_GREEDHAND, SK_GOLDSCENT, SK_GAMBLER, SK_DESPERATE
 };
 
 #define META_COST 3.0f          /* 代谢：1 理智 = 3.0 电量（2.0 已验证会崩） */
@@ -751,22 +762,12 @@ extern Leech leeches[LEECH_MAX];
 /* ------------------------------------------------------------------ */
 /* 成就系统                                                              */
 /* ------------------------------------------------------------------ */
-#define ACH_COUNT 40     /* v2.0：成就 16 → 40 */
+#define ACH_COUNT 32     /* v6：重建为 32 个（表驱动，见 achievements.c） */
 #define ACH_NAME_MAX 32
 #define ACH_DESC_MAX 64
 
-typedef struct {
-    int id;
-    char name[ACH_NAME_MAX];
-    char desc[ACH_DESC_MAX];
-    int unlocked;      /* 0 = 未解锁，1 = 已解锁 */
-    int progress;      /* 进度（用于部分成就） */
-    int target;        /* 目标值 */
-} Achievement;
+/* v6：Achievement 结构体搬到 achievements.h */
 
-extern Achievement g_achievements[ACH_COUNT];
-extern int achSelection;
-extern int achHovered;
 
 /* ------------------------------------------------------------------ */
 /* 全局按键绑定系统                                                      */
@@ -863,6 +864,43 @@ static inline float Dist2(float ax, float ay, float bx, float by) {
     float dx = ax - bx, dy = ay - by;
     return dx * dx + dy * dy;
 }
+
+
+/* ===== v2.4.68 **文案里出现过的数值，必须是这里的常量** =====
+   铁律十四：屏幕上的数字必须从常量生成，绝不写死。
+   这三个数值同时出现在「改造树描述文本」里，所以提出来命名，
+   并由 tests/test_canity.c 断言「文案里的数字 == 常量值」——
+   以后改常量忘了改文案，自检会直接 FAIL。 */
+#define CANITY_TUNED_NUMBERS 1
+#define TUNE_SLIP_AWAY_SECONDS      3.0f   /* VANISH：脱战多少秒隐身 */
+#define TUNE_SLIP_AWAY_SECONDS_UP   2.0f   /* 拥有 SK_SLIP 之后 */
+#define TUNE_SECOND_WIND_SECONDS    3.0f   /* SECOND WIND：体力归零后还能冲几秒 */
+#define TUNE_CHARGE_FULL_SECONDS    0.5f   /* 满蓄力基准秒数 */
+#define TUNE_STEADY_HAND_MUL        0.64f  /* STEADY HAND：蓄力时间倍率 */
+
+
+/* ===== v2.4.69 **扳手蓄力：阻尼 + 击退门槛** =====
+   用户要求：「改成蓄力击退，单点就是敲响，蓄力就是击退，
+   不然很容易误触，加一个阻尼防御误触。」
+
+   三档：
+     蓄力 < DEADZONE        → **完全不攻击**（阻尼区，防手抖/误点）
+     DEADZONE ~ KNOCK       → 普通敲击（有伤害，但**不击退**）
+     >= KNOCK               → **蓄力击退**（推怪 / 打掉拾荒者赃款） */
+#define WRENCH_CHARGE_DEADZONE  0.28f   /* 低于这个 = 取消，不消耗次数 */
+#define WRENCH_SWING_TIME   0.14f   /* v2.4.75：扳手挥击动画时长（两帧） */
+#define WRENCH_CHARGE_KNOCK     0.55f   /* v2.4.71：0.80 → 0.55。
+                                          0.80 需要按住 0.36 秒，实测没人会按那么久，
+                                          等于击退从来没触发过。0.55 ≈ 0.25 秒。 */
+
+
+/* ===== v2.4.93 听声鬼强化 =====
+   追逐从 8 秒拉到 14 秒 —— 从走廊一头跑到另一头大约 8~10 秒，
+   8 秒意味着"转个弯就脱身"，14 秒逼你真的甩掉它。 */
+#define HUNT_CHASE_MAX        14.0f
+#define HUNT_SEARCH_MAX        4.5f
+#define HUNT_RELOCK_WINDOW     6.0f   /* 搜寻中再次听到 → 立刻重锁 */
+#define HUNT_SECOND_SPAWN_T   30.0f   /* 第二只出现的秒数 */
 
 #endif /* CANITY_COMMON_H */
 

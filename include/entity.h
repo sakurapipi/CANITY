@@ -65,4 +65,17 @@ extern float noiseSrcX, noiseSrcY;
 int HitMonster(Monster* m, int dmg);
 int ApplyDamage(Monster* m, int base, int type, float sx, float sy);
 
+
+/* v2.4.94 封喉 / 包夹（flank.c） */
+void  FlankBuild(void);
+void  FlankReset(void);
+void  FlankUpdate(float dt);
+void  FlankOnCaught(void);
+int   FlankChokeOnExitPath(float px, float py, float* gx, float* gy);
+int   FlankBlocksPlayer(float nx, float ny);
+int   FlankIsBlocking(void);
+float FlankGoalX(void);
+float FlankGoalY(void);
+int   FlankStreak(void);
+
 #endif /* CANITY_ENTITY_H */

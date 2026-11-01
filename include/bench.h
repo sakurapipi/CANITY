@@ -20,7 +20,7 @@
 
 #define BENCH_COLS 4
 #define BENCH_ROWS 4   /* v3.4（方案 v5 §3.2）：3 → 4，12 节点扩到 16 */
-#define BENCH_COUNT (BENCH_COLS * BENCH_ROWS)
+#define BENCH_COUNT (BENCH_COLS * BENCH_ROWS + 4)   /* v6：+4 个"第二顶点"，4 类 ×(3 层 + 2 选 1 顶点)=20 */
 
 /* 节点 id = col * BENCH_ROWS + row  (row 0 = 最便宜那层) */
 
@@ -34,7 +34,7 @@ typedef struct {
     int star;                /* 1 = ★ 节点（第三条） */
 } BenchNode;
 
-extern const BenchNode benchNodes[BENCH_COUNT];
+extern const BenchNode benchNodes[];
 
 /* 本局已购买位掩码（1 << id） */
 extern unsigned int benchOwned;
@@ -105,4 +105,16 @@ int   BenchTwinThrow(void);      /* 11 TWIN THROW   双投 */
 float BenchBatterySaver(void);   /* 13 SPARE CELL   耗电倍率 */
 int   BenchCatchBreak(void);     /* 14 CATCH BREAK  挣脱 */
 
+float BenchMoveMul(void);
+float BenchStaminaMul(void);
+float BenchSprintCostMul(void);
+float BenchBatteryCapMul(void);
+float BenchLightRangeMul(void);
+float BenchSanityAdd(void);
+float BenchHealMul(void);
+float BenchKnockExtra(void);
+float BenchKnockStunMul(void);
+int BenchKnockCharges(void);
+int BenchShock(void);
+void BenchRefundRun(void);
 #endif

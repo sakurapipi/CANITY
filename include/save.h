@@ -16,7 +16,7 @@
    读档时会按文件的**实际长度**判断是老版本还是新版本：
    老存档照样能读（新增字段取默认值），不用丢玩家进度。
    —— 参见 LoadSettings 里的迁移逻辑。 */
-#define SAVE_VERSION 24   /* v8: 移除 boss 三字段 */   /* v6.4：遗物池 20→12 */  /* v17：藏身点进存档（HideSpot[6] + count + hiddenIn） */
+#define SAVE_VERSION 26   /* v8: 移除 boss 三字段 */   /* v6.4：遗物池 20→12 */  /* v17：藏身点进存档（HideSpot[6] + count + hiddenIn） */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
@@ -40,7 +40,7 @@ typedef struct {
     float gamma, sens;
 
     /* 大厅进度 */
-    int shards, upgBattery, upgSpeed, upgQuiet, upgSanity;
+    int carryGold, upgBattery, upgSpeed, upgQuiet, upgSanity;
     int bestLevel;
     float volume;
     /* 进度 */
@@ -83,14 +83,13 @@ typedef struct {
 
     /* 应用 1.8.0 新增：技能树 / 核心 / keystone。
        测试版不做向后兼容：旧存档被 SAVE_VERSION 校验挡掉。 */
-    int skillRank[SKILL_COUNT];
+    int skillRank[26];
     int cores;
     int activeKeystone;
     int bestMainScore;
     int seenMonsters;      /* v1.8：怪物图鉴解锁位掩码 */
     /* ---- v9：以前没存的运行时进度 ---- */
     int bricks, acids, smokeBombs;
-    int pendingShards;
     unsigned int runSkillMask;
     int lang;              /* v2.0：界面语言 */
     int saveSlot;          /* v2.0：存档槽 0..2 */
@@ -102,6 +101,11 @@ typedef struct {
     int   relicTotal;
     /* v8: bossLevel / bossMaxHp / bossDefeated 已从存档移除（BOSS 已删） */
     int   dailyMode, dailySeed;
+    /* v7 第 ㊿ 轮：**每日任务的进度必须存盘**
+       原来 s_daily 整个结构不进存档，开机首帧发现 !s_ready 就重新生成
+       → 今天做了一半的进度、连击天数、完成标记全部归零
+       → 「连续 7 天 +5,000」在正常开机关机的节奏下不可能达成。 */
+    int   dailyGoalId, dailyGoalParam, dailyProgress, dailyDone, dailyStreak;
     int   campaignMode, campaignStage;
     int   firePots, gluePots, mirrors;
     int   bankStreak;
@@ -115,7 +119,7 @@ typedef struct {
     /* ---- v2.3：武器能量（追加在末尾，老档读到 0，载入时补满） ---- */
     float energy;
     /* v3.0：局内改造树 / 强化必须存盘 ——
-       原来重启后这两个全归零，但买它们的碎片已经从 shards 扣掉了，
+       原来重启后这两个全归零，但买它们的碎片已经从 carryGold 扣掉了，
        等于每重启一次就吞掉玩家最多 5720 碎片（数值审查 #4）。 */
     unsigned int benchOwnedSave;   /* 改造树位掩码 */
     int runUpgSave[5];   /* v7：4 -> 5（新增 WRENCH）。save.h 不包含 upgrade_run.h，这里写死 */             /* 强化 4 条线的等级 */
@@ -143,11 +147,24 @@ typedef struct {
     int bankHistMaxSave;
     int bankCarryPctSave;
     /* v6：**本局本金必须存盘** —— 它是 BankSettle 的利润基准：
-         profit = shards - carryGold；死亡返还 35% 也按它算；
+         profit = carryGold - carryGold；死亡返还 35% 也按它算；
          金币招怪（GoldThreatMul）也读它。
        不存的话读档后 carryGold = 0 → 利润算成全额、死亡返还变 0、
        带钱招怪整条机制消失。 */
     int carryGoldSave;
+    unsigned int dailyQuestDate, dailyLastCompletedDate;
+    int dailySamples[8];
+    int runPrincipalSave;
+    int knockRunSave, throwHitRunSave, echoRunSave, dailyEscapeRunSave;
+    int cleanFloorsSave, wardenFloorsSave;
+    float doubleHuntSave;
+    int fullHideSave;
+    int lastRunGoldSave, lastRunKeptSave, lastRunCaughtSave;
+    int extraSkillRanks[4];
+    int shopRefreshFloorSave, shopRefreshUsedSave;
+    int contractKindSave, contractLockedSave;
+    float threatSave;
+    int bestiaryKnowledge[18];
 } SaveBlob;
 
 /* 写当前进度（游戏中 / 退出时） */

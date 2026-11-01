@@ -546,7 +546,7 @@ static void SetThemeLight(int id) {
 
 static float SpriteAtten(float dist) {
     int lightOn = (flashlightOn && battery > 0.0f);
-    float d = lightOn ? 1.0f / (1.0f + dist * 0.20f)
+    float d = lightOn ? 1.0f / (1.0f + dist * (0.20f/BenchLightRangeMul()))
                       : 1.0f / (1.0f + dist * 0.45f);
     if (d < 0.10f) d = 0.10f;      /* 贴脸的东西别全黑 */
     if (d > 1.00f) d = 1.00f;
@@ -1323,16 +1323,18 @@ static void DrawTintedBeast(int spr, float wx, float wy, float halfH,
 }
 
 static void DrawNewMonsters(void) {
-    /* ---- 拾荒者：矮胖 + 金色；带赃款时更亮 ---- */
+    /* ---- 拾荒者：**只换麻袋颜色**，身体保持原样 ---- */
     {
-        extern int   CollectorActive(void);
+        extern int   CollectorActive(void), CollectorHasMoney(void);
         extern float CollectorX(void), CollectorY(void);
-        extern int   CollectorBounty(void);
         if (CollectorActive()) {
-            int has = CollectorBounty() > 0;
-            /* 拾荒者：用听声怪的身体 + 暗金色调 */
-            DrawTintedBeast(SPR_MON_LEECH, CollectorX(), CollectorY(),
-                            0.86f, 0x00FFFFFFu, has ? 0.10f : 0.00f);   /* v2.4.2 方案A：用烘焙原色，带钱只轻微提亮 */
+            /* v2.4.66：整体染色会把明暗关系洗掉，观感廉价。
+               现在只把**麻袋**（烘焙时画的洋红 key）换成白/金，
+               身体的三层暗灰完全不动。 */
+            if (CollectorHasMoney()) SpriteAccentSet(0x00FFC040u);   /* 金：装满赃款 */
+            else                     SpriteAccentSet(0x00E8F0FFu);   /* 白：空袋子 */
+            DrawTintedBeast(SPR_MON_LEECH, CollectorX(), CollectorY(), 0.86f, 0, 0.0f);
+            SpriteAccentClear();
         }
     }
     /* ---- 清道夫：高瘦 + 病绿；开柜门时眼白转红 ---- */
@@ -1347,15 +1349,21 @@ static void DrawNewMonsters(void) {
                             1.00f, 0x00FF4030u, grabbing ? 0.28f : 0.00f);   /* v2.4.2 方案A：原色；撬柜门才加轻红调 */
         }
     }
-    /* ---- 守门人：中等身高 + 暗蓝；堵门时眼睛转红 ---- */
+    /* ---- 守门人：**两个烘焙变体，眼睛颜色直接烘死** ---- */
     {
-        extern int   WardenActive(void), WardenBlocking(void);
+        extern int   WardenActive(void);
+        extern int   WardenChasing(void);
         extern float WardenX(void), WardenY(void);
         if (WardenActive()) {
-            int blk = WardenBlocking();
-            /* 守门人：用听声怪的身体 + 暗蓝色调；堵门时偏红 */
-            DrawTintedBeast(SPR_MON_SPIDER, WardenX(), WardenY(),
-                            0.94f, 0x00FF4030u, blk ? 0.28f : 0.00f);   /* v2.4.2 方案A：原色；堵门才加轻红调 */
+            /* v2.4.81 **不再用洋红 key 换色**。
+               调研结论：颜色变化用调色盘是对的，但**前提是 key 色绝对不能漏到屏幕上**。
+               我在这条上翻车三次（品红眼睛、边缘杂色、绿色残留）。
+               守门人只有两种状态，直接烘两个变体最稳：
+                 SPR_MON_SPIDER   = 冷青眼（巡逻 / 堵门 / 失明）
+                 SPR_MON_LEECH_W  = 血红眼（追击）
+               一个 SpriteAccent 都不调，也就没有 key 泄漏的可能。 */
+            int spr = WardenChasing() ? SPR_MON_LEECH_W : SPR_MON_SPIDER;
+            DrawTintedBeast(spr, WardenX(), WardenY(), 0.94f, 0, 0.0f);
         }
     }
     /* ---- 回声：极矮 + 冷白微光，强度越弱越暗 ---- */
@@ -2621,7 +2629,7 @@ static void RenderWallBand(int x0, int x1) {
         /* v1.12：手电换成和荧光棒同一套光效 ——
            锥形（横向 flashTab）× 平方距离衰减，再叠一层暖色加色。
            原来只有"乘法提亮"，画面偏冷、也不像有个灯泡在照。 */
-        float reach = 1.0f - perpWallDist / 9.0f;
+        float reach = 1.0f - perpWallDist / (9.0f*BenchLightRangeMul());
         if (reach < 0.0f) reach = 0.0f;
         reach *= reach;
         float flash = flashTab[x];
@@ -2659,7 +2667,6 @@ static void RenderWallBand(int x0, int x1) {
         else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;
         k8 = shadeLut[k8];      /* gamma 校正，和地板共用同一张表 */
 
-        const unsigned int* src = &texture[0][texX];
         unsigned int* dst = pixels + (size_t)drawStart * renderW + x;
 
         /* v1.9：墙脚 / 墙顶 AO —— 沿墙面上下各压暗 16 像素，
@@ -2819,7 +2826,6 @@ static void DrawGroundShadow(int cx, int cyFloor, int halfW, float ty) {
     for (int y = -ry; y <= ry; y++) {
         int py = top + y + ry;
         if (py < 0 || py >= renderH) continue;
-        int occ = cx < 0 ? 0 : (cx >= renderW ? renderW - 1 : cx);
         if ((float)py < 0.0f) continue;
         for (int x = -rx; x <= rx; x++) {
             int px = cx + x;
@@ -2857,7 +2863,12 @@ static void DrawViewModel(void) {
     {
         extern int hiddenIn;
 #if NO_COMBAT
-        if (hiddenIn >= 0 || 1) return;   /* 无战斗：彻底不画手持模型 */
+        /* ===== v2.4.62 **这就是"左手看不到"的根因** =====
+           原来写的是 `if (hiddenIn >= 0 || 1) return;` ——
+           `|| 1` 让这个条件**永远成立**，于是 DrawViewModel()
+           每一帧都在第一行返回：右手扳手、左手投掷物**都没画过**。
+           用户反复说「左手没有东西」，根因在这里，不在模型。 */
+        if (hiddenIn >= 0) return;   /* 无战斗：只在藏身时不画 */
 #else
         if (hiddenIn >= 0) return;
 #endif
@@ -2884,6 +2895,38 @@ static void DrawViewModel(void) {
 
     int cx = (int)((float)renderW * 0.72f + sway);
     int cy = (int)((float)renderH * 1.04f + lift - kick);
+    /* ===== v2.4.83 **五帧挥击动画** =====
+       用户要求「动画多来几帧」。
+       五帧足够读出「起手 → 后摆 → 挥到 → 收势 → 回位」，
+       再多在这个尺度上（69px 手持模型）已经分辨不出来。
+
+         帧 0  起手：向后下、缩到 92%，压暗
+         帧 1  后摆：最大后移、最小（88%）
+         帧 2  挥到：**最前、最大（112%）、最亮** ← 命中在这一帧
+         帧 3  收势：稍微回收、105%
+         帧 4  回位：接近原位、98%
+    */
+    {
+        extern float wrenchSwingT;
+        if (wrenchSwingT > 0.0f) {
+            float prog = 1.0f - wrenchSwingT / 0.14f;
+            if (prog < 0.0f) prog = 0.0f;
+            if (prog > 1.0f) prog = 1.0f;
+            int fr = (int)(prog * 5.0f);
+            if (fr > 4) fr = 4;
+
+            /* 每帧的偏移（-1 后 / +1 前）与缩放/亮度 */
+            static const float kDx[5] = { -0.020f, -0.052f,  0.048f,  0.022f,  0.004f };
+            static const float kDy[5] = {  0.022f,  0.050f, -0.036f, -0.012f,  0.002f };
+            static const int   kSz[5] = { 92,      88,      112,     105,      98 };
+            static const float kLi[5] = { 0.90f,   0.82f,   1.14f,   1.04f,    0.99f };
+
+            cx += (int)((float)renderW * kDx[fr]);
+            cy += (int)((float)renderH * kDy[fr]);
+            size = size * kSz[fr] / 100;
+            light *= kLi[fr];
+        }
+    }
     int px = cx - size / 2;
     int py = cy - size;
     DrawSprite(sid, px, py, size, size, light, 1.0f, 0, 0.0f);
@@ -2929,7 +2972,17 @@ static void DrawViewModel(void) {
             /* v3.0：亮度 0.75 → 0.92（枪是 0.85~1.0），alpha 0.95 → 1.0。
                注释写着"亮一点"但实际比枪暗，同一只手的两个物体不该有明暗断层
                （建模审查 #12）。 */
-            DrawSprite(SPR_ITEM_FLARE + sel, ix, iy - isize, isize, isize,
+            /* ===== v2.4.59 **手持模型映射表** =====
+               原来是 `SPR_ITEM_FLARE + sel` 直接顺序对应 ——
+               但槽位是 FLARE/SLING/SMOKE/GLUE/ECHO/DECOY，
+               精灵却是 FLARE/BOTTLE/BRICK/ACID/SMOKE/FIRE，
+               于是「烟雾弹拿的是砖头」「回声弹拿的是烟雾弹」。
+               现在用显式表，每个槽位拿到对的模型。 */
+            static const int slotSpr[ITEM_SLOT_COUNT] = {
+                SPR_ITEM_FLARE, SPR_ITEM_SLING, SPR_ITEM_SMOKE,
+                SPR_ITEM_GLUE,  SPR_ITEM_ECHO,  SPR_ITEM_DECOY
+            };
+            DrawSprite(slotSpr[sel], ix, iy - isize, isize, isize,
                        0.92f, 1.0f, 0, 0.0f);
         }
     }
@@ -3188,6 +3241,32 @@ void RenderMap(void) {
                 for (int e = -span; e <= span; e++)
                     PutPixel(px + e, py + d, 0x0090E0FF);
             }
+        }
+    }
+
+    /* ===== v2.4.62 **回声弹标记的怪物**（本层永久）=====
+       被声呐照到过的怪物，一整个楼层都显示在小地图上 —— 红色菱形 + 中间一点，
+       和藏身点（青白菱形）、箱子（黄方块）一眼分开。 */
+    {
+        extern float echoMarkX[], echoMarkY[];
+        extern int   echoMarkActive[];
+        int emax = 8;
+        for (int i = 0; i < emax; i++) {
+            if (!echoMarkActive[i]) continue;
+            int mx = (int)echoMarkX[i], my = (int)echoMarkY[i];
+            if (mx < 0 || mx >= MAP_WIDTH || my < 0 || my >= MAP_HEIGHT) continue;
+            int px2 = mapStartX + mx * cellSize + cellSize / 2;
+            int py2 = mapStartY + my * cellSize + cellSize / 2;
+            /* 菱形外框 */
+            for (int d = -3; d <= 3; d++) {
+                int span = 3 - (d < 0 ? -d : d);
+                for (int e = -span; e <= span; e++) {
+                    int edge = (e == -span || e == span || d == -3 || d == 3);
+                    PutPixel(px2 + e, py2 + d, edge ? 0x00FF3020u : 0x00601010u);
+                }
+            }
+            /* 中间一点亮芯 */
+            PutPixel(px2, py2, 0x00FFD0D0u);
         }
     }
 

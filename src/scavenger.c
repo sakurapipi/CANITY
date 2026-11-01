@@ -125,6 +125,7 @@ typedef struct {
     float warnT;           /* >0 = 正在拉柜门 */
     float eatT;            /* 正在吃箱子的进度 */
     int   eating;          /* 正在吃的箱子下标，-1 = 没在吃 */
+    float stepAcc;     /* v2.4.92 脚步累计距离 */
     float life;            /* 剩余寿命 */
     float retarget;        /* 距离下次重新锁定 */
     float searchT;         /* 原地翻找剩余时间 */
@@ -135,7 +136,8 @@ typedef struct {
 Scavenger scavenger;
 static float scavCooldown = 0.0f;   /* 走掉之后的冷却 */
 
-int   ScavengerActive(void)  { return scavenger.active; }
+int   ScavengerActive(void)   { return scavenger.active; }
+float ScavengerSpeedNow(void) { return SCAV_SPEED; }
 int   ScavengerRifling(void) { return scavenger.eating >= 0; }
 float ScavengerX(void)       { return scavenger.x; }
 float ScavengerY(void)       { return scavenger.y; }
@@ -399,6 +401,18 @@ static void scavengerLeave(void) {
 }
 
 void UpdateScavenger(float dt) {
+    /* v2.4.98 EXIT_SPAWN_GUARD：玩家站在出口附近时不清道夫不出现 ——
+       否则它会贴着脸生成，把正在选"继续/撤离"的玩家撞死。 */
+    {
+        extern int breakerOpen, exitChoiceOpen;
+        extern float Dist2(float, float, float, float);
+        extern float exitX, exitY;
+        if (exitChoiceOpen) { scavenger.active = 0; return; }
+        if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 9.0f) {
+            if (!scavenger.active) return;   /* 还没出场就推迟 */
+        }
+    }
+
     { extern int trainingMode; if (trainingMode) return; }
     if (!scavenger.active) return;
 
@@ -526,6 +540,7 @@ void UpdateScavenger(float dt) {
         /* (a) 玩家躲着 → 拉柜门 */
         if (hiddenIn >= 0) {
             scavenger.warnT = SCAV_GRAB_WARN;
+        PlaySfx(SFX_SCAVENGER, 0.85f);   /* v2.4.89 刺耳刮擦 */
             PlaySfx(SFX_STEP, 0.9f);
             pickupMsg = (g_lang == LANG_ZH) ? "柜门被抓住了！" : "THE LOCKER IS GRABBED!";
             pickupMsgTimer = 1.4f;
@@ -600,7 +615,37 @@ void UpdateScavenger(float dt) {
             lastPY = pyNow;
         }
     }
-    stepAlongBfs(&scavenger.x, &scavenger.y, SCAV_SPEED, dt);
+    /* ===== v2.4.92 **走路要有声音** =====
+       用户要求：「他走路的音效不太好，走路没有声音。
+       我需要那种高速摩擦、令人毛骨悚然的声音。」
+
+       做法：
+         · 按**实际走过的距离**触发（不是按时间）——
+           它被墙挡住时不会继续播脚步，这点很重要
+         · 每 0.55 格一步 → 速度 1.55 时大约每 0.35 秒一声
+         · 音量随距离衰减（12 格外听不见），但地板/墙的遮挡不做处理
+         · 有 5% 的随机跳过，让节奏不机械 */
+    {
+        float oxp = scavenger.x, oyp = scavenger.y;
+        stepAlongBfs(&scavenger.x, &scavenger.y, SCAV_SPEED, dt);
+
+        float mdx = scavenger.x - oxp, mdy = scavenger.y - oyp;
+        float moved = sqrtf(mdx * mdx + mdy * mdy);
+
+        scavenger.stepAcc += moved;
+        if (scavenger.stepAcc >= 0.55f) {
+            scavenger.stepAcc = 0.0f;
+            if ((rand() % 100) >= 5) {          /* 5% 跳过，节奏不机械 */
+                float dxp = scavenger.x - posX, dyp = scavenger.y - posY;
+                float dist = sqrtf(dxp * dxp + dyp * dyp);
+                if (dist < 12.0f) {
+                    float vol = 1.0f - dist / 12.0f;
+                    vol = 0.22f + vol * 0.78f;  /* 远处也留一点，让你听见它在靠近 */
+                    PlaySfx(SFX_SCAV_STEP, vol);
+                }
+            }
+        }
+    }
 }
 
 /* v2.3.9：训练营用 —— 强制把清道夫摆到指定位置当标本 */

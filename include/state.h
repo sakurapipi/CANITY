@@ -43,9 +43,7 @@ extern int   hiddenIn;            /* 当前藏身点下标，-1 = 不在藏身 *
 /* ================================================================== */
 /* 区块 ②  经济（v7 新增的全部集中在这里）                              */
 /* ================================================================== */
-extern int   carryGold;            /* 本局携带的金币（决定强度档位） */
-extern int   shards;               /* 本金 / 当前结算基数 */
-extern int   pendingShards;        /* 本局还没结算的收益 */
+extern int   carryGold;            /* 局内携带金币：可花、可被偷、决定强度档 */
 extern int   bankGold;             /* 银行存款 */
 extern int   bankHistMax;          /* 历史最高存款（携带倍数的分母） */
 extern int   bankCarryPct;         /* 下一个携带比例档位 0..20 */

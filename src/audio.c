@@ -31,6 +31,10 @@ static short g_sndThrow[4410];     /* 0.20s 投掷：呼啸+出手音 */
 static short g_sndGlue[6615];      /* 0.30s 胶水：黏稠噗叽 */
 static short g_sndEcho[9922];      /* 0.45s 回声：短叮 + 回响 */
 static short g_sndDecoy[13230];    /* 0.60s 玩偶：嘎吱叫两声 */
+/* v2.4.89 两只新怪的声音 */
+static short g_sndWarden[35280];    /* 1.60s 守门人：极低频压迫 */
+static short g_sndScavenger[26460]; /* 1.20s 清道夫：刺耳刮擦 */
+static short g_sndScavStep[2646];   /* 0.12s 清道夫脚步：高速摩擦 */
 
 typedef struct { const short* data; int len, pos; float vol; int active; } Voice;
 
@@ -103,6 +107,9 @@ void PlaySfx(int id, float vol) {
         case SFX_GLUE:   data = g_sndGlue;  len = (int)(sizeof(g_sndGlue) / sizeof(short));  break;
         case SFX_ECHO:   data = g_sndEcho;  len = (int)(sizeof(g_sndEcho) / sizeof(short));  break;
         case SFX_DECOY:  data = g_sndDecoy; len = (int)(sizeof(g_sndDecoy) / sizeof(short)); break;
+        case SFX_WARDEN: data = g_sndWarden; len = (int)(sizeof(g_sndWarden) / sizeof(short)); break;
+        case SFX_SCAVENGER: data = g_sndScavenger; len = (int)(sizeof(g_sndScavenger) / sizeof(short)); break;
+        case SFX_SCAV_STEP: data = g_sndScavStep; len = (int)(sizeof(g_sndScavStep) / sizeof(short)); break;
         default: return;
     }
     EnterCriticalSection(&g_audioLock);
@@ -334,6 +341,180 @@ static void GenSounds(void) {
             }
             v *= 0.38f;
             g_sndDecoy[i] = (short)(v * 32000.0f);
+        }
+    }
+
+    /* ==================================================================
+     * v2.4.89 **守门人：极低频的压迫感**
+     * ------------------------------------------------------------------
+     * 调研依据（psychoacoustics）：
+     *   · 20~60 Hz 的持续能量给的是**体感压迫**，不是"听到声音"
+     *   · 「doom throb」—— 两个频率只差 2~4 Hz 会慢慢拍频，
+     *     听感像心跳/引擎，制造"有巨大东西在靠近"
+     *   · 非谐波泛音（1.4x / 2.7x）让它听起来**不自然**，
+     *     像金属结构被强行驱动
+     * ================================================================ */
+    {
+        int wl2 = (int)(sizeof(g_sndWarden) / sizeof(short));
+        unsigned int s2 = 98765u;
+        float brown = 0.0f;
+        for (int i = 0; i < wl2; i++) {
+            float t = (float)i / AUDIO_RATE;
+
+            s2 = s2 * 1664525u + 1013904223u;
+            float n = ((float)((s2 >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+            brown = brown * 0.96f + n * 0.04f;          /* 极低通 -> 棕噪 */
+
+            float env = (t < 0.25f) ? (t / 0.25f) : expf(-(t - 0.25f) * 1.5f);
+
+            float v = 0.0f;
+            v += sinf(6.2831f * 41.0f * t)   * 0.55f;   /* 基频 */
+            v += sinf(6.2831f * 43.5f * t)   * 0.45f;   /* 差 2.5Hz -> 隆隆拍频 */
+            v += sinf(6.2831f * 20.5f * t)   * 0.50f;   /* 次谐波：体感 */
+            v += sinf(6.2831f * 57.0f * t)   * 0.22f;   /* 非谐波 1.4x */
+            v += sinf(6.2831f * 110.0f * t)  * 0.10f;   /* 非谐波 2.7x */
+
+            v *= 0.85f + 0.15f * sinf(6.2831f * 0.8f * t);   /* 慢速起伏 */
+            v = v * 0.30f + brown * 2.2f;
+
+            v *= env;
+            if (v > 1.0f) v = 1.0f;
+            if (v < -1.0f) v = -1.0f;
+            g_sndWarden[i] = (short)(v * 32000.0f);
+        }
+    }
+
+    /* ==================================================================
+     * v2.4.89 **清道夫：刺耳到毛骨悚然**
+     * ------------------------------------------------------------------
+     * 调研依据：
+     *   · **sharpness**：能量集中在 3 kHz 以上 = 针刺感
+     *     （原文："Think dentist drill, not thunder"）
+     *   · **roughness**：两个分量差 20~200 Hz，耳朵分不开 -> 砂纸感
+     *   · **stick-slip**：不规则的微爆发（指甲刮玻璃）。
+     *     **时间必须不规则**，规则了大脑会习惯
+     *   · **FM 不稳**：调制本身随机游走，耳朵抓不到稳定音高
+     * ================================================================ */
+    {
+        int sl = (int)(sizeof(g_sndScavenger) / sizeof(short));
+        unsigned int s3 = 24680u;
+        float fm = 0.0f;
+        float bp1 = 0.0f, bp2 = 0.0f;
+        int burstLeft = 0;
+        float burstAmp = 0.0f;
+        int nextBurst = 400;
+
+        for (int i = 0; i < sl; i++) {
+            float t = (float)i / AUDIO_RATE;
+
+            s3 = s3 * 1664525u + 1013904223u;
+            float r = ((float)((s3 >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+
+            /* 随机 FM 游走 */
+            fm = fm * 0.995f + r * 0.05f;
+            if (fm > 1.0f) fm = 1.0f;
+            if (fm < -1.0f) fm = -1.0f;
+            float fmHz = fm * 720.0f;
+
+            /* 白噪 -> 高频带通 */
+            bp1 = bp1 + 0.55f * (r - bp1);
+            bp2 = bp2 + 0.55f * (bp1 - bp2);
+            float hp = r - bp2;
+
+            float am70 = 0.55f + 0.45f * sinf(6.2831f * 70.0f * t);
+
+            if (--nextBurst <= 0) {
+                burstLeft = 60 + (int)(r * 40.0f);
+                if (burstLeft < 30) burstLeft = 30;
+                burstAmp = 0.7f + 0.3f * r;
+                nextBurst = (int)(AUDIO_RATE * 0.011f) +
+                            (int)(fabsf(r) * AUDIO_RATE * 0.026f);
+            }
+
+            float burst = 0.0f;
+            if (burstLeft > 0) {
+                burst = hp * burstAmp * 2.2f;
+                burstLeft--;
+            }
+
+            float v = sinf(6.2831f * (3300.0f + fmHz) * t) * 0.34f;
+            v += sinf(6.2831f * (3380.0f - fmHz * 0.6f) * t) * 0.26f;
+            v += hp * 0.55f * am70;
+            v += burst;
+
+            float env;
+            if (t < 0.01f) env = t / 0.01f;
+            else if (t < 0.55f) env = 1.0f;
+            else env = expf(-(t - 0.55f) * 4.0f);
+
+            v *= env * 0.55f;
+            if (v > 1.0f) v = 1.0f;
+            if (v < -1.0f) v = -1.0f;
+            g_sndScavenger[i] = (short)(v * 32000.0f);
+        }
+    }
+
+    /* ==================================================================
+     * v2.4.92 **清道夫脚步：高速摩擦**
+     * ------------------------------------------------------------------
+     * 用户要求：「走路的音效不太好，走路没有声音。
+     *            我需要那种高速摩擦、令人毛骨悚然的声音。」
+     *
+     * 和"拆东西"那只不同 —— 那只长、有节奏、像撬。
+     * 脚步要**短、密集、没有音高**，核心是"有东西在地上拖"。
+     *
+     * 合成配方：
+     *   主层   5~9 kHz 高速带通噪声（摩擦的"沙"）
+     *   辅层   2.6 kHz 细窄音 + 快速颤音（金属尖细的"吱"）
+     *   颗粒   随机微爆发（像爪子一下一下刮过地面）
+     *   包络   极快起、0.12 秒内衰减完 —— 脚步不能拖沓
+     * 每次播放音高/颗粒都不同（渲染位置随机），不会听腻
+     * ================================================================ */
+    {
+        int n = (int)(sizeof(g_sndScavStep) / sizeof(short));
+        unsigned int ss = 13579u;
+        float b1 = 0.0f, b2 = 0.0f, b3 = 0.0f;
+        int grit = 0;
+        float gritAmp = 0.0f;
+        int nextGrit = 30;
+
+        for (int i = 0; i < n; i++) {
+            float t = (float)i / AUDIO_RATE;
+
+            ss = ss * 1664525u + 1013904223u;
+            float r = ((float)((ss >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+
+            /* 三级高通：把噪声推到 5kHz 以上 */
+            b1 = b1 + 0.72f * (r - b1);
+            b2 = b2 + 0.72f * (b1 - b2);
+            b3 = b3 + 0.72f * (b2 - b3);
+            float hp = r - b2 - b3 * 0.5f;
+
+            /* 高频细音：2.6kHz + 快速颤音（像金属啸叫）*/
+            float vib = sinf(6.2831f * 38.0f * t) * 90.0f;
+            float squeak = sinf(6.2831f * (2600.0f + vib) * t) * 0.16f;
+
+            /* 颗粒：随机的微小刮擦爆发 */
+            if (--nextGrit <= 0) {
+                grit = 14 + (int)(fabsf(r) * 26.0f);
+                gritAmp = 0.5f + 0.5f * fabsf(r);
+                nextGrit = 40 + (int)(fabsf(r) * 120.0f);
+            }
+            float g = 0.0f;
+            if (grit > 0) { g = hp * gritAmp * 3.0f; grit--; }
+
+            /* 摩擦主体 */
+            float v = hp * 1.35f;
+
+            /* 极快包络：0.002 秒起，之后指数衰减 */
+            float env;
+            if (t < 0.002f) env = t / 0.002f;
+            else env = expf(-t * 34.0f);
+
+            v = (v + squeak + g) * env * 0.62f;
+            if (v > 1.0f) v = 1.0f;
+            if (v < -1.0f) v = -1.0f;
+            g_sndScavStep[i] = (short)(v * 32000.0f);
         }
     }
 }

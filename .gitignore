@@ -34,3 +34,5 @@ Thumbs.db
 
 tests/
 tools/
+# Codex 的构建缓存目录
+work/

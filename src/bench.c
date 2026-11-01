@@ -6,54 +6,35 @@
 #include "game.h"
 #include "entity.h"   /* sanity 在这里声明 */
 #include "lang.h"
+#include "save.h"
+#include "wallet.h"
+#include "threat.h"
 
 /* 节点 id = col * BENCH_ROWS + row */
-const BenchNode benchNodes[BENCH_COUNT] = {
-    /* ===== v3.4（方案 v5 §3.2）**12 → 16 节点，4 列 × 4 层** =====
-       价格统一四档：150 / 350 / 700 / 1200
-       8 个纯数值（第 1~2 层）+ 8 个机制（第 3~4 层）
-       新增第 3 列 THROWING —— 投掷物第一次和成长系统挂钩。 */
-
-    /* ---- 列 0：潜行 STEALTH ---- */
-    { "LIGHT STEP",  "轻步",   "Walking noise -35%",             "走路噪音 -35%",
-      150, 0, 0, 0 },
-    { "QUIET LID",   "静盖",   "Search noise -50%, search 40% faster", "翻箱噪音 -50%，翻箱快 40%",
-      350, 0, 1, 0 },
-    { "SILENT THROW","静投",   "Thrown items make NO noise",     "投掷物落地不再产生噪音",
-      700, 0, 2, 0 },
-    { "VANISH",      "消失",   "3s out of sight = invisible until you move", "脱离视线 3 秒隐身，直到你移动",
-      1200, 0, 3, 1 },
-
-    /* ---- 列 1：体能 MOBILITY ---- */
-    { "ENDURANCE",   "耐力",   "Stamina max +30",                "体力上限 +30",
-      150, 1, 0, 0 },
-    { "CRANK WALK",  "边走边摇","Crank while walking",           "边走边摇电",
-      350, 1, 1, 0 },
-    { "SLIDE",       "滑铲",   "Sprint + crouch = slide, free",  "冲刺中按蹲滑铲，不耗体力",
-      700, 1, 2, 0 },
-    { "SECOND WIND", "二次呼吸","3s of sprint after stamina hits 0", "体力归零后还能再冲 3 秒",
-      1200, 1, 3, 1 },
-
-    /* ---- 列 2：投掷 THROWING（全新）---- */
-    { "DEEP POCKET", "深口袋", "Throwable capacity +2 each",     "每种投掷物上限 +2",
-      150, 2, 0, 0 },
-    { "STEADY HAND", "稳手",   "Full charge 0.5s -> 0.32s",      "满蓄力 0.5 秒 → 0.32 秒",
-      350, 2, 1, 0 },
-    { "SALVAGE",     "回收",   "Pick thrown items back up (5/run)", "投掷物落地可捡回（每局 5 次）",
-      700, 2, 2, 0 },
-    { "TWIN THROW",  "双投",   "Shift+RMB throws two at once",   "Shift+右键一次扔两个",
-      1200, 2, 3, 1 },
-
-    /* ---- 列 3：生存 SURVIVAL ---- */
-    { "THICK SKIN",  "厚皮",   "Grab costs -20% sanity",         "被抓扣理智 -20%",
-      150, 3, 0, 0 },
-    { "SPARE CELL",  "备用电池","Flashlight drain -25%",          "手电耗电 -25%",
-      350, 3, 1, 0 },
-    { "CATCH BREAK", "挣断",   "Press SPACE to break a grab (2/run)", "被抓时按空格挣脱（每局 2 次）",
-      700, 3, 2, 0 },
-    { "PLAY DEAD",   "假死",   "Once per run: escape + confuse",  "每局一次：被抓自动逃脱，怪物迷失",
-      1200, 3, 3, 1 },
+const BenchNode benchNodes[] = {
+    {"ENDURANCE","耐力","Stamina cap +15%","体力上限 +15%",350,0,0,0},
+    {"LIGHT PACK","轻装","Move speed +6%","移速 +6%",700,0,1,0},
+    {"ECONOMY","省力","Sprint cost -25%","冲刺消耗 -25%",1200,0,2,0},
+    {"BULL","蛮牛","Stamina +30%, sprint cost -15%","体力再 +30%，冲刺消耗再 -15%",2000,0,3,1},
+    {"BIG CELL","大电池","Battery cap +20%","电量上限 +20%",350,1,0,0},
+    {"SAVER","省电","Battery drain -20%","手电耗电 -20%",700,1,1,0},
+    {"BRIGHT","强光","Beam distance +25%","照射距离 +25%",1200,1,2,0},
+    {"EVERLIGHT","长明","Battery drain another -35%","耗电再 -35%",2000,1,3,1},
+    {"COMPOSURE","镇定","Sanity cap +20","理智上限 +20",350,2,0,0},
+    {"THICK SKIN","厚皮","Grab sanity cost -20%","被抓扣理智 -20%",700,2,1,0},
+    {"RECOVER","回神","Safe room healing +50%","安全屋回复 +50%",1200,2,2,0},
+    {"IRON MIND","铁石","Grab cost another -30%","被抓扣理智再 -30%",2000,2,3,1},
+    {"SPARE TOOL","备用扳手","Wrench charges +1 per floor","每层扳手次数 +1",350,3,0,0},
+    {"LONG HANDLE","长柄","Knockback distance +1","击退距离 +1 格",700,3,1,0},
+    {"HEAVY HEAD","重锤","Knockback +1.5, stun +50%","击退再 +1.5 格，硬直 +50%",1200,3,2,0},
+    {"SHOCK","震荡","Hits erase the hunters memory","击退命中清空怪物记忆与可疑点",2000,3,3,1},
+    {"SWIFT","疾风","Move +12%, stamina cap -15%","移速再 +12%，体力上限 -15%",2000,0,3,1},
+    {"SEARCHLIGHT","探照","Beam +40%, battery drain +20%","照射距离再 +40%，耗电 +20%",2000,1,3,1},
+    {"DESPERATE","绝境","Low sanity: move +10%, noise -20%","理智低于30时移速 +10%，噪音 -20%",2000,2,3,1},
+    {"TEMPERED","回震","Stun another +100%, no damage","硬直再 +100%，不造成伤害",2000,3,3,1},
 };
+
+typedef char benchNodes_count_check[(sizeof(benchNodes)/sizeof(benchNodes[0])==BENCH_COUNT) ? 1 : -1];
 
 
 unsigned int benchOwned = 0u;
@@ -73,23 +54,74 @@ int BenchPrereqOk(int id) {
     if (id < 0 || id >= BENCH_COUNT) return 0;
     int row = benchNodes[id].row;
     if (row == 0) return 1;                       /* 第一层无条件 */
+    if(id>=16) return BenchHas((id-16)*4+2);
     return BenchHas(id - 1);                      /* 同列上一层 */
 }
 
-int BenchCanBuy(int id) {
-    if (!BenchPrereqOk(id)) return 0;
-    if (BenchHas(id)) return 0;
-    return shards >= benchNodes[id].cost;
+/* v6：顶点二选一 —— A(id 3/7/11/15) 与 B(id 16/17/18/19) 互斥 */
+static int capstonePartner(int id) {
+    if (id == 3 || id == 7 || id == 11 || id == 15) return 16+(id-3)/4;
+    if (id >= 16 && id <= 19) return (id-16)*4+3;
+    return -1;
 }
 
+/* v7：给 UI 用 —— 这个节点买下去会涨多少 THREAT。
+   算法必须和 BenchTryBuy 里的一致（ThreatAddForTier(row+1, star)）。 */
+int BenchThreatCostOf(int id) {
+    if (id < 0 || id >= BENCH_COUNT) return 0;
+    /* 和 ThreatAddForTier 的公式保持一致 */
+    if (benchNodes[id].star) return 3;                 /* THREAT_W_CAPSTONE */
+    switch (benchNodes[id].row + 1) {
+    case 1:  return 1;
+    case 2:  return 2;
+    case 3:  return 3;
+    default: return 1;
+    }
+}
+
+int BenchCanBuy(int id) {
+    if (id < 0 || id >= BENCH_COUNT) return 0;
+    if (BenchHas(id)) return 0;
+    if (!BenchPrereqOk(id)) return 0;
+    {
+        int partner = capstonePartner(id);
+        if (partner >= 0 && BenchHas(partner)) return 0;   /* 对面已选，锁死 */
+    }
+    { extern int WalletCanPayRun(int); return WalletCanPayRun(benchNodes[id].cost); }
+}
+
+/* ==================================================================
+ * v7 第 ㊿ 轮：**返回值语义原来和调用方完全反了**
+ * ==================================================================
+ * 这里成功返回 1、失败返回 0；
+ * 而 shop.c 把这个函数当"0 = 成功、2/3/4 = 各种失败"来解读。
+ *
+ * 后果：**买失败时屏幕弹「已安装」并播放成功音效**，
+ *       买成功时一个字都没有。
+ *       这不是缺提示，是"假成功回应"——玩家会以为买了，
+ *       然后发现钱没扣、节点没亮，接着怀疑游戏坏了。
+ *
+ * 现在统一成原因码（和 RunUpgTryBuy 一致）：
+ *   1 = 成功 / 2 = 已拥有 / 3 = 需要先买上一层
+ *   4 = 金币不够 / 5 = 已被对面的顶点锁死
+ * ================================================================ */
 int BenchTryBuy(int id) {
-    if (id < 0 || id >= BENCH_COUNT) return 1;
-    if (BenchHas(id)) return 2;                   /* 已拥有 */
-    if (!BenchPrereqOk(id)) return 3;             /* 前置没买 */
-    if (shards < benchNodes[id].cost) return 4;   /* 碎片不够 */
-    shards -= benchNodes[id].cost;
+    if (id < 0 || id >= BENCH_COUNT)   return 3;
+    if (BenchHas(id))                  return 2;
+    if (!BenchPrereqOk(id))            return 3;
+    {
+        int partner = capstonePartner(id);
+        if (partner >= 0 && BenchHas(partner)) return 5;
+    }
+    { extern int WalletCanPayRun(int);
+      if (!WalletCanPayRun(benchNodes[id].cost)) return 4; }
+    { extern int WalletSpendRun(int); if (!WalletSpendRun(benchNodes[id].cost)) return 4; }
     benchOwned |= (1u << id);
-    return 0;
+    /* v6：买得越多，怪越凶 —— 局内强度必须有代价 */
+    { extern void ThreatAddForTier(int, int);
+      ThreatAddForTier(benchNodes[id].row + 1, benchNodes[id].star); }
+    { extern void SaveGame(void); SaveGame(); }
+    return 1;
 }
 
 /* ==================== 效果查询（v3.0 逃生向） ==================== */
@@ -100,28 +132,34 @@ int BenchTryBuy(int id) {
    下面每个 accessor 后面的注释写明它现在指向哪个节点，便于维护。 */
 
 /* ---- 列 0：潜行 ---- */
-float BenchWalkNoiseMul(void)  { return BenchHas(0)  ? 0.65f : 1.0f; }   /* 0 LIGHT STEP  噪音 -35% */
-float BenchSearchQuiet(void)   { return BenchHas(1)  ? 0.50f : 1.0f; }   /* 1 QUIET LID   翻箱 -50% */
-int   BenchSilentThrow(void)   { return BenchHas(2)  ? 1 : 0; }          /* 2 SILENT THROW 投掷无声 */
-int   BenchVanish(void)        { return BenchHas(3); }                   /* 3 VANISH      隐身 */
+float BenchWalkNoiseMul(void)  { return BenchHas(18) && sanity<30.0f ? 0.8f : 1.0f; }   /* 0 LIGHT STEP  噪音 -35% */
+float BenchSearchQuiet(void)   { return 1.0f; }   /* 1 QUIET LID   翻箱 -50% */
+int   BenchSilentThrow(void)   { return 0; }          /* 2 SILENT THROW 投掷无声 */
+int   BenchVanish(void)        { return 0; }                   /* 3 VANISH      隐身 */
 
 /* ---- 列 1：体能 ---- */
-int   BenchStaminaBonus(void)  { return BenchHas(4)  ? 30 : 0; }         /* 4 ENDURANCE   +30 */
-int   BenchCrankWalk(void)     { return BenchHas(5)  ? 1 : 0; }          /* 5 CRANK WALK  边走边摇 */
-int   BenchSlide(void)         { return BenchHas(6)  ? 1 : 0; }          /* 6 SLIDE       滑铲 */
-int   BenchSecondWind(void)    { return BenchHas(7); }                   /* 7 SECOND WIND 二次呼吸 */
+int   BenchStaminaBonus(void)  { return 0; }         /* 4 ENDURANCE   +30 */
+int   BenchCrankWalk(void)     { return 0; }          /* 5 CRANK WALK  边走边摇 */
+int   BenchSlide(void)         { return 0; }          /* 6 SLIDE       滑铲 */
+int   BenchSecondWind(void)    { return 0; }                   /* 7 SECOND WIND 二次呼吸 */
 
 /* ---- 列 2：投掷 ---- */
-int   BenchDeepPocket(void)    { return BenchHas(8)  ? 1 : 0; }          /* 8 DEEP POCKET 上限 +2 */
-float BenchSteadyHand(void)    { return BenchHas(9)  ? 0.64f : 1.0f; }   /* 9 STEADY HAND 蓄力更快 */
-int   BenchSalvage(void)       { return BenchHas(10) ? 1 : 0; }          /* 10 SALVAGE    可捡回 */
-int   BenchTwinThrow(void)     { return BenchHas(11) ? 1 : 0; }          /* 11 TWIN THROW 双投 */
+int   BenchDeepPocket(void)    { return 0; }          /* 8 DEEP POCKET 上限 +2 */
+float BenchSteadyHand(void)    { return 1.0f; }   /* 9 STEADY HAND 蓄力更快 */
+int   BenchSalvage(void)       { return 0; }          /* 10 SALVAGE    可捡回 */
+int   BenchTwinThrow(void)     { return 0; }          /* 11 TWIN THROW 双投 */
 
 /* ---- 列 3：生存 ---- */
-float BenchFearDamageMul(void) { return BenchHas(12) ? 0.80f : 1.0f; }   /* 12 THICK SKIN 被抓 -20% 理智 */
-float BenchBatterySaver(void)  { return BenchHas(13) ? 0.75f : 1.0f; }   /* 13 SPARE CELL 耗电 -25% */
-int   BenchCatchBreak(void)    { return BenchHas(14) ? 1 : 0; }          /* 14 CATCH BREAK 空格挣脱 */
-int   BenchPlayDead(void)      { return BenchHas(15); }                  /* 15 PLAY DEAD   假死 */
+float BenchFearDamageMul(void) { return (BenchHas(9)?0.80f:1.0f)*(BenchHas(11)?0.70f:1.0f); }   /* 12 THICK SKIN 被抓 -20% 理智 */
+float BenchBatterySaver(void)  { return 1.0f; }   /* 13 SPARE CELL 耗电 -25% */
+int   BenchCatchBreak(void)    { return 0; }          /* 14 CATCH BREAK 空格挣脱 */
+int   BenchPlayDead(void)      { return 0; }                  /* 15 PLAY DEAD   假死 */
+
+/* v6：四个第二顶点的效果（id 16..19，与 3/7/11/15 互斥） */
+int   BenchBullRush(void)   { return 0; }   /* 16 蛮冲：移速+噪音 */
+int   BenchBurst(void)      { return 0; }   /* 17 爆发：冲刺+体力- */
+int   BenchLure(void)       { return 0; }   /* 18 诱饵：投掷噪音x3 */
+int   BenchRecover(void)    { return 0; }   /* 19 回神：安全屋+60% */
 
 /* ===== v3.4 退役节点的兼容桩 =====
    HOLD BREATH / BURST / HEARING / INNER EYE / PREMONITION / COMPOSURE
@@ -145,7 +183,7 @@ float BenchDarkFearMul(void)   { return 1.0f; }   /* COMPOSURE 已退役 */
 int   BenchEnergyMax(int base)      { return base; }
 float BenchDamageMul(void)          { return 1.0f; }
 float BenchSanityDrainMul(void)     { return 1.0f; }
-float BenchFlashDrainMul(void)      { return 1.0f; }
+float BenchFlashDrainMul(void) { return (BenchHas(5)?0.80f:1.0f)*(BenchHas(7)?0.65f:1.0f)*(BenchHas(17)?1.20f:1.0f); }
 float BenchBatteryPickupMul(void)   { return 1.0f; }
 float BenchLowSpeedAdd(void)        { return 0.0f; }
 int   BenchArmorIgnore(void)        { return 0; }
@@ -178,7 +216,7 @@ float BenchNodeWorldX(int id) {
 
 float BenchNodeWorldY(int id) {
     if (id < 0 || id >= BENCH_COUNT) return 0.0f;
-    return 40.0f + (float)benchNodes[id].row * BENCH_NODE_WY;
+    return 40.0f + (float)(id>=16 ? 4 : benchNodes[id].row) * BENCH_NODE_WY;
 }
 
 void BenchFocusNode(int id) {
@@ -214,11 +252,33 @@ void BenchZoomAt(float factor, int mx, int my) {
 }
 
 void BenchResetView(void) {
-    treeVX = 0.0f; treeVY = 0.0f; treeVK = 1.0f;
+    float left=(float)winW*0.32f, right=(float)winW*0.96f;
+    float top=(float)winH*0.18f, bottom=(float)winH*0.72f;
+    treeVK=(right-left)/(4.0f*BENCH_NODE_WX);
+    float ky=(bottom-top)/(5.0f*BENCH_NODE_WY); if(ky<treeVK) treeVK=ky;
+    if(treeVK<0.40f) treeVK=0.40f;
+    treeVX=left+BENCH_NODE_WX*treeVK*0.5f-40.0f*treeVK;
+    treeVY=top+BENCH_NODE_WY*treeVK*0.5f-40.0f*treeVK;
     uiDirty = 1;
 }
 
 void BenchPanBy(float dxScreen, float dyScreen) {
     treeVX += dxScreen; treeVY += dyScreen;
     uiDirty = 1;
+}
+
+float BenchMoveMul(void) { return (BenchHas(1)?1.06f:1.0f)*(BenchHas(16)?1.12f:1.0f)*(BenchHas(18)&&sanity<30.0f?1.1f:1.0f); }
+float BenchStaminaMul(void) { return (BenchHas(0)?1.15f:1.0f)*(BenchHas(3)?1.30f:1.0f)*(BenchHas(16)?0.85f:1.0f); }
+float BenchSprintCostMul(void) { return (BenchHas(2)?0.75f:1.0f)*(BenchHas(3)?0.85f:1.0f); }
+float BenchBatteryCapMul(void) { return BenchHas(4)?1.20f:1.0f; }
+float BenchLightRangeMul(void) { return (BenchHas(6)?1.25f:1.0f)*(BenchHas(17)?1.40f:1.0f); }
+float BenchSanityAdd(void) { return BenchHas(8)?20.0f:0.0f; }
+float BenchHealMul(void) { return BenchHas(10)?1.50f:1.0f; }
+float BenchKnockExtra(void) { return (BenchHas(13)?1.0f:0.0f)+(BenchHas(14)?1.5f:0.0f); }
+float BenchKnockStunMul(void) { return (BenchHas(14)?1.5f:1.0f)*(BenchHas(19)?2.0f:1.0f); }
+int BenchKnockCharges(void) { return BenchHas(12)?1:0; }
+int BenchShock(void) { return BenchHas(15); }
+void BenchRefundRun(void) {
+    int refund=0; for(int i=0;i<BENCH_COUNT;++i) if(BenchHas(i)) refund+=benchNodes[i].cost;
+    BenchResetRun(); ThreatReset(); WalletAddRun(refund); SaveGame();
 }

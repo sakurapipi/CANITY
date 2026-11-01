@@ -15,6 +15,15 @@
 #include "weapons.h"
 #include "shop.h"
 #include "bench.h"
+#include "events.h"
+#include "achievements.h"
+#include "telemetry.h"
+#include "daily.h"
+#include "steam_zone.h"
+#include "music.h"
+#include "wallet.h"
+#include "warden.h"
+#include "campaign.h"
 #include "lockbox.h"   /* v2.7 改造树 */
 #include "upgrade_run.h"
 #include "relics.h"
@@ -37,11 +46,11 @@ void ThrowItem(int type, float charge);
 void SpawnShards(float x, float y, float vx, float vy, float charge);
 /* v3.3：粘胶区域（实现放在 entity.c） */
 void SpawnGlue(float x, float y);
-void WeaponTryAttack(float charge);   /* v2.0 武器攻击 */
 /* InitAchievements is public now (see game.h) */
 static void UnlockAchievement(int idx);
-static void AddAchievementProgress(int idx, int amount);
 static void CheckAchievements(void);
+int CatchCountThisRun(void);
+float ExtractDepthMul(int level);
 /* v3.4 银行结算（实现见下方 BankSettle） */
 void BankSettle(int survived);
 
@@ -101,7 +110,8 @@ float modShardMul = 1.0f;     /* v2.0 事件：碎片倍率 */
 float modNoiseMul = 1.0f;     /* v2.0 事件：噪声倍率（死寂） */
 float levelBanner = 0.0f;      /* 进关后显示词条名的秒数 */
 float safeZoneMsg = 0.0f;      /* 进入安全屋后提示「SAFE ZONE」的剩余秒数 */
-int shards = 0;
+int carryGold = 0;
+int carryAtRunStart = 0;   /* v6：本局开局时的携带量（算净赚用） */
 int upgBattery = 0;      /* 电量上限 +20/级 */
 int upgSpeed = 0;        /* 移速 +6%/级 */
 int upgQuiet = 0;        /* 噪声半径 -15%/级 */
@@ -115,7 +125,7 @@ int flares = 0, bottles = 0;
 int bricks = 0, acids = 0, smokeBombs = 0;   /* v1.16 新投掷物 */
 int firePots = 0, gluePots = 0, mirrors = 0; /* v2.0 三个新投掷物（v3.3：火/镜已删，只剩 gluPots 在用） */
 int echoBolts = 0;   /* v3.3 回声弹：落地显示 15 格内怪物位置 5 秒 */
-int decoys = 0;      /* v3.3 玩家诱饵玩偶：C 键放置，每 3 秒发声，挡 2 次伤害 */
+int decoys = 0;      /* v3.3 玩家诱饵玩偶：C 键放置，每 DECOY_SHOUT_EVERY 秒发声 */
 int g_dmgIgnoreArmor = 0;
 float smokeDim = 1.0f;      /* 烟幕内的光线衰减 */
 int monsterMuted = 0;       /* v1.20b：只静怪物的叫声（训练场） */
@@ -194,7 +204,7 @@ float heartTimer = 0.0f;
 int searchedCount = 0;    /* 搜索过的容器数 */
 int hasSave = 0;          /* 是否有可继续的存档 */
 
-int totalShardsEarned = 0;  /* 累计获得碎片（用于成就） */
+int totalGoldEarned = 0;  /* 累计获得碎片（用于成就） */
 int bottlesKilled = 0;      /* 用瓶子击杀怪物数 */
 int faceDodged = 0;         /* 躲开跳脸虫次数 */
 int crankTimeTotal = 0;     /* 累计发电秒数 */
@@ -212,6 +222,18 @@ int sprintedThisLevel = 0;  /* 本局是否冲刺过 */
    导致 SILENT SHADOW 到第 5 层必然满足）。 */
 int hideCount = 0;
 int totalThrown = 0;
+/* v7 第 ㊿ 轮：成就用的三个真实计数器 */
+int knockCountRun = 0;       /* 整局扳手击退次数 */
+int throwHitCountRun = 0;    /* 整局投掷命中次数 */
+int echoCellsTotalRun = 0;   /* 整局回声弹揭示格数 */
+/* v7 第 ㊿ 轮：每日任务用 */
+int bountyRecovered = 0;   /* v7：从拾荒者手里抢回赃款的次数 */
+int metaResetDone = 0;     /* v7：局外技能树重置过一次 */
+int dailyEscapeCount = 0;    /* 当天累计撤离次数（每日目标 1） */
+int lastRunGold=0, lastRunKept=0, lastRunCaught=0;
+int wardenCleanFloors=0, fullHideDone=0;
+float doubleHuntSeconds=0.0f;
+int floorsNoSanityLoss = 0;  /* 连续不掉理智的层数（每日目标 7） */
 int sprintedAnyFloor = 0;
 const char* pickupMsg = NULL;    /* 拾取提示文本 */
 float pickupMsgTimer = 0.0f;     /* 提示显示剩余时间 */
@@ -224,10 +246,8 @@ int runInProgress = 0;    /* 当前是否有一局未结束 */
 
 /* ---- v1.8 新状态 ---- */
 int bestMainScore = 0;        /* 主线最高分（固定分，记录展示用） */
-int pendingShards = 0;        /* 本层已获得、尚未上缴的碎片 */
 /* ===== v3.4 银行博弈 ===== */
 int   bankGold      = 0;    /* 局外存款（不参与局内消费） */
-int   carryGold     = 0;    /* 本局带进去的本金（死亡时按比例返还） */
 int   bankHistMax   = 1;    /* 历史最高存款，决定倍数分母 */
 int   bankCarryPct  = 10;   /* v6：档位 0..20 → 0% ~ 100%（每档 5%）。
                                默认 50%，不是 100% —— 100% 时倍数恒为 ×2、
@@ -283,7 +303,7 @@ float playerMoveSpeedNow = 0.0f;
 
 int   wrenchCharges  = 2;
 float wrenchCd       = 0.0f;
-int   wrenchLastUsed = 0;      /* 本层已经用掉几次（次数制显示用） */
+int   wrenchLastUsed = 0;
 float secondWindTimer = 0.0f;   /* v3.0 二次呼吸：体力归零后的宽限秒数 */
 float vanishTimer = 0.0f;       /* v3.0 消失：脱离视线累计秒数 */
 int   playDeadUsed = 0;         /* v3.0 假死：本局用过了吗 */
@@ -301,23 +321,12 @@ int hubPage = 1;   /* v6：Hub **只有一页**（技能树）。变量保留兼
 int levelEvent = -1;         /* 本层随机事件，-1 = 无 */
 int eventBonus = 0;          /* 本局事件累计加分 */
 
-const char* const eventNames[EVENT_COUNT] = {
-    "BLOOD MOON", "BLACKOUT", "DEAD SILENCE", "SUPPLY DROP",
-    "FLOOD", "WHISPERS", "MIRROR"
-};
+/* v6：事件名与分数全部搬到 events.c 的表里 */
 
 /* 通过本层时给的分 */
 int EventScore(int ev) {
-    switch (ev) {
-    case EV_BLOOD_MOON: return 1500;
-    case EV_BLACKOUT:   return 1000;
-    case EV_SILENCE:    return 800;
-    case EV_SUPPLY:     return 600;
-    case EV_FLOOD:      return 1200;    /* v2.0 */
-    case EV_WHISPER:    return 1300;
-    case EV_MIRROR:     return 1600;
-    default:            return 0;
-    }
+    extern int EventScoreOf(int);
+    return EventScoreOf(ev);   /* v6：查 events.c 的表 */
 }
 
 int playerInSafe = 0;
@@ -333,7 +342,8 @@ int forceFrame = 0;          /* v1.8：窗口变化后立刻出一帧，减少�
 ScoreBreakdown lastScore;     /* 上一次结算的分项 */
 int skillPickOptions[INRUN_CHOICES] = {-1, -1, -1};
 int skillPickSel = 0;
-int pickMode = 0;      /* v2.0：0 = 局内技能，1 = 遗物 */
+int pickMode = 0;
+static int pendingSkillDraft=0;      /* v2.0：0 = 局内技能，1 = 遗物 */
 int bossLevel = 0;     /* v2.1：本层是否 Boss 层 */
 int bossMaxHp = 1;
 int bossDefeated = 0;
@@ -367,15 +377,11 @@ static int pendingCampaignStage = 0;
 static void ApplyCampaignRules(int stage);
 
 /* v2.0 战役：5 个手工场景，固定种子 + 各自的规则 */
-static const char* kCampaignName[5] = {
-    "THE WARM-UP", "THE HUNT", "THE DROUGHT", "THE FLOOD", "THE LAST LIGHT"
-};
-static const char* kCampaignNameZh[5] = {
-    "热身", "猎杀", "干旱", "洪水", "最后的灯"
-};
+/* v6：关名搬到 campaign.c 的 kCampaign[] */
 const char* campaignName(int stage) {
-    if (stage < 0 || stage >= 5) return "?";
-    return Tr(kCampaignName[stage], kCampaignNameZh[stage]);
+    extern const CampaignDef kCampaign[];
+    if (stage < 0 || stage >= CAMPAIGN_STAGE_COUNT) return "?";
+    return (g_lang == LANG_ZH) ? kCampaign[stage].nameZh : kCampaign[stage].nameEn;
 }
 /* v2.0：燃烧瓶留下的火区（同时最多 3 处） */
 static float fireX[3], fireY[3], fireT[3];
@@ -406,9 +412,7 @@ void ClearKeyEdges(void) {
     for (int i = 0; i < 256; i++) keyPressed[i] = 0;
 }
 
-int achSelection = 0;
-int achHovered = -1;     /* 鼠标悬停的成就索引，-1 = 无；用于显示 tooltip */
-Achievement g_achievements[ACH_COUNT] = {0};
+/* v6：g_achievements 定义在 achievements.c */
 
 /* 每个菜单状态的滚动偏移，持久化避免 GetMenuGeo 重新计算 */
 int menuScrollOffsets[16] = {0};   /* 下标 = GameState，留足余量 */  /* 下标 = GameState，包含 STATE_ACHIEVEMENTS=7 */
@@ -643,7 +647,7 @@ void UpdateSmokes(float dt) {
     MoneyTick(dt);
     { extern void UpdateWarden(float); UpdateWarden(dt); }   /* v8 B1: 守门人 */   /* v8: 钱袋逻辑已搬到 src/money.c */
 
-    /* v3.3：诱饵心跳 —— 每 3 秒叫一次，把怪引过去 */
+    /* v3.3：诱饵心跳 —— 每 DECOY_SHOUT_EVERY 秒叫一次，把怪引过去 */
     for (int i = 0; i < MAX_DECOY; i++) {
         if (!decoysArr[i].active) continue;
         decoysArr[i].life -= dt;
@@ -851,6 +855,8 @@ static const char* optFps[5] = {"30", "60", "120", "144", "Unlimited"};
 static const char* optScale[4] = {"HIGH (100%)", "MEDIUM (75%)", "LOW (50%)", "MINIMAL (25%)"};
 static const char* optFov[5] = {"66", "75", "85", "95", "105"};
 static const char* optOnOff[2] = {"OFF", "ON"};
+/* v6 第 ㊳ 轮：语言选项 —— 之前 g_lang 只能靠改存档改 */
+static const char* optLang[2] = {"ENGLISH", "\xe4\xb8\xad\xe6\x96\x87"};
 /* HUD 详细度：游戏画面上放多少字。
    Minimal = 只留必须实时知道的数值；Full = 全部显示。 */
 static const char* optHud[3] = {"Minimal", "Normal", "Full"};
@@ -900,6 +906,11 @@ SettingItem settings[] = {
     /* ========== 分类: GAMEPLAY ========== */
     {"Mouse Sens.",     SET_SLIDER, NULL,        0, NULL, &mouseSens, 0.2f, 3.0f, 0.1f, 6},
     {"Volume",          SET_SLIDER, NULL,        0, NULL, &volumeF,  0.0f, 1.0f, 0.05f, 6},
+    /* v6 第 ㊳ 轮：**语言切换终于有入口了**
+       审计发现 LangToggle() 全工程 0 调用点 ——
+       游戏支持中英双语，但玩家在设置里找不到任何开关。
+       这里直接绑 g_lang（0=EN，1=ZH），列表循环就能切。 */
+    {"Language",        SET_LIST,   optLang,     2, &g_lang,             NULL,      0,    0,    0, 6},
     {"Sanity FX",       SET_LIST,   optOnOff,    2, &vignetteOn,        NULL,      0,    0,    0, 6},
     {"Show FPS",        SET_LIST,   optOnOff,    2, &showFps,           NULL,      0,    0,    0, 6},
     {"HUD Detail",      SET_LIST,   optHud,      3, &hudDetail,         NULL,      0,    0,    0, 6},
@@ -1215,10 +1226,10 @@ const char* TutorialObjective(void) {
         snprintf(buf, sizeof(buf), "CRANK  -  HOLD %s", VkName(g_bindings[ACT_CRANK]));
         break;
     case TUT_THROW:
-        snprintf(buf, sizeof(buf), "THROW  -  HOLD %s", VkName(g_bindings[ACT_THROW]));
+        snprintf(buf, sizeof(buf), "THROW  -  HOLD %s", VkName(g_bindings[ACT_CANCEL_CHARGE]));
         break;
     case TUT_KNOCK:
-        snprintf(buf, sizeof(buf), "KNOCK  -  HOLD %s", VkName(g_bindings[ACT_CANCEL_CHARGE]));
+        snprintf(buf, sizeof(buf), "KNOCK  -  HOLD %s", VkName(g_bindings[ACT_THROW]));
         break;
     case TUT_BREAKER:
         snprintf(buf, sizeof(buf), "BREAKER  -  HOLD %s", VkName(g_bindings[ACT_INTERACT]));
@@ -1316,6 +1327,9 @@ static void TutorialUpdate(float dt) {
         if (dirX * tutorialStartDirX + dirY * tutorialStartDirY < 0.985f) TutorialAdvance();
         break;
     case TUT_SPRINT:
+        /* v6：每日限制 —— 不能冲刺 */
+        { extern int DailyForbidSprint(void);
+          if (DailyForbidSprint() && sprinting) sprinting = 0; }
         if (sprinting) tutorialActionTimer += dt;
         else tutorialActionTimer = 0.0f;
         if (tutorialActionTimer >= 0.5f) TutorialAdvance();
@@ -1359,14 +1373,19 @@ static void TutorialUpdate(float dt) {
 /* v2.1：找离出生点最远的空格（BFS 洪泛）。
    原来出口硬编码在出生点正右方 2 格 —— 每层开局第一帧构图完全一样，
    而且整层探索的动机被削掉一半。 */
-static void FindFarthestCell(float* outX, float* outY) {
+/* v6 第 ㉔ 轮：**从任意格出发**找最远格。
+   原来只有"从出生点 (1,1)"一个版本，所以战役里写"出口更远"
+   根本做不出来 —— 最远格就是最远格，再找一次还是它。
+   现在第 3/5 关改成「从配电箱出发的最远格」：
+   通电之后你必须横穿整张图。 */
+static void FindFarthestFromCell(int sx, int sy, float* outX, float* outY) {
     static int dist[MAP_HEIGHT][MAP_WIDTH];
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++) dist[y][x] = -1;
 
     int qx[MAP_WIDTH * MAP_HEIGHT], qy[MAP_WIDTH * MAP_HEIGHT];
     int head = 0, tail = 0;
-    int sx = 1, sy = 1;
+    if (sx < 1 || sx >= MAP_WIDTH - 1 || sy < 1 || sy >= MAP_HEIGHT - 1) { sx = 1; sy = 1; }
     dist[sy][sx] = 0;
     qx[tail] = sx; qy[tail] = sy; tail++;
 
@@ -1395,10 +1414,15 @@ static void FindFarthestCell(float* outX, float* outY) {
     *outY = (float)by + 0.5f;
 }
 
+/* 旧接口：从出生点 (1,1) 出发 */
+static void FindFarthestCell(float* outX, float* outY) {
+    FindFarthestFromCell(1, 1, outX, outY);
+}
+
 void GenerateLevel(void) {
+    BestiaryBeginFloor();
     SuspicionReset();   /* v7：新一层，清空可疑点 */
     {   /* v7：新一层，清空地上的钱袋 */
-        extern int moneyDropOpen;
         extern void MoneyBagsResetForNewFloor(void);
         MoneyBagsResetForNewFloor();
     }
@@ -1409,6 +1433,11 @@ void GenerateLevel(void) {
         extern float floorTime;
         extern int hideStreak;
         ScavengerReset(); floorTime = 0.0f; hideStreak = 0;
+    { extern void EchoMarksReset(void); EchoMarksReset(); }   /* v2.4.62 换层清空回声标记 */
+    { extern void FlankBuild(void), ResetSecondSpawn(void);
+      FlankBuild(); ResetSecondSpawn();
+      { extern void CatchCountResetFloor(void); CatchCountResetFloor(); }
+    }   /* v2.4.94 封喉表 + 第二只计时 + 理智档位重置 */
     }
     {   /* v7：拾荒者按强度档决定是否出现 */
         extern void CollectorSpawnIfEligible(void);
@@ -1501,6 +1530,23 @@ void GenerateLevel(void) {
     /* 生成迷宫时保证出生点右侧有通路 */
     worldMap[1][2] = 0; worldMap[1][3] = 0;  /* 确保右侧有路 */
     FindFarthestCell(&exitX, &exitY);   /* v2.1：离出生点最远的空格 */
+    /* ================================================================
+     * v6 战役第 3/5 关：出口改成**离配电箱最远的格**
+     * ================================================================
+     * 原来的写法是"再找一次最远格取更远的那个" —— 但那个函数是确定性的，
+     * 两次结果一模一样，等于什么都没做。
+     *
+     * 正确语义：通电之后，出口在**图纸的另一头**。
+     * 你必须从配电箱横穿整张图才能出去。
+     * ================================================================ */
+    {
+        extern float CampaignExitDistNow(void);
+        extern Breaker breaker;
+        if (CampaignExitDistNow() > 1.01f) {
+            int bx = (int)breaker.x, by = (int)breaker.y;
+            FindFarthestFromCell(bx, by, &exitX, &exitY);
+        }
+    }
 
     /* 收集空地用于放置容器/配电箱/安全屋（排除出生区和出口周围） */
     static int cells[MAP_WIDTH * MAP_HEIGHT][2];
@@ -1562,6 +1608,23 @@ void GenerateLevel(void) {
     }
     /* 词条倍率已在上面重置并抽取；战役规则现在叠加到本层基础倍率上，
        这样首层和后续层都会生效，同时不会覆盖随机词条。 */
+    /* ==================================================================
+     * v6 第 ㉑ 轮：**每日任务的修正终于生效了**
+     * ==================================================================
+     * 第 ⑦ 轮写好 daily.c 的 6 个修正函数，但**一个调用点都没有** ——
+     * 玩家看到的每日任务只有"目标"，没有"世界规则变了"。
+     *
+     * 这里在事件表之后叠一层，顺序：基础 → 层词条 → 事件 → 战役 → 每日
+     * ================================================================ */
+    if (dailyMode) {
+        extern float DailyMonsterSpeedMul(void), DailyBatteryDrainMul(void);
+        extern float DailyGoldMul(void), DailyNoiseMul(void);
+        modSpeedMul   *= DailyMonsterSpeedMul();
+        modBatteryMul *= DailyBatteryDrainMul();
+        modShardMul   *= DailyGoldMul();
+        modNoiseMul   *= DailyNoiseMul();
+    }
+
     if (campaignMode) ApplyCampaignRules(campaignStage);
     levelBanner = 5.0f;
 
@@ -1570,7 +1633,24 @@ void GenerateLevel(void) {
     if (levelMod == 0) battery = (float)BatteryMax() * 0.55f;
 
     /* 本关需要的保险丝：2 根起，每 3 关 +1，最多 4（主线）；无尽模式封顶到 MAX_CONTAINERS */
-    if (isEndlessRun) {
+    /* ==================================================================
+     * v7 第 ㊿ 轮：**战役模式用 kCampaign[].fuses**
+     * ==================================================================
+     * 那个字段填好了（4/3/6/3·3·4/8）但全工程 0 个读取点，
+     * 于是 5 关的保险丝全走普通曲线 —— 战役规模差异完全不成立。
+     * ================================================================ */
+    if (campaignMode) {
+        extern int CampaignFusesNow(void);
+        int cf = CampaignFusesNow();
+        if (cf >= 2 && cf <= MAX_CONTAINERS) {
+            fusesNeeded = cf;
+            fusesNeeded -= (HasKeystone(SK_FUSE_LESS) ? 1 : 0) + RunFuseLess() + SkillOwned(SK_SHORTCUTJR);
+            if (fusesNeeded < 2) fusesNeeded = 2;
+        } else {
+            fusesNeeded = 2 + currentLevel / 3;
+            if (fusesNeeded > 6) fusesNeeded = 6;
+        }
+    } else if (isEndlessRun) {
         fusesNeeded = 2 + currentLevel / 3;   /* 见下方与箱子数联动的夹取 */
         if (fusesNeeded > MAX_CONTAINERS) fusesNeeded = MAX_CONTAINERS; /* 新增限制 */
     } else {
@@ -1580,7 +1660,7 @@ void GenerateLevel(void) {
            给电池/药/投掷物留出货位（原来无尽第 18 层 8 根 = 全箱都是保险丝）。 */
         fusesNeeded = 2 + currentLevel / 3;
         if (fusesNeeded > 6) fusesNeeded = 6;
-        fusesNeeded -= (HasKeystone(SK_FUSE_LESS) ? 1 : 0) + RunFuseLess();
+        fusesNeeded -= (HasKeystone(SK_FUSE_LESS) ? 1 : 0) + RunFuseLess() + SkillOwned(SK_SHORTCUTJR);
         if (fusesNeeded < 2) fusesNeeded = 2;
     }
 
@@ -1592,12 +1672,30 @@ void GenerateLevel(void) {
     if (isEndlessRun) {
         baseContainers += currentLevel / 5;  /* 每 5 层 +1 保底 */
     }
-    int contCap = ContainerTargetCount(levelMod, baseContainers);
+    /* ==================================================================
+     * v7 第 ㊿ 轮：**保险丝曲线被容器数夹死**
+     * ==================================================================
+     * 曲线本来写的是 fusesNeeded = 2 + currentLevel/3（封顶 6），
+     * 但箱子只有 3~5 个，紧接着这一行：
+     *     if (!campaignMode && fusesNeeded > contCap - 2) fusesNeeded = contCap - 2;
+     * 把曲线整个压回 2~3 根 —— **24 层没有任何爬升**。
+     *
+     * 审计原话：「第 2 层和第 20 层做的事一模一样」。
+     *
+     * 修法：反着来 —— 先让箱子数**跟着保险丝需求涨**（保险丝 + 2 个余量给
+     * 电池/药/投掷物），再夹到 MAX_CONTAINERS。这样曲线才真的生效。
+     * ================================================================ */
+    if (baseContainers < fusesNeeded + 2) baseContainers = fusesNeeded + 2;
+    if (baseContainers > MAX_CONTAINERS) baseContainers = MAX_CONTAINERS;
+    if (baseContainers < 3) baseContainers = 3;
+
+    int contCap = (int)(ContainerTargetCount(levelMod, baseContainers) * DailyCrateCountMul() + 0.5f);
     if (contCap < fusesNeeded) contCap = fusesNeeded;
 
     /* v3.0 平衡：保险丝不许多于「箱子数 - 2」——
-       否则整层所有箱子都是保险丝，电池/药/投掷物一件都搜不到。 */
-    if (fusesNeeded > contCap - 2) fusesNeeded = contCap - 2;
+       否则整层所有箱子都是保险丝，电池/药/投掷物一件都搜不到。
+       （上面的 baseContainers 已经保证了 fusesNeeded + 2，这里通常不再触发） */
+    if (!campaignMode && fusesNeeded > contCap - 2) fusesNeeded = contCap - 2;
     if (fusesNeeded < 2) fusesNeeded = 2;
 
     int attempts = 0;
@@ -1809,42 +1907,48 @@ void GenerateLevel(void) {
     ExtrasSpawnForLevel(currentLevel);
     levelEvent = -1;
     if (currentLevel >= 2 && (rand() % 100) < EVENT_CHANCE)
-        levelEvent = rand() % EVENT_COUNT;
+        {   /* v6：按权重抽（血月/空投更常见，幸运更少见） */
+            extern int EventPickRandom(unsigned int*);
+            unsigned int sd = (unsigned int)rand();
+            levelEvent = EventPickRandom(&sd);
+        }
     /* v2.0：每日挑战的固定加成，每层都生效 */
     if (dailyMode) {
         modSanityMul *= 1.25f;
         modShardMul *= 1.25f;
     }
-    if (levelEvent == EV_BLOOD_MOON) {
-        modSpeedMul *= 1.15f;                 /* 怪更快 */
-    } else if (levelEvent == EV_BLACKOUT) {
-        float cap = (float)BatteryMax() * 0.5f;
-        if (battery > cap) battery = cap;     /* 本层电量上限砍半 */
-    } else if (levelEvent == EV_SUPPLY) {
-        /* v2.2：补给空投给足量（原来最多 +1 荧光棒 +1 瓶，等于没有） */
-        flares += 2;
-        if (bottles < BottleCap()) bottles += 2;
-        firePots++;
-    } else if (levelEvent == EV_SILENCE) {
-        /* v2.2：死寂从 0.5 加强到 0.3（0.5 在走路噪声 4.5 格上几乎感知不到） */
-        modNoiseMul = 0.30f;
-    } else if (levelEvent == EV_FLOOD) {
-        /* v2.0 涨水：手电耗电翻倍，本层更逼你省电 */
-        modBatteryMul = 2.0f;
-    } else if (levelEvent == EV_WHISPER) {
-        /* v2.0 低语：理智流失 +50%，碎片 +50% —— 拿命换钱 */
-        modSanityMul *= 1.5f;
-        modShardMul *= 1.5f;
-    } else if (levelEvent == EV_MIRROR) {
-        /* v2.2 修复：描述写"怪物成倍出现"，实际只 +10% 速度和理智 ——
-           玩家完全感知不到。现在真的多放 3 只游荡怪（它们已经可杀）。 */
-        modSpeedMul *= 1.10f;
-        modSanityMul *= 1.10f;
-        int added = 0;
-        for (int i = 0; i < EXTRA_MAX && added < 3; i++) {
-            if (extras[i].active) continue;
-            ExtrasSpawnOne(i);
-            if (extras[i].active) added++;
+    /* ===== v6：事件效果统一从表里取 =====
+       加一个事件只需要在 events.c 的 kEvents[] 里加一行，
+       这里永远不用改。 */
+    {
+        extern const EventEffect* EventEffectFor(int);
+        const EventEffect* fx = EventEffectFor(levelEvent);
+        modSpeedMul  *= fx->monsterSpeedMul;
+        modNoiseMul  *= fx->noiseMul;
+        modBatteryMul *= fx->batteryDrainMul;
+        modSanityMul *= fx->sanityDrainMul;
+        modShardMul  *= fx->goldMul;
+
+        /* 电池上限按百分比压 */
+        if (fx->batteryCapPct != 100 && fx->batteryCapPct > 0) {
+            float cap = (float)BatteryMax() * (float)fx->batteryCapPct / 100.0f;
+            if (battery > cap) battery = cap;
+        }
+
+        /* 额外游荡怪 */
+        if (fx->extraMonsters > 0) {
+            int added = 0;
+            for (int i = 0; i < EXTRA_MAX && added < fx->extraMonsters; i++) {
+                if (extras[i].active) continue;
+                ExtrasSpawnOne(i);
+                if (extras[i].active) added++;
+            }
+        }
+
+        /* 空投：额外给投掷物 */
+        if (levelEvent == EV_SUPPLY) {
+            flares += 2;
+            if (bottles < BottleCap()) bottles += 2;
         }
     }
 
@@ -1867,10 +1971,12 @@ void GenerateLevel(void) {
             }
         }
     }
-    BestiaryMarkSeen(0);                                  /* 寻声鬼：每层都有 */
-    if (lightBeast.active) BestiaryMarkSeen(1);           /* 追光鬼 */
-    if (currentLevel >= LEECH_MIN_LEVEL) BestiaryMarkSeen(2);   /* 偷电怪 */
-    if (jumperTrigger >= 0.0f) BestiaryMarkSeen(3);       /* 跳脸虫 */
+    { extern void BestiaryNoteFloor(int,int);
+      extern void BestiaryMarkSeen(int);
+      BestiaryMarkSeen(0); BestiaryNoteFloor(0, currentLevel); }   /* 寻声鬼：每层都有 */
+    if (lightBeast.active) { BestiaryMarkSeen(1); BestiaryNoteFloor(1, currentLevel); }           /* 追光鬼 */
+    if (currentLevel >= LEECH_MIN_LEVEL) { BestiaryMarkSeen(2); BestiaryNoteFloor(2, currentLevel); }   /* 偷电怪 */
+    if (jumperTrigger >= 0.0f) { BestiaryMarkSeen(3); BestiaryNoteFloor(3, currentLevel); }       /* 跳脸虫 */
 
     /* 记录本局见过的词条种类（算难度乘子用） */
     if (levelMod >= 0) {
@@ -2022,7 +2128,7 @@ void UpdateExplored(void) {
 }
 int BatteryMax(void) {
     /* v2.2：SAVER 的 "cap -5" 代价现在真的生效 */
-    int m = 100 + SkillBatteryAdd() + RunBatteryCapDelta();
+    int m = (int)((100 + SkillBatteryAdd() + RunBatteryCapDelta() + 30*relicOwned[3]) * DailyBatteryCapMul() * BenchBatteryCapMul());
     if (m < 30) m = 30;
     return m;
 }
@@ -2032,7 +2138,7 @@ float BatteryDrainRate(void) { return BATTERY_DRAIN * BenchBatterySaver() * Skil
 
 /* 安全屋回智速度：REST 升级每级 +25% */
 float SafeHealRate(void) {
-    return SAFE_HEAL_RATE * (1.0f + SkillRestAdd() + RelicHealAdd());   /* REST + IRON LUNG */
+    return SAFE_HEAL_RATE * (1.0f + SkillRestAdd() + RelicHealAdd())*(HasKeystone(SK_LASTRESORT)?0.5f:1.0f);   /* REST + IRON LUNG */
 }
 
 /* v1.8：理智流失随层数增长（原版是常量，导致经济净正、玩家不死） */
@@ -2082,7 +2188,7 @@ int   calibResult = 0;        /* 0 无 / 1 完美 / 2 普通 / 3 失手 */
 float calibResultTimer = 0.0f;
 
 /* ===== v3.4 金币产出公式（方案 v5 §4）=====
-/* ===== v3.4 银行结算（方案 v5 §2.3）=====
+    v3.4 银行结算（方案 v5 §2.3）
    BANK += CARRY + 利润 × 倍数          （活着结算）
    BANK += CARRY × 0.5                  （死亡，本金损失一半 ——
                                           调研：100% 没收会 feel-bad，
@@ -2090,8 +2196,17 @@ float calibResultTimer = 0.0f;
 
    倍数 = 1 + min(1, CARRY / 历史最高)   → 1.0 ~ 2.0
    带 <20% 历史最高时利润 ×0.5（惩罚躺平：不能永远只带一点点） */
+int BankPreviewGain(int survived) {
+    int profit=carryGold-carryAtRunStart;if(profit<0)profit=0;
+    float pm=1.0f;
+    if(survived) {if(!tookDamage)pm*=1.5f;if(!runSpotted)pm*=1.3f;if(!runLightUse)pm*=1.2f;
+      profit=(int)(profit*pm*ExtractDepthMul(currentLevel)*ContractExitMul()*SkillExtractMul()+0.5f);}
+    return WalletPreviewSettle(survived,profit);
+}
 void BankSettle(int survived) {
-    int profit = shards - carryGold;
+    lastRunGold=carryGold; lastRunCaught=CatchCountThisRun();
+    int profit = carryGold - carryAtRunStart;   /* v6：本局净赚 = 现在 - 开局 */
+    if (profit < 0) profit = 0;
     if (profit < 0) profit = 0;
 
     /* v3.4 **表现加成**（方案 v5 §4.4）—— 可叠加，最高 ×2.34
@@ -2106,29 +2221,36 @@ void BankSettle(int survived) {
         if (!runSpotted)   pm *= 1.3f;
         if (!runLightUse)  pm *= 1.2f;
         if (pm > 2.34f) pm = 2.34f;
-        profit = (int)((float)profit * pm + 0.5f);
+        profit = (int)((float)profit * pm * ExtractDepthMul(currentLevel) * ContractExitMul() * SkillExtractMul() + 0.5f);
         lastPerfMul = pm;      /* 结算页显示用 */
     } else {
         lastPerfMul = 1.0f;
     }
 
-    if (survived) {
-        if (bankHistMax > 0 &&
-            (float)carryGold < (float)bankHistMax * BANK_LOW_CARRY) {
-            profit = (int)((float)profit * BANK_LOW_PENALTY + 0.5f);
+    /* v6：结算统一走 WalletSettle */
+    {
+        extern int WalletBank(void);
+        int beforeBank = WalletBank();
+        { extern void WalletSettle(int, int); WalletSettle(survived, profit); }
+        lastRunKept=WalletBank()-beforeBank;
+        /* v6 第 ⑲ 轮：**实测遥测** —— 每局结束写一行，
+           玩几局之后就能算真实金币/局、真实时长，
+           再回头校准技能树价格（现在是推算值，不是实测值）。 */
+        {
+            extern void TelemetryRunEnd(int, int, int, int, float, int);
+            extern int CatchCountThisRun(void);
+float ExtractDepthMul(int level);
+            TelemetryRunEnd(currentLevel,
+                            WalletBank() - beforeBank,
+                            lastRunGold,
+                            survived ? 1 : 0,
+                            runTime,
+                            CatchCountThisRun());
         }
-        float ratio = (bankHistMax > 0) ? (float)carryGold / (float)bankHistMax : 1.0f;
-        if (ratio > 1.0f) ratio = 1.0f;
-        float mult = 1.0f + ratio;
-        if (mult > BANK_MAX_MULT) mult = BANK_MAX_MULT;
-        bankGold += carryGold + (int)((float)profit * mult + 0.5f);
-    } else {
-        bankGold += (int)((float)carryGold * BANK_DEATH_REFUND + 0.5f);
     }
-    if (bankGold > bankHistMax) bankHistMax = bankGold;
-    shards = 0;
-    pendingShards = 0;
-    carryGold = 0;
+    SteamZoneSetStatInt("BEST_FLOOR",bestLevel);
+    SteamZoneSetStatInt("BANK_GOLD",bankGold);
+    SteamZoneStoreStats();
     SaveGame();
 }
 
@@ -2196,14 +2318,19 @@ float EndlessDepthBonus(int level) {
 }
 
 float SanityMax(void) {
-    float m = 100.0f + RelicMaxSanAdd();
+    float m = 100.0f + RelicMaxSanAdd()+BenchSanityAdd();
     if (m < 25.0f) m = 25.0f;
     return m;
 }
 
 float StaminaMax(void) {
     /* v3.0：改造树「耐力」+30 */
-    return 100.0f + (float)RunStaminaAdd() + (float)BenchStaminaBonus();
+    float m = 100.0f + (float)RunStaminaAdd() + (float)BenchStaminaBonus();
+    /* v6 第 ㉟ 轮：**爆发**（第 1 列第二顶点）体力上限 -30%，
+       换冲刺速度 +25%（冲刺加成的调用点在下面的移速计算里）。
+       第 ⑩ 轮加了节点没接 —— 玩家花钱买了个空节点。 */
+    { extern int BenchBurst(void); if (BenchBurst()) m *= 0.70f; }
+    return m*BenchStaminaMul();
 }
 
 /* v2.3：武器能量上限 */
@@ -2220,16 +2347,6 @@ int UpgradeLevel(int kind) {
     }
 }
 
-static void AddUpgrade(int kind) {
-    switch (kind) {
-        case 0: upgBattery++; break;
-        case 1: upgSpeed++; break;
-        case 2: upgQuiet++; break;
-        case 3: upgSanity++; break;
-        case 4: upgEco++; break;
-        default: upgRest++; break;
-    }
-}
 
 const char* UpgradeName(int kind) {
     switch (kind) {
@@ -2248,15 +2365,7 @@ int UpgradeCost(int kind) {
     return 30 + lvl * 45;      /* 30 / 75 / 120 */
 }
 
-static int BuyUpgrade(int kind) {
-    int cost = UpgradeCost(kind);
-    if (cost < 0 || shards < cost) return 0;
-    shards -= cost;
-    AddUpgrade(kind);
-    PlaySfx(SFX_POWER, 0.8f);
-    SaveGame();
-    return 1;
-}
+
 
 /* ---------------- 寻声怪 ---------------- */
 /* v1.16：蓄满（>=0.85）额外 +1 伤害 */
@@ -2294,179 +2403,12 @@ int WeaponDamageType(int id) {
 }
 
 /* v2.0 RELOAD RHYTHM：每第 3 次命中无视护甲 */
-static int g_hitCombo = 0;
-static int WeaponHitTick(void) {
-    g_hitCombo++;
-    if (SkillRhythmActive(g_hitCombo)) return 1;
-    return 0;
-}
 
-void WeaponTryAttack(float charge) {
-#if NO_COMBAT
-    /* v3.0 逃生试炼：**左键不再是攻击，是敲击**。
-       朝前方敲一下（墙/管道/门），制造噪音把追捕者引过去 ——
-       这是逃生类的经典操作：用声音控制敌人的位置。
-       不消耗能量、不判定伤害、不产生子弹。 */
-    MakeNoise(posX + dirX * 2.0f, posY + dirY * 2.0f, 11.0f);   /* v3.0 平衡：18 → 11 */
-    PlaySfx(SFX_GLASS, 0.55f);
-    if (trainingMode) tutorialKnocked = 1;
-    pickupMsg = g_lang == LANG_ZH ? "敲击  制造噪音" : "KNOCK  NOISE";
-    pickupMsgTimer = 0.8f;
-    uiDirty = 1;
-    (void)charge;
-    return;
-#endif
 
-    if (weaponCd > 0.0f) return;
-    const WeaponDef* w = WeaponGet(curWeapon);
-    float cost = WeaponCostNow(curWeapon);
-    if ((float)WeaponResourceAmount(w->resource) < cost) {
-        pickupMsg = "NOT ENOUGH";
-        pickupMsgTimer = 1.0f;
-        PlaySfx(SFX_POWER, 0.25f);
-        return;
-    }
+/* v2.4.80：WeaponTryAttack 已删除 —— 左键改走 WrenchStrike()，
+   这个函数（含里面的旧扳手击退、拾荒者判定）已经没有调用者，
+   留着只会让人以为"还有另一条攻击路径"。 */
 
-    WeaponSpend(w->resource, cost);
-    /* v2.1：开火反馈 */
-    muzzleFlash = 1.0f;
-    AddShake(w->kind == WPN_MELEE ? 0.16f : 0.11f, w->kind == WPN_MELEE ? 0.10f : 0.055f);
-    /* v2.0：体力是唯一会自然回复的资源，攻击后压住回复 0.7 秒，
-       否则 20/s 的回复会把 18 点的消耗在两秒内吃掉，「烧体力」就没有意义了。 */
-    /* v2.3：三把武器都烧能量，体力不再被攻击压住恢复 */
-    weaponCd = WeaponCdNow(curWeapon);
-
-    int dmg = WeaponDamageNow(curWeapon, charge);
-    int silent = WeaponSilentNow(curWeapon);
-    MakeNoise(posX, posY, w->noise * (silent ? 0.5f : 1.0f));   /* v3.0：轻步已移到脚步噪音处 */
-
-    if (w->kind == WPN_MELEE) {
-        /* 近战：沿视线扫 6 段，命中就停（除非有穿透） */
-        int hits = 0;
-        float range = WeaponRangeNow(curWeapon);
-        for (int st = 1; st <= 6; st++) {
-            float d = range * (float)st / 6.0f;
-            float px = posX + dirX * d, py = posY + dirY * d;
-            if (Blocked(px, py)) break;
-            if (monster.active && Dist2(px, py, monster.x, monster.y) < 0.42f) {
-                g_dmgIgnoreArmor = WeaponHitTick();
-                ApplyDamage(&monster, dmg, WeaponDamageType(curWeapon), posX, posY);
-                g_dmgIgnoreArmor = 0;
-                hits++;
-                /* ===== v7 **扳手击退** =====
-                   推出几格由升级等级决定；次数制下消耗一次，冷却制下进冷却。
-                   推的方向 = 从玩家指向怪物，推开后若落进墙里就退回一半。 */
-                {
-                    extern int RunUpgWrenchLevel(void);
-                    extern float RunUpgWrenchRange(void);
-                    extern float RunUpgWrenchCooldown(void);
-                    extern float RunUpgWrenchStun(void);
-                    extern int wrenchCharges, wrenchLastUsed;
-                    extern float wrenchCd;
-                    int lv = RunUpgWrenchLevel();
-                    float cdMax = RunUpgWrenchCooldown();
-                    int can = (cdMax < 0.0f) ? (wrenchLastUsed < wrenchCharges)
-                                             : (wrenchCd <= 0.0f);
-                    if (can) {
-                        float rng  = RunUpgWrenchRange();
-                        float dxm  = monster.x - posX, dym = monster.y - posY;
-                        float dm   = sqrtf(dxm * dxm + dym * dym);
-                        if (dm < 0.01f) { dxm = dirX; dym = dirY; dm = 1.0f; }
-                        dxm /= dm; dym /= dm;
-                        float nx2 = monster.x + dxm * rng;
-                        float ny2 = monster.y + dym * rng;
-                        if (Blocked(nx2, ny2)) {          /* 撞墙就只推一半 */
-                            nx2 = monster.x + dxm * rng * 0.5f;
-                            ny2 = monster.y + dym * rng * 0.5f;
-                        }
-                        if (!Blocked(nx2, ny2)) { monster.x = nx2; monster.y = ny2; }
-                        monster.stun = RunUpgWrenchStun();
-                        if (monster.stun < 0.25f) monster.stun = 0.25f;
-                        monster.repath = 0.0f;
-                        monster.pathLen = 0;
-                        monster.pathIdx = 0;
-                        if (cdMax < 0.0f) { wrenchLastUsed++; }
-                        else { wrenchCd = cdMax; }
-                        PlaySfx(SFX_POWER, 0.5f);
-                        { extern void HintOnce(int); HintOnce(6); }   /* v7 B4 */
-                        {   /* v7：打的是拾荒者吗？两次能抢回赃款 */
-                            extern void CollectorHitByWrench(float, float);
-                            CollectorHitByWrench(monster.x, monster.y);
-                        }
-                        AddShake(0.18f, 0.12f);
-                        /* 击退拾荒者 -> 记一次（两次抢回赃款，见 v7 方案 3.4） */
-                        { extern int DecoyIntercept(void); (void)DecoyIntercept; }
-                    }
-                }
-            }
-            if (lightBeast.active && Dist2(px, py, lightBeast.x, lightBeast.y) < 0.42f) {
-                g_dmgIgnoreArmor = WeaponHitTick();
-                ApplyDamage(&lightBeast, dmg, WeaponDamageType(curWeapon), posX, posY);
-                g_dmgIgnoreArmor = 0;
-                hits++;
-            }
-            /* v6.4：游荡怪已删，三只怪共用的伤害入口一起移除 */
-            for (int i = 0; i < LEECH_MAX; i++) {
-                if (!leeches[i].active) continue;
-                if (Dist2(px, py, leeches[i].x, leeches[i].y) < 0.42f) {
-                    leeches[i].active = 0;
-                    hits++;
-                }
-            }
-            if (hits > 0 && !WeaponPierceNow(curWeapon)) break;
-        }
-        if (hits > 0) {
-            slashHitStop = 0.04f;
-            AddShake(0.22f, 0.16f);
-            SpawnShards(posX + dirX * 1.2f, posY + dirY * 1.2f, dirX * 2.0f, dirY * 2.0f, charge);
-            WeaponAddXp(curWeapon, hits);
-            PlaySfx(SFX_GLASS, 0.6f);
-        } else {
-            PlaySfx(SFX_STEP, 0.45f);
-        }
-        return;
-    }
-
-    if (w->kind == WPN_RANGED) {
-        /* 远程：塞进 shot 池，kind 6 */
-        for (int i = 0; i < MAX_SHOTS; i++) {
-            if (shot[i].active) continue;
-            shot[i].x = posX + dirX * 0.35f;
-            shot[i].y = posY + dirY * 0.35f;
-            shot[i].z = SHOT_HEIGHT * 0.85f;
-            shot[i].vx = dirX * w->speed;
-            shot[i].vy = dirY * w->speed;
-            shot[i].vz = 0.6f;
-            shot[i].life = WeaponRangeNow(curWeapon) / (w->speed > 0.01f ? w->speed : 1.0f);
-            if (shot[i].life < 0.10f) shot[i].life = 0.10f;
-            shot[i].age = 0.0f;
-            shot[i].charge = charge;
-            shot[i].kind = 6;
-            shot[i].dmg = dmg;
-            shot[i].pierce = WeaponPierceNow(curWeapon);   /* v2.0：穿透配件对远程生效 */
-            shot[i].mirrorRebounded = 0;
-            shot[i].ignoreTarget = -1;
-            shot[i].ignoreTargetTime = 0.0f;
-            shot[i].active = 1;
-            break;
-        }
-        PlaySfx(SFX_THROW, 0.8f);
-        return;
-    }
-
-    /* 法术：走光束（和剑气同一套渲染），穿透 */
-    slashActive = 1;
-    slashX = posX + dirX * 0.4f;
-    slashY = posY + dirY * 0.4f;
-    slashDX = dirX;
-    slashDY = dirY;
-    slashTravel = 0.0f;
-    slashFade = 0.0f;
-    slashDmg = dmg;
-    slashMaxDist = WeaponRangeNow(curWeapon);
-    if (slashMaxDist < 4.0f) slashMaxDist = 4.0f;
-    PlaySfx(SFX_CRANK, 0.7f);
-}
 
 /* v2.1：对外统一的粒子接口。tint: 0 玻璃 / 1 血 / 2 尘 */
 void SpawnParticles(float x, float y, int tint) {
@@ -2496,22 +2438,290 @@ void SpawnShards(float x, float y, float vx, float vy, float charge) {
         count--;
     }
 }
+
+/* ===== v2.4.62 **回声弹的永久标记** =====
+   用户要求：「增加怪物图标在地图上，毕竟是永久透视，
+   有怪物的时候在地图上就能看到，仅限那两三格。
+   就是被扫描投掷物照出来之后，这一层可以永久透视那两三格。」
+
+   所以：回声弹落地时，把落点 3 格内的所有怪物**记下来**，
+   这一层之内它们都会显示在小地图上（红色骷髅点）。
+   换层时清空。 */
+#define ECHO_MARK_MAX 8
+float echoMarkX[ECHO_MARK_MAX];
+float echoMarkY[ECHO_MARK_MAX];
+int   echoMarkActive[ECHO_MARK_MAX];
+
+void EchoMarksReset(void) {
+    for (int i = 0; i < ECHO_MARK_MAX; i++) {
+        echoMarkActive[i] = 0;
+        echoMarkX[i] = echoMarkY[i] = 0.0f;
+    }
+}
+
+/* 在 (sx,sy) 周围 rad 格内记录所有怪物 */
+void EchoMarksScan(float sx, float sy, float rad) {
+    extern Monster monster, lightBeast, monster2;
+    extern int   CollectorActive(void), ScavengerActive(void), WardenActive(void);
+    extern float CollectorX(void), CollectorY(void);
+    extern float ScavengerX(void), ScavengerY(void);
+    extern float WardenX(void), WardenY(void);
+    extern int   trainingMode;
+
+    float px[8]; float py[8]; int n = 0;
+    if (monster.active)   { px[n] = monster.x;   py[n] = monster.y;   n++; }
+    if (monster2.active)  { px[n] = monster2.x;  py[n] = monster2.y;  n++; }
+    if (lightBeast.active){ px[n] = lightBeast.x; py[n] = lightBeast.y; n++; }
+    if (!trainingMode) {
+        if (CollectorActive()) { px[n] = CollectorX(); py[n] = CollectorY(); n++; }
+        if (ScavengerActive()) { px[n] = ScavengerX(); py[n] = ScavengerY(); n++; }
+        if (WardenActive())    { px[n] = WardenX();    py[n] = WardenY();    n++; }
+    }
+
+    float r2 = rad * rad;
+    for (int i = 0; i < n && i < 8; i++) {
+        float dx = px[i] - sx, dy = py[i] - sy;
+        if (dx * dx + dy * dy > r2) continue;
+        /* 找一个空槽记下 */
+        for (int k = 0; k < ECHO_MARK_MAX; k++) {
+            if (echoMarkActive[k]) {
+                /* 已经有同一只的标记 → 更新位置 */
+                float ox2 = echoMarkX[k] - px[i], oy2 = echoMarkY[k] - py[i];
+                if (ox2 * ox2 + oy2 * oy2 < 1.0f) { echoMarkX[k] = px[i]; echoMarkY[k] = py[i]; k = -1; break; }
+                continue;
+            }
+            echoMarkActive[k] = 1;
+            echoMarkX[k] = px[i];
+            echoMarkY[k] = py[i];
+            break;
+        }
+    }
+}
+
+/* ================================================================== */
+/* v2.4.80 **左键 = 扳手击退**（从零重写，取代原来的 atkNow 块）        */
+/* ================================================================== */
+/*
+ * 规则（只有这三条）：
+ *   按住左键        → 蓄力（0 → 1，0.45 秒满）
+ *   松手，蓄力 < 0.28 → **什么都不做**（阻尼，防误触）
+ *   松手，蓄力 >= 0.28 → 击退：
+ *                        · 消耗一次扳手（次数制）/ 进冷却（冷却制）
+ *                        · 推走面前的怪（距离按蓄力）
+ *                        · 打掉拾荒者的赃款（两次）
+ *                        · 播两帧挥击动画
+ *
+ * 不含任何"普通敲击"—— 用户明确要求删掉那个动作。
+ */
+/* ==================================================================
+ * v2.4.83 **多帧挥击 + 命中窗口**
+ *
+ * 用户要求：「动画多来几帧，然后在这几帧之内击退都生效。」
+ * 意思是：不要把判定做成"松手瞬间一次性结算"，
+ * 而是挥出去之后，**在挥击动作进行的过程中**判定命中。
+ *
+ *   帧 0  蓄力/起手        判定关
+ *   帧 1  后摆最高点      判定关
+ *   帧 2  挥到面前（接触）  **判定开**  ← 打中就在这一帧
+ *   帧 3  收势            判定关
+ *   帧 4  回位            判定关
+ *
+ * 这样"打中"发生在视觉上挥到的那一帧，手感才对得上。
+ * ========================================================== */
+#define WRENCH_SWING_FRAMES  5
+#define WRENCH_HIT_FRAME     2      /* 第几帧开始判定 */
+
+float wrenchSwingT = 0.0f;      /* 剩余时间 */
+float wrenchSwingPower = 1.0f;  /* 这次挥击的力度 */
+int   wrenchSwingHit = 0;       /* 已经判定过了吗 */
+
+/* 挥击进度 0..1（0 = 刚挥出，1 = 已收势） */
+static float WrenchSwingProgress(void) {
+    if (wrenchSwingT <= 0.0f) return 1.0f;
+    return 1.0f - wrenchSwingT / WRENCH_SWING_TIME;
+}
+
+/* 当前第几帧（0..4） */
+static int WrenchSwingFrame(void) {
+    float p = WrenchSwingProgress();
+    int f = (int)(p * (float)WRENCH_SWING_FRAMES);
+    if (f < 0) f = 0;
+    if (f >= WRENCH_SWING_FRAMES) f = WRENCH_SWING_FRAMES - 1;
+    return f;
+}
+
+/* ---- 真正结算击退（在命中帧调用一次）---- */
+static unsigned int wrenchHitMask=0;
+static void WrenchApplyHit(float power) {
+    extern float RunUpgWrenchRange(void);
+    extern float RunUpgWrenchStun(void);
+    extern Monster monster;
+
+    Monster* targets[2]={&monster,&lightBeast};
+    for(int ti=0;ti<2;++ti) { Monster* target=targets[ti];
+    if (target->active && !(wrenchHitMask&(1u<<ti))) {
+        float rng=RunUpgWrenchRange()+BenchKnockExtra();
+        float dx = target->x - posX, dy = target->y - posY;
+        float d2 = dx * dx + dy * dy;
+        float reach = rng + 1.2f;
+        if (d2 < reach * reach) {
+            float d = sqrtf(d2);
+            float ux = (d > 0.01f) ? dx / d : dirX;
+            float uy = (d > 0.01f) ? dy / d : dirY;
+            float push = rng * power;
+            float nx = target->x + ux * push;
+            float ny = target->y + uy * push;
+            if (Blocked(nx, ny)) { nx = target->x + ux * push * 0.5f;
+                                   ny = target->y + uy * push * 0.5f; }
+            if (!Blocked(nx, ny)) { target->x = nx; target->y = ny; }
+            wrenchHitMask|=1u<<ti;
+            target->stun=RunUpgWrenchStun()*BenchKnockStunMul();
+            knockCountRun++;
+            if(BenchShock()) { SuspicionReset();target->stateTimer=0.0f;target->tx=target->x;target->ty=target->y; }
+            target->state = 0;
+            target->pathLen = 0;
+            target->pathIdx = 0;
+            target->repath = 0.0f;
+            PlaySfx(SFX_POWER, 0.60f);
+            AddShake(0.16f, 0.12f);
+        }
+    }
+
+    }
+
+    {
+        extern int   CollectorActive(void);
+        extern float CollectorX(void), CollectorY(void);
+        extern void  CollectorHitByWrench(float, float);
+        if (CollectorActive() && !(wrenchHitMask&4u)) {
+            float cdx = CollectorX() - posX, cdy = CollectorY() - posY;
+            if (cdx * cdx + cdy * cdy < 4.0f) { CollectorHitByWrench(posX, posY);wrenchHitMask|=4u;knockCountRun++; }
+        }
+    }
+}
+
+/* ---- 开始一次挥击（只扣资源，不判定）---- */
+void WrenchStartSwing(float charge) {
+    /* v6 每日限制：今天不能使用扳手 */
+    { extern int DailyForbidWrench(void);
+      if (DailyForbidWrench()) {
+          extern const char* pickupMsg;
+          extern float pickupMsgTimer;
+          pickupMsg = "TODAY: NO WRENCH";
+          pickupMsgTimer = 1.6f;
+          return;
+      } }
+    extern float RunUpgWrenchCooldown(void);
+    extern int   wrenchCharges, wrenchLastUsed;
+    extern float wrenchCd;
+
+    float cdMax = RunUpgWrenchCooldown();
+
+    if (cdMax < 0.0f) {
+        if (wrenchLastUsed >= wrenchCharges) return;
+        wrenchLastUsed++;
+    } else {
+        if (wrenchCd > 0.0f) return;
+        wrenchCd = cdMax;
+    }
+
+    wrenchSwingT     = WRENCH_SWING_TIME;
+    wrenchSwingPower = 0.70f + 0.30f * charge;
+    wrenchSwingHit   = 0;
+    wrenchHitMask = 0;
+    PlaySfx(SFX_STEP, 0.50f);
+}
+
+/* ---- 每帧推进挥击动画，在命中帧结算 ---- */
+void WrenchTick(float dt) {
+    extern float wrenchSwingT;
+    if (wrenchSwingT <= 0.0f) return;
+
+    wrenchSwingT -= dt;
+    if (wrenchSwingT < 0.0f) wrenchSwingT = 0.0f;
+
+    if (WrenchSwingFrame() >= WRENCH_HIT_FRAME) {
+        wrenchSwingHit = 1;
+        WrenchApplyHit(wrenchSwingPower);
+    }
+}
+
+float wrenchCharge = 0.0f;    /* 0..1 */
+static int  wrenchPrev = 0;
+static int  wrenchInit = 0;
+/* ===== v2.5.00 **装填闩** =====
+   用户报告：「每次进游戏老是误触消耗一次扳手次数。」
+
+   根因：在主菜单用**鼠标左键**点"新游戏"，进入游戏时左键往往还按着。
+   旧代码在 resetInputState 那一帧只是把 wrenchPrev 同步成"已按下"，
+   但**接下来它仍然在累积蓄力**，等你松手就判定成一次挥击 ——
+   于是每局开场都白扣一次。
+
+   现在加一个闩：reset 之后必须**先松开过一次**，才允许开始蓄力。
+   拿鼠标点进游戏 → 松开 → 之后才是真正的一挥。 */
+static int  wrenchArmed = 1;
+
+static void WrenchKnockUpdate(float dt) {
+    extern int lockActive, isCharging;
+    extern float wrenchCd;
+
+    int down = (!lockActive) && (!isCharging) && IsActionDown(ACT_CANCEL_CHARGE);
+
+    if (resetInputState || !wrenchInit) {
+        wrenchPrev = down;
+        wrenchCharge = 0.0f;
+        wrenchArmed = 0;          /* 上闩：先松开才有效 */
+        wrenchInit = 1;
+    }
+
+    /* 只要处于"没按住"，就把闩打开 */
+    if (!down) wrenchArmed = 1;
+
+
+    if (down && !wrenchPrev) {
+        /* 只有上过膛才允许开始蓄力 */
+        wrenchCharge = wrenchArmed ? (dt / 0.45f) : 0.0f;
+        if (wrenchCharge > 1.0f) wrenchCharge = 1.0f;
+    } else if (down) {
+        if (wrenchArmed) {
+            wrenchCharge += dt / 0.45f;
+            if (wrenchCharge > 1.0f) wrenchCharge = 1.0f;
+        }
+    } else if (!down && wrenchPrev) {
+        if (wrenchArmed && wrenchCharge >= WRENCH_CHARGE_DEADZONE) {
+            WrenchStartSwing(wrenchCharge);
+        }
+        wrenchCharge = 0.0f;
+    }
+
+    wrenchPrev = down;
+}
+
 void Update(float dt) {
     { extern float playerMoveSpeedNow; playerMoveSpeedNow = 0.0f; }   /* v8: 守门人判断「在动/冲刺」用 */
     /* v7：可疑点表每帧衰减 / 过期 */
     { extern float gameTime; gameTime += dt; }   /* v2.4.3 全局秒表 */
     SuspicionTick(dt);
+    DailyTick();   /* Calendar rollover also applies while in menus. */
+    if(currentState==STATE_PLAYING && exitChoiceOpen && !keyPressed['1'] && !keyPressed['2']) return;
+    if(currentState==STATE_PLAYING && !trainingMode) {
+        if(monster.active && monster.state==2 && lightBeast.active && lightBeast.state==2) doubleHuntSeconds+=dt;
+        else if(doubleHuntSeconds<30.0f) doubleHuntSeconds=0.0f;
+        static int hidingHunt=0;
+        if(hiddenIn>=0 && (monster.state==2 || lightBeast.state==2)) hidingHunt=1;
+        if(hiddenIn<0) hidingHunt=0;
+        if(hidingHunt && monster.state!=2 && lightBeast.state!=2) { fullHideDone=1; hidingHunt=0; }
+    }
     {   /* v7 B4：第一次携带超过 8000 时提一句 */
         extern void HintOnce(int);
         if (carryGold >= 8000) HintOnce(4);
     }
-    { extern void UpdateCollector(float); UpdateCollector(dt); }
+    if(currentState==STATE_PLAYING && !exitChoiceOpen) { UpdateCollector(dt); }
     {   /* v7：清道夫 */
         extern float floorTime;
         extern void ScavengerTickTrigger(float), UpdateScavenger(float);
         if (currentState == STATE_PLAYING) floorTime += dt;
-        ScavengerTickTrigger(dt);
-        UpdateScavenger(dt);
+        if(currentState==STATE_PLAYING && !exitChoiceOpen) { ScavengerTickTrigger(dt); UpdateScavenger(dt); }
     }
     /* v7：扳手冷却递减 */
     { extern float wrenchCd; if (wrenchCd > 0.0f) { wrenchCd -= dt; if (wrenchCd < 0.0f) wrenchCd = 0.0f; } }
@@ -2586,6 +2796,24 @@ void Update(float dt) {
     int inSafe = (safeRoom.active &&
                   Dist2(posX, posY, safeRoom.x, safeRoom.y) < SAFE_ZONE_RADIUS * SAFE_ZONE_RADIUS);
 
+    /* ===== v2.4.98 **出口也算安全区** =====
+       用户报告的 bug：
+       「我刚好到撤离点，同时清道夫刷新，我再撤一点没选继续/撤离，
+         清道夫追上把我杀了，直接死亡。」
+
+       根因：出口原来只是"按到 0.55 格内弹面板"，**不提供任何保护**。
+       怪照追、照抓、照扣理智；理智一归零就直接判死。
+
+       现在：
+         · 距出口 1.4 格内 → 算安全区（怪不抓你）
+         · 撤离选择面板打开期间 → **无条件安全** */
+    {
+        extern int exitChoiceOpen, breakerOpen;
+        if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 1.4f * 1.4f) inSafe = 1;
+        if (exitChoiceOpen) inSafe = 1;
+    }
+
+
     /* v3.0：**开锁盘时暂停理智流失** ——
        用户实测「开锁装置导致精神崩溃」：
        锁盘是模态层，玩家不能动也不能跑，理智却照扣。
@@ -2649,16 +2877,20 @@ void Update(float dt) {
         if (sanity > SanityMax()) sanity = SanityMax();
     }
     lowSanitySeconds += (sanity <= 1.0f) ? dt : 0.0f;   /* v2.2：LAST BREATH */
+    /* v2.4.98：撤离面板开着的时候不许判死 ——
+       你已经在"要不要走"这一步了，此时被后面的怪撞死是 bug 不是难度。 */
+    {
+        extern int exitChoiceOpen;
+        if (exitChoiceOpen && sanity < 1.0f) sanity = 1.0f;
+    }
     if (sanity <= 0.0f) {
         sanity = 0.0f;
         runInProgress = 0;
         if (currentLevel > bestLevel) bestLevel = currentLevel;
         /* v2.0 SALVAGE：死亡时保留一半待上缴碎片 */
-    if (SkillSalvageKeep() > 0 && pendingShards > 0) {
-        int keep = pendingShards * SkillSalvageKeep() / 100;
-        shards += keep;
-        pendingShards -= keep;
-    }
+    /* v6：这里原本是一加一减两个空操作（净效果 0），
+       是合并货币时留下的。已删除。
+       死亡时的保留比例统一由 WalletSettle 的 BANK_DEATH_REFUND 处理。 */
     gameWon = 0;
         BankSettle(0);          /* v3.4：死亡结算 —— 本金返还 50% */
         /* v6 **死亡后不允许 Continue 复活** ——
@@ -2694,8 +2926,8 @@ void Update(float dt) {
     }
 
     if (flashlightOn) {
-        battery -= BatteryDrainRate() * RunBatteryDrainMul() * SkillGhostStepDrainMul() * dt;
-        if (battery <= 0.0f) { battery = 0.0f; flashlightOn = 0; }
+        if(!CampaignFlashlightLocked()) battery -= BatteryDrainRate() * RunBatteryDrainMul() * SkillGhostStepDrainMul() * dt;
+        if (battery <= 0.0f) { battery = 0.0f; flashlightOn = CampaignFlashlightLocked() ? 1 : 0; }
     }
 
     /* 先判断交互目标，决定这一帧能不能移动 */
@@ -2814,6 +3046,9 @@ void Update(float dt) {
                 uiDirty = 1;
             }
         } else if (hideSpotNear >= 0 && hideSpots[hideSpotNear].broken) {
+                    /* v6 每日限制：不能用藏身点 */
+                    { extern int DailyForbidHide(void);
+                      if (DailyForbidHide()) { pickupMsg = "TODAY: NO HIDE SPOTS"; pickupMsgTimer = 1.6f; hideKeyLatch = 1; } }
             /* ===== v2.4.17 **修复藏身点** =====
                清道夫撬坏的点按 E 花钱修。每修一次更贵。 */
             extern int hideRepairCount;
@@ -2825,7 +3060,7 @@ void Update(float dt) {
                 hideKeyLatch = 1;
                 keyPressed[g_bindings[ACT_INTERACT]] = 0;
                 if (carryGold >= cost && hideRepairCount < HIDESPOT_REPAIR_MAX) {
-                    carryGold -= cost;
+                    { extern int WalletSpendRun(int); WalletSpendRun(cost); }
                     hideSpots[hideSpotNear].broken = 0;
                     hideRepairCount++;
                     pickupMsg = (g_lang == LANG_ZH) ? "藏身点修好了" : "HIDE SPOT REPAIRED";
@@ -2890,7 +3125,7 @@ void Update(float dt) {
     /* v3.3：**B 键开/关训练营的分步引导** ——
        进 Tutorial 时默认不展开，只提示「按 B 激活引导」。 */
     /* v3.3：**T 在不能开店的地方也要给一句反馈** ——
-    /* ===== v6 **出口二选一** =====
+        v6 **出口二选一**
        1 = 撤离（立刻按 携带倍数 × 深度倍数 结算，本局结束）
        2 = 深入（继续下一层）
        ESC 不生效 —— 必须选一个。 */
@@ -2900,20 +3135,24 @@ void Update(float dt) {
             {
                 extern float ExtractDepthMul(int level);
                 float dm = ExtractDepthMul(currentLevel);
-                int carry = carryGold;
-                int profit = shards - carry;
+                /* v7 第 ㊿ 轮：**这里原来自己减自己**
+                   profit = carryGold - carry，而 carry 就是 carryGold
+                   → 恒 0 → 深度倍数一分不加 → 「越深撤离越值钱」不存在。 */
+                int profit = carryGold - carryAtRunStart;
                 if (profit < 0) profit = 0;
-                int extra = (int)((float)profit * (dm - 1.0f) + 0.5f);
-                shards += extra;
+                int extra=0; /* Depth and contract are applied once by BankSettle. */
+                carryGold += extra;
                 exitChoiceOpen = 0;
                 lastExtractDepthMul = dm;
                 /* v6 **必须先清 runInProgress** —— BankSettle 内部会 SaveGame，
                    原来在它之后才清零，存出一份「钱已进银行、人还站在出口」
                    的僵尸档，下次启动会出现假的 Continue。 */
                 runInProgress = 0;
-                BankSettle(1);
+                dailyEscapeCount++; DailyObserve(DQ_ESCAPE,dailyEscapeCount);
+                gameWon=1; CheckAchievements();
+                BankSettle(1); hasSave=0;
             }
-            gameWon = 0;
+            gameWon = 1;
             currentState = STATE_GAMEOVER;
             menuSelection = 0;
             ForceCursor(1);
@@ -2934,11 +3173,17 @@ void Update(float dt) {
     /* v3.3：T 键在不能开店的地方也要给一句反馈 ——
        试玩实测：「T 在走廊里按没反应，也没有『此处不能开商店』的提示」。
        静默是最糟糕的反馈，玩家会以为按键坏了。 */
-    if (currentState == STATE_PLAYING && keyPressed['T'] && !playerInSafe && hiddenIn < 0) {
-        keyPressed['T'] = 0;
-        pickupMsg = (g_lang == LANG_ZH) ? "商店只在安全屋" : "SHOP: SAFE HOUSE ONLY";
-        pickupMsgTimer = 1.4f;
-    }
+    /* v7 第 52 轮：**这条拦截删掉了**
+       它用的是 playerInSafe —— 那个变量在下面才更新，
+       所以玩家刚走进安全屋的那一帧，值还是 false，
+       T 被这里吃掉并弹一句「商店只在安全屋」，
+       而真正的开店代码在后面，永远收不到这个键。
+       （这就是「按 T 什么都没发生」的直接原因。）
+
+       而且现在商店是浮层，不再依赖安全屋状态机，
+       所以干脆允许**任何时候**按 T 打开。 */
+
+
 
 
 
@@ -2962,8 +3207,18 @@ void Update(float dt) {
             if (decoysArr[i].active && !decoysArr[i].armed) { any = 1; break; }
         if (any) {
             ArmDecoy();
-            pickupMsg = (g_lang == LANG_ZH) ? "诱饵已激活 - 每 3 秒叫一次"
-                                            : "DECOY ARMED - SHOUTS EVERY 3s";
+            /* ===== v2.4.63 **不要写死秒数** =====
+               原来文案写死「每 3 秒」，后来把 DECOY_SHOUT_EVERY 改成 1.5 之后
+               这句话就成了错的（用户实机看到的就是它）。
+               现在直接从常量生成，改参数文案自动跟着变。 */
+            {
+                static char decoyMsg[64];
+                snprintf(decoyMsg, sizeof(decoyMsg),
+                         (g_lang == LANG_ZH) ? "诱饵已激活 - 每 %.1f 秒叫一次"
+                                             : "DECOY ARMED - SHOUTS EVERY %.1fs",
+                         (double)DECOY_SHOUT_EVERY);
+                pickupMsg = decoyMsg;
+            }
             pickupMsgTimer = 2.0f;
         }
     }
@@ -3068,14 +3323,14 @@ void Update(float dt) {
 
     int wantSprint = IsActionDown(ACT_SPRINT);
     /* v3.0 改造树「二次呼吸」：体力归零后还能再冲 3 秒 */
-    if (BenchSecondWind()) {
+    if (BenchSecondWind() || HasKeystone(SK_LASTRESORT)) {
         if (stamina <= 0.0f && secondWindTimer <= 0.0f && wantSprint && secondWindTimer > -99.0f) {
             /* v3.0：**体力回满就恢复一次** ——
                原来 static swUsed 从不重置，整局只能用一次
                （验证报告：第二次起 secondWindTimer 恒 0）。 */
             static int swUsed = 0;
             if (stamina > StaminaMax() * 0.5f) swUsed = 0;
-            if (!swUsed) { secondWindTimer = 3.0f; swUsed = 1; }
+            if (!swUsed) { secondWindTimer = TUNE_SECOND_WIND_SECONDS; swUsed = 1; }
         }
         if (stamina <= 0.0f && secondWindTimer > 0.0f) {
             wantSprint = 1;          /* 宽限期内允许冲刺 */
@@ -3097,7 +3352,7 @@ void Update(float dt) {
     if (sprinting) {
         sprintedThisLevel = 1;  /* 标记本局冲刺过 */
         sprintedAnyFloor = 1;   /* v3.3：跨层不清零，SILENT SHADOW 用 */
-        stamina -= STAMINA_DRAIN * RunUpgStaminaMul() * dt;   /* v3.0 体能强化 */
+        stamina -= STAMINA_DRAIN * BenchSprintCostMul() * RunUpgStaminaMul() * dt;   /* v3.0 体能强化 */
         if (stamina < 0.0f) stamina = 0.0f;
         staminaIdle = 0.5f;
     } else if (staminaIdle > 0.0f) {
@@ -3130,10 +3385,44 @@ void Update(float dt) {
        站在安全屋里按 E 会让人搞不清是要搜箱子还是开店。
        E 保留给搜索，安全屋专用 T。 */
     /* v3.0：**藏身点里也能开商店** —— 用户要求「同时也可以打开商店面板」 */
-    if ((inSafe || hiddenIn >= 0) && currentState == STATE_PLAYING && keyPressed['T']) {
+    /* ==================================================================
+     * v7 第 ㊿ 轮：**T 也走 GetAsyncKeyState 兜底**
+     * ==================================================================
+     * WM_KEYDOWN 只在窗口有焦点时才来。GDI 窗口被别的程序抢焦点时，
+     * 玩家按 T 完全没反应 —— 而且这也让自动化测试无法验证这个功能。
+     *
+     * 这里自己做个 0→1 边沿检测，和 WM 那条互为兜底。
+     * ================================================================ */
+    {
+        static int tPrev = 0;
+        extern int shopOverlayOpen;
+        int tNow = (GetAsyncKeyState('T') & 0x8000) ? 1 : 0;
+        if (tNow && !tPrev && currentState == STATE_PLAYING && !shopOverlayOpen) {
+            extern void ShopOpen(int);
+            ShopOpen(currentLevel);
+            currentState = STATE_SAFEHOUSE;
+            shopPage = 0;
+            shopRow = 0;
+            ForceCursor(1);
+            uiDirty = 1;
+        }
+        tPrev = tNow;
+    }
+
+    if (currentState == STATE_PLAYING && keyPressed['T']) {   /* v7 第 52 轮：随时可开 */
         keyPressed['T'] = 0;
-        ShopOpen(currentLevel);
-        currentState = STATE_SAFEHOUSE;
+        /* v7 第 51 轮：**开浮层，不切状态**
+           STATE_SAFEHOUSE 那条路径一进就崩（已用 demo4 复现），
+           而浮层不动 currentState，绕开了整条坏路径。 */
+        {
+            extern int shopOverlayOpen;
+            extern void ShopOpen(int);
+            ShopOpen(currentLevel);
+            shopOverlayOpen = 1;
+            ForceCursor(1);
+            uiDirty = 1;
+        }
+        return;
         /* v2.4：次数改由 CalibTick 按层发放，这里不再重置 */
         shopPage = 0;
         shopRow = 0;
@@ -3150,7 +3439,12 @@ void Update(float dt) {
            再往上要靠药箱/技能/遗物。原来 3/s 回满 + 8 个安全屋，
            让理智根本不像计时器（审计实测一局净 +187）。 */
         if (sanity < SAFE_HEAL_CAP) {
-            sanity += SafeHealRate() * RunSanityGainMul() * dt;
+            /* v6 第 ㉟ 轮：**回神**（第 3 列第二顶点）安全屋回复 +60% */
+    {
+        extern int BenchRecover(void);
+        float rm=BenchHealMul();
+        sanity += SafeHealRate() * RunSanityGainMul() * rm * dt;
+    }
             if (sanity > SAFE_HEAL_CAP) sanity = SAFE_HEAL_CAP;
         }
         if (sanity > SanityMax()) sanity = SanityMax();
@@ -3258,7 +3552,7 @@ void Update(float dt) {
         if (crankClick >= 0.30f) {
             crankClick = 0.0f;
             PlaySfx(SFX_CRANK, 0.45f);
-            MakeNoise(posX, posY, 12.0f * RunCrankNoiseMul());   /* v2.2：FAST CRANK 的 +15% 噪声 */
+            MakeNoise(posX, posY, 12.0f * RunCrankNoiseMul()*(SkillOwned(SK_APPRENTICE)?0.5f:1.0f));   /* v2.2：FAST CRANK 的 +15% 噪声 */
         }
         /* v3.4：SPARE CELL 满级时摇电时间 -30%（2.4 → 1.68 秒） */
         if (crankTimer >= 2.4f * RunCrankTimeMul() * SkillCrankTimeMul()) {
@@ -3319,6 +3613,7 @@ void Update(float dt) {
     /* CRANK WALK：有这个技能时摇电也允许移动，只是移速打折 */
     /* v3.4：CRANK WALK（局内树 id 5）允许边走边摇，移速 -40% */
     float crankPenalty = SkillCrankWalkPenalty();
+    if(SkillOwned(SK_APPRENTICE))crankPenalty*=0.5f;
     if (BenchCrankWalk() && crankPenalty <= 0.0f) crankPenalty = 0.40f;
     float crankMul = cranking ? (1.0f - crankPenalty) : 1.0f;
     if (cranking) sprinting = 0;            /* 边摇边冲刺太离谱 */
@@ -3339,9 +3634,27 @@ void Update(float dt) {
     }
     /* v3.4：SLIDE（局内树 id 6）—— 没有蹲伏键，改成「冲刺时体力消耗减半 +
        起步瞬间速度 +20%」，手感上就是滑出去一下。 */
-    float sp = MOVE_SPEED * (1.0f + SkillSpeedAdd() + darkAdd) * slowMul * RelicSpeedMul() * glueSelf * dt
-             * (sprinting ? SPRINT_MULT * (BenchSlide() ? 1.20f : 1.0f) : 1.0f)   /* v3.4 SLIDE +20% */ * crankMul;
-        { extern float playerMoveSpeedNow; playerMoveSpeedNow = sp; }   /* v8: 守门人据此判断在动/冲刺 */
+    /* v6 第 ㉟ 轮：**蛮冲**（改造树第 0 列的第二顶点）终于生效了。
+   第 ⑩ 轮加了节点但 getter 没人调 —— 玩家花 1200 金买了一个空节点。 */
+    float bullAdd = 0.0f;
+    { extern int BenchBullRush(void); if (BenchBullRush()) bullAdd = 0.15f; }
+    /* v6：**爆发** 冲刺时再 +25% */
+    float burstAdd = 0.0f;
+    { extern int BenchBurst(void); if (BenchBurst()) burstAdd = 0.25f; }
+    /* ==================================================================
+     * v7 第 60 轮：**RunSpeedMul() 全工程 0 调用点**
+     * ==================================================================
+     * 局内技能的卡片明写「LIGHT FOOT: speed -3%」「IRON SKIN: speed -4%」，
+     * 而 RunSpeedMul() 就是这两个代价的实现 —— 但从来没人调它。
+     * 于是这两条"代价"一分钱都没收，玩家只拿到了好处。
+     *
+     * 接在这里：它只乘玩家的移动速度，不影响冲刺倍率本身。
+     * ================================================================ */
+    float sp = MOVE_SPEED * (1.0f + SkillSpeedAdd() + darkAdd + bullAdd) * slowMul * RelicSpeedMul() * glueSelf * dt * BenchMoveMul()
+             * RunSpeedMul()
+             * (sprinting ? SPRINT_MULT * (BenchSlide() ? 1.20f : 1.0f) * (1.0f + burstAdd) : 1.0f)   /* v3.4 SLIDE +20% */ * crankMul;
+    if (sprinting && sp < 2.25f*dt) sp=2.25f*dt;
+        { extern float playerMoveSpeedNow; playerMoveSpeedNow = dt>0.0f ? sp/dt : 0.0f; }   /* v8: 守门人据此判断在动/冲刺 */
     float perpX = -dirY, perpY = dirX;      /* 单位侧向，与 FOV 无关 */
     float dx = 0.0f, dy = 0.0f;
     /* v3.0：**锁盘打开时角色不能移动** ——
@@ -3386,11 +3699,10 @@ void Update(float dt) {
         SpawnParticles(c->x, c->y, 2);   /* v2.1：翻箱扬起灰尘 */
                 searchedCount++;
                 runSearched++;
-        int shardGain = (int)(GoldSearchAt(currentLevel) * SkillScavengerShardMul()
+        int shardGain = (int)(GoldSearchAt(currentLevel) * SkillScavengerShardMul() * SkillCrateGoldMul()
                               * RelicShardMul() * modShardMul + 0.5f);   /* v2.0：遗物+事件 */
-                pendingShards += shardGain;    /* v1.8：先记在待上缴里 */
-                totalShardsEarned += shardGain;
-                AddAchievementProgress(3, 3);  /* SHARD HUNTER */
+                carryGold += shardGain;    /* v1.8：先记在待上缴里 */
+                totalGoldEarned += shardGain;
                 PlaySfx(SFX_PICKUP, 0.55f);
                 MakeNoise(posX, posY, 8.0f * SkillSearchNoiseMul() * BenchSearchQuiet());
                 if (c->content == 1) { fusesHeld++; fusesCollectedRun++; pickupMsg = "+FUSE"; }
@@ -3433,10 +3745,10 @@ void Update(float dt) {
                 else if (c->content == 9) { if (decoys < BottleCap()) { decoys++; pickupMsg = "+DECOY"; } }
                 /* v3.4：箱子现在是主要金币来源（掉落表 35%） */
                 else if (c->content == 10) {
-                    int gld = (int)(GoldSearchAt(currentLevel) * SkillScavengerShardMul()
-                                    * RelicShardMul() * modShardMul + 0.5f);
-                    pendingShards += gld;
-                    totalShardsEarned += gld;
+                    int gld = (int)(GoldSearchAt(currentLevel) * SkillScavengerShardMul() * SkillCrateGoldMul()
+                                    * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
+                    carryGold += gld;
+                    totalGoldEarned += gld;
                     {
                         static char gmsg[48];
                         snprintf(gmsg, sizeof(gmsg), "+%d GOLD", gld);
@@ -3472,9 +3784,8 @@ void Update(float dt) {
                 { extern void WardenSpawnIfPowered(void); WardenSpawnIfPowered(); }   /* v7 B1: 通电 -> 守门人出现 */
         SpawnParticles(breaker.x, breaker.y, 0);   /* v2.1：通电火花 */
                     fusesHeld -= fusesNeeded;
-                    pendingShards += (int)(GoldBreakerAt(currentLevel) * RelicShardMul() * modShardMul + 0.5f);   /* v2.0 */
-                    totalShardsEarned += (int)GoldBreakerAt(currentLevel);
-                    AddAchievementProgress(3, 8);  /* SHARD HUNTER */
+                    carryGold += (int)(GoldBreakerAt(currentLevel) * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);   /* v2.0 */
+                    totalGoldEarned += (int)GoldBreakerAt(currentLevel);
                     PlaySfx(SFX_POWER, 0.75f);
                 }
             }
@@ -3485,48 +3796,17 @@ void Update(float dt) {
         holdTimer = 0.0f;
     }
 
-    /* ---- v2.0 武器攻击 / v3.0 敲击（按住蓄力 0.45 秒）----
-       三把武器各烧一条资源：扳手→体力、信号枪→电量、符印→理智。
+    /* ===== v2.4.80 **左键：扳手击退（从零重写）** =====
+       用户要求：「左键直接帮我重构代码吧，一直就没对过。」
+       旧的 atkNow 块里混着 5 个历史版本的注释、三套阈值、
+       和投掷抢键的判断 —— 已经没人能读懂它到底该干什么。
 
-       v3.1：**严格的「未按下 -> 按下」边沿检测**。
-       以前只要这一帧按着就加蓄力，于是用鼠标点主菜单「新游戏」进入游戏时，
-       左键还物理按着，下一帧就成了攻击蓄力，松手直接敲一下 ——
-       玩家看到的就是「一进去就会敲」。现在：
-         - 只有 atkPrev == 0 && atkNow == 1 才允许开始蓄力；
-         - 刚进游戏（resetInputState）时把 atkPrev 同步成当前物理状态，
-           已经按着的键不算新按下，必须先松开再按才会敲。 */
-    {
-        static int atkPrev = -1;
-        /* 锁盘打开时左键属于 UI，不能进入武器蓄力 */
-        int atkNow = (!lockActive) && IsActionDown(ACT_CANCEL_CHARGE);
-        if (resetInputState) {
-            atkPrev = atkNow;
-            weaponAtkCharge = 0.0f;
-        }
-        if (atkPrev < 0) atkPrev = atkNow;
-        int atkPressed = (atkNow && !atkPrev);
-        if (weaponCd > 0.0f) {
-            weaponCd -= dt;
-            if (weaponCd < 0.0f) weaponCd = 0.0f;
-        }
-        if (atkPressed && !holdingNow && !cranking && !isCharging) {
-            /* 未按下 -> 按下：开始蓄力（投掷蓄力中不抢键） */
-            weaponAtkCharge = dt / 0.45f;
-            if (weaponAtkCharge > 1.0f) weaponAtkCharge = 1.0f;
-        } else if (atkNow && weaponAtkCharge > 0.0f &&
-                   !holdingNow && !cranking && !isCharging) {
-            /* 持续按住：累积蓄力 */
-            weaponAtkCharge += dt / 0.45f;
-            if (weaponAtkCharge > 1.0f) weaponAtkCharge = 1.0f;
-        } else if (atkPrev && !atkNow && weaponAtkCharge > 0.10f) {
-            /* 松开：释放攻击 / 敲击 */
-            WeaponTryAttack(weaponAtkCharge);
-            weaponAtkCharge = 0.0f;
-        } else {
-            weaponAtkCharge = 0.0f;
-        }
-        atkPrev = atkNow;
-    }
+       新实现见 WrenchKnockUpdate()（在 Update 之前定义）：
+         按住 = 蓄力，松手 = 击退，低于死区 = 什么都不做。
+         只有这一条路径，没有"敲"，没有和投掷抢键。 */
+    WrenchKnockUpdate(dt);
+    { extern void TickSecondSpawn(float); TickSecondSpawn(dt); }   /* v2.4.94 第二只 */
+    WrenchTick(dt);
 
     /* 投掷：数字键选槽位，鼠标左键蓄力投掷 */
     if (throwCd > 0.0f) throwCd -= dt;
@@ -3558,8 +3838,9 @@ void Update(float dt) {
         isCharging = 0;
         mouseCharge = 0.0f;
     }
+    /* v2.4.77：**投掷 = 右键**（ACT_THROW = VK_RBUTTON） */
     int mouseLeftNow = (!lockActive) && IsActionDown(ACT_THROW);
-    int mouseRightNow = (!lockActive) && IsActionDown(ACT_CANCEL_CHARGE);
+    int mouseRightNow = (!lockActive) && IsActionDown(ACT_CANCEL_CHARGE);   /* 左键：现在只用于取消 */
 
     if (mouseLeftNow && !mouseLeftPrev && throwCd <= 0.0f && !holdingNow && !cranking) {
         /* 未按下 -> 按下：开始蓄力 */
@@ -3567,8 +3848,11 @@ void Update(float dt) {
         mouseCharge = 0.0f;
     }
     if (isCharging) {
+        /* v2.4.83：**取消投掷改回右键**。
+           原来这里读的是左键（鼠标左键），而左键现在归扳手击退 ——
+           于是在箱子旁边按住左键时，投掷蓄力被这一行直接取消掉，
+           看起来就是「扳手在箱子附近用不了」。 */
         if (mouseRightNow && !mouseRightPrev) {
-            /* 右键取消蓄力 */
             isCharging = 0;
             mouseCharge = 0.0f;
         } else if (mouseLeftNow) {
@@ -3578,7 +3862,7 @@ void Update(float dt) {
             if (sel < 0 || sel >= ITEM_SLOT_COUNT) sel = 0;
             if (counts[sel] > 0) {
                 /* v3.4：STEADY HAND（局内树 id 9）满蓄力 0.5s → 0.32s */
-                mouseCharge += dt / (0.5f * SkillHeavyHandChargeMul() * BenchSteadyHand());
+                mouseCharge += dt / (TUNE_CHARGE_FULL_SECONDS * SkillHeavyHandChargeMul() * BenchSteadyHand());
                 if (mouseCharge > 1.0f) mouseCharge = 1.0f;
             }
         } else {
@@ -3621,7 +3905,12 @@ void Update(float dt) {
                     else if (sel == 1 && bottles > 0) bottles--;
                     else if (sel == 2 && smokeBombs > 0) smokeBombs--;
                     else if (sel == 3 && gluePots > 0) gluePots--;
-                    else if (sel == 4 && echoBolts > 0) echoBolts--;
+                    else if (sel == 4 && echoBolts > 0) {
+                echoBolts--;
+                /* v7 第 65 轮：CARTOGRAPHER 成就的计数器**从来没被加过**
+                   —— 掷一枚回声弹揭示 15 格（见 echoBolts 的定义）。 */
+                { extern int echoCellsTotalRun; echoCellsTotalRun += 15; }
+            }
                     pickupMsg = (g_lang == LANG_ZH) ? "双投！" : "TWIN THROW!";
                     pickupMsgTimer = 1.0f;
                 }
@@ -3630,7 +3919,7 @@ void Update(float dt) {
                     else if (sel == 1) bottles--;
                     else if (sel == 2) smokeBombs--;
                     else if (sel == 3) gluePots--;
-                    else if (sel == 4) echoBolts--;
+                    else if (sel == 4) { echoBolts--; { extern int echoCellsTotalRun; echoCellsTotalRun += 15; } }
                     /* v3.4：SALVAGE（局内树 id 10）30% 概率不消耗 ——
                        比「落地后走过去捡回」实现简单得多，手感一样。 */
                     if (BenchSalvage() && (rand() % 100) < 30) {
@@ -3781,6 +4070,7 @@ void Update(float dt) {
     if (lastHitTimer > 0.0f) lastHitTimer -= dt;   /* v1.15：命中数字淡出 */
     UpdateMonster(dt);
     { extern void UpdateMonster2(float); UpdateMonster2(dt); }   /* v2.4.12 第二只 */
+    { extern void FlankUpdate(float); FlankUpdate(dt); }   /* v2.4.95 包夹（必须在 AI 之后，否则目标被覆盖） */
     UpdateLightBeast(dt);
     UpdateParasite(dt);
     UpdateLeech(dt);
@@ -3858,7 +4148,7 @@ void Update(float dt) {
     /* v6 **最终层不弹二选一** ——
        第 WIN_LEVEL 层的出口是「逃出生天」，必须走通关结算（含成就）。
        原来弹窗会把它截成「撤离」，导致通关画面/成就永远不出现。 */
-    int isFinalFloor = (currentLevel >= WIN_LEVEL && !isEndlessRun);
+    int isFinalFloor = campaignMode || (currentLevel >= WIN_LEVEL && !isEndlessRun);
     int atExit = (breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f);
 
     /* v6 **出口二选一：弹窗** ——
@@ -3867,6 +4157,7 @@ void Update(float dt) {
         exitChoiceOpen = 1;
             { extern void HintOnce(int); HintOnce(3); }   /* v7 B4 */
         exitChoiceT = 0.0f;
+        MusicNotify(MUSIC_EVENT_GATE);
         PlaySfx(SFX_GATE, 0.65f);
         uiDirty = 1;
     }
@@ -3879,20 +4170,32 @@ void Update(float dt) {
         /* NOCTURNAL：本层全程手电关着过关 */
         if (!flashlightOn) flashlightOffLevel = 1;
 
+        MusicNotify(MUSIC_EVENT_GATE);
         PlaySfx(SFX_GATE, 0.65f);
+        float completedTime = runTime-floorStartTime;
+        if (completedTime<90.0f) floorsFast++;
+        if (!floorSpotted) floorsPacifist++;
+        if (!floorTookDamage) { floorsFlawless++; floorsNoSanityLoss++; }
+        else floorsNoSanityLoss=0;
+        if (!runLightUse) floorsNoLight++;
+        if (WardenActive() && !floorTookDamage) wardenCleanFloors++; else wardenCleanFloors=0;
+        DailyObserve(DQ_NOHIT,floorsNoSanityLoss);
         int evThisLevel = levelEvent;   /* v1.8：GenerateLevel 会重置 levelEvent，先存 */
-        pendingShards += (int)(GoldExitAt(currentLevel) * RelicShardMul() * modShardMul + 0.5f);
+        carryGold += (int)(GoldExitAt(currentLevel) * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
         /* v6 **探索奖励** —— 按本层容器数折算，补上之前缺失的 GOLD_NEWROOM 渠道。
            原来 GOLD_NEWROOM 只定义不发放，「首次进新房间 +5」这条收入是空的。 */
-        pendingShards += containerCount * GOLD_NEWROOM;   /* v2.0 */
-        totalShardsEarned += (int)GoldExitAt(currentLevel);
-        AddAchievementProgress(3, 15);  /* SHARD HUNTER */
+        carryGold += containerCount * GOLD_NEWROOM;   /* v2.0 */
+        totalGoldEarned += (int)(GoldExitAt(currentLevel)*RelicShardMul()*modShardMul+0.5f)+containerCount*GOLD_NEWROOM;
         if (currentLevel > bestLevel) bestLevel = currentLevel;
         if (currentLevel == 1) UnlockAchievement(0);  /* FIRST STEPS */
         /* 战役模式：每段连续 3 层；段内换层不重置资源，段间才切规则/重开资源。 */
         if (campaignMode) {
-            int stageFloor = (currentLevel - 1) % CAMPAIGN_LEVELS_PER_STAGE;
-            if (stageFloor + 1 < CAMPAIGN_LEVELS_PER_STAGE) {
+            /* v7 第 ㊿ 轮：层数读 kCampaign[].layers，不再写死 3 */
+            extern int CampaignLayersNow(void);
+            int stageLayers = CampaignLayersNow();
+            if (stageLayers < 1) stageLayers = 1;
+            int stageFloor = currentLevel - CampaignStartFloor(campaignStage);
+            if (stageFloor + 1 < stageLayers) {
                 currentLevel++;
                 energy += ENERGY_PER_FLOOR;                      /* v2.3：每层唯一补给 */
         /* v2.4：过关奖励立刻到账，给玩家一个明确的反馈 */
@@ -3900,16 +4203,20 @@ void Update(float dt) {
         pickupMsgTimer = 2.2f;
                 if (energy > ENERGY_MAX) energy = ENERGY_MAX;
                 GenerateLevel();
-                RunSkillsReset();
+                floorStartTime=runTime;
                 ClearFx();
                 for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
                 flashTime = 0.15f;
                 UpdateExplored();
                 return;
             }
-            shards += GOLD_PER_CORE;   /* v3.4：核心并入金币 */
+            carryGold += CampaignReward(campaignStage);
             if (campaignStage < CAMPAIGN_STAGE_COUNT - 1) {
-                StartCampaign(campaignStage + 1);
+                campaignStage++;
+                currentLevel=CampaignStartFloor(campaignStage);
+                srand((unsigned)(9000+campaignStage*733));
+                GenerateLevel(); floorStartTime=runTime;
+                flashTime=0.15f; UpdateExplored(); SaveGame();
                 return;
             }
             gameWon = 1;
@@ -3922,6 +4229,8 @@ void Update(float dt) {
                 ComputeScore(&si, &lastScore);
                 lastScore.score += 5000;      /* 战役通关固定加成 */
             }
+            dailyEscapeCount++; DailyObserve(DQ_ESCAPE,dailyEscapeCount);
+            CheckAchievements(); BankSettle(1); hasSave=0;
             campaignMode = 0;
             currentState = STATE_GAMEOVER;
             menuSelection = 0;
@@ -3932,13 +4241,13 @@ void Update(float dt) {
         /* v2.2：每日挑战通关 —— 今天第一次给 1 核心 */
         if (dailyMode && !dailyClearedToday) {
             dailyClearedToday = 1;
-            shards += GOLD_PER_CORE;   /* v3.4 */
+            carryGold += GOLD_PER_CORE;   /* v3.4 */
         }
         if (currentLevel >= WIN_LEVEL && !isEndlessRun) {
             /* 主线通关：走进第 10 层的出口就是结局，不再生成下一层 */
             gameWon = 1;
             runInProgress = 0;
-            BankSettle(1);      /* v3.4：通关结算 —— 本金 + 利润×倍数 */
+            /* Settle after all victory rewards and achievement checks. */
             currentState = STATE_GAMEOVER;
             menuSelection = 0;
             ForceCursor(1);
@@ -3949,13 +4258,14 @@ void Update(float dt) {
                 ScoreInput si = { currentLevel, 1, 0, runSearched, bottlesKilled, runTime, modsSeenCount };
                 ComputeScore(&si, &lastScore);
                 if (lastScore.score > bestMainScore) bestMainScore = lastScore.score;
-                shards += GOLD_PER_CORE;   /* v3.4 */
+                carryGold += GOLD_PER_CORE;   /* v3.4 */
             }
-            UnlockAchievement(2);  /* ESCAPE ARTIST */
-            if (!tookDamage) UnlockAchievement(14);  /* PERFECT ESCAPE */
+            UnlockAchievement(1);  /* FIRST EXIT（原来 2 = FLOOR 5，解错了） */
+            { extern int dailyEscapeCount; dailyEscapeCount++; }   /* v7：每日「撤离 N 次」 */
+            if (sanity >= SanityMax()-0.01f) UnlockAchievement(14);  /* PERFECT ESCAPE */
             /* v2.8：属性面板删了，成就改成「技能树普通节点全满」 */
             if (SkillsAllMaxed()) {
-                UnlockAchievement(15);  /* TRUE SURVIVOR */
+                UnlockAchievement(25);  /* TREE MASTER（原来 15 = DISRUPTOR） */
             }
             /* v3.3 **修复 3 个永远解不开的通关成就** ——
                它们的判定写在 CheckAchievements 里（gameWon && ...），
@@ -3963,9 +4273,13 @@ void Update(float dt) {
                而本函数上面第 3485 行已经把 currentState 设成 GAMEOVER 了，
                所以这三条判定从来没有被求值过。
                在这里用同样的条件补一次。 */
-            if (relicTotal == 0)      UnlockAchievement(39);  /* TRUE ENDING */
-            if (sanity <= 25.0f)      UnlockAchievement(35);  /* BLOOD PRICE */
-            if (!flashlightOn)        UnlockAchievement(36);  /* GHOST RUN */
+            /* v7 第 ㊿ 轮：这三条原来用旧 40 条表的索引
+               39 / 35 / 36 —— 新表只有 32 条，越界的被静默丢弃。
+               39(TRUE ENDING) 和 35(BLOOD PRICE) 在新表里没有对应项，删掉；
+               36(GHOST RUN) → 20(LIGHTLESS)，语义完全一致。 */
+            if (!runLightUse)        UnlockAchievement(20);  /* LIGHTLESS */
+            DailyObserve(DQ_ESCAPE,dailyEscapeCount);
+            CheckAchievements(); BankSettle(1); hasSave=0;
             uiDirty = 1;
             return;
         }
@@ -3988,12 +4302,13 @@ void Update(float dt) {
         if (isEndlessRun) {
             /* ---- v1.8：过关上缴（重生细胞式）---- */
             bankStreak++;
-            {
-                int gain = pendingShards;
-                if (bankStreak >= BANK_STREAK_AFTER) gain += (int)(gain * BANK_STREAK_BONUS);
-                shards += gain;
-                pendingShards = 0;
+            /* v6：每日任务进度 —— 到达层数 / 箱子数 */
+            { extern int DailyGoalId(void), DailyGoalParam(void);
+              extern void DailySetProgress(int);
+              extern int currentLevel;
+              if (DailyGoalId() == 2) DailySetProgress(currentLevel);
             }
+            /* Retain carried gold until the player chooses extraction. */
             /* 记分 + 里程碑核心 */
             {
                 ScoreInput si = { currentLevel, 0, 1, runSearched, bottlesKilled, runTime, modsSeenCount };
@@ -4003,41 +4318,54 @@ void Update(float dt) {
                 if (lastScore.score > bestEndlessScore) bestEndlessScore = lastScore.score;
             }
             if (currentLevel == 20 || currentLevel == 40 ||
-                currentLevel == 60 || currentLevel == 80) shards += GOLD_PER_CORE;   /* v3.4 */
+                currentLevel == 60 || currentLevel == 80) carryGold += GOLD_PER_CORE;   /* v3.4 */
             /* v3.0：**每层 +35 能量**（数值审查 #1 的核心修复）——
                原来这行只写在战役分支里，主线/无尽从不补给，
                一局只有 19 刀的能量，第 2 层就开始「打不起」。 */
             energy += ENERGY_PER_FLOOR;
             if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
             currentLevel++;
-            GenerateLevel();
+GenerateLevel();
         } else {
             /* v1.8：主线也一样上缴 */
             bankStreak++;
-            shards += pendingShards;
-            pendingShards = 0;
+            /* v6：pending 已并入 carryGold，不再需要合并 */
             energy += ENERGY_PER_FLOOR;                        /* v3.0：主线每层补给 */
             if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
             currentLevel++;
             GenerateLevel();
         }
-        /* v2.2：每层结算 —— 给"无伤/和平/速通/摸黑/安静"五个成就攒计数 */
-        {
-            float floorTime = runTime - floorStartTime;
-            if (floorTime < 90.0f)  floorsFast++;
-            if (floorSpotted == 0) {
-        floorsPacifist++;
-        /* v3.4：潜行奖励 —— 本层完全没被发现，额外给金币 */
-        {
-            int gld = (int)((GOLD_QUIET_BASE + GOLD_QUIET_STEP * (float)currentLevel)
-                            * RelicShardMul() * modShardMul + 0.5f);
-            pendingShards += gld;
-            totalShardsEarned += gld;
+        /* ==================================================================
+         * v6 第 ㊲ 轮：**局内三选一技能终于会出现了**
+         * ==================================================================
+         * 全量审计发现 OpenSkillPick() **全工程 0 调用点** ——
+         * 这个界面（STATE_SKILL_PICK）、选项生成、按键处理、
+         * ui.c 的绘制，全都在，**但没有任何东西会打开它**。
+         * 一个完整的 Roguelite 系统就这么躺在代码里没人用。
+         *
+         * 设计：每通关 2 层给一次三选一。
+         * 插在这里（而不是某个分支里），主线 / 下潜两条路都会经过。
+         * ================================================================ */
+        /* ==================================================================
+         * v7 第 59 轮：**12 条遗物一条都拿不到**
+         * ==================================================================
+         * `OpenRelicPick()` 全工程 0 调用点 —— 和上面 OpenSkillPick 一模一样的病：
+         * 选项池、pickMode==1、STATE_SKILL_PICK 的绘制与按键、RelicTake()
+         * 全都写好了，**但没有任何东西会打开它**。
+         * 结果 8 个 Relic*Mul() 恒返 1.0，遗物系统整条不存在。
+         *
+         * 设计：每 3 层给一次遗物三选一（比技能稀有），
+         *       和技能错开层级（技能在偶数层，遗物在 3 的倍数层）。
+         * ================================================================ */
+        if (currentLevel % 3 == 0) {
+            pendingSkillDraft = (currentLevel % 2 == 0);
+            extern void OpenRelicPick(void);
+            OpenRelicPick();
+        } else if (currentLevel % 2 == 0) {
+            extern void OpenSkillPick(void);
+            OpenSkillPick();
         }
-    }   /* v3.3：原来判 floorKills，恒 0 */
-            if (floorTookDamage == 0) floorsFlawless++;
-            if (!flashlightOn)      floorsNoLight++;
-        }
+
         floorKills = 0;
     floorSpotted = 0;
     /* v3.3：换层时清空胶水，否则上一层扔的会残留到下一层 */
@@ -4107,7 +4435,7 @@ void SkipOneLevel(void) {
     shortcutUsed = 1;
     currentLevel++;
     GenerateLevel();
-    RunSkillsReset();   /* 保持一致性：换层重置局内技能选择 */
+    /* Drafted skills last until the run ends. */
     pickupMsg = "SHORTCUT USED";
     pickupMsgTimer = 1.6f;
     uiDirty = 1;
@@ -4219,9 +4547,9 @@ void CalibLock(void) {
            必须走静态缓冲区（和 DrawSaveStatusBanner 那次踩的坑一模一样）。 */
         {
             static char calibMsg[96];
-            int gld = (int)(GOLD_CALIB_PERFECT * RelicShardMul() * modShardMul + 0.5f);
-            pendingShards += gld;
-            totalShardsEarned += gld;
+            int gld = (int)(GOLD_CALIB_PERFECT * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
+            carryGold += gld;
+            totalGoldEarned += gld;
             snprintf(calibMsg, sizeof(calibMsg),
                      g_lang == LANG_ZH ? "完美校准  +%d 理智  +%d 金币"
                                        : "PERFECT  +%d SANITY  +%d GOLD",
@@ -4237,9 +4565,9 @@ void CalibLock(void) {
         sanity += CALIB_GOOD_SANITY;
         /* v3.4：良好校准也给金币（少一半） */
         {
-            int gld = (int)(GOLD_CALIB_GOOD * RelicShardMul() * modShardMul + 0.5f);
-            pendingShards += gld;
-            totalShardsEarned += gld;
+            int gld = (int)(GOLD_CALIB_GOOD * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
+            carryGold += gld;
+            totalGoldEarned += gld;
         }
         if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
         if (sanity > SanityMax()) sanity = SanityMax();
@@ -4312,13 +4640,19 @@ static void ResetModeFlags(void) {
 }
 
 static void ApplyCampaignRules(int stage) {
-    /* 在 GenerateLevel() 完成本层基础词条后叠加，避免被随机倍率重置。 */
-    switch (stage) {
-    case 0: modSanityMul *= 0.55f; break;                       /* 热身：理智流失减半 */
-    case 1: modSpeedMul *= 1.18f; break;                        /* 猎杀：怪更快 */
-    case 2: modShardMul *= 0.5f; modBatteryMul *= 0.7f; break;   /* 干旱：没碎片，省电 */
-    case 3: modBatteryMul *= 2.0f; modSanityMul *= 1.15f; break; /* 洪水：耗电翻倍 */
-    default: modSpeedMul *= 1.30f; modSanityMul *= 1.25f; break;/* 终章：全上 */
+    /* v6：改成**表驱动** —— 规则细节全在 campaign.c 的 kCampaign[] 里，
+       这里只把环境倍率乘进去。加一关只要加一行表。 */
+    extern const CampaignDef kCampaign[];
+    extern int campaignStage, campaignMode;
+    (void)stage;
+    if (!campaignMode) return;
+    if (campaignStage < 0 || campaignStage >= CAMPAIGN_STAGE_COUNT) return;
+    {
+        const CampaignDef* d = &kCampaign[campaignStage];
+        modSpeedMul   *= d->speedMul;
+        modSanityMul  *= d->sanityMul;
+        modBatteryMul *= d->batteryMul;
+        modShardMul   *= d->goldMul;
     }
 }
 
@@ -4328,7 +4662,7 @@ void StartGame(void) {
     exitChoiceOpen = 0;
     exitGoDeeper = 0;
     /* v3.0：**改造树 / 强化都不重置** ——
-       它们花的是 shards（跨局持久的元货币），重置等于把玩家买的东西吞掉：
+       它们花的是 carryGold（跨局持久的元货币），重置等于把玩家买的东西吞掉：
        买一个 620 的星节点，下一局归零，碎片永久损失。
        benchOwned / runUpg 都已进存档（benchOwnedSave / runUpgSave），
        本来就是元进度。每局该清的只有「假死」这类局内一次性状态。 */
@@ -4348,6 +4682,8 @@ void StartGame(void) {
     pendingCampaignStage = 0;
 
     ResetModeFlags();   /* v2.2：先清模式标志 */
+    { extern void SkillInitOnce(void); SkillInitOnce(); }   /* v6：技能树中心永远点亮 */
+    { extern void CatchCountResetRun(void); CatchCountResetRun(); }   /* v6：本局被捕计数清零 */
     if (startMode == START_ENDLESS) {
         isEndlessRun = 1;
     } else if (startMode == START_DAILY) {
@@ -4360,7 +4696,8 @@ void StartGame(void) {
     }
 
     currentState = STATE_PLAYING;
-    currentLevel = campaignMode ? campaignStage * CAMPAIGN_LEVELS_PER_STAGE + 1 : 1;
+    DailyTick(); DailyBeginRun();
+    currentLevel = campaignMode ? CampaignStartFloor(campaignStage) : 1;
     gameWon = 0;
     /* v3.3：新六槽位的开局初始量
        光球 1（照明刚需）/ 投石 2（基础诱饵）/ 其余从箱子里找 */
@@ -4380,10 +4717,57 @@ void StartGame(void) {
         if (p < 0) p = 0;
         if (p >= BANK_CARRY_STEPS) p = BANK_CARRY_STEPS - 1;
         int take = (int)((float)bankGold * (float)(p * BANK_STEP_PCT) / 100.0f + 0.5f);
-        if (take > bankGold) take = bankGold;
-        bankGold -= take;
-        carryGold = take;
-        shards = take;          /* 局内花的就是这笔 */
+        {   /* v6：取款走 Wallet（银行 → 携带） */
+            extern int WalletWithdraw(int);
+            take = WalletWithdraw(take);
+        }
+        carryGold = take;          /* 局内花的就是这笔 */
+        carryAtRunStart = take;    /* v6：记录基线，用于算净赚 */
+        /* v6：开局把今天的每日任务打出来 */
+        {
+            extern const char* DailyGoalTextEn(void);
+            extern const char* DailyModTextEn(void);
+            extern const char* DailyRestrictTextEn(void);
+            extern int DailyDone(void);
+            static char db[160];
+            if (!DailyDone()) {
+                /* v6 第 ㊱ 轮：**把修正和限制也说出来**
+                   玩家之前只看到"收集 5000 金"，
+                   完全不知道今天怪物更快、或者不能用扳手。 */
+                const char* mod = DailyModTextEn();
+                const char* res = DailyRestrictTextEn();
+                if (mod && mod[0] && res && res[0])
+                    snprintf(db, sizeof(db), "DAILY: %s | %s | %s",
+                             DailyGoalTextEn(), mod, res);
+                else if (mod && mod[0])
+                    snprintf(db, sizeof(db), "DAILY: %s | %s", DailyGoalTextEn(), mod);
+                else if (res && res[0])
+                    snprintf(db, sizeof(db), "DAILY: %s | %s", DailyGoalTextEn(), res);
+                else
+                    snprintf(db, sizeof(db), "DAILY: %s", DailyGoalTextEn());
+                pickupMsg = db;
+                pickupMsgTimer = 4.5f;
+            }
+        }
+        { extern void ThreatReset(void); ThreatReset(); }   /* v6：每局威胁归零 */
+        /* ==================================================================
+         * v7 第 ㊿ 轮：**改造树每局清空**
+         * ==================================================================
+         * 这是第 ⑨ 轮改造树"跨局保留"留下的坑：
+         *   · 节点买一次永久有（benchOwned 进存档）
+         *   · 但它的代价 THREAT 每局被 ThreatReset 清零
+         *   → 「付一次钱，永久白拿」，10 局买满 16 个节点之后
+         *     每局开局满配、THREAT 恒 0，**局内构筑这个决策彻底消失**
+         *   → 而这正是撑起 45 局的核心机制
+         *
+         * 而且节点是用**局内金币**（carryGold）买的，
+         * 本来就该是"这一局的构筑"，不是永久升级。
+         *
+         * 现在每局清空：玩家每局用捡到的钱重新做 2~4 个选择，
+         * 每次买都涨 THREAT —— 决策和代价同时回来。
+         * ================================================================ */
+        { extern void BenchResetRun(void); BenchResetRun(); }
+        RunUpgReset();
     }
     throwSelected = 0;
     runInProgress = 1;
@@ -4398,7 +4782,7 @@ void StartGame(void) {
     }
     /* v3.4 CARTO 满级：开局直接把安全屋和配电箱所在格子标记为已探索，
        地图上能看见。原来只是「通关更快」，玩家感知不到。 */
-    if (SkillCartoMaxed()) {
+    if (SkillCartoUnlock()) {
         int sx = (int)safeRoom.x, sy = (int)safeRoom.y;
         if (sx >= 0 && sx < MAP_WIDTH && sy >= 0 && sy < MAP_HEIGHT) explored[sy][sx] = 1;
         int bx = (int)breaker.x, by = (int)breaker.y;
@@ -4410,7 +4794,7 @@ void StartGame(void) {
     searchedCount = 0;
     sanity = 100.0f;
     battery = (float)BatteryMax();
-    flashlightOn = 1;
+    flashlightOn = DailyForbidLight() || HasKeystone(SK_SALVAGE) ? 0 : 1;
     stamina = StaminaMax();
     sprinting = 0;
     staminaIdle = 0.0f;
@@ -4421,7 +4805,7 @@ void StartGame(void) {
     mouseCharge = 0.0f;
     resetInputState = 1;
     /* v1.8：重置本局状态 */
-    pendingShards = 0;
+    /* carryGold already contains the bank withdrawal. */
     bankStreak = 0;
     eventBonus = 0;
     levelEvent = -1;
@@ -4449,13 +4833,17 @@ void StartGame(void) {
     RunSkillsReset();
 
     /* 重置成就追踪变量 */
-    totalShardsEarned = 0;
+    knockCountRun=throwHitCountRun=echoCellsTotalRun=0;
+    floorsNoSanityLoss=dailyEscapeCount=wardenCleanFloors=fullHideDone=0;
+    doubleHuntSeconds=0.0f; pendingSkillDraft=0;
+    totalGoldEarned = 0;
     bottlesKilled = 0;
     faceDodged = 0;
     crankTimeTotal = 0;
     fusesCollectedRun = 0;
     mapsFullyExplored = 0;
     tookDamage = 0;
+    { extern int contractKind,shopContractUsed; contractKind=1;shopContractUsed=0; }
     flashlightOffLevel = 0;
     sprintedThisLevel = 0;
     hideCount = 0;
@@ -4475,206 +4863,101 @@ void StartGame(void) {
     uiDirty = 1;
 }
 
-void InitAchievements(void) {
-    /* 总是初始化静态字段（name/desc/target/id），存档只保存动态字段(unlocked/progress) */
-    const char* names[ACH_COUNT] = {
-        "FIRST STEPS", "SURVIVOR", "ESCAPE ARTIST", "SHARD HUNTER",
-        "SILENT SHADOW", "BOTTLE MASTER", "FACE DODGER", "NOCTURNAL",
-        "SPEED RUNNER", "DEEP DIVER", "FUSE FINDER", "GENERATOR GURU",
-        "UPGRADE JUNKIE", "MAP MASTER", "PERFECT ESCAPE", "TRUE SURVIVOR",
-        /* v2.0 新增 24 条：进程 / 技巧 / 收集 / 荒谬 / 隐藏 各 8 段位 */
-        "DEEP DELVER",   "ABYSS WALKER", "CLOSE CALL",  "ALL FOUR ZONES",
-        "FLAWLESS FLOOR","NO LIGHT RUN", "UNSEEN FLOOR","SPEED DEMON",
-        "RELIC HOARDER", "FULL LOADOUT", "BESTIARY DONE", "SHARD TYCOON",
-        "CRANK ADDICT",  "HANDS EMPTY",   "DECOY RAIN",  "NO RELICS",
-        "LUCKY BREAK",   "OFF BY ONE",   "SILENT FLOOR", "BLOOD PRICE",
-        "GHOST RUN",     "LAST BREATH",  "CENTURION",    "TRUE ENDING"
-    };
-    /* v3.3 **文案与 target 全面对齐实际条件** ——
-       审计发现大量描述是旧版本的：ESCAPE ARTIST 写第 10 层（实际 24 层）、
-       UPGRADE JUNKIE 写 all 6 upgrades（实际判技能树全满）、
-       击杀类 / 遗物类的条件已经改成逃生向但描述没跟着改。
-       这里一次性对齐，避免玩家看着描述做了一件不相关的事。 */
-    const char* descs[ACH_COUNT] = {
-        "Complete level 1",
-        "Reach level 5",
-        "Beat the game (reach level 24 exit)",
-        "Collect 500 shards total",
-        "Reach level 5 without ever sprinting",
-        "Throw 30 objects total",
-        "Hide 5 times total",
-        "Complete a level with the flashlight off",
-        "Complete level 1 in under 2 minutes",
-        "Reach level 10",
-        "Collect 5 fuses in a single level",
-        "Crank the generator for 60 seconds total",
-        "Max out every skill tree node",
-        "Fully explore 3 maps in one run",
-        "Reach the exit without taking damage",
-        "Reach level 24 with every skill node maxed",
-        "Reach level 12",
-        "Reach level 18",
-        "Reach level 21",
-        "Clear all four zones (level 24)",
-        "Clear a floor without taking damage",
-        "Clear 3 floors with the light off",
-        "Clear 3 floors without ever being spotted",
-        "Clear a floor in under 90 seconds",
-        "Throw 80 objects total",
-        "Hide 30 times total",
-        "Unlock every bestiary entry",
-        "Collect 3000 shards total",
-        "Crank the generator for 300 seconds total",
-        "Search 60 containers in a single run",
-        "Search 120 containers in a single run",
-        "Reach level 12 without throwing a single object",
-        "Open 5 lock puzzles",
-        "Reach level 24",
-        "Clear 3 floors without ever being spotted",
-        "Win while below 25% sanity",
-        "Win without the flashlight",
-        "Survive at 1 sanity for 30 seconds",
-        "Hide 100 times total",
-        "Beat level 24 without a relic"
-    };
-    /* v3.3：target 与 checkpoint 里的判定一一对应。
-       原来 UPGRADE JUNKIE 的 target 是 18（旧的 18 级），
-       实际判的是 SkillsAllMaxed()，progress 永远是 0 —— 进度条死条。 */
-    int targets[ACH_COUNT] = {
-         1,   5,  24, 500,   1,  30,   5,   1, 120,  10,
-         5,  60,   1,   3,   1,   1,  12,  18,  21,  24,
-         1,   3,   3,  90,  80,  30,   8, 500, 300,  60,
-       120,  12,   5,  24,   3,   1,   1,  30, 100,  24
-    };
-    for (int i = 0; i < ACH_COUNT; i++) {
-        g_achievements[i].id = i + 1;
-        strncpy(g_achievements[i].name, names[i], ACH_NAME_MAX - 1);
-        g_achievements[i].name[ACH_NAME_MAX - 1] = '\0';
-        strncpy(g_achievements[i].desc, descs[i], ACH_DESC_MAX - 1);
-        g_achievements[i].desc[ACH_DESC_MAX - 1] = '\0';
-        g_achievements[i].target = targets[i];
-        /* unlocked 和 progress 由 LoadSettings 恢复，这里不覆盖 */
-    }
-}
+/* v6：InitAchievements 搬到 achievements.c（表驱动）*/
 
 /* 成就辅助：解锁并保存 */
-static void UnlockAchievement(int idx) {
-    if (idx < 0 || idx >= ACH_COUNT) return;
-    if (g_achievements[idx].unlocked) return;
-    g_achievements[idx].unlocked = 1;
-    g_achievements[idx].progress = g_achievements[idx].target;
-    /* v2.0 修复：原来每个成就白送 1 核心。40 个成就 = 40 核心，
-       而满技能树只需要 9 个 —— 核心货币直接失去意义。
-       现在成就只给碎片；核心只由「Boss 击杀 / 通关 / 里程碑楼层」产出。 */
-    /* v3.3 **成就奖励下调 + 不再计入 totalShardsEarned** ——
-       400/条 × 约 27 条 ≈ 10800 碎片，而全商店一次性购买项总共只要 5720，
-       等于成就白送两套全目录，经济直接被打穿。
-       而且原来把它加进 totalShardsEarned，而 SHARD HUNTER / SHARD TYCOON
-       判的就是该计数器 —— 解成就 → 计数器涨 → 再解成就，自我喂养。
-       现在 60/条（约 1600 总量，相当于小半个商店），且不计入统计。 */
-    shards += 60;
-    /* v2.2：解锁要有反馈 —— 原来只是静默加碎片 */
-    pickupMsg = g_achievements[idx].name;
-    pickupMsgTimer = 2.2f;
-    PlaySfx(SFX_POWER, 0.9f);
-    uiDirty = 1;
-    AddAchievementProgress(3, 0);   /* 不递归，仅占位说明奖励已发 */
-    SaveGame();  /* 立即持久化 */
-}
+/* v6：UnlockAchievement 搬到 achievements.c（含 Steam 上报）*/
+static void UnlockAchievement(int idx) { extern void AchUnlock(int); AchUnlock(idx); }
 
-static void AddAchievementProgress(int idx, int amount) {
-    if (idx < 0 || idx >= ACH_COUNT) return;
-    if (g_achievements[idx].unlocked) return;
-    g_achievements[idx].progress += amount;
-    if (g_achievements[idx].progress >= g_achievements[idx].target) {
-        UnlockAchievement(idx);
-    }
-}
+/* v6：改转发 */
 
-/* 每帧/事件时检查的成就 */
+/* v6：成就检查改成**表驱动** ——
+   把游戏里的值打成快照，交给 achievements.c 按 kind 比对。
+   加一个成就只需要在 kAchDefs[] 里加一行，这里永远不用改。 */
+extern int CatchCountThisFloor(void);
 static void CheckAchievements(void) {
-    /* 1: FIRST STEPS - 完成第 1 层（在过关时检查） */
-    /* 2: SURVIVOR - 到达第 5 层 */
-    if (currentLevel >= 5) UnlockAchievement(1);
-    /* 3: ESCAPE ARTIST - 通关（在 gameWon 时检查） */
-    /* 4: SHARD HUNTER - 累计 500 碎片（在获得碎片时累加，需要总计数） */
-    if (totalShardsEarned >= 500) UnlockAchievement(3);
-    /* 5: SILENT SHADOW - 第 5 层不冲刺 */
-    /* v3.3：sprintedThisLevel 每层清零 → 到第 5 层必然为 0，成就白送。
-       改用跨层保留的 sprintedAnyFloor。 */
-    if (currentLevel >= 5 && sprintedAnyFloor == 0) UnlockAchievement(4);
-    /* 6: BOTTLE MASTER - 用瓶子击杀 10 只怪 */
-    /* v3.3：bottlesKilled 只在击杀时 ++，而怪打不死 → 永远是 0。
-       改成「累计投掷 30 次」（引怪是逃生玩法的核心动作）。 */
-    if (totalThrown >= 30) UnlockAchievement(5);
-    /* 7: FACE DODGER - 躲开 5 次跳脸虫 */
-    /* v3.3：faceDodged 来自跳脸虫 QTE，那套已经不在了。
-       改成「成功藏身 5 次」。 */
-    if (hideCount >= 5) UnlockAchievement(6);
-    /* 8: NOCTURNAL - 手电关着过关 */
-    if (flashlightOffLevel) UnlockAchievement(7);
+    if(trainingMode) return;
+    AchSnap s;
+    memset(&s, 0, sizeof(s));
+    s.level            = currentLevel;
+    s.gameWon          = gameWon;
+    s.totalGoldEarned  = totalGoldEarned;
+    s.carryGold        = carryGold;
+    { extern int bankGold; s.bankGold = bankGold; }
+    s.totalThrown      = totalThrown;
+    s.hideCount        = hideCount;
+    /* v7 第 ㊿ 轮：**这三个原来写死 0**
+       → DISRUPTOR(击退20次) / PITCHER(投掷命中10次) / CARTOGRAPHER(回声100格)
+         这三个成就永远解不开。现在读真实计数器。 */
+    { extern int knockCountRun, throwHitCountRun, echoCellsTotalRun;
+      s.knockCount    = knockCountRun;
+      s.throwHitCount = throwHitCountRun; }
+    { extern int bestiarySeen; s.bestiarySeenMask = bestiarySeen; }
+    { extern int SkillNodesLit(void); s.skillNodesLit = SkillNodesLit(); }
+    { extern float ThreatValue(void); s.maxThreatThisRun = (int)ThreatValue(); }
+    { extern int echoCellsTotalRun; s.echoCellsTotal = echoCellsTotalRun; }
 
-    /* ---- v2.0：新加的 24 个成就接入触发点（原来只有 0-15 有解锁调用） ---- */
-    if (currentLevel >= 12) UnlockAchievement(16);          /* DEEP DELVER */
-    if (currentLevel >= 18) UnlockAchievement(17);          /* ABYSS WALKER */
-    /* v3.3：bossDefeated 只在不存在的战斗结算里置位。改成层数里程碑。 */
-    if (currentLevel >= 21)  UnlockAchievement(18);          /* CLOSE CALL */
-    if (currentLevel >= 24) UnlockAchievement(19);          /* ALL FOUR ZONES */
-    /* v3.3：遗物系统（OpenRelicPick/OpenSkillPick）是 0 调用点的死代码，
-       relicTotal 永远 0。改成「累计投掷 80 次」。 */
-    if (totalThrown >= 80)   UnlockAchievement(24);          /* RELIC HOARDER */
-    /* v3.3：武器配件系统已废（attachOwned 永远 0）。改成「藏身 30 次」。 */
-    if (hideCount >= 30)     UnlockAchievement(25);          /* FULL LOADOUT */
-    if (totalShardsEarned >= 3000) UnlockAchievement(27);   /* SHARD TYCOON */
-    if (BestiarySeenAll())  UnlockAchievement(26);          /* BESTIARY DONE */
-    /* v3.3：totalKills 的 ++ 在 NO_COMBAT 的编译死分支里。改成「藏身 100 次」。 */
-    if (hideCount >= 100)    UnlockAchievement(38);          /* CENTURION */
-    /* v3.3：LUCKY BREAK(32) 原来没有任何触发点，用开锁数接上。 */
-    if (locksOpened >= 5)    UnlockAchievement(32);          /* LUCKY BREAK */
-    /* ---- v2.2：把长期解不开的成就接上（原来 15 个没有任何触发点） ---- */
-    if (currentLevel >= 24) UnlockAchievement(33);              /* OFF BY ONE（与 19 同条件） */
-    /* v3.3：relicTotal 恒 0，这条退化成「到 12 层」和 DEEP DELVER 重复。
-       改成「到 12 层且一次都没投掷过」——真正的克制流。 */
-    if (currentLevel >= 12 && totalThrown == 0) UnlockAchievement(31);   /* NO RELICS */
-    if (gameWon && relicTotal == 0) UnlockAchievement(39);      /* TRUE ENDING */
-    if (gameWon && sanity <= 25.0f) UnlockAchievement(35);      /* BLOOD PRICE */
-    if (gameWon && !flashlightOn)   UnlockAchievement(36);      /* GHOST RUN */
-    /* v3.0：**改成逃生向条件** ——
-       原来 29/30 靠 killsWrench / killsBottle，而怪已经打不死，
-       这两个计数器永远是 0，成就永远不可能解锁。
-       改成用真正会累加的：搜索次数 / 投掷诱饵次数。 */
-    if (runSearched >= 60) UnlockAchievement(29);               /* HANDS EMPTY */
-    /* bottlesKilled 也只在「打死怪」时 ++，同样永远为 0。
-       改用真正会累加的搜索次数（120 次 = 大约两局全翻）。 */
-    if (runSearched >= 120) UnlockAchievement(30);              /* DECOY RAIN */
-    if (crankSecondsTotal >= 300.0f) UnlockAchievement(28);     /* CRANK ADDICT */
-    if (floorsNoLight >= 3) UnlockAchievement(21);              /* NO LIGHT RUN */
-    if (floorsFlawless >= 1) UnlockAchievement(20);             /* FLAWLESS FLOOR */
-    if (floorsPacifist >= 1) UnlockAchievement(22);             /* PACIFIST FLOOR */
-    if (floorsFast >= 1) UnlockAchievement(23);                 /* SPEED DEMON */
-    /* v3.3：floorsQuiet 全项目只有声明和读取，从没 ++。
-       改成「3 层全程没被发现」（floorsPacifist 现在由 floorSpotted 驱动）。 */
-    if (floorsPacifist >= 3) UnlockAchievement(34);             /* SILENT FLOOR */
-    if (lowSanitySeconds >= 30.0f) UnlockAchievement(37);       /* LAST BREATH */
-    /* 9: SPEED RUNNER - 第 1 关 2 分钟内过关 */
-    if (currentLevel == 1 && runTime < 120.0f && breakerOpen) UnlockAchievement(8);
-    /* 10: DEEP DIVER - 到达第 10 层 */
-    if (currentLevel >= 10) UnlockAchievement(9);
-    /* 11: FUSE FINDER - 单局集 5 保险丝（需计数） */
-    /* v3.3：原来要求 5 根，但生成时 fusesNeeded 被压到 箱子数-2，
-       普通层（4~6 个箱子）最多只能出 4 根 —— 数学上不可能达成。
-       降到 4，并且判的是「本层已收集」而不是「本局」。 */
-    if (fusesCollectedRun >= 4) UnlockAchievement(10);
-    /* 12: GENERATOR GURU - 发电累计 60 秒（需累计） */
-    if (crankTimeTotal >= 60) UnlockAchievement(11);
-    /* 13: UPGRADE JUNKIE - 6 项升级全满级 */
-    if (SkillsAllMaxed()) {      /* v2.8：属性面板删了，改成技能树全满 */
-        UnlockAchievement(12);
+    /* flags：特殊条件（0 未用）
+       1 进入过游戏 / 2 存活10分 / 3 存活30分 / 4 抢回赃款3次
+       5 零被抓撤离 / 6 完美逃脱 / 7 守门人三层 / 8~14 见 kAchDefs 注释 */
+    s.flags[1] = !trainingMode;
+    if (gameWon && CatchCountThisRun() == 0) s.flags[5] = 1;
+    /* v7 第 ㊿ 轮：TEN MINUTES / HALF HOUR 的 flag 从来没人置位 */
+    if (runTime >= 600.0f)  s.flags[2] = 1;
+    if (runTime >= 1800.0f) s.flags[3] = 1;
+    /* 撤离一次 → FIRST EXIT（独立 flag 15，不再和 FIRST BREATH 共用一个） */
+    if (gameWon) s.flags[15] = 1;
+    s.flags[6]=gameWon && sanity>=SanityMax()-0.01f;
+    s.flags[7]=wardenCleanFloors>=3;
+    s.flags[10]=gameWon && WardenActive() && WardenWatching();
+    s.flags[11]=doubleHuntSeconds>=30.0f;
+    s.flags[12]=currentLevel>=12 && carryGold>=300000;
+    s.flags[14]=fullHideDone;
+    /* 无光撤离 / 空手撤离 / 完美撤离 */
+    if (gameWon && !runLightUse)        s.flags[9] = 1;
+    if (gameWon && runSearched == 0)     s.flags[8] = 1;
+    /* v7 第 56 轮：最后两个没有置位点的 flag */
+    { extern int bountyRecovered;
+      if (bountyRecovered >= 3) s.flags[4] = 1; }              /* CLAWBACK */
+    { extern int metaResetDone;
+      if (metaResetDone) s.flags[13] = 1; }                    /* META RESET */
+
+        /* ==================================================================
+     * v7 第 ㊿ 轮：**每日任务 8 个目标，原来只有 1 个会推进**
+     * ==================================================================
+     * 旧代码：DailySetProgress() 全项目只有一个调用点，
+     *         条件是 `if (DailyGoalId() == 2)` 且包在 `if (isEndlessRun)` 里。
+     *         → 抽到「开 40 个箱子」的玩家，HUD 永远显示 0/40。
+     *
+     * 现在每帧把当前局的状态映射到对应目标上。
+     * DailySetProgress 是**取最大值**的，所以传累计值即可。
+     * ================================================================ */
+    {
+        extern int DailyGoalId(void);
+        extern void DailySetProgress(int);
+        extern int totalGoldEarned, runSearched;
+        extern int dailyEscapeCount, floorsNoSanityLoss;
+        int v = 0;
+        switch (DailyGoalId()) {
+        case 0: v = totalGoldEarned;                        break;  /* 收集金币 */
+        case 1: v = dailyEscapeCount;                       break;  /* 撤离次数 */
+        case 2: v = currentLevel;                           break;  /* 到达层数 */
+        case 3: v = runSearched;                            break;  /* 开箱数 */
+        case 4: v = knockCountRun;                          break;  /* 击退 */
+        case 5: v = throwHitCountRun;                       break;  /* 投掷命中 */
+        case 6: v = (int)(runTime / 60.0f);                 break;  /* 存活分钟 */
+        case 7: v = floorsNoSanityLoss;                     break;  /* 无伤层数 */
+        default: break;
+        }
+        DailyObserve(DailyGoalId(),v);
     }
-    /* 14: MAP MASTER - 单局全探索 3 张图 */
-    if (mapsFullyExplored >= 3) UnlockAchievement(13);
-    /* 15: PERFECT ESCAPE - 通关无伤（需标记） */
-    /* 16: TRUE SURVIVOR - 通关且全满级（在 gameWon 时检查） */
+
+extern void AchCheck(const AchSnap*);
+    AchCheck(&s);
+
+    /* v7 第 ㊿ 轮：这里原来 `if (gameWon) s.flags[2] = 0;`
+       写在 AchCheck() **之后**，是空操作；而且 flags[2] 现在是
+       TEN MINUTES 的标记，清掉它就是错。已删除。 */
 }
 
 void PauseGame(void) {
@@ -5022,7 +5305,7 @@ static void ApplyInstantSkill(int id) {
         sanity += 25.0f;
         if (sanity > SanityMax()) sanity = SanityMax();
         break;
-    case IR_SHARDBAG: pendingShards += 40; break;
+    case IR_SHARDBAG: carryGold += 40; break;
     /* v2.0 新增 */
     case IR_FIELDREPAIR:
         battery += 35.0f;
@@ -5036,7 +5319,7 @@ static void ApplyInstantSkill(int id) {
     case IR_PACKRAT:
         if (bottles < BottleCap()) bottles++;
         if (bottles < BottleCap()) bottles++;
-        pendingShards += 30;
+        carryGold += 30;
         break;
     case IR_OILCAN:
         battery += 25.0f;
@@ -5092,9 +5375,11 @@ void CloseSkillPick(void) {
             ApplyInstantSkill(id);
         }
     }
+    int wasRelic=pickMode;
     pickMode = 0;
     for (int k = 0; k < INRUN_CHOICES; k++) skillPickOptions[k] = -1;
     currentState = prevState;
+    if (wasRelic && pendingSkillDraft) { pendingSkillDraft=0; OpenSkillPick(); return; }
     ForceCursor(0);
     /* 鼠标点的卡：回到局内时左键还按着，不清就会立刻开始蓄力、
        松手朝面前的墙扔一个道具（还带 14 半径噪声把怪引来）。 */
@@ -5899,6 +6184,48 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 DumpUILayout("ui_layout.txt");
                 return 0;
             }
+            /* ==================================================================
+             * v7 第 63 轮：**技能树重置入口**
+             * ==================================================================
+             * SkillResetAll() 之前连实现都没有（skills.h 有原型、
+             * skills.c 里被 git 冲掉了），META RESET 成就因此永远拿不到。
+             *
+             * 入口：Hub 里按 R，**两秒内再按一次**才真的重置。
+             * 破坏性操作要二次确认，但不用弹窗（弹窗会打断键盘流）。
+             * ================================================================ */
+            if(currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE && wParam=='R') {
+                static DWORD lastReset=0; DWORD now=GetTickCount();
+                if(lParam&(1L<<30)) return 0;
+                if(lastReset && now-lastReset<2000) { BenchRefundRun();lastReset=0;pickupMsg=Tr("MODS RESET - GOLD REFUNDED","改造已重置，金币已退还"); }
+                else {lastReset=now;pickupMsg=Tr("PRESS R AGAIN TO RESET MODS","再按 R 重置本局改造");}
+                pickupMsgTimer=2.0f;uiDirty=1;return 0;
+            }
+            if(currentState==STATE_SAFEHOUSE && shopPage==SHP_SHOP && wParam=='R') { if(!(lParam&(1L<<30))) ShopRefresh(); return 0; }
+            if (currentState == STATE_HUB && wParam == 'R') {
+                if (lParam & (1L << 30)) return 0;
+                static DWORD lastR = 0;
+                DWORD now = GetTickCount();
+                if (lastR != 0 && (now - lastR) < 2000) {
+                    extern void SkillResetAll(void);
+                    extern const char* pickupMsg;
+                    extern float pickupMsgTimer;
+                    SkillResetAll();
+                    pickupMsg = Tr("SKILLS RESET - GOLD REFUNDED", "技能已重置，金币已退还");
+                    pickupMsgTimer = 2.5f;
+                    lastR = 0;
+                    uiDirty = 1;
+                } else {
+                    extern const char* pickupMsg;
+                    extern float pickupMsgTimer;
+                    pickupMsg = Tr("PRESS R AGAIN TO RESET ALL SKILLS",
+                                   "再按一次 R 重置全部技能");
+                    pickupMsgTimer = 2.0f;
+                    lastR = now;
+                    uiDirty = 1;
+                }
+                return 0;
+            }
+
             if (wParam == VK_F11 ||
                 (wParam == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000))) {
                 /* v1.24：F11 改成**真全屏切换**（无边框铺满整块屏），
@@ -5948,6 +6275,33 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     keys[wParam] = 1;
                     keyPressed[wParam] = 1;   /* 边沿，供 QTE 消费 */
                 }
+            }
+
+            /* ================================================================
+             * v7 第 ㊿ 轮：**T 键在这里直接处理**
+             * ================================================================
+             * 原来 T 是在 Update 里读 keyPressed['T'] 的 —— 但
+             * Update 里前面有若干 return / 提前分支，键很容易被跳过，
+             * 而且玩家看到的症状就是「按 T 完全没反应」。
+             *
+             * 这里和「切投掷槽位」一样，在消息里立即处理，
+             * 不依赖 Update 走到哪一行。
+             * ================================================================ */
+            if (currentState == STATE_PLAYING && wParam == 'T') {
+                /* v7 第 ㊿ 轮：**改回切状态**
+                   崩溃的真正原因是 ShopPriceAt() 无限递归（已修），
+                   不是这条状态路径。而这条路径是进改造树 / 局内强化 /
+                   休息 / 校准小游戏的**唯一入口**，不能没有。 */
+                extern void ShopOpen(int);
+                extern int currentLevel;
+                ShopOpen(currentLevel);
+                currentState = STATE_SAFEHOUSE;
+                shopPage = 0;
+                shopRow = 0;
+                keyPressed['T'] = 0;   /* 否则 Update 里那条还会再开一次 */
+                ForceCursor(1);
+                uiDirty = 1;
+                return 0;
             }
 
             /* 切投掷槽位：在消息里即时处理，后按的键立即生效。
@@ -6175,15 +6529,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                    一分碎片都花不出去，整条局外成长线等于锁死。 */
                 {
                     int cur = hubSelection;
-                    int col = SkillNodeCol(cur);
-                    int row = SkillNodeRow(cur);
-                    int moved = 0;
-                    if (menuUp    && row > 0) { row--; moved = 1; }
-                    if (menuDown  && row < SKILL_GRID_ROWS - 1) { row++; moved = 1; }
-                    if (menuLeft  && col > 0) { col--; moved = 1; }
-                    if (menuRight && col < SKILL_GRID_COLS - 1) { col++; moved = 1; }
-                    if (moved) {
-                        int nid = SkillNodeIdAt(col, row);
+                    /* v6：**按边导航** —— 辐射布局里节点不在直线上，
+                       col/row 加减会跳到视觉上很远的地方。
+                       现在按方向 + 距离找最近的邻居。 */
+                    int nid = -1;
+                    extern int SkillNavNearest(int, int);
+                    if (menuUp)    nid = SkillNavNearest(cur, 0);
+                    if (menuDown)  nid = SkillNavNearest(cur, 1);
+                    if (menuLeft)  nid = SkillNavNearest(cur, 2);
+                    if (menuRight) nid = SkillNavNearest(cur, 3);
+                    if (1) {
                         /* v6：**退役节点（maxRank 0）跳过** ——
                            原来会停在退役节点上，详情显示 [RETIRED]、
                            买不了，玩家以为卡死。 */
@@ -6231,19 +6586,63 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     uiDirty = 1;
                 }
             } else if (currentState == STATE_ACHIEVEMENTS) {
-                int n = ACH_COUNT + 1;
+                /* v6：**分类筛选** —— 32 个平铺看不完，TAB / Q / E 切分类 */
+                extern void AchCycleFilter(int);
+                extern int AchVisibleCount(void);
+                if (wParam == VK_TAB || wParam == (WPARAM)'E') { AchCycleFilter(1); menuScrollOffsets[STATE_ACHIEVEMENTS] = 0; uiDirty = 1; return 0; }
+                if (wParam == (WPARAM)'Q') { AchCycleFilter(-1); menuScrollOffsets[STATE_ACHIEVEMENTS] = 0; uiDirty = 1; return 0; }
+                int n = AchVisibleCount() + 1;   /* +1 = Back 行 */
                 if (menuUp) { achSelection = (achSelection + n - 1) % n; uiDirty = 1; }
                 if (menuDown) { achSelection = (achSelection + 1) % n; uiDirty = 1; }
                 MenuGeo ag = GetMenuGeo();
-                if (achSelection < ag.scrollOffset) menuScrollOffsets[STATE_ACHIEVEMENTS] = achSelection;
+                if (achSelection < ag.scrollOffset) menuScrollOffsets[STATE_ACHIEVEMENTS] = ag.scrollOffset;
                 else if (achSelection >= ag.scrollOffset + ag.maxVisibleRows) menuScrollOffsets[STATE_ACHIEVEMENTS] = achSelection - ag.maxVisibleRows + 1;
-                /* 只有 Back 行（或者 Esc）才退出；成就条目本身按回车不做事 */
-                if (menuCancel || (menuConfirm && achSelection >= ACH_COUNT)) {
+                if (menuCancel || (menuConfirm && achSelection >= AchVisibleCount())) {
                     currentState = STATE_MAIN_MENU;
                     menuSelection = 0;
                     uiDirty = 1;
                 }
             } else if (currentState == STATE_PLAYING) {
+
+            /* ================================================================
+             * v7 第 51 轮：**商店浮层接管按键**
+             * ================================================================ */
+            {
+                extern int shopOverlayOpen, shopRow;
+                extern void ShopActivate(void);
+                extern int ShopRowCount(void);
+                if (shopOverlayOpen) {
+                    int n = ShopRowCount();
+                    if (n < 1) n = 1;
+                    if (wParam == VK_ESCAPE) {
+                        shopOverlayOpen = 0;
+                        ForceCursor(0);
+                        resetInputState = 1;
+                        uiDirty = 1;
+                        return 0;
+                    } else if (wParam == VK_UP) {
+                        shopRow = (shopRow + n - 1) % n;
+                        uiDirty = 1;
+                        return 0;
+                    } else if (wParam == VK_DOWN) {
+                        shopRow = (shopRow + 1) % n;
+                        uiDirty = 1;
+                        return 0;
+                    } else if (wParam == VK_RETURN || wParam == VK_SPACE) {
+                        if (shopRow >= n - 1) {
+                            shopOverlayOpen = 0;
+                            ForceCursor(0);
+                            resetInputState = 1;
+                        } else {
+                            ShopActivate();
+                        }
+                        uiDirty = 1;
+                        return 0;
+                    }
+                    return 0;
+                }
+            }
+
                 if (wParam == (WPARAM)g_bindings[ACT_PAUSE]) { autoPaused = 0; PauseGame(); }
                 if (wParam == (WPARAM)g_bindings[ACT_MAP]) {
                     /* v2.4：M = 放大地图（全屏）。再按一次 M 关掉。
@@ -6270,6 +6669,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     MapCursorRefresh();
                 }
                 if (wParam == (WPARAM)g_bindings[ACT_FLASHLIGHT]) {
+                    /* v6 战役第 1 关：手电永远关不掉 */
+                    { extern int CampaignFlashlightLocked(void);
+                      if (CampaignFlashlightLocked()) { flashlightOn = 1; uiDirty = 1; return 0; } }
+                    /* v6 每日限制：不能开手电 */
+                    { extern int DailyForbidLight(void);
+                      if (DailyForbidLight() || HasKeystone(SK_SALVAGE)) { flashlightOn = 0; uiDirty = 1;
+                                                return 0; } }
                     if (battery > 0.0f) flashlightOn = !flashlightOn;
                     uiDirty = 1;
                 }

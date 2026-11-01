@@ -1,3 +1,4 @@
+#include <string.h>
 #include <windows.h>
 #include <math.h>
 #include "entity.h"
@@ -29,7 +30,8 @@ void GamepadInit(void) {
     for (int i = 0; i < 4 && !pGetState; i++) {
         HMODULE h = LoadLibraryA(dlls[i]);
         if (!h) continue;
-        pGetState = (PFN_XInputGetState)GetProcAddress(h, "XInputGetState");
+        FARPROC address=GetProcAddress(h,"XInputGetState");
+        memcpy(&pGetState,&address,sizeof(pGetState));
     }
 }
 

@@ -28,7 +28,7 @@ typedef struct {
     int isKeystone;        /* 1 = keystone（全局只能持有 1 个） */
 } SkillDef;
 
-extern const SkillDef skillDefs[SKILL_COUNT];
+extern const SkillDef skillDefs[];
 extern int skillRank[SKILL_COUNT];
 extern int cores;              /* 核心货币 */
 extern int activeKeystone;     /* 当前持有的 keystone id，-1 = 无 */
@@ -42,6 +42,20 @@ extern int activeKeystone;     /* 当前持有的 keystone id，-1 = 无 */
 int SkillNodeCol(int id);                    /* -1 = 非法 id */
 int SkillNodeRow(int id);
 int SkillNodeIdAt(int col, int row);         /* 越界返回 -1 */
+/* v6 网状：边查询（UI 画连线用） */
+int SkillEdgeCount(int id);
+int SkillEdgeNeighbor(int id, int i);
+int SkillIsCrossNode(int id);
+/* v6 辐射布局：按方向找最近的节点（0上 1下 2左 3右） */
+int SkillNavNearest(int from, int dir);
+/* v6：节点里显示用的短名（详情条仍用全名） */
+const char* SkillShortName(int id);
+int SkillNodesLit(void);
+void SkillInitOnce(void);
+float SkillGoldMul(void);
+float SkillCrateGoldMul(void);
+float SkillExtractMul(void);
+void SkillResetAll(void);
 
 /* 查询 */
 int SkillCost(int id);                       /* 下一级花费，-1 = 已满 */

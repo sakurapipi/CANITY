@@ -27,9 +27,16 @@ enum {
     SPR_WRENCH = 0,
     SPR_PISTOL,
     SPR_SIGIL,
-    /* 投掷物（左手） */
-    SPR_ITEM_FLARE, SPR_ITEM_BOTTLE, SPR_ITEM_BRICK, SPR_ITEM_ACID,
-    SPR_ITEM_SMOKE, SPR_ITEM_FIRE, SPR_ITEM_GLUE, SPR_ITEM_MIRROR,
+    /* 投掷物（左手）—— v2.4.82 按**槽位**命名，和 ITEM_SLOT_* 一一对应。
+       旧的名字（BOTTLE/BRICK/ACID/FIRE/MIRROR）是已删除的投掷物，
+       留着只会让人以为还有那几种东西。 */
+    SPR_ITEM_FLARE,     /* 0 光球 */
+    SPR_ITEM_SLING,     /* 1 投石（石弹） */
+    SPR_ITEM_SMOKE,     /* 2 烟雾 */
+    SPR_ITEM_GLUE,      /* 3 胶水 */
+    SPR_ITEM_ECHO,      /* 4 回声（音叉） */
+    SPR_ITEM_DECOY,     /* 5 玩偶 */
+    SPR_ITEM__COUNT,
     /* 怪物：三只主怪各 4 帧 = 正面/正面走/侧面/侧面走；
        其余各 1 帧。朝向由 DrawBakedMonster 按玩家与怪的夹角选，
        侧面靠水平镜像覆盖另一侧（Doom 也是这么省美术的）。 */
@@ -70,5 +77,13 @@ void DrawSpriteSub(int id, int sx, int sy, int sw, int sh,
 /* 水平镜像 blit（怪物侧面靠它覆盖另一侧，Doom 的做法） */
 void DrawSpriteFlip(int id, int x, int y, int w, int h,
                     float light, float alpha, int zTest, float zDist);
+
+
+/* v2.4.66：局部换色（只换 key 色像素） */
+void SpriteAccentSet(unsigned int col);
+void SpriteAccentClear(void);
+
+
+void SpriteDumpPPM(int id, const char* path);
 
 #endif

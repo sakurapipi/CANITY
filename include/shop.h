@@ -15,7 +15,20 @@
 /* v3.4：8 件商品。原第 9/10 行是「存钱」，已删除 ——
    调研结论：局内存钱是纯亏（本局变弱、下一局才收益、且倍数已锁定），
    银行决策统一挪到主菜单的 BANK 页。 */
-#define SHOP_OFFERS 8
+/* ================================================================
+ * v6 第 48 轮：**4 格退回 8 格**
+ * ================================================================
+ * 第 卌 轮把 8 格改成 4 格（设计文档要求），结果**一进商店就崩溃**。
+ * 崩溃点没定位到 —— 不能拿玩家的稳定性换一个设计细节。
+ *
+ * 现在退回 8 格，但保留第 卌 轮真正有价值的两件事：
+ *   · 价格按物品算（kItemPrice），不再按行号
+ *   · 扣钱走 ShopPriceAt()，折扣**真的生效**（原来只改显示）
+ *
+ * 4 格作为已知未完成项留在文档里。
+ * ================================================================ */
+#define SHOP_OFFERS 4
+#define SHOP_ITEM_KINDS 8   /* 可选物品总数 */
 #define SHOP_COOLDOWN_ROWS 8
 
 #define SAFEHOUSE_PAGES 5   /* v3.0：+ 强化 */
@@ -31,14 +44,26 @@ typedef enum {
 } ShopPage;
 
 extern int shopPage;                  /* 当前页 */
-extern int shopRow;                   /* 当前页光标 */
+extern int shopRow;
+/* v7 第 51 轮：**商店改成"叠在游戏上"的浮层**
+   不再切到 STATE_SAFEHOUSE —— 那条状态路径一进就崩，
+   而且不产生崩溃日志（栈溢出）。浮层完全不改状态，
+   所以不可能碰到那条坏路径。 */
+extern int shopOverlayOpen;                   /* 当前页光标 */
 extern int shopOffer[SHOP_OFFERS];    /* 配件 id，-1 = 已买 */
 extern int shopPrice[SHOP_OFFERS];
+/* v6 折扣 */
+#define SHOP_DISCOUNT_CHANCE 60
+extern int   shopDiscountRow;
+extern float shopDiscountPct;
+int  ShopPriceAt(int row);
+int  ShopIsDiscounted(int row);
 extern int shopNodeSel;   /* v2.7：改造树光标节点 */
 extern int attachOwned[ATTACH_COUNT]; /* 已拥有（未装）的配件数量 */
 
 /* 进入安全屋：按层号重掷报价，重置休息次数 */
 void ShopOpen(int level);
+void ShopRefresh(void);
 void SafeLevelReset(void);   /* v2.2 */
 
 /* 面板结构 */

@@ -4,7 +4,13 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "music.h"
 #include "entity.h"
+/* v6：威胁值接口 */
+float ThreatChaseBonus(void);
+float ThreatSpawnAdvance(void);
+float ThreatSpeedCap(void);
+float ThreatHearMul(void);
 #include "suspicion.h"
 #include "upgrade_run.h"
 #include "bench.h"
@@ -103,6 +109,29 @@ static float MonsterSpeedFor(int level, float base, float modMul) {
     if (s > MONSTER_SPEED_MAX) s = MONSTER_SPEED_MAX;
     s *= modMul;
     if (s > MONSTER_SPEED_FINAL_MAX) s = MONSTER_SPEED_FINAL_MAX;
+
+    /* ==================================================================
+     * v7 第 ㊿ 轮：**THREAT 的速度加成回来了，但先修寻路**
+     * ==================================================================
+     * 第 ③ 轮把上限换成 ThreatSpeedCap()（2.05~2.33）后，
+     * 用户实机反馈「听声鬼会瞬移」。
+     *
+     * 真正的原因不是速度本身，是**寻路重算间隔跟不上**：
+     * 原来每 0.45 秒才 MonPath() 一次，速度 2.33 时这 0.45 秒里
+     * 怪物已经走了 1.05 格 —— 切角、穿墙、看起来就是"瞬移"。
+     *
+     * 修法两件一起做：
+     *   ① repath 间隔 0.45 → 0.22（见下面 Hunt 分支）
+     *   ② 速度上限收敛到 2.20（原文 2.10，仍 < 玩家冲刺 3.0）
+     * ================================================================== */
+    {
+        extern float ThreatSpeedCap(void);
+        float hard = ThreatSpeedCap();
+        if (hard > 2.20f) hard = 2.20f;      /* 不许超过 2.20 */
+        if (hard < MONSTER_SPEED_FINAL_MAX) hard = MONSTER_SPEED_FINAL_MAX;
+        if (s > hard) s = hard;
+    }
+
     return s;
 }
 
@@ -130,9 +159,19 @@ static int InGlue(float x, float y) {
 /* 被抓后的无敌时间：深层收紧，让连续被抓不再是无解连击。
    第 6 层开始，每深一层减 0.1 秒，第 15 层触到下限 3.0 秒。 */
 static float HitCooldownFor(int level) {
-    if (level < HIT_COOLDOWN_START_LEVEL) return HIT_COOLDOWN_BASE;
-    float t = HIT_COOLDOWN_BASE - 0.1f * (float)(level - HIT_COOLDOWN_START_LEVEL + 1);
+    float t;
+    if (level < HIT_COOLDOWN_START_LEVEL) {
+        t = HIT_COOLDOWN_BASE;
+    } else {
+        t = HIT_COOLDOWN_BASE - 0.1f * (float)(level - HIT_COOLDOWN_START_LEVEL + 1);
+    }
+    /* v6 第 ㊱ 轮：**THREAT 的第 5 项效果终于接上了**
+       第 ③ 轮我在报告里写「五项效果全部接线」——
+       实际上 ThreatCooldownDelta 一直是死代码。
+       这是唯一一项影响"你多久能被抓第二次"的效果。 */
+    { extern float ThreatCooldownDelta(void); t += ThreatCooldownDelta(); }
     if (t < HIT_COOLDOWN_MIN) t = HIT_COOLDOWN_MIN;
+    if (t < 0.25f) t = 0.25f;          /* 硬下限：再强也不许贴脸连抓 */
     return t;
 }
 
@@ -190,6 +229,48 @@ static int MonPathFor(Monster* m, int sx, int sy, int tx, int ty) {
 static int MonPath(int sx, int sy, int tx, int ty) { return MonPathFor(&monster, sx, sy, tx, ty); }
 
 /* 把怪放到离玩家足够远的空格 */
+/* ==================================================================
+ * v2.4.93 **被抓的理智惩罚：递增档位**
+ * ------------------------------------------------------------------
+ * 用户要求：「每次被撞到，理智递减 —— 第一次 10%，第二次 15%，
+ *            越减越多，封顶 40%。计数换层重置。」
+ *
+ * 为什么递增：固定扣 18 意味着"被抓一次和被抓五次一样疼"，
+ * 玩家不会因为连续失误而真正感到压力。
+ * 递增之后，"今天这层已经被抓三次了"本身就是压迫感。
+ *
+ * 为什么换层重置：整局累积会让前期小失误在深层变成必死。
+ * 每层重新计数，深度惩罚靠层数本身（怪更快）来实现。
+ * ================================================================ */
+static int s_catchCountFloor = 0;
+
+/* 看一眼本次会扣多少（不消耗档位） */
+float CatchSanityPeek(void) {
+    static const float tier[6] = { 10.0f, 15.0f, 21.0f, 28.0f, 36.0f, 40.0f };
+    int i = s_catchCountFloor;
+    if (i < 0) i = 0;
+    if (i > 5) i = 5;
+    return tier[i];
+}
+
+/* 真的被抓到一次 —— 档位 +1 */
+void CatchCountBump(void) {
+    MusicNotify(MUSIC_EVENT_CAUGHT);
+    s_catchCountFloor++;
+    if (s_catchCountFloor > 6) s_catchCountFloor = 6;
+}
+
+/* 换层重置 */
+void CatchCountResetFloor(void) { s_catchCountFloor = 0; }
+
+int CatchCountThisFloor(void) { return s_catchCountFloor; }
+
+/* v6：**本局累计**被抓次数（上面那个每层清零，两个用途不同） */
+static int s_catchCountRun = 0;
+void CatchCountBumpRun(void)  { s_catchCountRun++; }
+int  CatchCountThisRun(void)  { return s_catchCountRun; }
+void CatchCountResetRun(void) { s_catchCountRun = 0; }
+
 void SpawnMonster(void) {
     monster.active = 1;
     monster.state = 0;
@@ -288,6 +369,22 @@ static int FlareNearHide(void) {
 }
 
 void MakeNoise(float x, float y, float radius) {
+    /* ==================================================================
+     * v7 第 ㊿ 轮：**事件的「怪物听觉」倍率一直是死的**
+     * ==================================================================
+     * events.h 里定义了 monsterHearMul，但全工程 0 个读取点。
+     * 于是「浓雾：怪物听觉 -20%」和「死寂：怪物听觉 +40%」
+     * 这两个描述**一个字都没发生** —— 玩家还会按它调整策略。
+     *
+     * 这里把它接进噪音半径：听觉倍率直接缩放"能传多远"。
+     * ================================================================ */
+    {
+        extern int levelEvent;
+        extern float EventMonsterHearMul(int);   /* events.c 提供的取值函数 */
+        float h = EventMonsterHearMul(levelEvent);
+        if (h > 0.01f && h != 1.0f) radius *= h;
+    }
+
     /* v3.0：**先记录再判距离** ——
        原来这段在主循环之后，而前面有 `if (Dist2 > radius) return;`，
        于是「没有怪听见就零反馈」：玩家在空地扔石头，HUD 一点反应都没有。 */
@@ -348,7 +445,8 @@ void MakeNoise(float x, float y, float radius) {
                遗物唯一卖点白买。现在被动噪音把三项一起算。 */
             if (r2 <= 14.0f) {
                 r2 *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;
-                { extern float GoldHearMul(void); r2 *= GoldHearMul(); }
+                { extern float GoldHearMul(void), ThreatHearMul(void);
+      r2 *= GoldHearMul() * ThreatHearMul(); }   /* v6：金币 + 威胁都放大听觉 */
             }
             if (Dist2(x, y, mm->x, mm->y) > r2 * r2) continue;
             mm->state = 1;
@@ -377,8 +475,8 @@ void MakeNoise(float x, float y, float radius) {
        这是「奖励就是风险」原则在 CANITY 的落点 ——
        钱让你变强，同时也让你更容易被听见。 */
     {
-        extern float GoldHearMul(void);
-        radius *= GoldHearMul();
+        extern float GoldHearMul(void), ThreatHearMul(void), CampaignNoiseAlertMul(void);
+        radius *= GoldHearMul() * ThreatHearMul() * CampaignNoiseAlertMul();   /* v6：金币 + 威胁 + 战役 */
     }
     radius *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;   /* QUIET LID + 遗物 + 事件 */
     /* v3.3：盲螨只认声音。它原来每帧直接朝玩家冲刺，所以玩家“静音走路”
@@ -761,7 +859,6 @@ void UpdateMonster(float dt) {
         float sd2 = sdx * sdx + sdy * sdy;
         /* v3.0：BLACKOUT 生效期间追捕者完全失明 */
         extern float ultTimer;
-        extern int ultKind;
         float sight = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
         if (ultTimer > 0.0f) sight = 0.0f;
         if (sd2 < sight * sight && HasLOS(monster.x, monster.y, posX, posY)) {
@@ -869,9 +966,10 @@ void UpdateMonster(float dt) {
     }
 
     if (monster.state == 1) {
+    hunt_continues:
         monster.repath -= dt;
         if (monster.repath <= 0.0f) {
-            monster.repath = 0.45f;
+            monster.repath = 0.22f;   /* v7：0.45 太慢，速度 2.2 时会切角=瞬移 */
             MonPath((int)monster.x, (int)monster.y, (int)monster.tx, (int)monster.ty);
         }
         if (Dist2(monster.x, monster.y, monster.tx, monster.ty) < 0.45f) {
@@ -879,11 +977,11 @@ void UpdateMonster(float dt) {
                 /* v3.4：甩脱追捕给金币 —— 这是逃生玩法的核心动作，
                    但它原来是零奖励，玩家没有「主动甩怪」的动力。 */
                 {
-                    extern int pendingShards, totalShardsEarned;
+                    extern int carryGold, totalGoldEarned;
                     extern const char* pickupMsg;
                     extern float pickupMsgTimer;
-                    pendingShards += GOLD_ESCAPE;
-                    totalShardsEarned += GOLD_ESCAPE;
+                    carryGold += GOLD_ESCAPE;
+                    totalGoldEarned += GOLD_ESCAPE;
                     pickupMsg = "ESCAPED  +GOLD";
                     pickupMsgTimer = 1.2f;
                 }          /* 到了声源，原地搜一圈 */
@@ -896,7 +994,11 @@ void UpdateMonster(float dt) {
            永远不放弃也永远抓不到（抓取要求 0.74 格内）。
            追 8 秒还没抓到就降级为搜寻（3 秒），给玩家脱身窗口。 */
         monster.huntTimer += dt;
-        if (monster.huntTimer > 8.0f) {
+        if (monster.huntTimer > HUNT_CHASE_MAX + ThreatChaseBonus()) {
+            /* v6 战役第 5 关：永不放弃 */
+            { extern int CampaignNoGiveUp(void);
+              if (CampaignNoGiveUp()) { monster.huntTimer = 0.0f; goto hunt_continues; } }
+            { extern void BestiaryMarkEscaped(int); BestiaryMarkEscaped(0); }   /* v6 图鉴：甩掉了 */
             /* v3.0：**超时后要真的走开，不能原地搜** ——
                用户截图「还是在堵门」：原来超时只切到 state=2「原地搜寻」，
                而原地就在玩家旁边，于是它永远堵在那儿。
@@ -994,8 +1096,7 @@ void UpdateMonster(float dt) {
         }
     } else if (!playerInSafe && monster.hitCooldown <= 0.0f && pd2 < 0.55f) {
         /* v1.8：被抓的惩罚随层数增长，且受局内"铁皮"减免 */
-        float catchLoss = CATCH_SANITY_BASE *
-                          (1.0f + CATCH_SANITY_STEP * (float)(currentLevel > 0 ? currentLevel - 1 : 0));
+        float catchLoss = CatchSanityPeek();   /* v2.4.93 递增档位 */
         /* v3.0：**藏在柜子里 = 完全抓不到**。
            原来只包住了扣理智那一行，后面的红屏/尖叫/tookDamage/
            怪物重生全在 if 外照跑 —— 怪贴到 0.55 格内照样红屏，
@@ -1022,6 +1123,10 @@ void UpdateMonster(float dt) {
         if (hiddenIn < 0) {
             /* v3.0：厚皮三层叠加 —— 改造树 -15%、局内 THICK HIDE -35% */
             sanity -= catchLoss * RunDamageTakenMul() * BenchFearDamageMul() * ThickHideMul();
+            CatchCountBump();   /* v2.4.93：这一次记账，下次更疼 */
+            { extern void CatchCountBumpRun(void); CatchCountBumpRun(); }
+            { extern void BestiaryMarkCaught(int); BestiaryMarkCaught(0); }   /* v6 图鉴 */
+            { extern void FlankOnCaught(void); FlankOnCaught(); }   /* v2.4.96 封喉者扑上来 */
 
     AddHitFlash(0.85f);          /* v2.1：被抓的红闪 */
     AddShake(0.30f, 0.22f);
@@ -1075,6 +1180,81 @@ void UpdateMonster(float dt) {
    训练营要同时放两只听声怪做行为测试。
    这段是从 UpdateMonster 机械复制出来的，唯一的差别是操作 monster2。
    两只怪逻辑完全一致 —— 所以测出来的行为可以直接代表正式关卡。 */
+/* ==================================================================
+ * v2.4.94 **第二只听声鬼：进层 30 秒后出现**
+ * ------------------------------------------------------------------
+ * 用户拍板：「一只先出，30 秒之后出第二只。」
+ * 一开局就被两只堵死太劝退；先来一只建立压力，
+ * 30 秒后第二只去封喉 —— 这时玩家通常已经开过一两个箱子，
+ * 噪音已经把自己卖出去了，包夹才有意义。
+ * ================================================================ */
+static float s_secondSpawnT = 0.0f;
+static int   s_secondSpawned = 0;
+
+void ResetSecondSpawn(void) {
+    s_secondSpawnT = 0.0f;
+    s_secondSpawned = 0;
+}
+
+void TickSecondSpawn(float dt) {
+    extern Monster monster2;
+    extern int trainingMode;
+    if (currentState != STATE_PLAYING) return;
+    if (trainingMode) return;
+
+    /* v2.4.98：玩家在出口附近时不刷第二只 */
+    {
+        extern int breakerOpen, exitChoiceOpen;
+        if (exitChoiceOpen) return;
+        if (breakerOpen) {
+            extern float Dist2(float, float, float, float);
+            extern float exitX, exitY;
+            if (Dist2(posX, posY, exitX, exitY) < 9.0f) return;
+        }
+    }
+
+    s_secondSpawnT += dt;
+    if (s_secondSpawned) return;
+    /* v6：威胁越高，第二只来得越早（最多提前 7.2 秒） */
+    /* v6：第二只的出场时间 = 基础 - 威胁提前 + 每日修正 */
+    { extern float DailySecondSpawnOffset(void);
+      if (s_secondSpawnT < HUNT_SECOND_SPAWN_T - ThreatSpawnAdvance()
+                                     + DailySecondSpawnOffset()) return; }
+
+    s_secondSpawned = 1;
+
+    /* 在玩家 10~16 格外找一个能站的格子 */
+    for (int t = 0; t < 120; t++) {
+        float ang = (float)(rand() % 6283) / 1000.0f;
+        float d = 10.0f + (float)(rand() % 600) / 100.0f;
+        float x = posX + cosf(ang) * d;
+        float y = posY + sinf(ang) * d;
+        if (x < 1.5f || y < 1.5f || x > MAP_WIDTH - 1.5f || y > MAP_HEIGHT - 1.5f) continue;
+        if (Blocked(x, y)) continue;
+
+        monster2.active = 1;
+        monster2.x = x;
+        monster2.y = y;
+        monster2.tx = posX;
+        monster2.ty = posY;
+        monster2.state = 0;
+        monster2.huntTimer = 0.0f;
+        monster2.stun = 0.0f;
+        monster2.hitCooldown = 0.0f;
+        monster2.pathLen = 0;
+        monster2.pathIdx = 0;
+        monster2.repath = 0.0f;
+        monster2.sightHold = 0.0f;
+
+        PlaySfx(SFX_WARDEN, 0.55f);
+        pickupMsg = "A SECOND SET OF FOOTSTEPS...";
+        pickupMsgTimer = 2.0f;
+        return;
+    }
+    /* 没找到位置 → 下帧继续试 */
+    s_secondSpawned = 0;
+}
+
 void UpdateMonster2(float dt) {
     /* ===== v2.4.14 **怪物扑到玩偶上** =====
        用户反馈：怪贴到玩偶上之后「不消失、没有实际反应、直接走开了」。
@@ -1122,7 +1302,6 @@ void UpdateMonster2(float dt) {
         float sd2 = sdx * sdx + sdy * sdy;
         /* v3.0：BLACKOUT 生效期间追捕者完全失明 */
         extern float ultTimer;
-        extern int ultKind;
         float sight = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
         if (ultTimer > 0.0f) sight = 0.0f;
         if (sd2 < sight * sight && HasLOS(monster2.x, monster2.y, posX, posY)) {
@@ -1240,11 +1419,11 @@ void UpdateMonster2(float dt) {
                 /* v3.4：甩脱追捕给金币 —— 这是逃生玩法的核心动作，
                    但它原来是零奖励，玩家没有「主动甩怪」的动力。 */
                 {
-                    extern int pendingShards, totalShardsEarned;
+                    extern int carryGold, totalGoldEarned;
                     extern const char* pickupMsg;
                     extern float pickupMsgTimer;
-                    pendingShards += GOLD_ESCAPE;
-                    totalShardsEarned += GOLD_ESCAPE;
+                    carryGold += GOLD_ESCAPE;
+                    totalGoldEarned += GOLD_ESCAPE;
                     pickupMsg = "ESCAPED  +GOLD";
                     pickupMsgTimer = 1.2f;
                 }          /* 到了声源，原地搜一圈 */
@@ -1257,7 +1436,13 @@ void UpdateMonster2(float dt) {
            永远不放弃也永远抓不到（抓取要求 0.74 格内）。
            追 8 秒还没抓到就降级为搜寻（3 秒），给玩家脱身窗口。 */
         monster2.huntTimer += dt;
-        if (monster2.huntTimer > 8.0f) {
+        if (monster2.huntTimer > HUNT_CHASE_MAX + ThreatChaseBonus()) {
+            /* v7 第 50 轮：战役第 5 关的「永不放弃」原来只对第一只猎手生效
+               （第一只在上面有 CampaignNoGiveUp 判断，这只没有）
+               → 第 5 关实际上只有一半是"永不放弃"。 */
+            { extern int CampaignNoGiveUp(void);
+              if (CampaignNoGiveUp()) monster2.huntTimer = 0.0f; }
+            { extern void BestiaryMarkEscaped(int); BestiaryMarkEscaped(0); }   /* v6 图鉴：甩掉了 */
             /* v3.0：**超时后要真的走开，不能原地搜** ——
                用户截图「还是在堵门」：原来超时只切到 state=2「原地搜寻」，
                而原地就在玩家旁边，于是它永远堵在那儿。
@@ -1355,8 +1540,7 @@ void UpdateMonster2(float dt) {
         }
     } else if (!playerInSafe && monster2.hitCooldown <= 0.0f && pd2 < 0.55f) {
         /* v1.8：被抓的惩罚随层数增长，且受局内"铁皮"减免 */
-        float catchLoss = CATCH_SANITY_BASE *
-                          (1.0f + CATCH_SANITY_STEP * (float)(currentLevel > 0 ? currentLevel - 1 : 0));
+        float catchLoss = CatchSanityPeek();   /* v2.4.93 递增档位 */
         /* v3.0：**藏在柜子里 = 完全抓不到**。
            原来只包住了扣理智那一行，后面的红屏/尖叫/tookDamage/
            怪物重生全在 if 外照跑 —— 怪贴到 0.55 格内照样红屏，
@@ -1382,6 +1566,9 @@ void UpdateMonster2(float dt) {
         if (hiddenIn < 0) {
             /* v3.0：厚皮三层叠加 —— 改造树 -15%、局内 THICK HIDE -35% */
             sanity -= catchLoss * RunDamageTakenMul() * BenchFearDamageMul() * ThickHideMul();
+            CatchCountBump();   /* v2.4.93：这一次记账，下次更疼 */
+            { extern void CatchCountBumpRun(void); CatchCountBumpRun(); }
+            { extern void FlankOnCaught(void); FlankOnCaught(); }   /* v2.4.96 封喉者扑上来 */
 
     AddHitFlash(0.85f);          /* v2.1：被抓的红闪 */
     AddShake(0.30f, 0.22f);
@@ -1454,6 +1641,7 @@ static void KnockbackMonster(Monster* m) {
     /* v2.7：接上 STAGGER（瓶子硬直 +0.2s/级）。原来这里写死 MONSTER_STUN，
        导致技能树里买了 STAGGER 完全没反应。 */
     m->stun = MONSTER_STUN + SkillStunAdd();
+    { extern int knockCountRun; knockCountRun++; }   /* v7：DISRUPTOR 成就用 */
     m->pathLen = 0;
     m->pathIdx = 0;
     m->state = 0;              /* 被打断，重新游荡 */
@@ -1485,6 +1673,7 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
     if (!m || !m->active) return 0;
     MakeNoise(m->x, m->y, 14.0f);
     m->stun = 0.35f;
+    { extern int throwHitCountRun; throwHitCountRun++; }   /* v7：PITCHER 成就用 */
     PlaySfx(SFX_GLASS, 0.5f);
     SpawnParticles(m->x, m->y, 2);
     return 0;

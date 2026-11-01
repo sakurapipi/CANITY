@@ -67,7 +67,7 @@ extern float levelBanner;           /* 进关后显示词条名的秒数 */
 extern float safeZoneMsg;           /* 进入安全屋后提示「SAFE ZONE」的剩余秒数 */
 
 /* ---- 局内资源 / 升级 ---- */
-extern int shards;
+extern int carryGold;
 extern int upgBattery;              /* 电量上限 +20/级 */
 extern int upgSpeed;                /* 移速 +6%/级 */
 extern int upgQuiet;                /* 噪声半径 -15%/级 */
@@ -154,6 +154,8 @@ extern const char* bindCategoryNames[3];
 
 /* ---- 主逻辑 ---- */
 void Update(float dt);
+void WrenchStartSwing(float charge);
+void WrenchTick(float dt);
 void ClearKeyEdges(void);
 void ApplyDisplayMode(void);
 void ForceCursor(int visible);
@@ -176,7 +178,6 @@ int IsKeyBindItem(const SettingItem* it);
 
 /* ---- v1.8 新状态（存档 / 结算 / 技能界面用） ---- */
 extern int bestMainScore;
-extern int pendingShards;      /* 本层未上缴的碎片 */
 extern int bankStreak;         /* 连续上缴层数 */
 extern int modsSeenMask;
 extern int modsSeenCount;
@@ -284,7 +285,7 @@ void ActivateHubRow(void);
 void ActivateSettingRow(void);
 
 /* ---- 成就追踪 ---- */
-extern int totalShardsEarned;
+extern int totalGoldEarned;
 extern int bottlesKilled;
 extern int faceDodged;
 extern int crankTimeTotal;

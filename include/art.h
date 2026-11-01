@@ -1,11 +1,8 @@
 /*
- * Canity — 审美代码专区（声明）
- *
- * 规范：include/art_direction.h（六条铁律 + 六只怪剪影规格）
- * 实现：src/art.c
- *
- * 任何新加的审美要求，实现都放 src/art.c，在这里声明。
- * 不要在 render.c / sprites.c / ui.c 里直接写颜色和光照常数。
+ * CANITY — 共享美术运算接口。
+ * 规范：art_direction.h（造型、光照、UI、状态反馈与验证规则）。
+ * 实现：src/art.c；具体模型烘焙在 sprites.c，UI 主题与布局在各自模块。
+ * 新的共享光照／材质算法在这里声明，不把所有表现代码集中到一个文件。
  */
 #ifndef CANITY_ART_H
 #define CANITY_ART_H
