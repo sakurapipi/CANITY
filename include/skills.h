@@ -22,7 +22,7 @@ typedef struct {
     const char* desc;      /* 一行说明 */
     int branch;            /* 0=A 潜行 1=B 续航 2=C 反击 3=跨支 */
     int maxRank;           /* 3 = 普通节点，1 = keystone */
-    int cost[3];           /* 每级花费碎片；keystone 只用 cost[0] */
+    int cost[3];           /* 每级花费金币；keystone 只用 cost[0] */
     int coreCost;          /* 购买需要多少核心（0 = 不需要） */
     int prereq;            /* 前置技能 id，-1 = 无 */
     int isKeystone;        /* 1 = keystone（全局只能持有 1 个） */
@@ -91,7 +91,7 @@ float SkillGhostStepDrainMul(void);   /* 该技能带来的额外耗电倍率 */
 int   SkillHeavyHand(void);           /* 满蓄力投掷的额外伤害 */
 float SkillHeavyHandChargeMul(void);  /* 蓄力变慢倍率 */
 int   SkillScavenger(void);           /* 翻箱额外掉投掷物 */
-float SkillScavengerShardMul(void);   /* 碎片收入倍率 */
+float SkillScavengerShardMul(void);   /* 金币收入倍率 */
 
 int   HasKeystone(int id);
 

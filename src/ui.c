@@ -166,16 +166,25 @@ static int TextScale(void) {
     return s;
 }
 
-static int TextAdvWin(void) {
-    return FONT_W * TextScale();
+/* v8：统一的字符步进。英文 8px、中文/全角 12px，和各自点阵的真实宽度一致。 */
+static int TextCellW(unsigned int cp) {
+    return (cp < 0x80) ? FONT_W : CJK_CELL_W;
+}
+
+/* 以“基准像素”计宽（不乘 TextScale）。 */
+static int TextBaseWidth(const char* t) {
+    int w = 0;
+    const char* p = t;
+    while (p && *p) {
+        unsigned int cp = CjkDecodeOne(&p);
+        w += TextCellW(cp);
+    }
+    return w;
 }
 
 int TextWidthWin(const char* t) {
-    /* v2.0：先过一遍翻译表，再按是否含中文选字形 */
     t = Transl(t);
-    if (CjkHasNonAscii(t))
-        return CjkTextWidth(t) * renderH / 458;   /* v3.0：同一基准 */
-    return (int)strlen(t) * TextAdvWin();
+    return TextBaseWidth(t) * TextScale();
 }
 
 /* v1.8：行文本按可用宽度截断。
@@ -287,39 +296,72 @@ void DumpUILayout(const char* path) {
     fclose(f);
 }
 
+static void PlotUiPixel(int x, int y, unsigned int color) {
+    if (x < 0 || y < 0 || x >= renderW || y >= renderH) return;
+    pixels[(size_t)y * renderW + x] = color;
+}
+
+/* 12*scale 的单色中文点阵，按当前缩放 1:1 取预烘图，不再放大 12px。 */
+static void DrawCjkGlyph(int px, int py, int cell, const unsigned long long* rows, unsigned int color) {
+    for (int r = 0; r < cell; r++) {
+        unsigned long long bits = rows[r];
+        if (!bits) continue;
+        for (int c = 0; c < cell; c++) {
+            if (!(bits & (1ULL << (cell - 1 - c)))) continue;
+            PlotUiPixel(px + c, py + r, color);
+        }
+    }
+}
+
+/* 图集里没有的字：画一个空心框，至少让玩家知道这里有个字符。 */
+static void DrawMissingCjk(int px, int py, int cell, unsigned int color) {
+    for (int x = 0; x < cell; x++) {
+        PlotUiPixel(px + x, py, color);
+        PlotUiPixel(px + x, py + cell - 1, color);
+    }
+    for (int y = 0; y < cell; y++) {
+        PlotUiPixel(px, py + y, color);
+        PlotUiPixel(px + cell - 1, py + y, color);
+    }
+}
+
+/* 渲染坐标下逐码点绘制：ASCII 走 8x12 点阵，非 ASCII 走 12x12 中文图集。 */
+static void DrawUiTextRaw(int px, int py, const char* t, unsigned int color, int s) {
+    if (!t) return;
+    const char* p = t;
+    while (*p) {
+        unsigned int cp = CjkDecodeOne(&p);
+        if (cp < 0x80) {
+            int ch = (int)cp;
+            if (ch < 32 || ch > 126) ch = '?';
+            const unsigned char* g = fontData[ch - 32];
+            for (int r = 0; r < FONT_H; r++) {
+                unsigned char bits = g[r];
+                if (!bits) continue;
+                for (int c = 0; c < FONT_W; c++) {
+                    if (!(bits & (1u << (FONT_W - 1 - c)))) continue;
+                    int bx = px + c * s, by = py + r * s;
+                    for (int dy = 0; dy < s; dy++)
+                        for (int dx = 0; dx < s; dx++)
+                            PlotUiPixel(bx + dx, by + dy, color);
+                }
+            }
+            px += FONT_W * s;
+        } else {
+            int cs = s > 4 ? 4 : s;      /* 图集只烘到 4x；更大缩放极罕见 */
+            int cell = CJK_CELL_W * cs;
+            const unsigned long long* rows = CjkRows(cp, cs);
+            if (rows) DrawCjkGlyph(px, py, cell, rows, color);
+            else DrawMissingCjk(px, py, cell, color);
+            px += cell;
+        }
+    }
+}
+
 void DrawTextWin(int xWin, int yWin, const char* t, unsigned int color) {
     t = Transl(t);          /* v2.0：绘制层统一翻译 */
     UiTrack(xWin, yWin, TextWidthWin(t), TextHeightWin(), t);
-    if (CjkHasNonAscii(t)) {
-        CjkDrawRaw(xWin * renderW / winW, yWin * renderH / winH, t, color);
-        return;
-    }
-    int s = TextScale();
-    int px = xWin * renderW / winW;
-    int py = yWin * renderH / winH;
-    for (const char* p = t; *p; p++) {
-        int ch = (unsigned char)*p;
-        if (ch < 32 || ch > 126) ch = '?';
-        const unsigned char* g = fontData[ch - 32];
-        for (int r = 0; r < FONT_H; r++) {
-            unsigned char bits = g[r];
-            if (!bits) continue;
-            for (int c = 0; c < FONT_W; c++) {
-                if (!(bits & (1u << (FONT_W - 1 - c)))) continue;
-                int bx = px + c * s, by = py + r * s;
-                for (int dy = 0; dy < s; dy++) {
-                    int y = by + dy;
-                    if (y < 0 || y >= renderH) continue;
-                    unsigned int* row = pixels + (size_t)y * renderW;
-                    for (int dx = 0; dx < s; dx++) {
-                        int x = bx + dx;
-                        if (x >= 0 && x < renderW) row[x] = color;
-                    }
-                }
-            }
-        }
-        px += FONT_W * s;
-    }
+    DrawUiTextRaw(xWin * renderW / winW, yWin * renderH / winH, t, color, TextScale());
 }
 
 
@@ -328,38 +370,12 @@ void DrawTextWin(int xWin, int yWin, const char* t, unsigned int color) {
    这条通道给「角落的次要提示」用 —— 不抢画面、不压住功能 UI。 */
 void DrawTextSmallWin(int xWin, int yWin, const char* t, unsigned int color) {
     t = Transl(t);
-    if (CjkHasNonAscii(t)) {
-        CjkDrawRaw(xWin * renderW / winW, yWin * renderH / winH, t, color);
-        return;
-    }
-    int s = 1;
-    int px = xWin * renderW / winW;
-    int py = yWin * renderH / winH;
-    for (const char* p = t; *p; p++) {
-        int ch = (unsigned char)*p;
-        if (ch < 32 || ch > 126) ch = '?';
-        const unsigned char* g = fontData[ch - 32];
-        for (int r = 0; r < FONT_H; r++) {
-            unsigned char bits = g[r];
-            if (!bits) continue;
-            for (int c = 0; c < FONT_W; c++) {
-                if (!(bits & (1u << (FONT_W - 1 - c)))) continue;
-                int y = py + r * s;
-                if (y < 0 || y >= renderH) continue;
-                unsigned int* row = pixels + (size_t)y * renderW;
-                int x = px + c * s;
-                if (x >= 0 && x < renderW) row[x] = color;
-            }
-        }
-        px += FONT_W * s;
-    }
+    DrawUiTextRaw(xWin * renderW / winW, yWin * renderH / winH, t, color, 1);
 }
 
 int DrawTextSmallWidth(const char* t) {
     t = Transl(t);
-    int n = 0;
-    for (const char* p = t; *p; p++) n++;
-    return n * FONT_W + 2;
+    return TextBaseWidth(t) + 2;
 }
 
 void DrawTextCenterWin(int cxWin, int yWin, const char* t, unsigned int color) {
@@ -369,20 +385,7 @@ void DrawTextCenterWin(int cxWin, int yWin, const char* t, unsigned int color) {
 /* 在**渲染坐标**上画 1:1 的点阵字（小地图标题用）。
    与 DrawTextWin 的区别：那个用窗口坐标（会缩放），这个直接落在渲染缓冲上。 */
 void PutTextRaw(int x, int y, const char* t, unsigned int color) {
-    for (const char* p = t; *p; p++) {
-        int ch = (unsigned char)*p;
-        if (ch < 32 || ch > 126) ch = '?';
-        const unsigned char* g = fontData[ch - 32];
-        for (int r = 0; r < FONT_H; r++) {
-            unsigned char bits = g[r];
-            if (!bits) continue;
-            for (int c = 0; c < FONT_W; c++) {
-                if (!(bits & (1u << (FONT_W - 1 - c)))) continue;
-                PutPixel(x + c, y + r, color);
-            }
-        }
-        x += FONT_W;
-    }
+    DrawUiTextRaw(x, y, t, color, 1);
 }
 
 /* 渲染坐标下的文字宽度（1:1 点阵） */
@@ -1280,7 +1283,7 @@ static const char* MenuLabel(int i) {
         case STATE_GAMEOVER: return "Return to Menu";
         case STATE_ACHIEVEMENTS: {
             /* v6：**按分类筛选 + 用表里的真实奖励**
-               原来这里写着 "+1C/250S" —— 那是已删除的「核心 / 碎片」，
+               原来这里写着 "+1C/250S" —— 那是已删除的「核心 / 金币」，
                玩家看到的是两个不存在的货币。现在从 kAchDefs 读。 */
             extern int  AchVisibleCount(void), AchIdAtRow(int);
             extern const AchDef kAchDefs[ACH_COUNT];
@@ -1320,7 +1323,8 @@ static const char* MenuLabel(int i) {
             }
             if (it->kind == SET_SLIDER) {
                 if (it->fvalue == &gammaValue) sprintf(buf, "%s: %.2f", it->name, *it->fvalue);
-                else if (it->fvalue == &volumeF) sprintf(buf, "%s: %.0f%%", it->name, *it->fvalue * 100.0f);
+                else if (it->fvalue == &volumeF || it->fvalue == &musicVolumeF)
+                    sprintf(buf, "%s: %.0f%%", it->name, *it->fvalue * 100.0f);
                 else sprintf(buf, "%s: %.1fx", it->name, *it->fvalue);
             } else {
                 int dispVal = *it->value;
@@ -3491,7 +3495,7 @@ void DrawHUD(void) {
         }
     }
 
-    /* v1.8：待上缴碎片 + 绣刀冷却。
+    /* v1.8：待上缴金币 + 绣刀冷却。
        注意：右上角 FPS 那一行也占着 y=UIS(18)，所以这两行要排在它下面，
        否则开 FPS 时会叠在一起。 */
     {
@@ -3528,7 +3532,7 @@ void DrawHUD(void) {
             }
         }        /* v3.0：**删掉 HUD 上的 PENDING N** ——
        玩家实测「一整个小时都是 PENDING 12」，既看不懂又永远不变。
-       待上缴碎片只在安全屋/结算页显示就够了。 */
+       待上缴金币只在安全屋/结算页显示就够了。 */
 
 
 

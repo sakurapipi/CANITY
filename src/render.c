@@ -1866,7 +1866,7 @@ static void DrawSmokeCloud(void) {
 }
 
 static void DrawShardSprite(void) {
-    spriteLight = 1.0f;      /* v2.1：碎片是自发光的 */
+    spriteLight = 1.0f;      /* v2.1：金币是自发光的 */
 
     for (int i = 0; i < MAX_SHOTS * SHARD_COUNT; i++) {
         if (!shards_debris[i].active) continue;
@@ -1879,7 +1879,7 @@ static void DrawShardSprite(void) {
         float alpha = 0.7f * lifeRatio;
         if (alpha < 0.05f) continue;
 
-        /* v2.1：碎片按 tint 分色（玻璃 / 血 / 尘），尺寸随距离缩放 */
+        /* v2.1：金币按 tint 分色（玻璃 / 血 / 尘），尺寸随距离缩放 */
         unsigned int scol = 0x00d0e0ffu;
         if (shards_debris[i].tint == 1)      scol = 0x00c02818u;   /* 血 */
         else if (shards_debris[i].tint == 2) scol = 0x00c0a070u;   /* 尘 */

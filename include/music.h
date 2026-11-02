@@ -6,7 +6,9 @@
    into Music*. A provider owns its decoder/resources; the music director
    owns scene selection, master gain, ducking and pause state. UTF-8 paths. */
 #define MUSIC_PROTOCOL_VERSION 1
-typedef enum { MUSIC_LOCAL=0, MUSIC_STEAM, MUSIC_SIM, MUSIC_PROVIDER_COUNT } MusicProviderId;
+/* MUSIC_BUILTIN 是零素材的程序化配乐（music_proc.c）。追加在末尾，
+   不改动旧编号，避免已有适配器按数值比较时失效。 */
+typedef enum { MUSIC_LOCAL=0, MUSIC_STEAM, MUSIC_SIM, MUSIC_BUILTIN, MUSIC_PROVIDER_COUNT } MusicProviderId;
 typedef enum { MUSIC_MENU=0, MUSIC_EXPLORE, MUSIC_CHASE, MUSIC_SAFE, MUSIC_VICTORY, MUSIC_DEFEAT, MUSIC_SCENE_COUNT } MusicScene;
 typedef enum { MUSIC_EVENT_GATE=0, MUSIC_EVENT_CAUGHT, MUSIC_EVENT_ACHIEVEMENT } MusicEvent;
 typedef struct {

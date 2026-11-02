@@ -1,7 +1,7 @@
 /*
  * Canity — 局内强化（v3.0）
  *
- * 用**碎片**（用户叫它"晶体"）在安全屋买的永久强化，每局重置。
+ * 用**金币**（用户叫它"晶体"）在安全屋买的永久强化，每局重置。
  * 4 条线，每条 3 级：
  *   0 WEAPON       武器伤害 +12%/级
  *   1 RESIST       受到伤害 -10%/级
@@ -17,7 +17,7 @@
 void  RunUpgReset(void);
 int   RunUpgLevel(int kind);
 int   RunUpgCost(int kind);          /* -1 = 满级 */
-int   RunUpgTryBuy(int kind);        /* 0=成功 2=满级 4=碎片不够 */
+int   RunUpgTryBuy(int kind);        /* 0=成功 2=满级 4=金币不够 */
 const char* RunUpgName(int kind);    /* 英文名 */
 const char* RunUpgNameZh(int kind);
 const char* RunUpgDesc(int kind);    /* 精确效果 */

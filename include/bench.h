@@ -1,16 +1,16 @@
 /*
  * Canity — 局内改造树（v2.7）
  *
- * 安全屋按 T 打开。4 条分支 × 3 层 = 12 个节点，用**局内碎片**买，
+ * 安全屋按 T 打开。4 条分支 × 3 层 = 12 个节点，用**局内金币**买，
  * **跨局保留**（元进度）。和局外 20 节点技能树互不相干。
  *
  * v3.3 修正：这里原来写「每局重置」，但实现和存盘都是跨局累积的
  * （benchOwnedSave 进 SaveBlob，BenchResetRun 全项目 0 调用点）——
- * 玩家花碎片买的东西不该一局就没了。注释跟着实现改，函数保留待用。
+ * 玩家花金币买的东西不该一局就没了。注释跟着实现改，函数保留待用。
  *
  * 设计约束（见 docs 调研记录）：
  *   · 精确数字，不用抽象图标 —— "能量上限 +15" 而不是 "★★☆"
- *   · 每层都能看到"为什么买不了"：前置 / 碎片差多少
+ *   · 每层都能看到"为什么买不了"：前置 / 金币差多少
  *   · 连线表达状态：已解锁实线，未解锁虚线
  */
 #ifndef CANITY_BENCH_H
@@ -29,7 +29,7 @@ typedef struct {
     const char* nameZh;      /* 中文名 */
     const char* desc;        /* 精确效果（英文） */
     const char* descZh;      /* 精确效果（中文） */
-    int cost;                /* 碎片价格 */
+    int cost;                /* 金币价格 */
     int col, row;            /* 网格位置（用来画） */
     int star;                /* 1 = ★ 节点（第三条） */
 } BenchNode;
@@ -43,7 +43,7 @@ extern int benchKills;      /* 嗜血：本局击杀计数 */
 void BenchResetRun(void);                  /* 开局清空 */
 int  BenchHas(int id);                     /* 是否已购买 */
 int  BenchPrereqOk(int id);                /* 前置是否满足 */
-int  BenchCanBuy(int id);                  /* 前置 + 碎片都够 */
+int  BenchCanBuy(int id);                  /* 前置 + 金币都够 */
 int  BenchTryBuy(int id);                  /* 返回 0=成功，否则失败原因码 */
 
 /* —— 效果查询（没买就是 0 / 1.0） —— */

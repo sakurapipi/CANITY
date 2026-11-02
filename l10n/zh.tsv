@@ -1,0 +1,514 @@
+# Canity 中文词条表（单一来源）
+# 改这里，然后运行： python l10n/apply_tsv.py
+# 列：英文<TAB>中文<TAB>来源；# 开头是注释
+  CAMPAIGN %d/5 %s	  战役 %d/5 %s	tr
+  DAILY %d	  每日 %d	tr
++1 DECOY	+1 诱饵	tr
++1 ECHO	+1 回声	tr
++1 FLARE	+1 光球	tr
++1 GLUE	+1 胶水	tr
++1 SLING	+1 投石	tr
++1 SMOKE	+1 烟雾	tr
++25 SANITY	+25 理智	tr
++35 BATTERY	+35 电量	tr
++40 SANITY (-25)	+40 理智 (-25)	tr
++60 BATTERY	+60 电量	tr
+120 GOLD	120 金币	table
+3rd hit ignores armor	每第 3 次命中无视护甲	table
+40% chance to return on hit	命中后 40% 概率返还	table
+<25% HP targets take +80% damage	目标血量 <25% 时伤害 +80%	table
+???	???	table
+A  STEALTH	A  潜行	table
+ABYSS WALKER	深渊行者	table
+ACCESS DENIED	拒绝访问	table
+ACHIEVEMENTS	成就	table
+ACID	酸瓶	table
+ALL	全部	table
+ALL FOUR ZONES	踏遍四区	table
+ALREADY MAXED	已满级	tr
+ALREADY OWNED	已拥有	tr
+ANOTHER ULT IS ACTIVE	已有其它终极生效	table
+Achievements	成就	table
+B  STAMINA	B  续航	table
+BACK TO MENU	返回主菜单	table
+BALANCE          %d GOLD	存款          %d 金币	tr
+BANK	银行	table
+BATTERY	电量	table
+BATTERY  %d%%  +%.0f/s	电量  %d%%  +%.0f/秒	tr
+BATTERY  100%%  FULL	电量  100%%  满	tr
+BATTERY LEECH	偷电怪	table
+BESTIARY	怪物图鉴	table
+BESTIARY DONE	图鉴全开	table
+BLIND AND FAST. DASHES TOWARD THE LAST SOUND, THEN WAITS.	又瞎又快。朝最后的声音冲刺，然后等待。	table
+BLINDED	致盲	table
+BLOOD PRICE	血的代价	table
+BOOST  +%d%%	强度  +%d%%	tr
+BOSS	首领	table
+BOSS BREAKER	屠魔者	table
+BOTTLE	瓶子	table
+BOTTLE BACK	回瓶	table
+BOTTLE MASTER	瓶子大师	table
+BOTTLE RAIN	瓶雨	table
+BOTTLE: THROW IT AT A MONSTER TO HIT IT.	瓶子：砸向怪物造成伤害。	table
+BOTTLES %d  FLARES %d  OTHERS %d	瓶子 %d  照明弹 %d  其它 %d	tr
+BREAKER HAND	配电手	table
+BRICK	砖头	table
+BROKEN  -  TOO DAMAGED TO REPAIR	柜子坏了  -  破得太狠，修不了	tr
+BUY THE NODE ABOVE	先买上面的节点	table
+Back	返回	table
+Bank	银行	table
+Beat level 24 without a relic	不拿遗物打到第 24 层	table
+Beat the game (reach level 10 exit)	通关（走进最终出口）	table
+Beat the game (reach level 24 exit)	通关（走到第 24 层的出口）	table
+Beat the game on level 10 with all upgrades maxed	满级满强化通关	table
+Beat the game without taking damage	无伤通关	table
+Bestiary	图鉴	table
+Bottle stun +0.2s per rank	瓶子硬直 +0.2 秒/级	table
+C  COMBAT	C  反击	table
+CALIB %ds	校准冷却 %d 秒	tr
+CALIB - HIDE TO USE	校准 - 需躲进藏身点	tr
+CALIB COOLING	校准冷却	tr
+CALIB READY	校准就绪	tr
+CALIBRATED	成功	tr
+CALIBRATING	校准中	tr
+CALIBRATION - PRESS SPACE TO LOCK	校准中 - 按空格锁定	tr
+CALM	平静	table
+CAMPAIGN	战役	table
+CARRY  %d   TIER %d	带入  %d   强度档 %d	tr
+CARRY IN   %3d%%   (%d / %d GOLD)	携带   %3d%%   (%d / %d 金币)	tr
+CARRY IN   %d%%  (%d / %d GOLD)	携带  %d%%  (%d / %d 金币)	tr
+CARRY RATIO ONLY TAKES EFFECT NEXT RUN	携带比例只在下一局生效	tr
+CARTOGRAPHER	制图师	table
+CENTURION	百人斩	table
+CHARGE   +60 BATTERY	充电   +60 电量	tr
+CHARGED	已充电	tr
+CHARGING KNOCK	敲击蓄力	tr
+CHARGING THROW	蓄力投掷	table
+CHASES YOUR FLASHLIGHT. FASTER THAN THE SOUND HUNTER.	追着你的手电跑，比寻声鬼更快。	table
+CHECK INVENTORY	查看背包	tr
+CHOOSE A RELIC	选择遗物	tr
+CHOOSE ONE	三选一	table
+CHOOSE WEAPON	选择初始武器	table
+CLOSE CALL	擦肩而过	table
+COMBAT	反击	table
+COST	价格	tr
+CRAMPED	狭窄	table
+CRANK	摇电	tr
+CRANK ADDICT	摇电成瘾	table
+CRANK WALK	摇走	table
+CRANKING	摇电中	table
+CROSS	跨支	table
+Campaign	战役	table
+Cancel Charge	取消蓄力	table
+Clear 3 floors with the light off	关灯通过 3 层	table
+Clear 3 floors without ever being spotted	全程没被发现地清完 3 层	table
+Clear a floor in under 90 seconds	90 秒内通过一层	table
+Clear a floor with under 20 noise	噪声低于 20 通过一层	table
+Clear a floor without killing anything	一层里不杀任何东西	table
+Clear a floor without taking damage	无伤通过一层	table
+Clear all four zones (level 24)	清完四个区域（第 24 层）	table
+Clear all four zones in one run	单局踏遍四个区段	table
+Collect 3000 gold total	累计收集 3000 金币	table
+Collect 5 fuses in a single level	单层收集 5 根保险丝	table
+Collect 5 fuses in a single run	单局收集 5 根保险丝	table
+Collect 500 gold total	累计收集 500 金币	table
+Complete a level with flashlight off	关灯通过一层	table
+Complete a level with the flashlight off	关着手电过关	table
+Complete level 1	通过第 1 层	table
+Complete level 1 in under 2 minutes	2 分钟内通过第 1 层	table
+Continue	继续	table
+Crank Battery	手摇发电	table
+Crank for 300 seconds total	累计摇电 300 秒	table
+Crank generator for 60 seconds total	累计摇电 60 秒	table
+Crank the generator for 300 seconds total	累计摇电 300 秒	table
+Crank the generator for 60 seconds total	累计摇电 60 秒	table
+Crank while walking, move -20%	可边移动边摇电，移速 -20%	table
+DAILY	每日	table
+DAILY RUN	每日挑战	table
+DARK	黑暗	table
+DEAD	没电	tr
+DECOY	诱饵	table
+DECOY RAIN	诱饵如雨	table
+DEEP DELVER	深渊行者	table
+DEEP DIVER	深潜者	table
+DELIVERY	投放	table
+DIE INSIDE - YOU KEEP 35%	死在里面 - 只保留 35%	tr
+DISABLED	禁用	table
+DISPLAY	显示	table
+DIST	距离	tr
+DRAIN	抽取中	table
+DRAINED	枯竭	table
+DRAINING	抽取	table
+DROP %d%%  =  %d GOLD   LEFT/RIGHT   RELEASE K	丢钱 %d%%  =  %d 金币   ←/→ 调整   松开 K 丢出	tr
+Daily Run	每日挑战	table
+Dark steps quiet, drain -12%	黑暗中脚步变轻，耗电 -12%	table
+Dark steps silent, drain -12%	暗步无声，流失 -12%	table
+Dodge (QTE)	闪避	table
+Dodge 5 face jumpers successfully	成功躲开 5 次跳脸虫	table
+Dynamic Res	动态分辨率	table
+E OUT	E 出去	tr
+ECHO	回响	table
+ECONOMY	节流	table
+ENABLED	启用	table
+ENERGY	能量	table
+ENTER  CYCLE CARRY RATIO	回车   切换携带比例	tr
+ENTER BUY   ARROWS MOVE   ESC BACK	回车购买   方向键移动   ESC 返回	table
+ENTER SWITCH   ESC BACK	回车切换   ESC 返回	tr
+ENTER TO BUY	回车购买	tr
+ENTER-SWAP 3000 GOLD	回车切换（3000 金币）	table
+ESC  BACK	ESC  返回	tr
+ESC TO CANCEL	ESC 取消	table
+ESCAPE ARTIST	逃生专家	table
+EXECUTIONER	处刑人	table
+Endless	无尽	table
+FACE DODGER	闪避高手	table
+FACE JUMPER	跳脸虫	table
+FACE JUMPER: PRESS SPACE TO DODGE IT.	跳脸虫：按空格闪避。	table
+FIREPOT	燃烧瓶	table
+FIRST STEPS	第一步	table
+FLARE	荧光棒	table
+FLAWLESS FLOOR	无瑕一层	table
+FLESH CAVE	血肉洞穴	table
+FULL	全屏	table
+FULL LOADOUT	满配	table
+FUSE FINDER	寻丝者	table
+FUSE SMITH	保险丝匠	table
+Field of View	视野	table
+Fill both weapon slots	两个武器槽都装上配件	table
+Flashlight	手电	table
+Frame Limit	帧率上限	table
+Full charge +1 dmg, slow charge	满蓄力 +1 伤害，蓄力变慢	table
+Fullscreen	全屏	table
+Fully explore 3 maps in one run	单局完整探索 3 张图	table
+Fuse need -1 (min 2)	保险丝需求 -1（最低 2）	table
+G: throw a stone (8s cd), noise 14	G：扔石头引开（8 秒冷却），噪声 14	table
+G: throw a stone, noise r=14	G：扔石头，噪声半径 14	table
+GAMEPLAY	玩法	table
+GENERATOR GURU	发电专家	table
+GHOST RUN	幽灵之旅	table
+GHOST STEP	幽步	table
+GLUE	胶瓶	table
+GO DEEPER	继续深入	tr
+GOLD	金币	table
+GOLD %d	黄金 %d	tr
+GOLD HUNTER	金币猎手	table
+GOLD TYCOON	金币大亨	table
+GOLD UPGRADE	金币强化	tr
+GREEN RING = RIGHT DIGIT	绿圈 = 数字正确	table
+Gamma	亮度	table
+HANDS EMPTY	空手而归	table
+HEAVY HAND	重手	table
+HELL	地狱	table
+HELP	帮助	table
+HELP  -  CONTROLS	帮助  -  按键	tr
+HELP  -  RULES	帮助  -  规则	tr
+HIGH	高	table
+HIGHEST EVER     %d GOLD	历史最高      %d 金币	tr
+HOLD E SEARCH	长按 E 翻找	table
+HUD Detail	HUD 详细度	table
+HUNTED	被猎	table
+HUNTING	追捕中	tr
+HUNTS NOISE. WALKS TO THE LAST SOUND IT HEARD.	循声而来。会移动到它最后听到声音的位置。	table
+Heal +25%, sanity drain -10%	安全屋回智 +25%，理智流失 -10%	table
+Help	帮助	table
+Hide 100 times total	累计藏身 100 次	table
+Hide 30 times total	累计藏身 30 次	table
+Hide 5 times total	累计藏身 5 次	table
+Hits stun +0.2s per rank	命中硬直 +0.2 秒/级	table
+Hold 8 relics at once	同时持有 8 个遗物	table
+Hub	大厅	table
+ICE VAULT	冰窖	table
+IF IT LANDS ON YOUR FACE, PRESS THE KEY.	如果扑到脸上，按提示的键。	table
+INSTALLED	已安装	tr
+IT DOES NOT WALK. IT BLINKS TO A SPOT NEAR YOU EVERY FEW SECONDS.	它不走。每隔几秒闪到你附近。	table
+IT IS ON YOUR FACE	它扑到脸上了	table
+Interact	交互	table
+KEY BINDINGS	按键绑定	table
+KILL IT TO POWER THE BREAKER. THERE IS NO WAY AROUND IT.	杀了它才能通电。没有绕过去的办法。	table
+KILL THE LIGHT. IT LOSES YOU AND WANDERS OFF.	关灯它就跟丢了，会自己游荡走。	table
+KNIFE ONLY	只用扳手	table
+KNOCK	敲击	tr
+Keep 50% carried gold on death	死亡时保留 50% 待上缴金币	table
+Kill 10 monsters with bottles	用瓶子击杀 10 只怪	table
+Kill 100 monsters total	累计击杀 100 只怪	table
+Kill 25 monsters with bottles	用瓶子击杀 25 只怪	table
+Kill 25 monsters with the wrench	用扳手击杀 25 只怪	table
+Kill a boss	击杀一只首领	table
+LARGE	大	table
+LAST BREATH	最后一息	table
+LAST RESORT	绝境反击	table
+LEAKY	漏水	table
+LEAPS AT YOUR FACE. TWO WINDOWS: DODGE, THEN PRESS THE SHOWN KEY.	直接扑到脸上。两次判定：先闪避，再按提示的键。	table
+LEAVE  (ESC)	离开  (ESC)	tr
+LEAVE NOW	现在撤离	tr
+LESS FUSES	省丝	table
+LEVEL %d	第 %d 层	tr
+LIGHT	手电	table
+LIGHT BEAST	追光鬼	table
+LIGHT GEAR	照明	tr
+LIGHT STEP	轻步	table
+LOCK +GOLD	开锁 +金币	table
+LOCKED	已上锁	table
+LOCKED BY THE OTHER CAPSTONE	已被另一个顶点锁死	tr
+LOW	低	table
+LOW HP. ONE GOOD HIT ENDS IT. LISTEN FOR THE SKITTER.	血很少，一击就死。听那阵窸窣。	table
+LUCKY BREAK	险胜	table
+LV %d   x%.2f	第 %d 层   x%.2f	tr
+Language	语言	table
+Low-bat regen, battery +20	低电涓流回电，电量上限 +20	table
+Lv 0/3	0/3 级	table
+MAP	地图	table
+MAP -10/s	地图 -10/s	table
+MAP MASTER	地图大师	table
+MATCH LEFT TERMINALS BY COLOR	按颜色连接左侧端子	table
+MATCH THE BRIGHT WAVE TO THE DIM	把亮波形对准暗波形	table
+MAX	满	table
+MAX 3 RANKS	每节点 3 级	table
+MAX LEVEL	已满级	tr
+MAXED	已满级	table
+MEDIUM	中	table
+METABOLISM	代谢	table
+MIRROR	镜面弹	table
+MISS BOTH AND YOU LOSE SANITY.	两次都错过就掉理智。	table
+MISSED	失手	tr
+MODS RESET - GOLD REFUNDED	改造已重置，金币已退还	tr
+MOUSE   -   ANY KEY TO EXIT	鼠标操作   -   任意键退出	table
+MOVE	移动	tr
+Main Menu	主菜单	table
+Max out all 6 upgrades	把所有基础升级点满	table
+Max out every skill tree node	技能树全部点满	table
+Menu Cancel	取消	table
+Menu Confirm	确认	table
+Menu Down	菜单下	table
+Menu Left	菜单左	table
+Menu Right	菜单右	table
+Menu Up	菜单上	table
+Move Backward	后退	table
+Move Forward	前进	table
+Move Left	左移	table
+Move Right	右移	table
+NEED 1 MORE FUSE	还差 1 根保险丝	table
+NEED 15 GOLD	需要 15 金币	tr
+NEED 25 GOLD	需要 25 金币	tr
+NEED PREVIOUS NODE	需要先买上一层	tr
+NEEDS 6 PTS IN BRANCH	需要分支 6 点	table
+NEEDS A BRANCH ULT	需要分支终极	table
+NEXT RUN BOOST   +%d%%	下局强度加成  +%d%%	tr
+NO LIGHT RUN	摸黑前行	table
+NO RELICS	不用遗物	table
+NOCTURNAL	夜行	table
+NOISE	声音	table
+NORMAL	正常	table
+NOT ENOUGH	金币不够	tr
+NOT ENOUGH GOLD	金币不够	table
+New Run	新游戏	table
+OFF	关	table
+OFF BY ONE	只差一层	table
+ON	开	table
+ONLY EXISTS WHILE YOUR LIGHT IS OFF. SLOW, BUT IT NEVER STOPS.	只在你关灯时存在。很慢，但永不停下。	table
+OWNED	已拥有	tr
+Open 5 lock puzzles	解开 5 个锁盘	table
+PACIFIST FLOOR	和平主义者	table
+PAUSE	暂停	tr
+PAUSED	已暂停	table
+PENDING	待上缴	table
+PERFECT	完美	tr
+PERFECT ESCAPE	完美逃生	table
+PICK A LEFT TERMINAL	选择左侧端子	table
+PICK A MATCHING TERMINAL	选择匹配的端子	table
+POWER ON	已供电	table
+PRESS %s  PICK UP  %d GOLD	按 %s 拾取  %d 金币	tr
+PRESS AGAIN TO REPLACE	再按一次替换	table
+PRESS ANY KEY	按任意键	table
+PRESS E  -  HIDE	按 E 躲进去	tr
+PRESS E  -  REPAIR  %d   (YOU HAVE %d)	按 E 修理  %d 金币   （你有 %d）	tr
+PRESS R AGAIN TO RESET ALL SKILLS	再按一次 R 重置全部技能	tr
+PRESS R AGAIN TO RESET MODS	再按 R 重置本局改造	tr
+PRESS SPACE TO DODGE IT	按空格闪避	table
+PRISON	监狱	table
+PUSH BARS TO THEIR GREEN LINES	把推子推到绿线	table
+Pause	暂停	table
+Power-on faster, monsters slowed 20s	通电更快，通电后怪减速 20 秒	table
+Preview next modifier, reroll 150	预览下一层词条，150 金币重掷	table
+Q: sword wave, 60s cd	Q：发射剑气，冷却 60 秒	table
+QTE	快速反应	table
+QTE Hint	QTE 提示	table
+QUIET LID	静盖	table
+Quit	退出	table
+R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY	滚轮缩放   拖拽平移   HOME 复位   回车购买	tr
+R x2 RESET / WHEEL ZOOM  DRAG PAN  HOME  ESC	滚轮缩放  拖拽平移  HOME  ESC	tr
+RAYCASTER HORROR	射线投射恐怖游戏	table
+REBIND	改绑	table
+RECOVER STAMINA  (15)	恢复体力  (15)	tr
+REFRESH USED THIS FLOOR	本层刷新已用完	tr
+RELIC HOARDER	遗物囤积者	table
+RELOAD RHYTHM	换弹节奏	table
+REPAIR COST  %d   (SHORT %d)	修复需要  %d 金币   （还差 %d）	tr
+REQUIRES THE NODE ABOVE IT	需要先点亮上面的节点	table
+REROLL	重掷	table
+REST	休息	table
+REST   +40 SANITY  (25)	休息   +40 理智  (25)	tr
+RESTED	已休息	tr
+RESTOCKING  %ds	补货中  %d 秒	tr
+RICH	富饶	table
+RUN	冲刺	table
+RUN  %d%%	体力  %d%%	tr
+RUNNING AND SEARCHING MAKE NOISE.	跑步和翻箱都会发出声音。	table
+RUST KNIFE	锈刃	table
+RUST WORKS	锈厂	table
+Reach level 10	到达第 10 层	table
+Reach level 12	到达第 12 层	table
+Reach level 12 without taking a relic	不拿遗物到达第 12 层	table
+Reach level 12 without throwing a single object	一次都不投掷地到第 12 层	table
+Reach level 18	到达第 18 层	table
+Reach level 21	到达第 21 层	table
+Reach level 24	到达第 24 层	table
+Reach level 24 with every skill node maxed	技能树全满的情况下到第 24 层	table
+Reach level 5	到达第 5 层	table
+Reach level 5 without ever sprinting	到达第 5 层且全程没冲刺过	table
+Reach level 5 without sprinting	不冲刺到达第 5 层	table
+Reach the exit without taking damage	无伤抵达出口	table
+Render Scale	渲染比例	table
+Reroll first negative modifier	重掷前一个负面词条	table
+Reset to Defaults	恢复默认	table
+Resolution	分辨率	table
+Resume	继续游戏	table
+Return to Menu	返回主菜单	table
+Reveal safe house + breaker at start	开局标出安全屋和配电箱	table
+SAFE HOUSE  -  BENCH	安全屋  -  改装台	tr
+SAFE HOUSE  -  REST	安全屋  -  休息	tr
+SAFE HOUSE  -  SHOP	安全屋  -  商店	tr
+SAFE ZONE	安全区	table
+SALVAGE	打捞	table
+SANITY	理智	table
+SANITY  %d%%	理智  %d%%	tr
+SCAVENGER	拾荒	table
+SCAVENGER RIFLING YOUR CRATES	清道夫在翻你的箱子	tr
+SEARCH	翻找	tr
+SEARCH CONTAINERS FOR FUSES, THEN POWER THE BREAKER.	翻箱子找保险丝，然后给配电箱供电。	table
+SEARCHING	搜寻中	tr
+SETTINGS	设置	table
+SHADE	影子	table
+SHAPE	塑形	table
+SHINE ON IT FOR 0.6s AND IT FLEES. WATCH THE DRAIN WARNING.	照它 0.6 秒它就跑。注意耗电警告。	table
+SHORT BY	还差	tr
+SHORTCUT	捷径	table
+SHORTCUT   skip this floor	跳层   跳过本层	tr
+SHORTCUT (boss floor)	跳层（首领层）	tr
+SHORTCUT (locked)	跳层（未解锁）	tr
+SHORTCUT (used)	跳层（已用）	tr
+SILENCE	沉寂	table
+SILENT FLOOR	静默一层	table
+SILENT SHADOW	无声之影	table
+SIPHON	涓流	table
+SKILL TREE	技能树	table
+SKILLS RESET - GOLD REFUNDED	技能已重置，金币已退还	tr
+SLOT	选槽	tr
+SLOWED	减速	table
+SMALL	小	table
+SMALL, SILENT, ONLY VISIBLE WHEN LIT. SIPS BATTERY WITHIN 3.5 TILES.	又小又安静，只有被照到才看得见。3.5 格内会偷电。	table
+SMOKE	烟雾弹	table
+SNEAK!	偷袭!	table
+SOUND HUNTER	寻声鬼	table
+SPACE  -  CALIBRATE  (cooling %ds)	按空格开始小游戏  (冷却 %d 秒)	tr
+SPACE  -  START MINIGAME	按空格开始小游戏	tr
+SPACE %ds	空格 %d秒	tr
+SPACE GAME	空格 小游戏	tr
+SPACE LOCK	空格 锁定	tr
+SPACE TO DODGE. MISS BOTH AND YOU LOSE SANITY.	空格闪避。两次都错过就掉理智。	table
+SPACE TO LOCK	空格锁定	tr
+SPACE: CALIBRATE	空格：校准	tr
+SPACE: LOCK CALIBRATION	空格：锁定校准	tr
+SPACE: START CALIBRATION	空格：开始校准	tr
+SPECIMEN DMG	木桩伤害	table
+SPEED	速度	table
+SPEED DEMON	疾风	table
+SPEED RUNNER	速通者	table
+SPIDER	盲螨	table
+SPRINT	冲刺	tr
+SPRINTING / SEARCHING / CRANKING MAKE NOISE. WALKING IS QUIET - BUT AFTER 5S IT WHISPERS.	跑步 / 翻箱 / 摇电都会发声。走路是安静的 —— 但连续走 5 秒就会开始有声音。	table
+STAGGER	硬直	table
+STAMINA	续航	table
+STAMINA RESTORED	体力已恢复	tr
+STAMINA RESTORED (-15)	体力已恢复 (-15)	tr
+STAY MOVING. ITS CONTACT HURTS MORE THAN THE OTHERS.	保持移动。它碰到你比其它怪更疼。	table
+STEALTH	潜行	table
+SUPPLIES REFRESHED	补给已刷新	tr
+SURVIVOR	幸存者	table
+Safe heal +25%, sanity drain -10%	安全屋回智 +25%，理智流失 -10%	table
+Sanity 0 saves you once (4s)	理智归零时免死一次	table
+Sanity loss burns battery (1:3)	理智流失转为耗电（1:3）	table
+Save Slot	存档槽	table
+Search 120 containers in a single run	一局内搜索 120 个箱子	table
+Search 60 containers in a single run	一局内搜索 60 个箱子	table
+Search also drops loot, gold -25%	翻箱额外掉道具，金币 -25%	table
+Search noise -30%, noise -15%	翻箱噪声 -30%，全局噪声 -15%	table
+Select Bottle	选瓶子	table
+Select Flare	选荧光棒	table
+Select Slot 3	选第三槽	table
+Settings	设置	table
+Skip one non-boss level per run	每局可跳过一层（首领层除外）	table
+Sprint	冲刺	table
+Sprint noise -25%, speed +6%	冲刺噪声 -25%，移速 +6%	table
+Survive at 1 sanity for 30 seconds	以 1 点理智存活 30 秒	table
+Survive at 1 sanity for 30s	在 1 点理智下撑住 30 秒	table
+T  -  OPEN SHOP	T  -  打开商店	tr
+T SHOP	T 商店	tr
+T: SHOP    SPACE: CALIBRATE	T：商店    空格：校准	tr
+TELEPORT	闪现	table
+THE EXIT IS OPEN	出口已开	tr
+THE HUB	大厅	table
+THE ONE THAT WAS WAITING. EIGHT TIMES THE BODY, NO MERCY.	一直在等的那个。八倍的身躯，不留情面。	table
+THE THING MOVES FASTER	它变快了	table
+THROW	投掷	tr
+THROWABLES	投掷物	tr
+THUD = WRONG	闷响 = 错误	table
+TRUE ENDING	真结局	table
+TRUE SURVIVOR	真·幸存者	table
+TURN EACH DIAL UNTIL IT CLICKS	转动每个拨盘，直到咔哒一声	table
+TURN THE LIGHT ON AND IT VANISHES. THEY CAN BE KILLED NOW.	开灯它就消失。现在它也能被打死了。	table
+TUTORIAL COMPLETE	教程完成	tr
+TYPE WORK	熟能生巧	table
+Throw	投掷	table
+Throw 30 objects total	累计投掷 30 次	table
+Throw 80 objects total	累计投掷 80 次	table
+Toggle Map	地图	table
+Training	训练营	table
+Tutorial	新手教程	table
+ULTRA	极高	table
+UNKNOWN	未知	table
+UNKNOWN. ENCOUNTER IT IN A RUN TO UNLOCK.	未知。在游戏里遇到它就会解锁。	table
+UNLOCKED	已解锁	table
+UNSEEN FLOOR	无人察觉	table
+UP/DOWN SELECT   ENTER BUY   ESC CLOSE	上下选择   回车购买   ESC 关闭	tr
+UPGRADE JUNKIE	升级狂	table
+UPGRADED	已强化	tr
+Unlock every bestiary entry	解锁全部图鉴	table
+WALKING IS QUIET, BUT 5S OF IT STARTS TO WHISPER.	走路是安静的，但连续走 5 秒就会开始有声音。	table
+WANDERING	游荡	tr
+WARD	病栋	table
+WARDEN BLOCKS EXIT	守门人堵住了出口	tr
+WEATHERMAN	观测者	table
+WINDOWED	窗口	table
+WORKBENCH TREE	改造树	tr
+WRENCH  %.1fs	扳手  %.1f秒	tr
+WRENCH  %d/%d	扳手  %d/%d	tr
+WRENCH  READY	扳手  就绪	tr
+Weapon damage +8%/rank	武器伤害 +8%/级	table
+Weapon deals your chosen damage type	武器按你选的伤害类型结算	table
+Win a run with 1 sanity left	只剩 1 点理智时通关	table
+Win while below 25% sanity	理智低于 25% 时通关	table
+Win without the flashlight	不开手电通关	table
+YOU ESCAPED	你逃出去了	table
+YOU LOST YOUR MIND	你失去了理智	table
+[B] GUIDE	[B] 引导	tr
+[C] ARM DECOY	[C] 激活诱饵	tr
+kinds	种	tr
+Mouse Sens.	鼠标灵敏度	table
+SFX Volume	音效音量	table
+Music Volume	音乐音量	table
+Sanity FX	理智特效	table
+Show FPS	显示帧率	table
+Display	显示	table
+Key Bindings	按键绑定	table
+Gameplay	玩法	table

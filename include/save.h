@@ -16,7 +16,7 @@
    读档时会按文件的**实际长度**判断是老版本还是新版本：
    老存档照样能读（新增字段取默认值），不用丢玩家进度。
    —— 参见 LoadSettings 里的迁移逻辑。 */
-#define SAVE_VERSION 26   /* v8: 移除 boss 三字段 */   /* v6.4：遗物池 20→12 */  /* v17：藏身点进存档（HideSpot[6] + count + hiddenIn） */
+#define SAVE_VERSION 27   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26 */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
@@ -119,8 +119,8 @@ typedef struct {
     /* ---- v2.3：武器能量（追加在末尾，老档读到 0，载入时补满） ---- */
     float energy;
     /* v3.0：局内改造树 / 强化必须存盘 ——
-       原来重启后这两个全归零，但买它们的碎片已经从 carryGold 扣掉了，
-       等于每重启一次就吞掉玩家最多 5720 碎片（数值审查 #4）。 */
+       原来重启后这两个全归零，但买它们的金币已经从 carryGold 扣掉了，
+       等于每重启一次就吞掉玩家最多 5720 金币（数值审查 #4）。 */
     unsigned int benchOwnedSave;   /* 改造树位掩码 */
     int runUpgSave[5];   /* v7：4 -> 5（新增 WRENCH）。save.h 不包含 upgrade_run.h，这里写死 */             /* 强化 4 条线的等级 */
     /* v17：藏身点必须存盘 —— 否则读档后整层一个都没有（玩法审查 #3） */
@@ -165,6 +165,8 @@ typedef struct {
     int contractKindSave, contractLockedSave;
     float threatSave;
     int bestiaryKnowledge[18];
+    /* v27：音乐音量独立于音效音量。追加在末尾，旧档读不到时回退到音效音量。 */
+    float musicVolume;
 } SaveBlob;
 
 /* 写当前进度（游戏中 / 退出时） */

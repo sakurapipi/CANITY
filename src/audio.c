@@ -6,6 +6,7 @@
 #include "common.h"
 #include "audio.h"
 #include "game.h"
+#include "music_proc.h"
 
 
 /* ------------------------------------------------------------------ */
@@ -16,6 +17,11 @@
 #define AUDIO_BUFS 3
 #define AUDIO_SAMPLES 1024
 #define MAX_VOICES 8
+
+/* 音乐总线输出的是 [-1,1] 浮点，留约 2dB 余量和音效叠加。
+   采样率必须和 music_proc.c 一致，否则音高会整体跑调。 */
+#define MUSIC_MIX_SCALE 26214.0f
+typedef char AudioMusicRateMustMatch[(AUDIO_RATE == MUSIC_PROC_RATE) ? 1 : -1];
 
 static short g_sndStep[2205];      /* 0.10s 脚步 */
 static short g_sndHeart[9922];     /* 0.45s 心跳 */
@@ -41,7 +47,7 @@ typedef struct { const short* data; int len, pos; float vol; int active; } Voice
 static Voice g_voices[MAX_VOICES];
 static HWAVEOUT g_wave = NULL;
 static WAVEHDR g_hdr[AUDIO_BUFS];
-static short g_pcm[AUDIO_BUFS][AUDIO_SAMPLES];
+static short g_pcm[AUDIO_BUFS][AUDIO_SAMPLES * 2];
 static HANDLE g_audioEvent = NULL;
 static HANDLE g_audioThread = NULL;
 static volatile LONG g_audioQuit = 0;
@@ -54,8 +60,17 @@ static void AudioCallback(HWAVEOUT h, UINT msg, DWORD_PTR inst, DWORD_PTR p1, DW
 }
 
 static void MixInto(short* out) {
+    /* 音效是单声道素材，居中复制到左右；音乐自带声像，直接进立体声总线。 */
+    static int mix[AUDIO_SAMPLES];
+    static float musicL[AUDIO_SAMPLES];
+    static float musicR[AUDIO_SAMPLES];
     int i;
-    for (i = 0; i < AUDIO_SAMPLES; i++) out[i] = 0;
+
+    for (i = 0; i < AUDIO_SAMPLES; i++) {
+        mix[i] = 0;
+        musicL[i] = musicR[i] = 0.0f;
+    }
+    MusicProcMix(musicL, musicR, AUDIO_SAMPLES);
 
     EnterCriticalSection(&g_audioLock);
     for (int v = 0; v < MAX_VOICES; v++) {
@@ -63,14 +78,21 @@ static void MixInto(short* out) {
         if (!vo->active) continue;
         for (i = 0; i < AUDIO_SAMPLES; i++) {
             if (vo->pos >= vo->len) { vo->active = 0; break; }
-            int sample = (int)(vo->data[vo->pos++] * vo->vol);
-            int acc = out[i] + sample;
-            if (acc > 32767) acc = 32767;
-            else if (acc < -32768) acc = -32768;
-            out[i] = (short)acc;
+            mix[i] += (int)(vo->data[vo->pos++] * vo->vol);
         }
     }
     LeaveCriticalSection(&g_audioLock);
+
+    for (i = 0; i < AUDIO_SAMPLES; i++) {
+        int l = mix[i] + (int)(musicL[i] * MUSIC_MIX_SCALE);
+        int r = mix[i] + (int)(musicR[i] * MUSIC_MIX_SCALE);
+        if (l > 32767) l = 32767;
+        else if (l < -32768) l = -32768;
+        if (r > 32767) r = 32767;
+        else if (r < -32768) r = -32768;
+        out[i * 2] = (short)l;
+        out[i * 2 + 1] = (short)r;
+    }
 }
 
 static DWORD WINAPI AudioThreadMain(LPVOID param) {
@@ -528,11 +550,11 @@ void InitAudio(void) {
     WAVEFORMATEX fmt;
     memset(&fmt, 0, sizeof(fmt));
     fmt.wFormatTag = WAVE_FORMAT_PCM;
-    fmt.nChannels = 1;
+    fmt.nChannels = 2;
     fmt.nSamplesPerSec = AUDIO_RATE;
     fmt.wBitsPerSample = 16;
-    fmt.nBlockAlign = 2;
-    fmt.nAvgBytesPerSec = AUDIO_RATE * 2;
+    fmt.nBlockAlign = 4;
+    fmt.nAvgBytesPerSec = AUDIO_RATE * 4;
 
     if (waveOutOpen(&g_wave, WAVE_MAPPER, &fmt, (DWORD_PTR)AudioCallback, 0, CALLBACK_FUNCTION) != MMSYSERR_NOERROR) {
         g_wave = NULL;
@@ -541,7 +563,7 @@ void InitAudio(void) {
     for (int i = 0; i < AUDIO_BUFS; i++) {
         memset(&g_hdr[i], 0, sizeof(WAVEHDR));
         g_hdr[i].lpData = (LPSTR)g_pcm[i];
-        g_hdr[i].dwBufferLength = AUDIO_SAMPLES * sizeof(short);
+        g_hdr[i].dwBufferLength = AUDIO_SAMPLES * 2 * sizeof(short);
         waveOutPrepareHeader(g_wave, &g_hdr[i], sizeof(WAVEHDR));
         MixInto(g_pcm[i]);
         waveOutWrite(g_wave, &g_hdr[i], sizeof(WAVEHDR));

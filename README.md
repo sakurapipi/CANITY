@@ -2,7 +2,7 @@
 
 纯 C / Win32 GDI 编写的第一人称像素恐怖逃生游戏。
 射线投射、纹理采样、Z-Buffer 和后处理都由 CPU 在内存位图中完成，无需 OpenGL 或 DirectX。
-默认画面与音效由代码程序化生成；Windows x64 单机版可直接运行，背景音乐可自行添加。
+默认画面、音效与背景音乐都由代码程序化生成；Windows x64 单机版可直接运行，也可以往 `music/` 放文件替换配乐。
 
 当前版本：**v2.3.4 · 2026-11-02**。下载见 [Releases](https://github.com/sakurapipi/CANITY/releases/latest)，完整版本记录见 [CHANGELOG](CHANGELOG.md)。
 
@@ -122,7 +122,7 @@
 
 ## 音乐与存档
 
-背景音乐是可选的。在 `canity.exe` 旁建立 `music/`，放入以下文件：
+背景音乐默认是内置程序化配乐：主菜单 Lull、探索 Hollow、追逐 Fracture、安全屋 Crawl，实时合成、无缝续写；胜利和失败只留音效。想换成自己的曲子，在 `canity.exe` 旁建立 `music/`，放入以下文件：
 
 | 文件名 | 场景 |
 |---|---|
@@ -133,12 +133,11 @@
 | `victory.mp3` / `victory.wav` | 成功撤离 |
 | `defeat.mp3` / `defeat.wav` | 失败 |
 
-可只放部分曲目；同名时优先 MP3，没有曲目时该场景保持无背景音乐，合成音效仍正常。
+可只放部分曲目；放任意一个文件后游戏整体切换到文件模式，同名时优先 MP3，缺少文件的场景保持无背景音乐。清空 `music/` 或设置 `CANITY_MUSIC=builtin` 可回到内置曲目。
 播放由 Windows MCI 提供，实际支持取决于文件编码和系统解码能力。
 模块已接场景切换、音量、暂停与事件触发的临时压低，详情见 [音乐协议 v1](docs/music_protocol.md)。
 
-当前存档格式为 **26**。代码支持符合结构条件的 v25 存档迁移；不识别的版本会归档为
-`.v<版本>.bak` 并按无存档处理，不保证所有旧版本的进度兼容。
+当前存档格式为 **27**。代码可向下兼容 **v24（2.3.3 及更早）/ v25 / v26**：读档时按版本和文件长度迁移，金币、银行、遗物、藏身点、局内改造与运行进度都会保留；2.3.4 重建了成就表，旧成就 ID 无法一一对应，迁移时清零以免误弹成就。更老的版本仍会归档为 `.v<版本>.bak` 并按无存档处理，不覆盖原文件。
 测试可设置 `CANITY_DATA_DIR` 指向独立目录，避免写入玩家存档。
 
 ## Steam 与 SIM 接入状态
@@ -148,6 +147,12 @@ Steam 封装已接生命周期、成就共用定义、统计、云存档和音�
 线上功能还需要本游戏的 App ID、Steamworks 运行库和后台配置，目前未完成线上验证。
 SIM 已预留音乐适配协议并有模拟适配器测试记录，尚未接入具体外部系统。
 接入说明见 [Steam 专区](src/steam/README.md) 与 [音乐协议](docs/music_protocol.md)。
+
+## 中文与字体
+
+中文使用内置点阵，不再依赖系统字体：字形来源为 **Noto Sans SC**（思源黑体，SIL OFL 1.1，可商用），只把源码实际用到的字烘成 12/24/36/48px 单色图集，和英文点阵共用行高与缩放。仓库不包含 TTF；发布时需随游戏保留许可证 [l10n/OFL-NotoSansSC.txt](l10n/OFL-NotoSansSC.txt)。
+
+翻译词条统一在 [l10n/zh.tsv](l10n/zh.tsv)，改完运行 `python l10n/apply_tsv.py`；新增汉字再运行 `python l10n/bake_cjk_atlas.py`，最后用 `python l10n/audit_l10n.py` 检查覆盖和图集是否过期。流程见 [l10n/README.md](l10n/README.md)。
 
 ## 编译
 
@@ -204,7 +209,7 @@ gcc tests/test_canity.c src/steam/steam_ach.c -Iinclude \
 | `src/wallet.c`、`src/economy.c`、`src/money.c` | 金币收支、强度档、协议与钱袋 |
 | `src/campaign.c`、`src/daily.c`、`src/events.c` | 战役、每日任务与特殊事件 |
 | `src/achievements.c`、`src/bestiary.c`、`src/save.c` | 成就、图鉴与存档 |
-| `src/audio.c`、`src/music.c`、`src/steam/` | 合成音效、音乐调度与 Steam 封装 |
+| `src/audio.c`、`src/music.c`、`src/music_proc.c`、`src/steam/` | 合成音效与立体声混音、音乐调度、内置程序化配乐与 Steam 封装 |
 
 进一步阅读：[2.3.3 修复与升级](docs/codex_upgrade_2.3.3.md)、
 [审美规范修订记录](docs/art_direction_revision.md)、[审美与体验规范](include/art_direction.h)、

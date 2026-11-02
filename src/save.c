@@ -176,6 +176,7 @@ static void CopyDisplaySettings(SaveBlob* s) {
     s->gamma = gammaValue;
     s->sens = mouseSens;
     s->volume = volumeF;
+    s->musicVolume = musicVolumeF;
     for (int a = 0; a < BINDING_SLOTS; a++)
         s->bindings[a] = (a < ACT_COUNT) ? g_bindings[a] : 0;
     s->lang = g_lang;
@@ -319,7 +320,7 @@ void SaveGame(void) {
     }
 
     BackupSave();     /* v2.0：写坏之前先留一份 .bak */
-    /* v9：投掷物 / 待上缴碎片 / 局内技能，以前完全没存 */
+    /* v9：投掷物 / 待上缴金币 / 局内技能，以前完全没存 */
     g_save.bricks = bricks;
     g_save.acids = acids;
     g_save.smokeBombs = smokeBombs;
@@ -491,6 +492,152 @@ static void RestoreBankFromSave(void) {
     { extern int carryGold; if (carryGold < 0) carryGold = 0; }
 }
 
+/* ==================================================================
+ * v24 存档布局（2.3.3 及更早）
+ * ------------------------------------------------------------------
+ * v26 重建了成就表（40 → 32）、技能树（20 → 26 + 4 个额外），
+ * 还删掉了 pendingShards，所以 v24 的字节**不能**直接当新结构读。
+ * 这里保留一份旧结构，只在版本号和文件长度都精确匹配时启用迁移。
+ * ================================================================ */
+typedef struct {
+    unsigned int magic;
+    int version;
+    int gameVersion;
+    int resIndex, fullscreen, fpsCap, scale, fov, vignette, showFps;
+    float gamma, sens;
+    int shards, upgBattery, upgSpeed, upgQuiet, upgSanity;
+    int bestLevel;
+    float volume;
+    int hasRun, level, fusesHeld, fusesNeeded, breakerOpen, breakerActive, searchedCount, nContainers;
+    int flashlightOn;
+    float sanity, battery, stamina, posX, posY, dirX, dirY, exitX, exitY, breakerX, breakerY, runTime;
+    Container cont[MAX_CONTAINERS];
+    int worldMap[MAP_HEIGHT][MAP_WIDTH];
+    int explored[MAP_HEIGHT][MAP_WIDTH];
+    int flares, bottles;
+    int safeActive;
+    float safeX, safeY;
+    int levelMod;
+    float modSanityMul, modSpeedMul;
+    int themeId;
+    int nThrown;
+    Thrown thr[MAX_THROWN];
+    int hudDetail, qteHint;
+    int bindings[BINDING_SLOTS];
+    int upgEco, upgRest;
+    int achUnlocked[40];
+    int achProgress[40];
+    int bestEndlessLevel, bestEndlessScore, isEndlessRunSaved;
+    int skillRank[20];
+    int cores, activeKeystone, bestMainScore, seenMonsters;
+    int bricks, acids, smokeBombs;
+    int pendingShards;
+    unsigned int runSkillMask;
+    int lang, saveSlot;
+    int weaponRank[3], weaponXp[3];
+    int relicOwned[RELIC_COUNT], relicTotal;
+    int dailyMode, dailySeed;
+    int campaignMode, campaignStage;
+    int firePots, gluePots, mirrors;
+    int bankStreak;
+    float modBatteryMul, modShardMul, modNoiseMul;
+    int weaponAttach[3][2];
+    int attachOwned[10];
+    int curWeapon;
+    int runUltimate;
+    float energy;
+    unsigned int benchOwnedSave;
+    int runUpgSave[5];
+    int hideSpotSaveCount;
+    HideSpot hideSpotSave[6];
+    int hiddenInSave;
+    int safeHealLvSave, safeChargeLvSave, safeStaminaLvSave;
+    int achFloorsNoLight, achFloorsFlawless, achFloorsPacifist, achFloorsFast;
+    int achMapsExplored, achFusesRun, achLocksOpened;
+    int achHideCount, achTotalThrown;
+    float achCrankSecondsTotal, achLowSanitySeconds;
+    int bankGoldSave, bankHistMaxSave, bankCarryPctSave, carryGoldSave;
+} LegacySaveV24;
+
+/* 迁移只保留能一一对应的字段：
+   · 成就表从 40 条重建为 32 条，旧 ID 不保证对应 → 清零，避免误弹成就；
+   · 技能树前 20 项按位置保留（新树 20..29 级从 0 开始）；
+   · 其余大厅进度、金币、银行、遗物、藏身点原样带走。 */
+static void MigrateV24(SaveBlob* cur, const LegacySaveV24* old) {
+    memset(cur, 0, sizeof(*cur));
+    /* 到 upgRest 为止两边布局完全一致（成就是第一个尺寸变化的数组） */
+    memcpy(cur, old, offsetof(LegacySaveV24, achUnlocked));
+    cur->magic = SAVE_MAGIC;
+    cur->version = SAVE_VERSION;
+
+    cur->bestEndlessLevel = old->bestEndlessLevel;
+    cur->bestEndlessScore = old->bestEndlessScore;
+    cur->isEndlessRunSaved = old->isEndlessRunSaved;
+    for (int i = 0; i < 20; i++) cur->skillRank[i] = old->skillRank[i];
+    cur->cores = old->cores;
+    cur->activeKeystone = old->activeKeystone;
+    cur->bestMainScore = old->bestMainScore;
+    cur->seenMonsters = old->seenMonsters;
+    cur->bricks = old->bricks;
+    cur->acids = old->acids;
+    cur->smokeBombs = old->smokeBombs;
+    cur->runSkillMask = old->runSkillMask;
+    cur->lang = old->lang;
+    cur->saveSlot = old->saveSlot;
+    for (int i = 0; i < 3; i++) {
+        cur->weaponRank[i] = old->weaponRank[i];
+        cur->weaponXp[i] = old->weaponXp[i];
+    }
+    for (int i = 0; i < RELIC_COUNT; i++) cur->relicOwned[i] = old->relicOwned[i];
+    cur->relicTotal = old->relicTotal;
+    cur->dailyMode = old->dailyMode;
+    cur->dailySeed = old->dailySeed;
+    cur->campaignMode = old->campaignMode;
+    cur->campaignStage = old->campaignStage;
+    cur->firePots = old->firePots;
+    cur->gluePots = old->gluePots;
+    cur->mirrors = old->mirrors;
+    cur->bankStreak = old->bankStreak;
+    cur->modBatteryMul = old->modBatteryMul;
+    cur->modShardMul = old->modShardMul;
+    cur->modNoiseMul = old->modNoiseMul;
+    for (int i = 0; i < 3; i++) {
+        cur->weaponAttach[i][0] = old->weaponAttach[i][0];
+        cur->weaponAttach[i][1] = old->weaponAttach[i][1];
+    }
+    for (int i = 0; i < 10; i++) cur->attachOwned[i] = old->attachOwned[i];
+    cur->curWeapon = old->curWeapon;
+    cur->runUltimate = old->runUltimate;
+    cur->energy = old->energy;
+    cur->benchOwnedSave = old->benchOwnedSave;
+    for (int i = 0; i < 5; i++) cur->runUpgSave[i] = old->runUpgSave[i];
+    cur->hideSpotSaveCount = old->hideSpotSaveCount;
+    for (int i = 0; i < 6; i++) cur->hideSpotSave[i] = old->hideSpotSave[i];
+    cur->hiddenInSave = old->hiddenInSave;
+    cur->safeHealLvSave = old->safeHealLvSave;
+    cur->safeChargeLvSave = old->safeChargeLvSave;
+    cur->safeStaminaLvSave = old->safeStaminaLvSave;
+    cur->achFloorsNoLight = old->achFloorsNoLight;
+    cur->achFloorsFlawless = old->achFloorsFlawless;
+    cur->achFloorsPacifist = old->achFloorsPacifist;
+    cur->achFloorsFast = old->achFloorsFast;
+    cur->achMapsExplored = old->achMapsExplored;
+    cur->achFusesRun = old->achFusesRun;
+    cur->achLocksOpened = old->achLocksOpened;
+    cur->achHideCount = old->achHideCount;
+    cur->achTotalThrown = old->achTotalThrown;
+    cur->achCrankSecondsTotal = old->achCrankSecondsTotal;
+    cur->achLowSanitySeconds = old->achLowSanitySeconds;
+    cur->bankGoldSave = old->bankGoldSave;
+    cur->bankHistMaxSave = old->bankHistMaxSave;
+    cur->bankCarryPctSave = old->bankCarryPctSave;
+    cur->carryGoldSave = old->carryGoldSave;
+    cur->runPrincipalSave = old->carryGoldSave;   /* v25 新增字段，用本金兜底 */
+    cur->musicVolume = volumeF;                   /* v27 字段：老档沿用音效音量 */
+}
+
+typedef char legacySave24_must_fit[(sizeof(LegacySaveV24) <= sizeof(SaveBlob)) ? 1 : -1];
+
 int LoadSettings(void) {
     char p[MAX_PATH];
     memset(&g_save, 0, sizeof(g_save));
@@ -508,7 +655,11 @@ int LoadSettings(void) {
             fs = ReadWholeFile(bak, &g_save, sizeof(g_save));
         }
     }
-    if (fs <= 0) return 0;
+    if (fs <= 0) {
+        /* v8：第一次运行按系统语言选中文 —— 中文 Windows 上不用先去设置里找开关。 */
+        if (PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE) g_lang = LANG_ZH;
+        return 0;
+    }
     size_t fileSize = (size_t)fs;
     size_t want = (fileSize < sizeof(g_save)) ? fileSize : sizeof(g_save);
     size_t got = want;
@@ -536,7 +687,7 @@ int LoadSettings(void) {
     /* 1.8.0 是测试版：只认当前格式，旧存档直接丢弃（已确认可接受）。 */
     /* v2.0：v13 → v14 迁移。
        技能树从 15 节点变 20 节点，skillRank 是定长数组 → 结构体尺寸变了。
-       策略：技能等级全清、把已投入的碎片和核心按旧价退回，其余进度原样保留。
+       策略：技能等级全清、把已投入的金币和核心按旧价退回，其余进度原样保留。
        旧价：普通节点 {100,500,900}、keystone 2000 + 1 核、跨支 1400 + 2 核。 */
     /* v2.2 修复：v13→v14 的"迁移"是错的 —— 它把 v13 的文件字节
        原地当成 v14 的 SaveBlob 解释，而 v14 的 skillRank[15]→[20]
@@ -546,9 +697,26 @@ int LoadSettings(void) {
        真正安全的做法：不认识的版本**不解释**，把旧档改名归档，
        当作"没有存档"处理。玩家的数据一定还在盘上，可以回滚，
        而不是被一个错误的迁移静默毁掉。 */
-    if (g_save.version == 25 && fileSize >= offsetof(SaveBlob, dailyQuestDate)) {
+    /* 读进来的字节可能比当前结构短：先把尾部清零，后面才能安全地按
+       “缺字段取默认值”处理。 */
+    int hasMusicField = (fileSize >= offsetof(SaveBlob, musicVolume) + sizeof(float));
+    if (fileSize < sizeof(g_save))
+        memset((char*)&g_save + fileSize, 0, sizeof(g_save) - fileSize);
+
+    /* v24（2.3.3 及更早）的布局和现在不同：成就 40→32、技能树 20→26、
+       还删了 pendingShards。只在版本号和文件长度都精确匹配时迁移，
+       对不上就继续走“归档不解释”的安全路径。 */
+    if (g_save.version == 24 && fileSize == sizeof(LegacySaveV24)) {
+        LegacySaveV24 old;
+        memcpy(&old, &g_save, sizeof(old));
+        MigrateV24(&g_save, &old);
+        fileSize = sizeof(SaveBlob);
+    }
+    /* v25 / v26：新字段都追加在结构末尾，前缀可以直接读。
+       v25 缺 runPrincipalSave，用本局本金兜底（和原来的迁移一致）。 */
+    if (g_save.version == 25 || g_save.version == 26) {
         g_save.version = SAVE_VERSION;
-        g_save.runPrincipalSave = g_save.carryGoldSave;
+        if (g_save.runPrincipalSave == 0) g_save.runPrincipalSave = g_save.carryGoldSave;
     }
     if (g_save.version != SAVE_VERSION) {
         char oldp[MAX_PATH], arc[MAX_PATH + 24];   /* v3.0：留 ".v%d.bak" 的位置 */
@@ -559,7 +727,8 @@ int LoadSettings(void) {
         }
         return 0;
     }
-    if (g_save.version != SAVE_VERSION) return 0;
+    /* 旧档没有音乐音量字段：在下面读到 volumeF 之后回退到音效音量。 */
+    if (!hasMusicField) g_save.musicVolume = 0.0f;
     int isOldSave = (fileSize < sizeof(SaveBlob));
 
     /* 迁移：老存档缺的字段给默认值。
@@ -614,6 +783,8 @@ int LoadSettings(void) {
     volumeF = g_save.volume;
     /* v2.7：写成 !(x >= lo && x <= hi) 才能挡住 NaN（NaN 的所有比较都是假） */
     if (!(volumeF >= 0.0f && volumeF <= 1.0f)) volumeF = 0.8f;
+    musicVolumeF = hasMusicField ? g_save.musicVolume : volumeF;
+    if (!(musicVolumeF >= 0.0f && musicVolumeF <= 1.0f)) musicVolumeF = volumeF;
     if (carryGold < 0) carryGold = 0;
     if (upgBattery < 0 || upgBattery > UPG_MAX) upgBattery = 0;
     if (upgSpeed < 0 || upgSpeed > UPG_MAX) upgSpeed = 0;
@@ -777,6 +948,15 @@ void ContinueRun(void) {
     RunUpgLoadFromSave(g_save.runUpgSave);   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
     if (!(energy > 0.0f)) energy = ENERGY_MAX;
     flashlightOn = g_save.flashlightOn;
+    /* v8：模式规则优先于存档里的开关状态 ——
+       每日“不能开手电”/ SALVAGE keystone 读档后必须保持关闭；
+       战役第 1 关“关不掉”读档后必须保持开启。 */
+    {
+        extern int DailyForbidLight(void);
+        extern int CampaignFlashlightLocked(void);
+        if (DailyForbidLight() || HasKeystone(SK_SALVAGE)) flashlightOn = 0;
+        else if (CampaignFlashlightLocked()) flashlightOn = 1;
+    }
     /* v3.0：坐标必须夹在地图内且非 NaN */
     #define CLAMP_POS(v, wrap) do { \
         if (!((v) == (v)) || (v) < 1.0f || (v) > (float)(wrap) - 1.0f) (v) = 1.5f; \

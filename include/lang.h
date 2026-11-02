@@ -16,8 +16,9 @@ typedef enum {
 
 extern int g_lang;
 
+const char* LangTr(const char* en, const char* zh);
 static inline const char* Tr(const char* en, const char* zh) {
-    return (g_lang == LANG_ZH) ? zh : en;
+    return LangTr(en, zh);
 }
 
 /* 绘制层翻译：找不到就原样返回（动态字符串按前缀造） */

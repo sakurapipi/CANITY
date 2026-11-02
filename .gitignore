@@ -36,3 +36,9 @@ tests/
 tools/
 # Codex 的构建缓存目录
 work/
+
+
+# 忽略 Steamworks SDK（如果是放在本地目录的话）
+sdk/
+steam_api64.dll
+steam_api64.lib

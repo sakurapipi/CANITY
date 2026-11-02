@@ -1,8 +1,9 @@
-/* Independent music director. No assets required; missing tracks are silent.
-   Local MCI supports WAV/MP3 through Windows. SIM plugs into the same v1
-   provider protocol; no SIM implementation is assumed by the game. */
+/* Independent music director. Three providers: local MCI files, the built-in
+   procedural score (music_proc.c) and Steam. Missing track files fall back to
+   the built-in score; SIM plugs into the same v1 provider protocol. */
 #include "common.h"
 #include "music.h"
+#include "music_proc.h"
 #include "steam_zone.h"
 
 typedef struct { MusicProvider api;void* context;int present; } ProviderSlot;
@@ -50,6 +51,14 @@ static void steamPause(void* context,int value) {
     if(!value && steamPausedByUs) {SteamZoneMusicPause(0);steamPausedByUs=0;}
 }
 static void steamStop(void* context) {steamPause(context,0);}
+/* 内置配乐：真正的声音在音频线程里生成。这里只转发场景和音量；
+   暂停由 MusicTick 把增益降到 0 完成，所以不给 pause 回调。 */
+static int builtinPlay(void* context,const char* track,int loop) {
+    (void)context;(void)track;(void)loop;return 1;
+}
+static void builtinStop(void* context) {(void)context;MusicProcSetScene(MUSIC_PROC_SILENT);}
+static void builtinGain(void* context,float gain) {(void)context;MusicProcSetGain(gain);}
+static void builtinScene(void* context,MusicScene scene) {(void)context;MusicProcSetScene((int)scene);}
 int MusicRegisterProvider(MusicProviderId id,const MusicProvider* api,void* context) {
     if(id<0 || id>=MUSIC_PROVIDER_COUNT || !api || api->version!=MUSIC_PROTOCOL_VERSION || !api->play || !api->stop) return 0;
     if(ready && current==id) active()->api.stop(active()->context);
@@ -60,7 +69,9 @@ void MusicInit(void) {
     memset(providers,0,sizeof(providers));memset(tracks,0,sizeof(tracks));
     MusicProvider local={1,localPlay,localStop,localPause,localGain,NULL,NULL};
     MusicProvider steam={1,steamPlay,steamStop,steamPause,NULL,NULL,NULL};
+    MusicProvider builtin={1,builtinPlay,builtinStop,NULL,builtinGain,builtinScene,NULL};
     MusicRegisterProvider(MUSIC_LOCAL,&local,NULL);MusicRegisterProvider(MUSIC_STEAM,&steam,NULL);
+    MusicRegisterProvider(MUSIC_BUILTIN,&builtin,NULL);
     current=MUSIC_LOCAL;currentScene=MUSIC_MENU;ready=1;paused=0;duckTime=0;duckGain=1;lastGain=-1;errorText[0]=0;
 }
 void MusicShutdown(void) {if(!ready)return;active()->api.stop(active()->context);ready=0;}
@@ -123,14 +134,21 @@ const char* MusicLastError(void) {return errorText;}
 void MusicLoadGameTracks(void) {
     static const wchar_t* names[]={L"menu",L"explore",L"chase",L"safe",L"victory",L"defeat"};
     wchar_t base[MAX_PATH*3];DWORD n=GetModuleFileNameW(NULL,base,(DWORD)(sizeof(base)/sizeof(base[0])));
-    if(!n || n>=sizeof(base)/sizeof(base[0]))return;
-    wchar_t* slash=wcsrchr(base,L'\\');if(!slash)return;slash[1]=0;
+    if(!n || n>=sizeof(base)/sizeof(base[0])){MusicUseProvider(MUSIC_BUILTIN);return;}
+    wchar_t* slash=wcsrchr(base,L'\\');if(!slash){MusicUseProvider(MUSIC_BUILTIN);return;}slash[1]=0;
+    int found=0;
     for(int i=0;i<MUSIC_SCENE_COUNT;++i) {
         wchar_t path[MAX_PATH*3+80];char utf8[MAX_PATH*3];
         _snwprintf(path,sizeof(path)/sizeof(path[0]),L"%lsmusic\\%ls.mp3",base,names[i]);
         if(GetFileAttributesW(path)==INVALID_FILE_ATTRIBUTES)
             _snwprintf(path,sizeof(path)/sizeof(path[0]),L"%lsmusic\\%ls.wav",base,names[i]);
         if(GetFileAttributesW(path)==INVALID_FILE_ATTRIBUTES)continue;
-        if(WideCharToMultiByte(CP_UTF8,0,path,-1,utf8,sizeof(utf8),NULL,NULL))MusicSetTrack((MusicScene)i,utf8);
+        if(WideCharToMultiByte(CP_UTF8,0,path,-1,utf8,sizeof(utf8),NULL,NULL)) {
+            if(MusicSetTrack((MusicScene)i,utf8))found++;
+        }
     }
+    /* 没有 music 文件夹时用内置程序化配乐；CANITY_MUSIC=builtin/files 可强制选择。 */
+    const char* mode=getenv("CANITY_MUSIC");
+    if(mode && !strcmp(mode,"builtin")) {MusicUseProvider(MUSIC_BUILTIN);return;}
+    if(!found && !(mode && !strcmp(mode,"files"))) MusicUseProvider(MUSIC_BUILTIN);
 }

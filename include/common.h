@@ -89,7 +89,7 @@ typedef enum {
 #define SAFE_HEAL_RATE    1.2f     /* v2.0：3.0→1.2。审计实测三资源线里只有体力会卡，
                                       理智靠 8 个安全屋白送反而净 +187，恐怖感被抹平 */
 #define SAFE_HEAL_CAP     60.0f    /* v2.0：安全屋回智封顶（不再是满血点） */
-#define SAFE_REST_COST    25       /* v2.0：主动休息要花碎片 */
+#define SAFE_REST_COST    25       /* v2.0：主动休息要花金币 */
 #define LEVEL_CLEAR_SANITY 12.0f   /* 过关回智（配合 STEP 上调，奖励同步下调） */   /* 过关回智（原 30） */
 #define MOUSE_BASE_SENS 0.0035   /* v3.0：0.002→0.0035（玩家实测转身太慢） */ /* 弧度/像素（1.0x） */
 
@@ -180,10 +180,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 38   /* v6 第 38 轮：**Language 项加回来了**
-                               v3.1 曾把它删掉（界面固定英文），
-                               但全项目有 158 处 Tr() 双语代码，
-                               中文玩家却没有开关 —— 现在补上。 */
+#define SETTING_COUNT 39   /* v8：SFX / Music 音量拆成两项 */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 
@@ -348,7 +345,7 @@ typedef struct {
     float x, y;
     float z, vz;       /* 抛物线高度和垂直速度 */
     float vx, vy;      /* 水平速度 */
-    int type;          /* 0=荧光棒(飞行中/落地发光) 1=玻璃碎片 */
+    int type;          /* 0=荧光棒(飞行中/落地发光) 1=玻璃金币 */
     float life;
     int active;
 } Thrown;
@@ -356,7 +353,7 @@ typedef struct {
 /* 飞行投掷物（玻璃瓶 = 唯一的武器）                                    */
 /* 荧光棒是「扔在地上持续发光」的静止物，玻璃瓶则是「飞出去砸东西」的弹丸。
    两者机制不同，所以分成两个系统：
-     thrown[]  —— 静止物（荧光棒 / 瓶子碎片），只管显示与被光敏怪追踪
+     thrown[]  —— 静止物（荧光棒 / 瓶子金币），只管显示与被光敏怪追踪
      shot[]    —— 飞行物（玻璃瓶），带速度，撞到怪就结算伤害 */
 #define SHOT_SPEED 9.0f      /* 玻璃瓶基础飞行速度，单位/秒 */
 #define SHOT_MAX_SPEED 14.0f  /* 蓄力最大速度 */
@@ -364,8 +361,8 @@ typedef struct {
 #define SHOT_DAMAGE 8        /* v2.0：1→8（原来一整局的投掷物伤害 < 一次近战挥击） */
 #define GRAVITY 9.8f         /* 重力加速度，格/秒² */
 #define SHOT_HEIGHT 1.6f     /* 手部高度（抛物线初始高度） */
-#define MAX_SHARD_LIFE 2.5f  /* 玻璃碎片存活时间 */
-#define SHARD_COUNT 10       /* 每次破碎产生的碎片数 */
+#define MAX_SHARD_LIFE 2.5f  /* 玻璃金币存活时间 */
+#define SHARD_COUNT 10       /* 每次破碎产生的金币数 */
 
 typedef struct {
     float x, y;          /* 世界坐标（水平面） */
@@ -383,7 +380,7 @@ typedef struct {
     float ignoreTargetTime;
 } Shot;
 
-/* 玻璃碎片：撞击时生成，带重力、随机扩散、逐渐变暗 */
+/* 玻璃金币：撞击时生成，带重力、随机扩散、逐渐变暗 */
 typedef struct {
     float x, y, z;
     float vx, vy, vz;
@@ -561,7 +558,7 @@ enum {
     EV_SILENCE,          /* 死寂：噪声减半，+800 */
     EV_SUPPLY,           /* 补给空投：多给瓶+棒，+600 */
     EV_FLOOD,            /* v2.0 涨水：耗电翻倍，+1200 */
-    EV_WHISPER,          /* v2.0 低语：理智流失 +50%，但碎片 +50%，+1300 */
+    EV_WHISPER,          /* v2.0 低语：理智流失 +50%，但金币 +50%，+1300 */
     EV_MIRROR,           /* v2.0 镜像：怪物成倍出现，+1600 */
     EV_HEAT,             /* v6 热浪：电池上限 -30%，怪速 +10% */
     EV_FOG,              /* v6 浓雾：视野 -40%，听觉 -20% */
@@ -672,7 +669,7 @@ typedef struct {
 extern Leech leeches[LEECH_MAX];
 
 /* ------------------------------------------------------------------ */
-/* v1.8 碎片"过关上缴"（重生细胞式）                                   */
+/* v1.8 金币"过关上缴"（重生细胞式）                                   */
 /* ------------------------------------------------------------------ */
 #define SHARD_SEARCH 12        /* v3.4：实际值改成 8 + 层数×1.5，见 GoldSearchAt() */         /* v2.0：7→12（一局满通 2160 → 3600 左右） */
 #define SHARD_POWER  32        /* v3.4：实际值改成 25 + 层数×3，见 GoldBreakerAt() */         /* v2.0：20→32 */

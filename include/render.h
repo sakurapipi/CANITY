@@ -92,9 +92,15 @@ void DrawParasiteSprite(void);
 /* 基准测试用：单独跑某个渲染阶段（1=地板 2=墙体 3=后处理） */
 void RunPhase(int phase);
 
-/* v2.0 中文字形（cjktext.c） */
+/* v8 内置中文字形：
+   cjk_glyphs.c 里是 12px 单色点阵（由 l10n/bake_cjk_atlas.py 从 OFL 字体生成），
+   cjktext.c 只负责 UTF-8 解码。字宽/字高与 8x12 英文点阵同一套。 */
+#define CJK_CELL_W 12
+#define CJK_CELL_H 12
 int  CjkHasNonAscii(const char* s);
-int  CjkTextWidth(const char* utf8);
-void CjkDrawRaw(int x, int y, const char* utf8, unsigned int color);
+/* 解一个 UTF-8 码点并前移指针；返回 0 表示字符串结束。 */
+unsigned int CjkDecodeOne(const char** s);
+/* 12*scale 行位图（scale 1..4 预烘），每行最高位是左侧像素；找不到返回 NULL。 */
+const unsigned long long* CjkRows(unsigned int cp, int scale);
 
 #endif /* CANITY_RENDER_H */

@@ -211,7 +211,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             scene=(monster.active && monster.state==2) || (lightBeast.active && lightBeast.state==2) ? MUSIC_CHASE : MUSIC_EXPLORE;
         }
         MusicSetScene(scene);
-        MusicSetMasterVolume(volumeF);
+        MusicSetMasterVolume(musicVolumeF);
         MusicSetPaused(currentState==STATE_PAUSED || (g_hwnd && IsIconic(g_hwnd)));
         MusicTick((float)dt);
         if (dt > 0.25) dt = 0.25;

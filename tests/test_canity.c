@@ -155,6 +155,10 @@ static void test_no_unwired_api(void) {
         { "ThreatCooldownDelta",     "src/entity.c" },
         { "DailyModTextEn",          "src/game.c" },
         { "DailyRestrictTextEn",     "src/game.c" },
+        /* 内置程序化配乐：合成器必须真的被音频线程调用，不能只是编译进去 */
+        { "MusicProcMix",            "src/audio.c" },
+        { "MusicProcSetScene",       "src/music.c" },
+        { "MusicProcSetGain",        "src/music.c" },
         /* v6 round 37: the whole in-run skill draft was unreachable */
         { "OpenSkillPick",           "src/game.c" },
         /* v6 round 41: daily progress is now shown in the HUD */

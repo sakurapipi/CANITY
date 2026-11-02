@@ -22,7 +22,7 @@ typedef struct {
     float sanityMul;       /* 理智流失倍率 */
     float batteryMul;      /* 手电耗电倍率 */
     float noiseMul;        /* 噪声倍率 */
-    float shardMul;        /* 碎片收入倍率 */
+    float shardMul;        /* 金币收入倍率 */
     float healAdd;         /* 安全屋回智加成（0.25 = +25%） */
     float maxSanAdd;       /* 理智上限增减（负数 = 削上限） */
 } RelicDef;

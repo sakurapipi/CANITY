@@ -171,7 +171,7 @@ void ThrowItem(int type, float charge) {
     PlaySfx(SFX_THROW, 0.6f);  /* 投掷专用音效：呼啸+出手闷响 */
 }
 
-/* 推进所有飞行中的玻璃瓶，结算命中 + 抛物线 + 碎片 */
+/* 推进所有飞行中的玻璃瓶，结算命中 + 抛物线 + 金币 */
 void UpdateShots(float dt) {
     /* v2.3.2：8 秒不扔就断链 */
     if (throwChainTimer > 0.0f) {
@@ -326,7 +326,7 @@ void UpdateShots(float dt) {
             shot[i].z += sdz;
             shot[i].vz -= GRAVITY * dt / (float)steps;  /* 重力 */
 
-            /* 撞地面：碎裂生成碎片 */
+            /* 撞地面：碎裂生成金币 */
             if (shot[i].z <= 0.0f) {
                 shot[i].z = 0.0f;
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
@@ -382,7 +382,7 @@ void UpdateShots(float dt) {
                     if (shot[i].kind == 2) {            /* 砖头：钝击 12 点，蓄满 15 */
                         base = 12 + chargeBonus(shot[i].charge) * 3;
                         type = DT_BLUNT;
-                    } else if (shot[i].kind == 3) {     /* 酸瓶：碎片 10 点、无视护甲 */
+                    } else if (shot[i].kind == 3) {     /* 酸瓶：金币 10 点、无视护甲 */
                         base = 10 + chargeBonus(shot[i].charge) * 2;
                         type = DT_SHARD;
                         g_dmgIgnoreArmor = 1;
@@ -453,7 +453,7 @@ void UpdateShots(float dt) {
         }
     }
 
-    /* 更新玻璃碎片 */
+    /* 更新玻璃金币 */
     for (int i = 0; i < MAX_SHOTS * SHARD_COUNT; i++) {
         if (!shards_debris[i].active) continue;
         shards_debris[i].age += dt;

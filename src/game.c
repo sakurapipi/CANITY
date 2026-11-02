@@ -106,7 +106,7 @@ int levelMod = -1;
 float modSanityMul = 1.0f;
 float modSpeedMul = 1.0f;
 float modBatteryMul = 1.0f;   /* v2.0 事件：手电耗电倍率 */
-float modShardMul = 1.0f;     /* v2.0 事件：碎片倍率 */
+float modShardMul = 1.0f;     /* v2.0 事件：金币倍率 */
 float modNoiseMul = 1.0f;     /* v2.0 事件：噪声倍率（死寂） */
 float levelBanner = 0.0f;      /* 进关后显示词条名的秒数 */
 float safeZoneMsg = 0.0f;      /* 进入安全屋后提示「SAFE ZONE」的剩余秒数 */
@@ -204,7 +204,7 @@ float heartTimer = 0.0f;
 int searchedCount = 0;    /* 搜索过的容器数 */
 int hasSave = 0;          /* 是否有可继续的存档 */
 
-int totalGoldEarned = 0;  /* 累计获得碎片（用于成就） */
+int totalGoldEarned = 0;  /* 累计获得金币（用于成就） */
 int bottlesKilled = 0;      /* 用瓶子击杀怪物数 */
 int faceDodged = 0;         /* 躲开跳脸虫次数 */
 int crankTimeTotal = 0;     /* 累计发电秒数 */
@@ -241,7 +241,8 @@ int bestLevel = 0;
 int bestEndlessLevel = 0;   /* 无尽模式最高层数 */
 int bestEndlessScore = 0;   /* 无尽模式最高分 */
 int isEndlessRun = 0;       /* 当前是否为无尽模式 */
-float volumeF = 0.8f;     /* 0..1，0 = 静音 */
+float volumeF = 0.8f;     /* 0..1，音效音量，0 = 静音 */
+float musicVolumeF = 0.8f;/* 0..1，音乐音量，0 = 静音 */
 int runInProgress = 0;    /* 当前是否有一局未结束 */
 
 /* ---- v1.8 新状态 ---- */
@@ -905,7 +906,8 @@ SettingItem settings[] = {
 
     /* ========== 分类: GAMEPLAY ========== */
     {"Mouse Sens.",     SET_SLIDER, NULL,        0, NULL, &mouseSens, 0.2f, 3.0f, 0.1f, 6},
-    {"Volume",          SET_SLIDER, NULL,        0, NULL, &volumeF,  0.0f, 1.0f, 0.05f, 6},
+    {"SFX Volume",      SET_SLIDER, NULL,        0, NULL, &volumeF,  0.0f, 1.0f, 0.05f, 6},
+    {"Music Volume",    SET_SLIDER, NULL,        0, NULL, &musicVolumeF, 0.0f, 1.0f, 0.05f, 6},
     /* v6 第 ㊳ 轮：**语言切换终于有入口了**
        审计发现 LangToggle() 全工程 0 调用点 ——
        游戏支持中英双语，但玩家在设置里找不到任何开关。
@@ -2186,6 +2188,13 @@ int   calibLevel = -1;        /* v2.4：这一层是否已经发过次数（防�
 float calibCooldown = 0.0f;
 int   calibResult = 0;        /* 0 无 / 1 完美 / 2 普通 / 3 失手 */
 float calibResultTimer = 0.0f;
+/* v8：校准按键锁存与最短有效时间。
+   按住空格时 Windows 会持续重发 WM_KEYDOWN，旧代码每收到一次就锁一次：
+   刚在垃圾桶里按下“开始”，同一个按键的重复消息立刻把滑块锁在 0 附近，
+   屏幕上直接蹦出「校准失手」。这两个状态保证一次按下只算一次、
+   且至少让滑块跑够 0.12 秒才允许锁定。 */
+static float calibElapsed = 0.0f;
+static int   calibStartLatch = 0;
 
 /* ===== v3.4 金币产出公式（方案 v5 §4）=====
     v3.4 银行结算（方案 v5 §2.3）
@@ -2377,7 +2386,7 @@ int chargeBonus(float charge) {
 
 /* v2.7：ThrowItem 是否真的生成了一个投掷物。
    以前池子满时它会静默不生成，而调用方已经先把数量扣掉了 —— 东西凭空消失。 */
-static int g_shardTint = 0;   /* v2.1：下一批碎片的颜色类型 */
+static int g_shardTint = 0;   /* v2.1：下一批金币的颜色类型 */
 int g_throwOk = 0;
 
 /* v8: ThrowItem / UpdateShots 已搬到 src/throwing.c */
@@ -2387,8 +2396,8 @@ int g_throwOk = 0;
 /* ------------------------------------------------------------------ */
 
 /* v2.0 TYPE WORK：武器伤害类型。
-   rank 0 = 按武器默认（近战钝 / 远程碎片 / 法术斩）；
-   rank 1/2/3 = 强制 斩 / 钝 / 碎片 —— 让"改刃"变成石头剪刀布。 */
+   rank 0 = 按武器默认（近战钝 / 远程金币 / 法术斩）；
+   rank 1/2/3 = 强制 斩 / 钝 / 金币 —— 让"改刃"变成石头剪刀布。 */
 int WeaponDamageType(int id) {
     int r = SkillTypeWorkRank();
     if (r <= 0) {
@@ -2417,9 +2426,9 @@ void SpawnParticles(float x, float y, int tint) {
     g_shardTint = 0;
 }
 
-/* 生成玻璃碎片：撞击点产生随机扩散的碎片 */
+/* 生成玻璃金币：撞击点产生随机扩散的金币 */
 void SpawnShards(float x, float y, float vx, float vy, float charge) {
-    int count = 6 + (int)(charge * 6);  /* 6~12 个碎片 */
+    int count = 6 + (int)(charge * 6);  /* 6~12 个金币 */
     for (int i = 0; i < MAX_SHOTS * SHARD_COUNT && count > 0; i++) {
         if (shards_debris[i].active) continue;
         shards_debris[i].x = x;
@@ -2697,6 +2706,14 @@ static void WrenchKnockUpdate(float dt) {
     wrenchPrev = down;
 }
 
+/* v8：每日“不能开手电”/ SALVAGE keystone 会禁止点灯。
+   所有自动点灯路径（摇电、满电重亮、读档）都必须走这里，
+   否则玩家可以靠摇电绕过每日限制。 */
+static int FlashlightUseAllowed(void) {
+    extern int DailyForbidLight(void);
+    return !(DailyForbidLight() || HasKeystone(SK_SALVAGE));
+}
+
 void Update(float dt) {
     { extern float playerMoveSpeedNow; playerMoveSpeedNow = 0.0f; }   /* v8: 守门人判断「在动/冲刺」用 */
     /* v7：可疑点表每帧衰减 / 过期 */
@@ -2771,7 +2788,10 @@ void Update(float dt) {
             battery = 0.0f;
             isMapOpen = 0;
             mapFullScreen = 0;
-            flashlightOn = 0;
+            /* v8：战役第 1 关的规则是“手电关不掉”，地图耗电把灯关掉
+               等于绕过了规则。这里保留开启状态（电量仍是 0，会自然变暗）。 */
+            { extern int CampaignFlashlightLocked(void);
+              flashlightOn = CampaignFlashlightLocked() ? 1 : 0; }
             ForceCursor(0);
             firstMouseMove = 1;
             uiDirty = 1;
@@ -2859,7 +2879,7 @@ void Update(float dt) {
         if (SkillPwrSiphonActive() && battery < (float)BatteryMax() * 0.25f)
             siphonSan = SkillPwrSiphonSanityMul();
         /* v2.2：LAST RESORT —— 理智归零时免死一次，回 15 点并给 4 秒。
-           这个 keystone 之前是纯空函数（1200 碎片 + 2 核心买了个寂寞）。 */
+           这个 keystone 之前是纯空函数（1200 金币 + 2 核心买了个寂寞）。 */
         if (!lastResortUsed && SkillLastResortOneshot()) {
             lastResortUsed = 1;
             sanity = 15.0f;
@@ -2887,7 +2907,7 @@ void Update(float dt) {
         sanity = 0.0f;
         runInProgress = 0;
         if (currentLevel > bestLevel) bestLevel = currentLevel;
-        /* v2.0 SALVAGE：死亡时保留一半待上缴碎片 */
+        /* v2.0 SALVAGE：死亡时保留一半待上缴金币 */
     /* v6：这里原本是一加一减两个空操作（净效果 0），
        是合并货币时留下的。已删除。
        死亡时的保留比例统一由 WalletSettle 的 BANK_DEATH_REFUND 处理。 */
@@ -3373,11 +3393,16 @@ void Update(float dt) {
        用户要求把校准系统移进藏身点，冷却 60 秒，主要奖励改成理智。
        这样柜子/床底从「单纯躲避」变成「喘息 + 回复」，才有存在感。 */
     if ((inSafe || hiddenIn >= 0) && currentState == STATE_PLAYING) {
+        int spaceDown = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
         if (keyPressed[VK_SPACE]) {
-            if (calibActive) CalibLock();
-            else             CalibStart();
             keyPressed[VK_SPACE] = 0;   /* 吃掉这一次，别再触发闪避 */
+            if (!calibStartLatch) {
+                calibStartLatch = 1;
+                if (calibActive) CalibLock();
+                else             CalibStart();
+            }
         }
+        if (!spaceDown) calibStartLatch = 0;
     }
 
     /* v2.6：**进安全屋商店的热键改成 T**（用户要求）。
@@ -3509,7 +3534,7 @@ void Update(float dt) {
             WeaponAddXp(WPN_SPELL, 1);         /* v2.1：法术也能练 */
             slashFade = 0.18f;                 /* 命中留一点余辉 */
             slashHitStop = 0.05f;              /* 50ms 顿帧 */
-            /* 在命中点炸一圈碎片（复用玻璃碎片池） */
+            /* 在命中点炸一圈金币（复用玻璃金币池） */
             SpawnShards(slashX, slashY, slashDX * 3.0f, slashDY * 3.0f, 1.0f);
             MakeNoise(slashX, slashY, KNIFE_NOISE * 0.5f);
             PlaySfx(SFX_THROW, 0.85f);
@@ -3567,7 +3592,7 @@ void Update(float dt) {
                试玩实测：「电量归零灯自动熄灭，摇满后灯仍是 OFF，
                必须再单独按一次 F，而 HUD 从不提示 F 的存在」。
                你刚刚专门花 2.4 秒摇电，显然是想继续用灯。 */
-            if (wasDead && !flashlightOn) {
+            if (wasDead && !flashlightOn && FlashlightUseAllowed()) {
                 flashlightOn = 1;
                 pickupMsg = (g_lang == LANG_ZH) ? "手电已重新点亮" : "LIGHT BACK ON";
                 pickupMsgTimer = 1.2f;
@@ -3597,7 +3622,7 @@ void Update(float dt) {
                  电量 0 → 松手早 → 加到 ~20 → battery 不再是 0
                  → 下次摇满时 wasDead = 0 → **灯永远开不回来**。
                所以这里补上同样的判断。 */
-            if (wasDeadPart && !flashlightOn && battery > 1.0f) {
+            if (wasDeadPart && !flashlightOn && battery > 1.0f && FlashlightUseAllowed()) {
                 flashlightOn = 1;
                 pickupMsg = (g_lang == LANG_ZH) ? "手电已重新点亮" : "LIGHT BACK ON";
                 pickupMsgTimer = 1.2f;
@@ -4075,7 +4100,7 @@ void Update(float dt) {
     UpdateParasite(dt);
     UpdateLeech(dt);
 
-    /* 荧光棒/碎片物理更新：飞行中受重力，落地转静止 */
+    /* 荧光棒/金币物理更新：飞行中受重力，落地转静止 */
     for (int i = 0; i < MAX_THROWN; i++) {
         if (!thrown[i].active) continue;
         if (thrown[i].z > 0.0f) {
@@ -4410,7 +4435,7 @@ void StartDailyRun(void) {
     DeleteSave();
     pendingStartMode = START_DAILY;
     StartGame();
-    /* 强制机制：每日挑战理智流失 +25%，碎片 +25%。
+    /* 强制机制：每日挑战理智流失 +25%，金币 +25%。
        v2.0 修复：原来直接乘在当前层的乘子上，下一层 GenerateLevel 就重置了，
        等于只有第 1 层生效。改成写进 dailyMode 的固定加成，在 GenerateLevel 里叠加。 */
 }
@@ -4428,7 +4453,7 @@ void StartCampaign(int stage) {
 }
 
 /* v2.0 SHORTCUT：跳过当前层，直接生成下一层。
-   不给碎片、不给遗物 —— 换的是时间，不是资源。 */
+   不给金币、不给遗物 —— 换的是时间，不是资源。 */
 void SkipOneLevel(void) {
     if (shortcutUsed) return;
     if (bossLevel) return;                     /* Boss 层不能跳 */
@@ -4515,6 +4540,7 @@ void CalibStart(void) {
     calibActive = 1;
     calibPos = 0.0f;
     calibDir = 1.0f;
+    calibElapsed = 0.0f;      /* v8：从 0 开始计时，锁定前至少要跑一小段 */
     /* 目标区随机，但不贴着两端（否则没得玩） */
     calibZoneC = 0.22f + (float)(rand() % 57) / 100.0f;   /* 0.22 ~ 0.78 */
     calibResult = 0;
@@ -4523,6 +4549,10 @@ void CalibStart(void) {
 
 void CalibLock(void) {
     if (!calibActive) return;
+    /* v8：刚按下开始就锁定的双击/自动重复，直接忽略 —— 否则滑块还停在
+       0 附近，必然判成「失手」。0.12 秒足够挡住同一次按下的重复消息，
+       又不会影响正常操作。 */
+    if (calibElapsed < 0.12f) return;
     calibActive = 0;
     calibCooldown = CALIB_COOLDOWN;   /* v2.6：只上冷却 */
     calibUsedLevel = currentLevel;    /* v3.0：记下本层用过了 */
@@ -4604,6 +4634,15 @@ void CalibTick(float dt) {
     }
 
     if (!calibActive) return;
+    /* v8：离开藏身点/换层后不能把上一次的滑块状态带进来 ——
+       否则下次在垃圾桶里按空格会直接锁定一个残留位置，表现为「一按就失手」。 */
+    if (hiddenIn < 0 && currentState == STATE_PLAYING) {
+        calibActive = 0;
+        calibElapsed = 0.0f;
+        calibResult = 0;
+        return;
+    }
+    calibElapsed += dt;
     /* 滑块每帧都在动，必须每帧重画界面（否则会留下残影） */
     uiDirty = 1;
     calibPos += calibDir * dt / (CALIB_SWEEP / CalibSpeedScale());   /* v2.6：深层更快 */
@@ -4663,12 +4702,15 @@ void StartGame(void) {
     exitGoDeeper = 0;
     /* v3.0：**改造树 / 强化都不重置** ——
        它们花的是 carryGold（跨局持久的元货币），重置等于把玩家买的东西吞掉：
-       买一个 620 的星节点，下一局归零，碎片永久损失。
+       买一个 620 的星节点，下一局归零，金币永久损失。
        benchOwned / runUpg 都已进存档（benchOwnedSave / runUpgSave），
        本来就是元进度。每局该清的只有「假死」这类局内一次性状态。 */
     playDeadUsed = 0;   /* v3.0 假死每局重置 */
     /* v3.0：这几个也必须在开局清零，否则上一局用过之后新局直接失效 */
     calibUsedLevel = -1;
+    calibActive = 0;
+    calibElapsed = 0.0f;
+    calibStartLatch = 0;
     lastResortUsed = 0;
     secondWindTimer = 0.0f;
     vanished = 0;
@@ -5446,7 +5488,7 @@ void ActivateSettingRow(void) {
         for (int a = 0; a < ACT_COUNT; a++) g_bindings[a] = defBindings[a];
         resIndex = 0; isFullscreen = 0; fpsCapIndex = 1; renderScaleIndex = 0;
         fovIndex = 2; vignetteOn = 1; showFps = 0; hudDetail = 1; qteHint = 1;
-        gammaValue = 1.0f; mouseSens = 1.0f; volumeF = 0.8f;
+        gammaValue = 1.0f; mouseSens = 1.0f; volumeF = 0.8f; musicVolumeF = 0.8f;
         ApplyDisplayMode();
         ApplyFov();
         PlaySfx(SFX_POWER, 0.5f);
@@ -6526,7 +6568,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
                 /* v2.2 修复：原来这里只处理 ESC —— 方向键和回车一个都不响应，
                    而屏幕底部明写 ENTER BUY / ARROWS MOVE。纯键盘玩家
-                   一分碎片都花不出去，整条局外成长线等于锁死。 */
+                   一分金币都花不出去，整条局外成长线等于锁死。 */
                 {
                     int cur = hubSelection;
                     /* v6：**按边导航** —— 辐射布局里节点不在直线上，
@@ -6671,11 +6713,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (wParam == (WPARAM)g_bindings[ACT_FLASHLIGHT]) {
                     /* v6 战役第 1 关：手电永远关不掉 */
                     { extern int CampaignFlashlightLocked(void);
-                      if (CampaignFlashlightLocked()) { flashlightOn = 1; uiDirty = 1; return 0; } }
-                    /* v6 每日限制：不能开手电 */
-                    { extern int DailyForbidLight(void);
-                      if (DailyForbidLight() || HasKeystone(SK_SALVAGE)) { flashlightOn = 0; uiDirty = 1;
-                                                return 0; } }
+                      if (CampaignFlashlightLocked()) {
+                          flashlightOn = 1; uiDirty = 1;
+                          pickupMsg = g_lang == LANG_ZH ? "这一关手电关不掉" : "FLASHLIGHT IS LOCKED ON";
+                          pickupMsgTimer = 1.2f;
+                          return 0;
+                      } }
+                    /* v6 每日限制：不能开手电；SALVAGE keystone 同理 */
+                    if (!FlashlightUseAllowed()) {
+                        flashlightOn = 0; uiDirty = 1;
+                        pickupMsg = g_lang == LANG_ZH ? "今天不能开手电" : "NO FLASHLIGHT TODAY";
+                        pickupMsgTimer = 1.2f;
+                        return 0;
+                    }
                     if (battery > 0.0f) flashlightOn = !flashlightOn;
                     uiDirty = 1;
                 }
