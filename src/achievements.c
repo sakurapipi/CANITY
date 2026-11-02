@@ -3,8 +3,6 @@
  *
  * 32 个成就，一张表。加成就 = 加一行。
  */
-#include <stdio.h>
-#include <string.h>
 #include "common.h"
 #include "achievements.h"
 #include "wallet.h"
@@ -97,7 +95,6 @@ const AchDef kAchDefs[] = {
 #include "achievement_defs.inc"
 };
 #undef ACH_DEF
-
 
 typedef char kAchDefs_count_check[(sizeof(kAchDefs)/sizeof(kAchDefs[0]) == ACH_COUNT) ? 1 : -1];
 

@@ -22,11 +22,13 @@ extern float stamina;
 extern int sprinting;
 extern float staminaIdle;
 
-/* ---- 怪物 ---- */
-extern Monster monster;
+/* ---- 怪物 ----
+   听声鬼现在是一个数组（monHunters[MON_HUNTER_MAX]），
+   monster / monster2 / monster3 是它的别名，定义在 common.h。
+   数组实体本身也在 common.h 里 extern 了，这里不再重复声明。 */
 extern Monster lightBeast;      /* 只看光 */
-extern Monster monster2;        /* v2.4.12 第二只听声怪 */
 void UpdateMonster2(float dt);
+void UpdateMonster3(float dt);
 extern Monster parasite;        /* 寄生怪 / 跳脸虫共用（只用位置和几个状态字段） */
 
 /* ---- 跳脸虫 QTE 运行时状态 ---- */

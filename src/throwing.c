@@ -7,7 +7,6 @@
  *   · include/suspicion.h  可疑点表（落地写 THE ECHO 的点）
  *   · game.c 暴露的公开变量（下面 extern 声明）
  */
-#include <math.h>
 #include "common.h"
 #include "game.h"
 #include "state.h"
@@ -285,12 +284,21 @@ void UpdateShots(float dt) {
                 }
                 /* v2.4.58 瓶子增强：落点附近的普通怪被震一下（硬直 0.35 秒） */
                 {
-                    extern Monster monster;
+
                     extern int trainingMode;
-                    if (!trainingMode && monster.active) {
-                        float mdx = monster.x - shot[i].x, mdy = monster.y - shot[i].y;
-                        if (mdx * mdx + mdy * mdy < 2.25f) {  /* 1.5 格 */
-                            if (monster.stun < 0.35f) monster.stun = 0.35f;
+                    if (!trainingMode) {
+                        /* 落点 1.5 格内的**所有**猎手都被震一下。
+                           原来只判 monster，第 2、3 只完全免疫。 */
+                        extern int MonsterCollect(Monster**, int, int);
+                        /* 变量名别叫 near —— 那是 Windows 的宏（__near） */
+                        Monster* inRange[MON_HUNTER_MAX + 1];
+                        int nn = MonsterCollect(inRange, MON_HUNTER_MAX + 1, 1);
+                        for (int q = 0; q < nn; q++) {
+                            float mdx = inRange[q]->x - shot[i].x;
+                            float mdy = inRange[q]->y - shot[i].y;
+                            if (mdx * mdx + mdy * mdy < 2.25f) {  /* 1.5 格 */
+                                if (inRange[q]->stun < 0.35f) inRange[q]->stun = 0.35f;
+                            }
                         }
                     }
                 }
@@ -368,10 +376,11 @@ void UpdateShots(float dt) {
             /* 撞怪：按 kind 分派（1 玻璃瓶 / 2 砖头 / 3 酸瓶 / 4 烟雾弹） */
             float r = SHOT_RADIUS + 0.24f;
             {
-                Monster* targets[2];
-                int nTargets = 0;
-                if (monster.active) targets[nTargets++] = &monster;
-                if (lightBeast.active) targets[nTargets++] = &lightBeast;
+                /* 投掷物也要能打中第 2、3 只听声鬼 ——
+                   原来这里是手写两条 push，扩到三只之后它们免疫投掷物。 */
+                Monster* targets[MON_HUNTER_MAX + 1];
+                extern int MonsterCollect(Monster**, int, int);
+                int nTargets = MonsterCollect(targets, MON_HUNTER_MAX + 1, 1);
                 for (int t = 0; t < nTargets; t++) {
                     Monster* m = targets[t];
                     if (shot[i].ignoreTargetTime > 0.0f && shot[i].ignoreTarget == t) continue;

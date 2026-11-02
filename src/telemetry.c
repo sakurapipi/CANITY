@@ -11,9 +11,6 @@
  *
  * 现在改成**exe 所在目录**，跟游戏本体放一起，永远找得到。
  */
-#include <stdio.h>
-#include <string.h>
-#include <windows.h>
 #include "common.h"
 #include "telemetry.h"
 

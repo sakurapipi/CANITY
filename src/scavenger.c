@@ -22,7 +22,6 @@
  *    没箱子可翻 → 原地翻找 2 秒 → 走（有动作，不是站着）
  *  · **可以重来**：走掉之后 25 秒冷却，冷却完 hideStreak 归零，可再次触发
  */
-#include <math.h>
 #include "state.h"
 #include "common.h"
 #include "game.h"
@@ -105,9 +104,14 @@ static float scavSanityLoss(void) {
      · 玩家吃 **30% 减速，持续 10 秒**
      · 理智按 **25 → 50** 随层数成长地扣（复用正式关卡的强度算法）
    这条走的是「逃跑失败」的代价，和「被堵在柜子里」是两种惩罚。 */
-#define SCAV_CATCH_SLOW      0.35f   /* v2.4.40 平调：30%→35%。 */   /* 减速 30% */
-#define SCAV_CATCH_SLOW_T     8.0f   /* v2.4.40 平调：10→8 秒。
-                                       更疼但更短 —— 减少「被减速追死」的挫败感。 */   /* 持续 10 秒 */
+/* 2026-11-03 用户强化清道夫：
+     「减速时间调整为减 30% 移速，持续两分钟」
+   原来是 35% / 8 秒 —— 改成 30% / 120 秒。
+   幅度小一点、但持续时间拉长 15 倍：
+   被抓一次之后，接下来两分钟你都在瘸着跑，
+   能不能在减速期里完成本层是新的压力点。 */
+#define SCAV_CATCH_SLOW      0.30f   /* 减速 30% */
+#define SCAV_CATCH_SLOW_T  120.0f    /* 持续 120 秒（2 分钟） */
 #define SCAV_CATCH_SAN_MIN   20.0f   /* v2.4.40 平调：25→20（起始层）。 */   /* 第 1 层扣 25 理智 */
 #define SCAV_CATCH_SAN_MAX   45.0f   /* v2.4.40 平调：50→45（封顶）。
                                        因为柜子损坏还要额外花 450+ 金币。 */   /* 上限 50 */
@@ -190,7 +194,6 @@ static void stepToward(float* x, float* y, float tx, float ty, float sp, float d
     }
     /* 13 个方向全堵 = 真的被围死了，这一帧不动（交给上层处理） */
 }
-
 
 /* ===== v2.4.38 **出生点改走 BFS，只放在真正可达的过道上** =====
    用户实测：它卡在墙里（d 不变）。
@@ -495,10 +498,10 @@ void UpdateScavenger(float dt) {
 
     /* ===== v2.4.29 **玩家跑出柜子后被逮到** =====
        条件：玩家不在藏身点里，且清道夫贴到 0.85 格内。
-       惩罚：30% 减速 10 秒 + 理智按 25→50 随层成长。
+       惩罚：30% 减速 120 秒 + 理智按 25→50 随层成长。
        这是「临阵脱逃失败」的代价 —— 和「被堵在柜子里」区分开：
          躲在里面被抓   = 固定 12 理智 + 柜子被撬坏
-         跑出来被抓     = 25~50 理智 + 10 秒瘸腿（但不坏柜子）
+         跑出来被抓     = 25~50 理智 + 120 秒瘸腿（但不坏柜子）
     */
     {
         extern int hiddenIn;
@@ -513,7 +516,7 @@ void UpdateScavenger(float dt) {
                 sanity -= loss * RunDamageTakenMul();
                 if (sanity < 0.0f) sanity = 0.0f;
 
-                /* 减速 30% 持续 10 秒 —— 走现成的 FX_SLOW 通道，
+                /* 减速 30% 持续 120 秒 —— 走现成的 FX_SLOW 通道，
                    game.c 里 slowMul = 1 - FxStrength(FX_SLOW) * 0.45f，
                    所以 0.30 / 0.45 ≈ 0.667 正好得到 30% 减速。 */
                 ApplyFx(FX_SLOW, SCAV_CATCH_SLOW / 0.45f, SCAV_CATCH_SLOW_T);
@@ -522,8 +525,8 @@ void UpdateScavenger(float dt) {
                 AddShake(0.30f, 0.22f);
                 PlaySfx(SFX_SCREAM, 0.85f);
                 pickupMsg = (g_lang == LANG_ZH)
-                    ? "它抓住了你！减速 10 秒"
-                    : "IT CAUGHT YOU!  SLOWED 10s";
+                    ? "它抓住了你！减速 30%，持续 2 分钟"
+                    : "IT CAUGHT YOU!  -30% SPEED FOR 2 MIN";
                 pickupMsgTimer = 2.2f;
                 { extern int floorSpotted, runSpotted;
                   floorSpotted = 1; runSpotted = 1; }

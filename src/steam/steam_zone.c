@@ -16,10 +16,6 @@
  *  下面每个符号都在 Init 里**全部解析一遍并统一检查**，
  *  缺一个就把状态标成"符号不全"，而不是半个功能能用。
  * ================================================================== */
-#include <windows.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 
 #include "steam_zone.h"
 #include "steam_ach.h"
@@ -326,7 +322,6 @@ void SteamZoneOpenOverlay(const char* dialog) {
     (void)dialog;
 #endif
 }
-
 
 /* ==================================================================
  *  v5 新增实现

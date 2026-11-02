@@ -1,5 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include "common.h"   /* 系统头只在 common.h 里出现（模块约定） */
 #include "shop.h"
 #include "game.h"
 #include "entity.h"

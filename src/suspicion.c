@@ -14,7 +14,6 @@
  *
  * 加新怪时只需要写「它读哪种 source」，不用碰 MakeNoise。
  */
-#include <math.h>
 #include "state.h"   /* v8: 走统一的全局状态入口 */
 #include "common.h"
 #include "suspicion.h"

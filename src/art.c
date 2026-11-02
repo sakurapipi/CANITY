@@ -7,7 +7,6 @@
  * UI 主题在 ui_theme.h，布局与合成在 ui.c，音乐调度在 music.c。
  * 共享算法集中管理，具体表现留在实际负责的模块。
  */
-#include <math.h>
 #include "common.h"
 #include "art.h"
 

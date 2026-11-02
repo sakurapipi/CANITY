@@ -20,8 +20,6 @@
  *  ④ **可能卡死不消失**
  *     45 秒上限只在「没钱」时生效（有钱时它在跑）。
  */
-#include <math.h>
-#include <stdio.h>
 #include "state.h"
 #include "common.h"
 #include "game.h"

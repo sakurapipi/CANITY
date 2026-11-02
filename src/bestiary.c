@@ -9,7 +9,6 @@
  *   · 有价值的是：独特机制 / 弱点 / 对策
  *   · 两段揭示（初见只有名字，之后才给细节）最受好评
  */
-#include <stdio.h>
 #include "common.h"
 #include "bestiary.h"
 
@@ -22,7 +21,7 @@ int bestiaryCaught[BESTIARY_COUNT] = {0};
  * 程序化数据源：每个函数读的是**真实常量**，不是写死的数字
  * ================================================================== */
 
-static float bstSpeedHunter(void) { extern Monster monster; return monster.speed; }
+static float bstSpeedHunter(void) { return monster.speed; }
 static float bstHearHunter(void)  { return 8.0f; }
 static float bstChaseHunter(void) { return 14.0f; }
 

@@ -5,9 +5,6 @@
  * 我们给 Container 加了对应字段，这里用 g_lock* 访问器桥接，
  * 抄过来的逻辑一行都不用改。
  */
-#include <stdio.h>
-#include <string.h>
-#include <math.h>
 #include "common.h"
 #include "lockbox.h"
 #include "game.h"
@@ -22,7 +19,6 @@
    调波器面板 LUIS(520)=807px 超过屏幕 711px，整个界面就崩了。
    这里恢复成 600 基准，只作用于锁盘内部。 */
 #define LUIS(v) ((int)((v) * winH / 600 + 0.5f))   /* winH == renderH（SyncWindowSize 保证） */
-
 
 /* ---- 桥接层：把 Container 的字段暴露成上游那三个数组的名字 ---- */
 static int g_lockCont[MAX_CONTAINERS];
@@ -58,7 +54,6 @@ int lockIgnoreVK = 0;
 
 int locksOpened = 0;
 static float lockCooldown = 0.0f;
-
 
 /* 上游用 contLocked[] / contLockType[] / contLockCode[]，
    这里用宏把它们映射到桥接数组，抄过来的代码不用改。 */
@@ -121,8 +116,6 @@ int LockCorrectCount(int code, const int* digits) {
         if (digits[d] == LockDigit(code, d)) n++;
     return n;
 }
-
-
 
 void LockAdjustDigit(int dial, int delta) {
     if (dial < 0 || dial >= LOCK_DIALS) return;

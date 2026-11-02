@@ -3,7 +3,6 @@
  *
  * 每关只改一条规则。加/改关卡 = 改这一张表。
  */
-#include <stddef.h>
 #include "common.h"
 #include "campaign.h"
 
@@ -146,7 +145,6 @@ float CampaignGoldMulNow(void) {
     return d ? d->goldMul : 1.0f;
 }
 
-
 /* ==================================================================
  * v6 第 ㉓ 轮：把最后两条战役规则接上
  * ==================================================================
@@ -191,7 +189,6 @@ int CampaignFusesNow(void) {
         return (n > 0 && n <= 8) ? n : 0;
     }
 }
-
 
 int CampaignStartFloor(int stage) {
     int floor = 1;

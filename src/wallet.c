@@ -19,7 +19,6 @@
  * 收入（+=）不强制走这里 —— 收入的来源点很分散且语义各异
  * （箱子 / 撤离 / 成就 / 每日任务），强行统一反而不好读。
  */
-#include <stdio.h>
 #include "common.h"
 #include "wallet.h"
 

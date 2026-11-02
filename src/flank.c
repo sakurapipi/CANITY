@@ -13,13 +13,11 @@
  * 移动、寻路、状态机全部交给 entity.c 原有的 UpdateMonster /
  * UpdateMonster2 —— 那套逻辑是稳定的，不再被这里覆盖。
  */
-#include <math.h>
 #include "state.h"
 #include "common.h"
 #include "game.h"
 #include "entity.h"
 #include "audio.h"
-
 
 void FlankBuild(void) { }
 void FlankReset(void) { }
@@ -47,7 +45,7 @@ void FlankUpdate(float dt) {
  * 被抓：两只都不松懈
  * ================================================================== */
 void FlankOnCaught(void) {
-    extern Monster monster, monster2;
+    
     if (monster.active) monster.huntTimer = 0.0f;
     if (monster2.active) {
         monster2.huntTimer = 0.0f;

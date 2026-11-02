@@ -4,9 +4,6 @@
  * 日期种子 + 三池组合 = 384 种，只写 22 张卡片。
  * 同一天全世界一样（种子 = 年月日）。
  */
-#include <stdio.h>
-#include <string.h>
-#include <time.h>
 #include "common.h"
 #include "daily.h"
 #include "game.h"

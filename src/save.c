@@ -6,7 +6,6 @@
 #include "common.h"
 #include "achievements.h"
 #include "save.h"
-#include <stddef.h>
 #include "daily.h"
 #include "threat.h"
 #include "steam_zone.h"
@@ -22,7 +21,6 @@ extern int carryAtRunStart;
 #include "skills.h"
 #include "bestiary.h"
 #include "lockbox.h"   /* v3.0：读档要关锁盘 */
-
 
 static SaveBlob g_save;
 

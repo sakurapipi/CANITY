@@ -4,7 +4,6 @@
  * 10 个事件，每个都真的改一条规则。
  * 加事件 = 在 kEvents[] 里加一行，别处不用动。
  */
-#include <stddef.h>
 #include "common.h"
 #include "events.h"
 

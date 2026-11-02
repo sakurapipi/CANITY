@@ -30,7 +30,6 @@
  *   寻路：从出口做一次 BFS，得到「每格到出口多少步」的距离场，
  *         巡逻和赶路都沿梯度走 —— 跨房间也不会卡。
  */
-#include <math.h>
 #include "common.h"
 #include "game.h"
 #include "state.h"
@@ -44,8 +43,8 @@ extern void ApplyFx(int kind, float strength, float duration);
 
 #define WARDEN_SPEED          0.70f   /* 巡逻速度（全场最慢） */
 #define WARDEN_RUSH_SPEED     1.70f   /* 发现玩家后赶去出口的速度 */
-#define WARDEN_SIGHT_SPRINT   6.0f    /* 冲刺时多少格内发现 */
-#define WARDEN_SIGHT_WALK     3.0f    /* 走路时多少格内发现 */
+#define WARDEN_SIGHT_SPRINT   7.0f    /* 冲刺时多少格内发现 */
+#define WARDEN_SIGHT_WALK     4.0f    /* 走路时多少格内发现 */
 #define WARDEN_SPRINT_SPEED   2.30f   /* 超过这个算冲刺（原来写 2.4，永远不成立） */
 #define WARDEN_BLOCK_TIME    18.0f    /* v2.4.48 平调：25 → 18 秒。
                                        25 秒是"被迫站着等"，18 秒还能忍。 */    /* 堵门持续 */
@@ -64,8 +63,10 @@ extern void ApplyFx(int kind, float strength, float duration);
      · 5 秒后**失去视野**，持续 5 秒（这段时间它变白 = 没电形态）
      · 5 秒失明结束后重新开始
    这条设计让它变成「周期性压迫」而不是「一直知道你在哪」。 */
-#define WARDEN_CHASE_TIME      5.0f    /* 追击持续 */
-#define WARDEN_LOST_TIME       5.0f    /* 失去视野持续 */
+#define WARDEN_CHASE_TIME      3.0f    /* 追击持续（2026-11-03 用户：5 → 3 秒） */
+#define WARDEN_LOST_TIME       4.0f    /* 眩晕/泄力持续（2026-11-03 用户：5 → 4 秒）。
+                                          这段时间它是白模、不动、也抓不到人，
+                                          是玩家拉开距离的窗口。 */
 #define WARDEN_CONE_DIST       8.0f    /* v2.4.48 平调：9 → 8 格 */    /* 视野锥长度 */
 #define WARDEN_CONE_HALF       0.60f
 /* ===== v2.4.52 **听觉** =====
@@ -410,6 +411,25 @@ static void SendPlayerToStart(void) {
         }
     }
 
+    /* ============================================================
+     * 修：**被传送走了，但游戏还以为你在藏身点里**
+     * ------------------------------------------------------------
+     * SendPlayerToStart 只改 posX/posY，没清 hiddenIn。
+     * 于是人已经被扔到地图另一头，界面仍然是「躲在垃圾桶里」：
+     *   · 视野是藏身点的视野（窄、暗）
+     *   · 再交互的判定还挂在原来那个点上
+     *   · 守卫/清道夫的「在藏身点里抓不到」保护还生效
+     * 传送 = 强制离开藏身点，状态必须一起清。
+     * ============================================================ */
+    {
+        extern int hiddenIn;
+        extern int uiDirty;
+        if (hiddenIn >= 0) {
+            hiddenIn = -1;
+            uiDirty = 1;
+        }
+    }
+
     posX = bestX;
     posY = bestY;
     resetInputState = 1;
@@ -420,7 +440,6 @@ static void SendPlayerToStart(void) {
                                     : "THROWN TO THE FARTHEST POINT";
     pickupMsgTimer = 2.2f;
 }
-
 
 /* v2.4.54：调试用的 WardenStateName / WardenBlockT 已删除 */
 /* v2.4.47：渲染层用 —— 追击中变红、失明中变白（没电形态） */
@@ -460,6 +479,23 @@ void UpdateWarden(float dt) {
     }
 
     /* ============ 状态机 ============ */
+    /* ---------- 站在烟里：立刻丢失目标 ----------
+       和听声鬼「进烟就丢目标」保持一致。
+       这是烟雾弹对守门人唯一能主动打断追捕的手段，
+       没有它的话「被锁定 = 必被抓」，烟就是废的。 */
+    {
+        extern int PointInSmoke(float, float);
+        if (PointInSmoke(warden.x, warden.y) &&
+            (warden.state == WD_CHASE || warden.state == WD_RUSH)) {
+            warden.state = WD_PATROL;
+            warden.stateT = 0.0f;
+            warden.sightHold = 0.0f;
+            pickupMsg = (g_lang == LANG_ZH) ? "守门人在烟里失去了你"
+                                            : "THE WARDEN LOST YOU IN THE SMOKE";
+            pickupMsgTimer = 1.8f;
+        }
+    }
+
     switch (warden.state) {
 
     /* ---------- 堵门：站在出口，计时 ---------- */
@@ -591,11 +627,23 @@ void UpdateWarden(float dt) {
 
     /* ============ 感知：**视野锥** ============ */
     if (warden.coolT <= 0.0f) {
+        extern float playerMoveSpeedNow;   /* 视野半径 / 听觉半径都按它分档 */
         float mdx = posX - warden.x, mdy = posY - warden.y;
         float md2 = mdx * mdx + mdy * mdy;
 
+        /* ============================================================
+         * 修：**视野半径用的是 8 格，而设计文档写的是 3 / 6 格**
+         * ============================================================
+         * 文件顶上写的设计是「走路 3 格、冲刺 6 格」，
+         * 常量 WARDEN_SIGHT_WALK / WARDEN_SIGHT_SPRINT 也确实定义着 ——
+         * 但真正生效的是 WARDEN_CONE_DIST（8 格），那两个常量一次都没被用过。
+         * 结果：玩家在 8 格外的走廊里正常走路，他就跨半张图盯上来。
+         * 现在按文档来。
+         * ============================================================ */
+        float sightR = (playerMoveSpeedNow >= WARDEN_SPRINT_SPEED)
+                     ? WARDEN_SIGHT_SPRINT : WARDEN_SIGHT_WALK;
         int inCone = 0;
-        if (md2 < WARDEN_CONE_DIST * WARDEN_CONE_DIST) {
+        if (md2 < sightR * sightR) {
             float angTo = atan2f(mdy, mdx);
             float diff = angTo - warden.facing;
             /* 归一到 -pi..pi */
@@ -603,10 +651,16 @@ void UpdateWarden(float dt) {
             while (diff < -3.14159265f) diff += 6.28318530f;
             if (diff < 0.0f) diff = -diff;
 
-            /* 锥内**且**玩家在动（静止仍然看不见）*/
-            extern float playerMoveSpeedNow;
+            /* 锥内 + 玩家在动 + 中间没墙 + 没被烟挡住。
+               2026-11-03：**原来只判距离和角度，他能隔墙看见你**
+               （HasLOS 一次都没调过），烟对它也完全无效。 */
             if (diff <= WARDEN_CONE_HALF && playerMoveSpeedNow > WARDEN_MOVE_EPS) {
-                inCone = 1;
+                extern int HasLOS(float, float, float, float);
+                extern int SegmentInSmoke(float, float, float, float);
+                if (HasLOS(warden.x, warden.y, posX, posY) &&
+                    !SegmentInSmoke(warden.x, warden.y, posX, posY)) {
+                    inCone = 1;
+                }
             }
         }
 
@@ -617,12 +671,17 @@ void UpdateWarden(float dt) {
            现在：听到就进追击，不累积。 */
         int heard = 0;
         {
-            extern float playerMoveSpeedNow;
             float hearR = (playerMoveSpeedNow >= WARDEN_SPRINT_SPEED) ? WARDEN_HEAR_SPRINT
                         : (playerMoveSpeedNow > WARDEN_MOVE_EPS)      ? WARDEN_HEAR_WALK
                         : 0.0f;
             warden.hearNow = hearR;
-            if (hearR > 0.0f && md2 < hearR * hearR) heard = 1;
+            /* 2026-11-03：**耳朵以前完全不吃烟**。
+               听觉本来就是「全向、穿墙」，所以烟雾弹对守门人一点用都没有 ——
+               他能看见你、也能听见你，两种通道都不受烟影响。
+               现在：你和他之间隔着烟，声音就被吞掉了。 */
+            extern int SegmentInSmoke(float, float, float, float);
+            if (hearR > 0.0f && md2 < hearR * hearR &&
+                !SegmentInSmoke(warden.x, warden.y, posX, posY)) heard = 1;
         }
 
         /* 视觉仍然累积 0.28 秒（要"看一眼"才确认） */
@@ -630,6 +689,20 @@ void UpdateWarden(float dt) {
 
         if (heard || (inCone && warden.sightHold >= 0.28f)) {
             warden.sightHold = 0.0f;
+            /* ============================================================
+             * 发现玩家 → **WD_CHASE（追）+ WD_RUSH（堵门）两层状态**
+             * ------------------------------------------------------------
+             * 上一轮我把这里改成了纯 WD_RUSH，结果守门人只剩「走去出口」
+             * 一种行为 —— 用户反馈「失去双心态」。
+             *
+             * 现在恢复两层：
+             *   ① 立刻进 WD_CHASE：贴着你走，抓到就送回起点
+             *   ② WD_CHASE 5 秒后自然转 WD_LOST，再回 PATROL
+             *   ③ 追不到就按原设计去出口堵（WD_RUSH 仍在别处生效）
+             *
+             * 会"从老远扑过来"的根因是**视野 8 格**（文档写 3/6），
+             * 那个已经改成按文档取值了，所以追是追，但不会隔着半张图锁人。
+             * ============================================================ */
             warden.state = WD_CHASE;
             PlaySfx(SFX_WARDEN, 1.0f);   /* v2.4.89 追击低频吼叫 */          /* ← 直接进入 5 秒追击 */
             warden.stateT = 0.0f;
@@ -678,7 +751,6 @@ void UpdateWarden(float dt) {
         if (mvx * mvx + mvy * mvy > 1e-6f) warden.facing = atan2f(mvy, mvx);
     }
 }
-
 
 /* 训练营用 —— 强制摆到指定位置当标本 */
 void WardenForcePlace(float x, float y) {

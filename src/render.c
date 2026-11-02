@@ -4,7 +4,6 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
-#include <math.h>
 #include "render.h"
 #include "suspicion.h"
 #include "art.h"
@@ -15,7 +14,6 @@
 #include "game.h"
 #include "entity.h"
 #include "ui.h"
-
 
 int renderW = 800, renderH = 600;    /* 内部渲染分辨率 */
 static const float fovPlaneLen[5] = {0.6494f, 0.7673f, 0.9163f, 1.0926f, 1.2972f};
@@ -227,7 +225,6 @@ static int nFloorColors = 0, nCeilColors = 0;
    贴图颜色一旦超过这个数就会写越界 —— 加纹理细节时踩过（直接崩溃）。
    统计阶段就夹住，宁可少几种颜色也绝不越界。 */
 
-
 static void BuildPremulTables(void) {
     unsigned int fcols[PREMUL_MAXCOL], ccols[PREMUL_MAXCOL];
     /* v2.7：从 0 起算。原来从 1 开始，导致下面第一轮 fcols[0]/ccols[0]
@@ -438,7 +435,6 @@ void GenerateThemeTextures(int id) {
     BuildShadeTables();
 }
 
-
 /* ------------------------------------------------------------------ */
 /* 地图生成                                                            */
 /* ------------------------------------------------------------------ */
@@ -485,7 +481,6 @@ static float SpriteShade(float ty, float minK) {
     if (k > 1.0f) k = 1.0f;
     return k;
 }
-
 
 static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK);   /* v2.1 */
 
@@ -567,8 +562,6 @@ static void DrawCrateSprite(int i) {
     }
 }
 
-
-
 /* v3.0：藏身点渲染。
    原来全项目 render.c/ui.c 对 hideSpots 零引用 —— 玩家根本看不见
    衣柜/床底/桌下，只有按下 E 之后闪 1.6 秒的一行字。
@@ -586,7 +579,6 @@ static void DrawBreakerSprite(void) {
     float k = breakerOpen ? 1.15f : 0.95f;
     DrawBakedProp(SPR_PROP_BREAKER, breaker.x, breaker.y, 0.52f, k);
 }
-
 
 /* ------------------------------------------------------------------ */
 
@@ -692,7 +684,8 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
     DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
 
     /* v2.2：只有三只主怪有 4 帧，其余单帧 */
-    int isMain = (spr == SPR_MON_HUNTER || spr == SPR_MON_LIGHT || spr == SPR_MON_LEECH);
+    int isMain = (spr == SPR_MON_HUNTER || spr == SPR_MON_LIGHT || spr == SPR_MON_LEECH
+                  || spr == SPR_MON_HUNTER2 || spr == SPR_MON_HUNTER3);
     if (isMain) {
         int useSpr, flip, frame;
         /* v3.0：朝向/相位由**调用方传进来** ——
@@ -721,9 +714,11 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
            保留常量并显式标记，免得每次编译都报一条 set-but-not-used。 */
         int ec = 0x00FF4020u;
         (void)ec;
-        int base = (spr >= SPR_MON_HUNTER && spr < SPR_MON_HUNTER + 4) ? SPR_MON_HUNTER :
-                   (spr >= SPR_MON_LIGHT  && spr < SPR_MON_LIGHT  + 4) ? SPR_MON_LIGHT :
-                   (spr >= SPR_MON_LEECH  && spr < SPR_MON_LEECH  + 4) ? SPR_MON_LEECH : spr;
+        int base = (spr >= SPR_MON_HUNTER  && spr < SPR_MON_HUNTER  + 4) ? SPR_MON_HUNTER  :
+                   (spr >= SPR_MON_HUNTER2 && spr < SPR_MON_HUNTER2 + 4) ? SPR_MON_HUNTER2 :
+                   (spr >= SPR_MON_HUNTER3 && spr < SPR_MON_HUNTER3 + 4) ? SPR_MON_HUNTER3 :
+                   (spr >= SPR_MON_LIGHT   && spr < SPR_MON_LIGHT   + 4) ? SPR_MON_LIGHT   :
+                   (spr >= SPR_MON_LEECH   && spr < SPR_MON_LEECH   + 4) ? SPR_MON_LEECH : spr;
         spr = base;
         if (spr == SPR_MON_LIGHT)  ec = 0x00C8F0FFu;
         else if (spr == SPR_MON_SHADE)  ec = 0x007040A0u;
@@ -751,7 +746,7 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
 /* v2.4.3: 距离曲线已统一到 src/art.c 的 ArtMonsterLight() */
 static float ProximityLight(float wx, float wy) { return ArtMonsterLight(wx, wy); }
 
-static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
+static void DrawBeastSprite(Monster* m, unsigned int eyeColor, int baseSpr) {
     if (!m->active) return;
     if (!SpritesReady()) {
         /* 烘焙失败时退回旧路径：至少不黑屏 */
@@ -770,7 +765,10 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
     }
 
     extern int bossLevel;
-    int spr = (eyeColor == 0x00c8f0ffu) ? SPR_MON_LIGHT : SPR_MON_HUNTER;
+    /* 变体由调用方指定：第一只 SPR_MON_HUNTER、第二只 HUNTER2、第三只 HUNTER3。
+       原来这里写死 HUNTER/LIGHT 二选一，所以三只长得一样。 */
+    int spr = (baseSpr > 0) ? baseSpr
+              : ((eyeColor == 0x00c8f0ffu) ? SPR_MON_LIGHT : SPR_MON_HUNTER);
     float halfH = 0.86f;
     float lightK = 1.0f;
     unsigned int tint = 0;
@@ -809,11 +807,16 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor) {
 }
 
 static void DrawMonster2Sprite(void) {
-    extern Monster monster2;
     if (!monster2.active) return;
-    DrawBeastSprite(&monster2, 0x00ff0000);
+    DrawBeastSprite(&monster2, 0x00ff0000, SPR_MON_HUNTER2);
 }
-static void DrawMonsterSprite(void) { DrawBeastSprite(&monster, 0x00ff4020u); }
+/* 第三只听声鬼（120 秒后出现）。配色再暗一档，
+   三只同屏时玩家能从轮廓上分出"又来了一只"。 */
+static void DrawMonster3Sprite(void) {
+    if (!monster3.active) return;
+    DrawBeastSprite(&monster3, 0x00c02050, SPR_MON_HUNTER3);
+}
+static void DrawMonsterSprite(void) { DrawBeastSprite(&monster, 0x00ff4020u, SPR_MON_HUNTER); }
 
 /* v1.8 偷电怪：体型 55%，暗色，只有被手电光锥照到才可见。
    "看不见但电量在掉" 就是它的压迫感来源，所以这里宁可画得几乎融进黑里。 */
@@ -878,7 +881,7 @@ static void DrawLeechSprite(int idx) {
         if (wrote && s.ty < zBuffer[x]) zBuffer[x] = s.ty;
     }
 }
-static void DrawLightBeastSprite(void) { DrawBeastSprite(&lightBeast, 0x00c8f0ffu); }
+static void DrawLightBeastSprite(void) { DrawBeastSprite(&lightBeast, 0x00c8f0ffu, SPR_MON_LIGHT); }
 
 /* 跳脸虫的脸：预渲染成一张 128x128 的纹理，每帧只做采样 + 缩放。
    逐像素现画的话，800x600 实测 11ms/帧 —— QTE 是实时反应，
@@ -1131,7 +1134,6 @@ static float FlareLightAt(float wx, float wy) {
     }
     return best;
 }
-
 
 /* v2.2：把一次相机投影抽成函数（原来有三份拷贝，后两份没算 pitch）。
    ProjectSprite 用 pitchCos/pitchSin，另外两处直接用 renderH/2，
@@ -1918,7 +1920,6 @@ static void DrawFlowerSprite(void) {
     DrawBakedProp(SPR_PROP_SAFE, safeRoom.x, safeRoom.y, 0.30f, 1.0f);
 }
 
-
 /* ===== v2.4.4 **出口重新设计 v2**（按 art_direction.h + art.c）=====
    v2.4.3 那版还是太平：一整块灰 + 一条黑缝，没有体积感。
 
@@ -2039,7 +2040,6 @@ static void DrawExitBeamSprite(void) {
     }
 }
 
-
 /* 所有 billboard 按距离从远到近画，近的盖住远的（画家算法）
    数组上界 MAX_SPRITES = 容器 + 投掷物 + 配电箱 + 两只怪 + 安全屋 + 出口光柱，
    写满时会被下面的断言拦下来，不会像以前那样悄悄越界。 */
@@ -2113,10 +2113,17 @@ void RenderSprites(void) {
     }
     /* v2.4.12：第二只听声怪也进渲染列表 */
     {
-        extern Monster monster2;
+
         if (monster2.active && n < MAX_SPRITES) {
             list[n].d2 = Dist2(monster2.x, monster2.y, posX, posY);
             list[n].kind = 13;
+            list[n].idx = 0;
+            n++;
+        }
+        /* 第三只（120 秒后出现） */
+        if (monster3.active && n < MAX_SPRITES) {
+            list[n].d2 = Dist2(monster3.x, monster3.y, posX, posY);
+            list[n].kind = 14;
             list[n].idx = 0;
             n++;
         }
@@ -2214,6 +2221,7 @@ void RenderSprites(void) {
             case 1: DrawBreakerSprite(); break;
             case 2: DrawMonsterSprite(); break;
             case 13: DrawMonster2Sprite(); break;   /* v2.4.12 第二只听声怪 */
+            case 14: DrawMonster3Sprite(); break;   /* 第三只听声鬼 */
         case 9: DrawLeechSprite(list[i].idx); break;
             case 5: DrawLightBeastSprite(); break;
             case 6: DrawFlareSprite(list[i].idx); break;
@@ -2243,7 +2251,6 @@ void RenderSprites(void) {
 
     DrawShardSprite();
 }
-
 
 /* ------------------------------------------------------------------ */
 /* 并行渲染：画面切成横带，主线程 + 工作线程一起画                       */
@@ -2814,7 +2821,6 @@ static void RenderPostBand(int y0, int y1) {
     }
 }
 
-
 /* v2.1：落地阴影。全项目只有抛出的光球有假阴影，怪物/箱子全都没有，
    于是所有东西都像"浮在地面上"。这里在精灵脚下压一个扁椭圆。 */
 static void DrawGroundShadow(int cx, int cyFloor, int halfW, float ty) {
@@ -2846,9 +2852,6 @@ static void DrawGroundShadow(int cx, int cyFloor, int halfW, float ty) {
 /*   原来玩家手上什么都没有：准星指向哪里、手上拿的是什么全靠想象。      */
 /*   这里是纯手工绘制的：前臂 + 拳头 + 手持物，带走路摆动和开火后坐。     */
 /* ------------------------------------------------------------------ */
-
-
-
 
 /* ------------------------------------------------------------------ */
 /* v2.1 第一人称手持模型（烘焙版）                                       */

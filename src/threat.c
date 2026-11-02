@@ -19,7 +19,6 @@
  *   **速度上限永远 ≤ 2.33，玩家冲刺是 2.40。**
  *   冲刺必须是永远可信的保命手段。
  */
-#include <math.h>
 #include "common.h"
 #include "threat.h"
 

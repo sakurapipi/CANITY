@@ -1,4 +1,3 @@
-#include <math.h>
 #include "extras.h"
 #include "common.h"
 #include "entity.h"
@@ -36,8 +35,6 @@ void UpdateExtras(float dt) {
 }
 
 int ExtrasCount(void) { return 0; }
-
-
 
 const Extra* ExtraAt(int i) {
     if (i < 0 || i >= EXTRA_MAX) return NULL;

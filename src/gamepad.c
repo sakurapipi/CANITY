@@ -1,6 +1,3 @@
-#include <string.h>
-#include <windows.h>
-#include <math.h>
 #include "entity.h"
 #include "common.h"
 #include "gamepad.h"

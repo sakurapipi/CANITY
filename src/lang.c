@@ -1,5 +1,4 @@
-#include <stdio.h>
-#include <string.h>
+#include "common.h"   /* 系统头只在 common.h 里出现（模块约定） */
 #include "lang.h"
 
 int g_lang = LANG_EN;
@@ -46,9 +45,31 @@ const char* Transl(const char* en) {
     if (!strncmp(en, "RUN FAILED", 10)) return "本局失败";
     if (!strncmp(en, "KNIFE", 5))    { snprintf(buf, sizeof(buf), "锈刃 %s", en + 5); return buf; }
     {   /* "100 GOLD" -> "100 金币" */
-        int n = 0; char tail[24];
-        if (sscanf(en, "%d GOLD%23s", &n, tail) == 1) { snprintf(buf, sizeof(buf), "%d 金币", n); return buf; }
-        if (sscanf(en, "%d CORES%23s", &n, tail) == 1)  { snprintf(buf, sizeof(buf), "%d 核心", n); return buf; }
+        int n = 0, consumed = 0;
+        /* ==================================================================
+         * 修：**这里原来是 `sscanf(...) == 1`，条件永远成立**
+         * ==================================================================
+         * 本意是「形如 `100 GOLD`」，但 `sscanf` 的返回值是**成功赋值的转换项数**：
+         * `%d` 一匹配上就返回 1，后面的 " GOLD" 根本不参与判断。
+         * 于是**任何以数字开头的字符串**都会被改成「N 金币」。
+         *
+         * 后果（实测）：
+         *   · 主菜单行号 "1".."9" 变成 "1 金币".."9 金币"，
+         *     多出来的「金币」正好压在下一列菜单文字上 → 每一行都多出一个「金」
+         *   · 顺手把所有「以数字开头」的 HUD 文字也改坏了
+         *
+         * 改法：用 `%n` 拿到已消费长度，再确认整串被吃干净（允许尾随空格）。
+         * ================================================================ */
+        if (sscanf(en, "%d GOLD%n", &n, &consumed) == 1) {
+            const char* rest = en + consumed;
+            while (*rest == ' ') rest++;
+            if (*rest == '\0') { snprintf(buf, sizeof(buf), "%d 金币", n); return buf; }
+        }
+        if (sscanf(en, "%d CORES%n", &n, &consumed) == 1) {
+            const char* rest = en + consumed;
+            while (*rest == ' ') rest++;
+            if (*rest == '\0') { snprintf(buf, sizeof(buf), "%d 核心", n); return buf; }
+        }
     }
 
     return en;

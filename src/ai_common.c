@@ -12,7 +12,6 @@
  * 现在统一成 ai_common.c 里的两个函数，新加的怪一律调用它们。
  * 这也是「AI 区块」的第一块砖：AI 的公共能力集中在一处。
  */
-#include <math.h>
 #include "common.h"
 #include "game.h"
 #include "state.h"

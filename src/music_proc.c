@@ -14,15 +14,18 @@
  * 线程模型：只有音频线程会碰下面的合成状态。MusicProcSetScene/SetGain
  * 只写两个原子变量，混音线程每块读一次，因此不需要锁。
  */
+/* 按 common.h 顶部的模块约定：**除 common.h 外任何 .c 都不直接包含系统头**。
+   原来这里直接写了 5 个系统头（windows/math/string/stdlib/stdint）——
+   功能上没问题（能编过），但它开了个坏头：
+   下一个人会照着抄，系统头就会慢慢散到每个文件里。
+   common.h 已经把这几样全带进来了。 */
+#include "common.h"
 #include "music_proc.h"
 #include "music.h"
 
-#include <windows.h>
-#include <math.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdint.h>
-
+/* 注意：这四首曲子的容量参数叫 maxNotes，不能叫 max ——
+   windows.h（经 common.h 进来）会定义 max(a,b) 宏，同名参数会被展开成语法错误。
+   现在能编过只是因为宏展开的时机凑巧，属于潜在雷，改名消掉。 */
 #define MP_SR       ((double)MUSIC_PROC_RATE)
 #define MP_PI       3.14159265358979323846
 #define MP_TWO_PI   (2.0 * MP_PI)
@@ -115,10 +118,10 @@ static float rev_tick(Reverb* r, float in) {
 /* ------------------------------------------------------------------ */
 /* 四个 composer：音符生成逻辑原样保留                                 */
 /* ------------------------------------------------------------------ */
-#define PUSH(...) do { if (ne < max) notes[ne++] = (Note)__VA_ARGS__; } while (0)
+#define PUSH(...) do { if (ne < maxNotes) notes[ne++] = (Note)__VA_ARGS__; } while (0)
 
 /* ============ 1: Hollow — 两段式和弦，旋律不规整 ============ */
-static int comp_hollow(Note* notes, int max, double dur) {
+static int comp_hollow(Note* notes, int maxNotes, double dur) {
     int ne = 0;
     /* 前半段：Am-F-Dm-E；后半段：Dm-Bb-Gm-A */
     static const int ch1[4][3] = { {45,48,52},{41,45,48},{38,41,45},{40,44,47} };
@@ -169,7 +172,7 @@ static int comp_hollow(Note* notes, int max, double dur) {
 }
 
 /* ============ 2: Crawl — 深海感：低 drone + 高音点 + 中频涌动 ============ */
-static int comp_crawl(Note* notes, int max, double dur) {
+static int comp_crawl(Note* notes, int maxNotes, double dur) {
     int ne = 0;
     g_seed = 0xFEEDFACEu;
 
@@ -210,7 +213,7 @@ static int comp_crawl(Note* notes, int max, double dur) {
 }
 
 /* ============ 3: Fracture — 保持，稍加丰富 ============ */
-static int comp_fracture(Note* notes, int max, double dur) {
+static int comp_fracture(Note* notes, int maxNotes, double dur) {
     int ne = 0;
     static const int ch[4][3] = { {40,43,47},{45,48,52},{38,41,45},{47,50,54} };
     double cd = 4.0, lp = 16.0;
@@ -234,7 +237,7 @@ static int comp_fracture(Note* notes, int max, double dur) {
 }
 
 /* ============ 4: Lull — 音乐盒开场，逐渐加低音和走调 ============ */
-static int comp_lull(Note* notes, int max, double dur) {
+static int comp_lull(Note* notes, int maxNotes, double dur) {
     int ne = 0;
     g_seed = 0xBEEFCAFEu;
 

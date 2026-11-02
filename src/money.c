@@ -5,7 +5,6 @@
  * SuspicionAdd() 可疑点表。这就是区块化的样本：
  * 一个功能 = 一个文件 + 只走公开接口。
  */
-#include <math.h>
 #include "common.h"
 #include "game.h"
 #include "state.h"
@@ -64,7 +63,6 @@ void MoneyBagsResetForNewFloor(void) {
     for (int i = 0; i < MAX_MONEYBAG; i++) moneyBags[i].active = 0;
     moneyDropOpen = 0;
 }
-
 
 /* ===== v2.4.91 **脚下有没有钱袋** =====
    给 HUD 用：返回玩家附近（1.6 格内）最近那个钱袋的金额，

@@ -1,4 +1,4 @@
-#include <string.h>
+#include "common.h"   /* only common.h touches system headers */
 #include "achievements.h"
 #include "steam_ach.h"
 #define ACH_DEF(en,zh,de,dz,cat,reward,hidden,kind,target,steam) {steam,en,zh,cat,reward,hidden},

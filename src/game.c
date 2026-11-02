@@ -617,6 +617,62 @@ void SpawnGlue(float x, float y) {
     glues[best].active = 1;
 }
 
+/* 任意一点是否在某朵烟里（守门人/猎手/清道夫共用）。
+   2026-11-03：原来只有 PlayerInSmoke()，怪物那边各自写死距离判断，
+   结果烟雾只对第 1 只听声鬼 + 追光鬼生效，守门人和第 2/3 只完全免疫。 */
+int PointInSmoke(float x, float y) {
+    for (int i = 0; i < MAX_SMOKE; i++) {
+        if (!smokes[i].active) continue;
+        float dx = x - smokes[i].x, dy = y - smokes[i].y;
+        if (dx * dx + dy * dy < SMOKE_RADIUS * SMOKE_RADIUS) return 1;
+    }
+    return 0;
+}
+
+/* 线段是否穿过任意一朵烟（用于「视线被烟挡住」）。
+   沿线段每 0.35 格采样一次，够密也不会太贵。 */
+int SegmentInSmoke(float x0, float y0, float x1, float y1) {
+    float dx = x1 - x0, dy = y1 - y0;
+    float d = sqrtf(dx * dx + dy * dy);
+    if (d < 0.001f) return PointInSmoke(x0, y0);
+    dx /= d; dy /= d;
+    for (float t = 0.0f; t <= d; t += 0.35f)
+        if (PointInSmoke(x0 + dx * t, y0 + dy * t)) return 1;
+    return PointInSmoke(x1, y1);
+}
+
+/* ==================================================================
+ * **把所有还活着的猎手收集到一个列表里**
+ * ------------------------------------------------------------------
+ * 2026-11-03：听声鬼从 1 只扩到 3 只，但代码里有 5 处写死了
+ *     Monster* targets[2] = { &monster, &lightBeast };
+ * 每处都漏掉第 2、3 只 —— 扳手、烟雾、投掷物、WHISTLE、TIME STOP
+ * 全都对它们无效。这不是一次失误，是「手写枚举」这种写法必然漏。
+ *
+ * 以后任何「对所有猎手做某事」的地方，一律调这两个函数，
+ * 不要再自己写数组。新增怪只需要改 MonsterCollect 一处。
+ * ================================================================ */
+int MonsterCollect(Monster** out, int maxOut, int includeLightBeast) {
+    int n = 0;
+    for (int i = 0; i < MON_HUNTER_MAX && n < maxOut; i++)
+        if (monHunters[i].active) out[n++] = &monHunters[i];
+    if (includeLightBeast && lightBeast.active && n < maxOut)
+        out[n++] = &lightBeast;
+    return n;
+}
+
+/* 对所有猎手执行一次「瘫痪」——TIME STOP / STATIC FIELD 共用 */
+void MonsterStunAll(float seconds) {
+    Monster* list[MON_HUNTER_MAX + 1];
+    int n = MonsterCollect(list, MON_HUNTER_MAX + 1, 1);
+    for (int i = 0; i < n; i++) {
+        list[i]->stun = seconds;
+        list[i]->state = 0;
+        list[i]->pathLen = 0;
+        list[i]->pathIdx = 0;
+    }
+}
+
 /* 玩家是否在某朵烟里 */
 int PlayerInSmoke(void) {
     for (int i = 0; i < MAX_SMOKE; i++) {
@@ -1079,7 +1135,7 @@ static void BuildTrainingArena(void) {
     monster.hp = 9999;
     monster.stun = 0.0f;
     monster.speed = 0.0f;          /* 标靶：不动 */
-    { extern Monster monster2; monster2.active = 0; }
+    { monster2.active = 0; monster3.active = 0; }   /* 新局清掉第 2、3 只听声鬼 */
 
     lightBeast.active = 0;
     parasite.active = 0;
@@ -2306,7 +2362,7 @@ float ExtractDepthMul(int level) {
 
 /* 怪物当前的威胁分（不含金币） */
 float MonsterThreatScore(void) {
-    extern Monster monster;
+
     float sSpeed   = (THREAT_REF_SPEED  > 0.01f) ? monster.speed / THREAT_REF_SPEED : 1.0f;
     float sHear    = 1.0f;                       /* 听觉基数，由 MakeNoise 的半径体现 */
     float sPersist = 1.0f;                       /* 持久度，由 huntTimer 上限体现 */
@@ -2470,7 +2526,7 @@ void EchoMarksReset(void) {
 
 /* 在 (sx,sy) 周围 rad 格内记录所有怪物 */
 void EchoMarksScan(float sx, float sy, float rad) {
-    extern Monster monster, lightBeast, monster2;
+    extern Monster lightBeast;
     extern int   CollectorActive(void), ScavengerActive(void), WardenActive(void);
     extern float CollectorX(void), CollectorY(void);
     extern float ScavengerX(void), ScavengerY(void);
@@ -2564,11 +2620,21 @@ static unsigned int wrenchHitMask=0;
 static void WrenchApplyHit(float power) {
     extern float RunUpgWrenchRange(void);
     extern float RunUpgWrenchStun(void);
-    extern Monster monster;
 
-    Monster* targets[2]={&monster,&lightBeast};
-    for(int ti=0;ti<2;++ti) { Monster* target=targets[ti];
-    if (target->active && !(wrenchHitMask&(1u<<ti))) {
+    /* ============================================================
+     * 修：**扳手打不到第 2、3 只听声鬼**
+     * ------------------------------------------------------------
+     * 原来这里是写死的两只：{&monster, &lightBeast}。
+     * 听声鬼扩到三只之后，第 2、3 只根本不在列表里 ——
+     * 玩家砸到它们身上毫无反应，也击退不了。
+     *
+     * 位掩码：1=第1只 2=追光鬼 8=第2只 16=第3只
+     * （4 留给清道夫，别动）
+     * ============================================================ */
+    Monster* targets[4] = { &monster, &lightBeast, &monster2, &monster3 };
+    static const unsigned int tbits[4] = { 1u, 2u, 8u, 16u };
+    for(int ti=0;ti<4;++ti) { Monster* target=targets[ti];
+    if (target->active && !(wrenchHitMask&tbits[ti])) {
         float rng=RunUpgWrenchRange()+BenchKnockExtra();
         float dx = target->x - posX, dy = target->y - posY;
         float d2 = dx * dx + dy * dy;
@@ -2583,7 +2649,7 @@ static void WrenchApplyHit(float power) {
             if (Blocked(nx, ny)) { nx = target->x + ux * push * 0.5f;
                                    ny = target->y + uy * push * 0.5f; }
             if (!Blocked(nx, ny)) { target->x = nx; target->y = ny; }
-            wrenchHitMask|=1u<<ti;
+            wrenchHitMask|=tbits[ti];
             target->stun=RunUpgWrenchStun()*BenchKnockStunMul();
             knockCountRun++;
             if(BenchShock()) { SuspicionReset();target->stateTimer=0.0f;target->tx=target->x;target->ty=target->y; }
@@ -3246,8 +3312,8 @@ void Update(float dt) {
     if (runUltimate >= 0 && !ultUsed && currentState == STATE_PLAYING
         && IsActionPressed(ACT_SWING)) {
 
-        extern Monster lightBeast;
-        Monster* targets[2] = { &monster, &lightBeast };
+        Monster* targets[MON_HUNTER_MAX + 1];
+        int nTargets = MonsterCollect(targets, MON_HUNTER_MAX + 1, 1);
         ultUsed = 1;
         ultKind = runUltimate;
         keyPressed[g_bindings[ACT_SWING]] = 0;
@@ -3269,8 +3335,7 @@ void Update(float dt) {
                 float ddx = fx - posX, ddy = fy - posY;
                 if (ddx * ddx + ddy * ddy > 144.0f) break;   /* 至少 12 格远 */
             }
-            for (int k = 0; k < 2; k++) {
-                if (!targets[k]->active) continue;
+            for (int k = 0; k < nTargets; k++) {
                 targets[k]->state = 1;
                 targets[k]->tx = fx;
                 targets[k]->ty = fy;
@@ -4089,12 +4154,23 @@ void Update(float dt) {
             lightBeast.state = 0;
             lightBeast.pathLen = 0;
         }
+        /* 2026-11-03：第 2、3 只听声鬼以前**完全不吃烟** ——
+           烟只写了 monster 和 lightBeast，扩到三只之后这里没跟着改。 */
+        for (int hi = 1; hi < MON_HUNTER_MAX; hi++) {
+            extern Monster monHunters[MON_HUNTER_MAX];
+            if (!monHunters[hi].active) continue;
+            if (Dist2(monHunters[hi].x, monHunters[hi].y, smokes[si].x, smokes[si].y) < 2.6f) {
+                monHunters[hi].state = 0;
+                monHunters[hi].pathLen = 0;
+            }
+        }
     }
 
     EnsureThrowSelectedValid();   /* v1.14：手里不能是空的 */
     if (lastHitTimer > 0.0f) lastHitTimer -= dt;   /* v1.15：命中数字淡出 */
     UpdateMonster(dt);
-    { extern void UpdateMonster2(float); UpdateMonster2(dt); }   /* v2.4.12 第二只 */
+    { extern void UpdateMonster2(float); UpdateMonster2(dt); }
+    { extern void UpdateMonster3(float); UpdateMonster3(dt); }   /* v2.4.12 第二只 */
     { extern void FlankUpdate(float); FlankUpdate(dt); }   /* v2.4.95 包夹（必须在 AI 之后，否则目标被覆盖） */
     UpdateLightBeast(dt);
     UpdateParasite(dt);
@@ -5374,19 +5450,12 @@ static void ApplyInstantSkill(int id) {
         break;
     case IR_TIMESTOP: {
         /* v2.0：TIME STOP 原来是空卡（24 张里唯一一张没 case 的） */
-        Monster* list[2] = { &monster, &lightBeast };
-        for (int i = 0; i < 2; i++) {
-            if (!list[i]->active) continue;
-            list[i]->stun = 8.0f;
-            list[i]->state = 0;
-            list[i]->pathLen = 0;
-        }
+        MonsterStunAll(8.0f);
         break;
     }
     case IR_STATICFIELD: {
         /* 大招：瘫痪本层所有怪 6 秒 */
-        if (monster.active) monster.stun = 6.0f;
-        if (lightBeast.active) lightBeast.stun = 6.0f;
+        MonsterStunAll(6.0f);
         for (int i = 0; i < LEECH_MAX; i++) if (leeches[i].active) leeches[i].repelTimer = 6.0f;
         sanity -= 8.0f;
         if (sanity < 0.0f) sanity = 0.0f;
@@ -5439,6 +5508,26 @@ void ActivateHubRow(void) {
     if (ok) {
         PlaySfx(SFX_POWER, 0.8f);
         SaveGame();
+    } else {
+        /* ============================================================
+         * 修：**买不了的时候完全没反馈**
+         * ============================================================
+         * 原来失败就是静默 return，玩家按了回车以为键坏了。
+         * 详情条虽然写着「金币不够 / 需要先点亮上面的节点」，
+         * 但那是常驻文字，按下去的瞬间没有任何回应。
+         * 现在给一句 1.2 秒的提示 —— 和改造树的行为对齐。
+         * ============================================================ */
+        extern const char* pickupMsg;
+        extern float pickupMsgTimer;
+        const SkillDef* d = &skillDefs[hubSelection];
+        if (skillRank[hubSelection] >= d->maxRank) {
+            pickupMsg = Tr("ALREADY MAXED", "已满级");
+        } else if (!(d->prereq < 0 || skillRank[d->prereq] > 0)) {
+            pickupMsg = Tr("NEEDS THE NODE ABOVE", "需要先点亮上面的节点");
+        } else {
+            pickupMsg = Tr("NOT ENOUGH GOLD", "金币不够");
+        }
+        pickupMsgTimer = 1.2f;
     }
     uiDirty = 1;
 }
@@ -6206,7 +6295,24 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_LBUTTONUP:
-            if (currentState == STATE_HUB) { SkillDragEnd(); return 0; }
+            if (currentState == STATE_HUB) {
+                /* 修：没拖动就当成单击 —— 选中鼠标下的节点（见 ui.c 的注释） */
+                extern int SkillDragWasClick(void);
+                extern int SkillNodeHitTest(int, int);
+                extern int hubSelection;
+                int wasClick = SkillDragWasClick();
+                SkillDragEnd();
+                if (wasClick) {
+                    int mx = (short)LOWORD(lParam), my = (short)HIWORD(lParam);
+                    POINT pt = { mx, my };
+                    ScreenToClient(g_hwnd, &pt);
+                    int dx = pt.x, dy = pt.y;
+                    MouseToLogical(&dx, &dy);
+                    int id = SkillNodeHitTest(dx, dy);
+                    if (id >= 0 && hubSelection != id) { hubSelection = id; uiDirty = 1; }
+                }
+                return 0;
+            }
             BenchDragEnd();   /* v2.9：结束画布拖拽 */
             if (sliderDragging) {
                 ReleaseCapture();
@@ -6380,8 +6486,24 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             int menuRight = (wParam == (WPARAM)g_bindings[ACT_MENU_RIGHT]) || wParam == 'D';   /* v2.8 */
             /* v1.8：空格也能确认（很多人不习惯按回车）。
                游戏里空格仍是跳脸虫的躲避键，两者不冲突。 */
-            int menuConfirm = (wParam == (WPARAM)g_bindings[ACT_MENU_CONFIRM]) || wParam == VK_SPACE;
-            int menuCancel  = (wParam == (WPARAM)g_bindings[ACT_MENU_CANCEL]);
+            /* ==================================================================
+             * 修：**确认键没有挡「键盘自动重复」**
+             * ==================================================================
+             * 按住 Space / Enter 时 Windows 每秒重发几十次 WM_KEYDOWN。
+             * menuUp/menuDown 需要重复（连按可以滚列表），
+             * 但 menuConfirm 一旦重复就是灾难：
+             *
+             *   设置页按 Space → 第 1 次打开弹窗
+             *                  → 第 2 次立刻确认并关掉弹窗
+             *   玩家看到的就是「空格没反应」。
+             *
+             * 同文件里 R 键（6282）和投掷槽键（6389）都判断了 bit30，
+             * 只有这个聚合量漏了。给 confirm / cancel 加上。
+             * ================================================================ */
+            int keyRepeat   = (lParam & (1L << 30)) ? 1 : 0;
+            int menuConfirm = !keyRepeat &&
+                              ((wParam == (WPARAM)g_bindings[ACT_MENU_CONFIRM]) || wParam == VK_SPACE);
+            int menuCancel  = !keyRepeat && (wParam == (WPARAM)g_bindings[ACT_MENU_CANCEL]);
 
             if (currentState == STATE_MAIN_MENU) {
                 /* v3.3 **数字键直接选中并确认** ——

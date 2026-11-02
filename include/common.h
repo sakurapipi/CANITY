@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdint.h>   /* uint32_t：程序化配乐用（规则：系统头只在本文件出现） */
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
 #define CANITY_VERSION_NUM 27         /* 整数版本，进存档做记录 */
@@ -34,7 +35,7 @@
    置 0 = 回到旧的战斗版本。 */
 #define NO_COMBAT 1
 
-#define CANITY_VERSION_STR "2.3.4"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_STR "2.3.5"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -284,6 +285,26 @@ typedef struct {
     float prevX, prevY;        /* 上一帧位置，用来算位移 */
 } Monster;
 
+/* ==================================================================
+ * 听声鬼数量（2026-11-03 用户要求重做）
+ * ------------------------------------------------------------------
+ * 开局 1 只 → 60 秒 2 只 → 120 秒 3 只。
+ * **每多一只，全部听声鬼的听觉半径都下调** —— 拿听觉换数量：
+ *   1 只：100% 听觉，靠耳朵就能逮人
+ *   2 只：75%
+ *   3 只：55%，但三面包夹，撞上就更难走
+ * 这样压力是「数量」给的，不是「单只更强」给的。
+ *
+ * 保留 monster / monster2 / monster3 三个别名，
+ * 老代码里所有 `monster.xxx` 不用动。
+ * ================================================================ */
+#define MON_HUNTER_MAX 3
+extern Monster monHunters[MON_HUNTER_MAX];
+#define monster  monHunters[0]
+#define monster2 monHunters[1]
+#define monster3 monHunters[2]
+
+
 /* v1.16 烟幕云：落到地面后持续一段时间，双向遮蔽 */
 typedef struct {
     float x, y;
@@ -301,6 +322,13 @@ extern SmokeCloud smokes[MAX_SMOKE];
 #define LIGHTBEAST_HP_MUL 0.6f            /* 寻声怪：3 瓶 */
 #define MONSTER_STUN 1.2f       /* 被砸中后的硬直秒数 */
 #define MONSTER_FLEE_DIST 3.0f  /* 被驱离时后退的距离 */
+/* 听声鬼 / 追光鬼的**抓取判定半径**（格）。
+   原来是写死的 `pd2 < 0.55f` —— 那是距离的平方，等于 0.742 格。
+   对比同场景的另外两只：
+       清道夫 SCAV_CATCH_R 1.45 格
+       守门人 WARDEN_TOUCH_R 1.30 格
+   0.74 格读感就是"贴脸了还抓不到"，所以统一抬到 0.95 格（+28%）。 */
+#define MONSTER_CATCH_R   0.95f
 
 /* ------------------------------------------------------------------ */
 /* 跳脸虫（Face Jumper）—— QTE 怪                                      */

@@ -12,9 +12,6 @@
  *   4) 双线性 blit + alpha + 可选 z 测试
  */
 
-#include <math.h>
-#include <stdlib.h>
-#include <string.h>
 #include "sprites.h"
 #include "common.h"
 #include "render.h"
@@ -825,6 +822,13 @@ static void BakeMonster(int id, int kind, int pose) {
        只留极小的色相偏移；**颜色只留给识别特征**（口袋 / 爪 / 眼 / 灯）。 */
     case 7:  /* 拾荒者：中性暗灰，略暖 */
         edge = 0x00080A0Au; body = 0x00292A2Cu; hi = 0x0045474Cu; heightK = 0.74f; break;
+    /* ===== 听声鬼变体（2026-11-03）=====
+       同族识别点必须保住：**无眼、牙齿下颌、瘦长肢体、冷色、不用高饱和**。
+       区分靠**体态与地标**，不靠颜色（art_direction 铁律一 / 五）。 */
+    case 11: /* 听声鬼·匍匐者：更矮更宽，冷灰偏土 —— 像趴着听地面 */
+        edge = 0x000A0A08u; body = 0x002A2A26u; hi = 0x00444138u; heightK = 0.76f; break;
+    case 12: /* 听声鬼·长颈：更高更瘦，冷灰偏紫 —— 像把耳朵伸到天花板 */
+        edge = 0x0008090Bu; body = 0x00252A34u; hi = 0x003C4456u; heightK = 1.22f; break;
     case 8:  /* 清道夫：中性暗灰，略冷绿 */
         edge = 0x00070A08u; body = 0x00282E2Au; hi = 0x00444C46u; heightK = 1.26f; break;
     case 9:  /* 守门人：中性暗灰，略冷蓝 */
@@ -875,12 +879,18 @@ static void BakeMonster(int id, int kind, int pose) {
         /* 上下各一缕外泄的尖刺（不对称：上面长、下面短） */
         cvLine(cx, ECHO_CY - 26.0f, cx - 4.0f, ECHO_CY - 62.0f, 3.0f, hi, 0.5f);
         cvLine(cx, ECHO_CY + 26.0f, cx + 3.0f, ECHO_CY + 44.0f, 3.0f, hi, 0.5f);
-    } else if (kind == 0 || kind == 1 || kind == 2 || kind == 7 || kind == 8 || kind == 9) {
+    } else if (kind == 0 || kind == 1 || kind == 2 || kind == 7 || kind == 8 || kind == 9
+               || kind == 11 || kind == 12) {
         float narrow = (kind == 1) ? 0.82f : (kind == 2 ? 1.35f : 1.0f);   /* 体型胖瘦 */
         /* v2.4.1 审美规范：体型必须和移速一致（见 include/art_direction.h 铁律四） */
         if (kind == 7) narrow = 1.42f;   /* 拾荒者：最宽，负重 */
         if (kind == 8) narrow = 0.60f;   /* 清道夫：最瘦 */
         if (kind == 9) narrow = 1.62f;   /* 守门人：宽肩立柱 */
+        /* 听声鬼变体：宽度也要和"怎么移动"一致（铁律四）
+           · 匍匐者贴着地面爬/挪，肩更宽、重心更低
+           · 长颈几乎不带体积，瘦成一根 */
+        if (kind == 11) narrow = 1.34f;
+        if (kind == 12) narrow = 0.52f;
         float shoulderW = 30.0f * narrow;
         if (side) shoulderW *= 0.68f;
 
@@ -959,12 +969,29 @@ static void BakeMonster(int id, int kind, int pose) {
             }
         }
 
-        /* --- 脖子 --- */
-        Limb(cx, headY + H * 0.19f, cx, shoulderY + 2.0f, 13.0f, 17.0f, edge, body, hi);
+        /* --- 脖子 ---
+           长颈变体的地标就在这：脖子拉到 0.34H、细到 6px，
+           于是**头、脖子、肩三段之间出现明显的负空间**，
+           填黑之后轮廓是「一根竖杆顶个小球」，和第一只完全不同（铁律一/二）。 */
+        if (kind == 12) {
+            Limb(cx, headY + H * 0.12f, cx, shoulderY + 2.0f, 9.0f, 6.0f, edge, body, hi);
+        } else if (kind == 11) {
+            /* 匍匐者：几乎没有脖子，头直接压在肩上 */
+            Limb(cx, headY + H * 0.24f, cx, shoulderY + 2.0f, 15.0f, 19.0f, edge, body, hi);
+        } else {
+            Limb(cx, headY + H * 0.19f, cx, shoulderY + 2.0f, 13.0f, 17.0f, edge, body, hi);
+        }
 
         /* --- 头 --- */
-        float hry = (kind == 2) ? 15.0f : 19.0f;
-        float hrx = (kind == 2) ? 17.0f : 15.0f;
+        /* 头型也是区分点：
+           · 匍匐者：头更扁更宽（贴地听声，下颌横向铺开）
+           · 长颈：头更小更长（远端的耳朵） */
+        float hry = (kind == 2) ? 15.0f
+                  : (kind == 11) ? 15.0f
+                  : (kind == 12) ? 21.0f : 19.0f;
+        float hrx = (kind == 2) ? 17.0f
+                  : (kind == 11) ? 19.0f
+                  : (kind == 12) ? 11.0f : 15.0f;
         float hy = headY + hry + 2.0f;
         cvEllipse(cx, hy, hrx + 2.0f, hry + 2.0f, edge, 1.0f);
         cvEllipse(cx, hy - 1.0f, hrx, hry, body, 1.0f);
@@ -1174,6 +1201,49 @@ static void BakeMonster(int id, int kind, int pose) {
             /* 眼窝：两个凹坑，不发光 */
             cvEllipse(cx - hrx * 0.42f, hy - 4, 5.0f, 4.0f, 0x00020406u, 0.9f);
             cvEllipse(cx + hrx * 0.42f, hy - 4, 5.0f, 4.0f, 0x00020406u, 0.9f);
+        } else if (kind == 11) {
+            /* ===== 听声鬼·匍匐者（第二只）=====
+               同族识别点：无眼、牙齿下颌 —— 保住。
+               自己的地标：**下颌横向铺得比头还宽**，而且牙是密集短牙，
+               不是第一只那种 5 根长牙。
+               轮廓读法：一个横着的梯形压在窄肩上 = 在贴地听。 */
+            float jaw[8] = { cx - hrx * 1.05f, hy + 3,
+                             cx + hrx * 1.05f, hy + 3,
+                             cx + hrx * 0.78f, hy + hry + 7.0f,
+                             cx - hrx * 0.78f, hy + hry + 7.0f };
+            cvPoly(jaw, 4, 0x00040206u, 1.0f);
+            /* 密集短牙：8 根，上下各一排 */
+            for (int i = 0; i < 8; i++) {
+                float tx = cx - hrx * 0.86f + (float)i * (hrx * 0.245f);
+                cvLine(tx, hy + 4, tx, hy + 9, 2.0f, 0x00BEB49Cu, 0.9f);
+                cvLine(tx, hy + hry + 6, tx, hy + hry + 1, 2.0f, 0x00A69C88u, 0.9f);
+            }
+            /* 无眼，但有**两条横向听缝**（不是眼窝 —— 斜切，像耳裂） */
+            cvLine(cx - hrx * 0.72f, hy - 6, cx - hrx * 0.18f, hy - 4, 2.6f, 0x00020406u, 0.95f);
+            cvLine(cx + hrx * 0.18f, hy - 4, cx + hrx * 0.72f, hy - 6, 2.6f, 0x00020406u, 0.95f);
+        } else if (kind == 12) {
+            /* ===== 听声鬼·长颈（第三只）=====
+               同族识别点：无眼、牙齿下颌 —— 保住。
+               自己的地标：**头很小、下颌窄长、头顶一根竖立的听针**。
+               配合 0.52 的窄身和长脖子，填黑后是「细杆 + 尖顶」。 */
+            float jaw[8] = { cx - hrx * 0.80f, hy + 3,
+                             cx + hrx * 0.80f, hy + 3,
+                             cx + hrx * 0.42f, hy + hry + 15.0f,
+                             cx - hrx * 0.42f, hy + hry + 15.0f };
+            cvPoly(jaw, 4, 0x00040208u, 1.0f);
+            for (int i = 0; i < 4; i++) {
+                float tx = cx - hrx * 0.55f + (float)i * (hrx * 0.37f);
+                cvLine(tx, hy + 4, tx, hy + 11, 2.2f, 0x00C8C0A8u, 0.9f);
+                cvLine(tx, hy + hry + 13, tx, hy + hry + 4, 2.2f, 0x00B0A890u, 0.9f);
+            }
+            /* 听针：头顶竖起一根细杆 + 末端小球（负空间最大的地标） */
+            cvLine(cx, hy - hry - 1.0f, cx, hy - hry - 22.0f, 3.2f, edge, 1.0f);
+            cvLine(cx, hy - hry - 2.0f, cx, hy - hry - 20.0f, 1.8f, hi, 0.9f);
+            cvEllipse(cx, hy - hry - 24.0f, 5.0f, 5.0f, edge, 1.0f);
+            cvEllipse(cx, hy - hry - 24.0f, 3.4f, 3.4f, hi, 0.85f);
+            /* 无眼：两处凹陷，比第一只更小更偏外 */
+            cvEllipse(cx - hrx * 0.50f, hy - 3, 3.4f, 2.8f, 0x00020406u, 0.9f);
+            cvEllipse(cx + hrx * 0.50f, hy - 3, 3.4f, 2.8f, 0x00020406u, 0.9f);
         } else if (kind == 1) {
             /* 追光鬼：一对又大又亮的眼睛（它追光） */
             cvEllipse(cx - hrx * 0.40f, hy - 2, 7.0f, 6.0f, 0x00080A10u, 1.0f);
@@ -1584,7 +1654,6 @@ static void BakeProp(int id, int kind) {
     cvFinish(&g_sprites[id]);
 }
 
-
 /* ------------------------------------------------------------------ */
 /* UI 资源（v2.2）                                                      */
 /*   9-slice 母版：四角各一颗螺丝，双线边框（外亮内暗），底部警示条。      */
@@ -1623,7 +1692,6 @@ static void BakeUiPanel(int id, int hot) {
 
     cvFinish(&g_sprites[id]);
 }
-
 
 static void BakeUiCursor(void) {
     cvClear();
@@ -1678,6 +1746,9 @@ void SpritesInit(void) {
     BakeItem(SPR_ITEM_DECOY, 5);   /* 玩偶 */
     for (int p = 0; p < 4; p++) {
         BakeMonster(SPR_MON_HUNTER + p, 0, p);
+    /* 听声鬼变体：第二只「匍匐者」、第三只「长颈」，各 4 帧 */
+    BakeMonster(SPR_MON_HUNTER2 + p, 11, p);
+    BakeMonster(SPR_MON_HUNTER3 + p, 12, p);
         BakeMonster(SPR_MON_LIGHT  + p, 1, p);
         BakeMonster(SPR_MON_LEECH  + p, 7, p);   /* v2.4.1: 槽位复用 -> 拾荒者 */
     }

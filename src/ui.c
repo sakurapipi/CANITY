@@ -395,8 +395,11 @@ int TextWidthRaw(const char* t) {
 
 /* 标题加粗：右移一格再画一遍 */
 static void DrawTitleWin(const char* t, int yWin, unsigned int color) {
+    /* 修：标题被画两遍（偏移 1px、同色）。
+       ui_layout.txt 里每个标题都是两条记录：
+         "SKILL TREE"(320,20,480,44) 和 (321,20,481,44)
+       同色 +1px 不是阴影，只会让字发毛。画一遍就够。 */
     DrawTextCenterWin(winW / 2, yWin - 2 * TextScale(), t, color);
-    DrawTextCenterWin(winW / 2 + 1, yWin - 2 * TextScale(), t, color);
 }
 
 /* v2.2 修复：UI 尺寸必须跟着**实际文字高度**缩放，而不是窗口高度。
@@ -1969,6 +1972,24 @@ void SkillDragMove(int mx, int my) {
     uiDirty = 1;
 }
 void SkillDragEnd(void) { skDragging = 0; }
+
+/* ==================================================================
+ * 修：**技能树里鼠标点节点选不中**
+ * ==================================================================
+ * WM_LBUTTONDOWN 在 HUB 里无条件 `SkillDragStart(...); return 0;`，
+ * 于是永远走不到 ClickMenu 里的 SkillNodeHitTest ——
+ * 那套命中测试和 ActivateHubRow 是**死代码**，玩家只能靠方向键选。
+ *
+ * 现在：按下记下当时的相机位置，松开时如果相机几乎没动，
+ * 就当成「单击」→ 命中测试 → 选中节点。
+ * ================================================================== */
+int SkillDragWasClick(void) {
+    float dx = skVX - skDragVX;
+    float dy = skVY - skDragVY;
+    if (dx < 0) dx = -dx;
+    if (dy < 0) dy = -dy;
+    return (dx < 4.0f && dy < 4.0f) ? 1 : 0;
+}
 int  SkillIsDragging(void) { return skDragging; }
 
 /* 世界 → 屏幕 */
@@ -2287,7 +2308,7 @@ void DrawSkillTree(void) {
     int innerL = L.panel.left + L.padX;
     int innerR = L.panel.right - L.padX;
     int gTop = L.curY + TH + TH / 2;          /* 图区上界 */
-    int gBot = L.panel.bottom - TH * 4;        /* 图区下界（下面重算） */
+    int gBot = L.panel.bottom - TH * 4;        /* 图区下界 = 详情条顶边 */
     /* v6 **图区下界要留够详情条的空间** ——
        详情条三行从 panel.bottom - TH*4 开始，而节点高 0.62*SK_WY*skVK，
        原来 gBot 正好等于详情首行 y，第 3 行的节点会压上去。
@@ -2311,6 +2332,16 @@ void DrawSkillTree(void) {
         int nodeH = (int)(SK_WY * 0.62f * skVK);
         if (nodeW < 24) nodeW = 24;
         if (nodeH < 18) nodeH = 18;
+        /* ============================================================
+         * 修：**上一条注释说了要让出一个节点高，但代码里没写**
+         * ============================================================
+         * 实测 ui_layout.txt（800x600）：
+         *   "BRE.."(157,500..237,524) × "LIGHT STEP [SILENCE]"(31,492..383,516)
+         *   交叠 67% —— 节点直接压在详情条第一行上。
+         * 现在真的把图区下界抬到详情条之上一个节点高。
+         * ============================================================ */
+        gBot -= nodeH + TH / 2;
+        if (gBot < gTop + nodeH) gBot = gTop + nodeH;
 
 
         /* 连线先画（在节点下面）
@@ -2396,9 +2427,25 @@ void DrawSkillTree(void) {
                 /* v6：节点里画短名，详情条才用全长名 */
                 { extern const char* SkillShortName(int);
                   sprintf(nm, "%s", SkillShortName(id)); }
-                ClampRowText(nm, nw2 - TH / 4);
+                /* ============================================================
+                 * 修：**节点名被截成 3 个字**
+                 * ============================================================
+                 * 节点框约 80px 宽，而文字按窗口缩放（scale≈2）算宽度，
+                 * 一个字符 16px → 只能放 3 个，于是 "QUIET LID" 变 "QUI.."。
+                 * 文件名是玩家唯一能认出这是哪个节点的线索，截成这样没有用。
+                 *
+                 * 改用 1x 小字（每个字符 8px），同样宽度能放 8~10 个字符。
+                 * ============================================================ */
                 unsigned int tc = owned ? 0x0090FFB0u : (canBuy ? 0x00FFE080u : 0x00787878u);
-                DrawTextCenterWin((x0 + x1) / 2, y0 + nodeH / 2 - TH / 2, nm, tc);
+                {
+                    extern void DrawTextSmallWin(int, int, const char*, unsigned int);
+                    extern int  DrawTextSmallWidth(const char*);
+                    int sw = DrawTextSmallWidth(nm);
+                    if (sw > nw2 - 4) ClampRowText(nm, nw2 - 4);
+                    sw = DrawTextSmallWidth(nm);
+                    DrawTextSmallWin((x0 + x1) / 2 - sw / 2,
+                                     y0 + nodeH / 2 - 6, nm, tc);
+                }
             }
 
             /* 等级点（缩得太小就不画，避免糊成一团） */
@@ -3123,20 +3170,30 @@ static void DrawAchievementsWindow(MenuGeo g) {
             ClampRowText(nm, (right - progW - TH * 4) - nameX);
             DrawTextWin(nameX, y, nm, nameCol);
 
-            /* 奖励：金色，画在进度左边 */
-            if (locked) {
-                char rw[24];
-                sprintf(rw, "+%d", d->reward);
-                DrawTextWin(right - progW - TH / 2 - TextWidthWin(rw), y, rw,
-                            isSel ? PAL_GOLD : 0x00A08040u);
-            }
-
-            /* 进度：右对齐 */
+            /* ============================================================
+             * 修：**奖励列与进度列重叠，`+600` 被挤成 `+6000`**
+             * ============================================================
+             * 原来奖励用**估算值** progW 定位，进度用**实测宽度**右对齐：
+             *   · 进度 "0/4"     宽 ~24px  → 落在右侧，不撞
+             *   · 进度 "0/100000" 宽 ~128px → 向左伸出去，压到奖励上
+             * 实测 ui_layout.txt：`+600`(476..540) × `0/100000`(536..664)，交叠 4px。
+             *
+             * 现在先量出进度的真实宽度，再把它左边的空间让给奖励。
+             * ============================================================ */
             char pr[32];
             if (locked && d->hidden) sprintf(pr, "?");
             else                     sprintf(pr, "%d/%d", a->progress, a->target);
-            DrawTextWin(right - TextWidthWin(pr), y, pr,
-                        a->unlocked ? 0x0040D060u : (isSel ? 0x00C8C8C8u : 0x00747880u));
+            {
+                int pw = TextWidthWin(pr);
+                if (locked) {
+                    char rw[24];
+                    sprintf(rw, "+%d", d->reward);
+                    DrawTextWin(right - pw - TH / 2 - TextWidthWin(rw), y, rw,
+                                isSel ? PAL_GOLD : 0x00A08040u);
+                }
+                DrawTextWin(right - pw, y, pr,
+                            a->unlocked ? 0x0040D060u : (isSel ? 0x00C8C8C8u : 0x00747880u));
+            }
         }
     }
 
@@ -3729,7 +3786,19 @@ void DrawHUD(void) {
         for (int i = 0; i < FX_COUNT; i++) {
             float s = FxStrength(i);
             if (s <= 0.0f) continue;
-            sprintf(buf, "%s %d%%", fxName[i], (int)(s * 100.0f + 0.5f));
+            /* ============================================================
+             * 修：**HUD 显示的是 FX 原始强度，不是玩家真实受到的效果**
+             * ------------------------------------------------------------
+             * FX_SLOW 的 strength 是"归一化到 0.45 系数"的中间量：
+             *     game.c: slowMul = 1 - strength * 0.45
+             * 所以给 20% 减速要写 strength = 0.444，
+             * 而 HUD 直接把 0.444 打成 "SLOWED 44%" —— 玩家以为被减速 44%。
+             * 现在按各效果的真实换算显示。
+             * ============================================================ */
+            float shown = s;
+            if (i == FX_SLOW)  shown = s * 0.45f;    /* 实际减速百分比 */
+            if (i == FX_DRAIN) shown = s * 1.5f;     /* 实际额外消耗 */
+            sprintf(buf, "%s %d%%", fxName[i], (int)(shown * 100.0f + 0.5f));
             DrawTextWin(UIS(20), fy, buf, 0x00FF6060u);
             fy += hudTH + UIS(4);
         }
@@ -4078,7 +4147,6 @@ void DrawHUD(void) {
        怪已经打不死了，「它现在有没有在追我」是唯一需要盯的信息。 */
     {
         extern int hideSpotNear, hiddenIn, hoverKind;
-        extern Monster monster;
 
         /* ① 藏身提示 */
         if (hiddenIn >= 0) {
@@ -4189,7 +4257,7 @@ void DrawHUD(void) {
     /* ===== v3.0 改造树感知系：预知 + 心眼 ===== */
     {
         extern int hiddenIn;
-        extern Monster monster;
+
         extern float posX, posY;
         if (currentState == STATE_PLAYING) {
             /* ① 预知：怪物进 8 格 → 屏幕边缘泛红（不需要看见它） */

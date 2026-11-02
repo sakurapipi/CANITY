@@ -21,7 +21,6 @@
 #include "music.h"
 #include "shop.h"
 
-
 /* ------------------------------------------------------------------ */
 /* 入口：固定步长逻辑 + 可限帧渲染                                      */
 /* ------------------------------------------------------------------ */
@@ -37,11 +36,9 @@ static int FileExists(const char* path) {
     return 1;
 }
 
-
 /* ===== 崩溃定位器 =====
    崩溃时把「异常地址 - 模块基址」写进 canity_crash.txt。
    canity.exe 没有 strip，拿到 RVA 就能用 nm 反查到函数名。 */
-#include <stdio.h>
 volatile int g_dbgMark = 0;   /* 崩溃现场标记：最后执行到哪一步 */
 LONG WINAPI CanityCrashHandler(EXCEPTION_POINTERS* ep) {
     /* v6 第 ㊽ 轮：**崩溃日志必须落在 exe 旁边**
@@ -155,6 +152,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (!g_hwnd) return 1;
 
     ShowWindow(g_hwnd, nCmdShow);
+    /* ==================================================================
+     * 修：**启动后要手动点一下窗口键盘才生效**
+     * ==================================================================
+     * `ShowWindow` 只负责显示，不保证拿到**前台焦点**。
+     * 从别的程序（终端 / 启动器 / 桌面快捷方式）拉起来时，
+     * 窗口会开在后面，键盘消息全落在原来的前台窗口上 ——
+     * 玩家看到画面了，但按什么键都没反应，得先用鼠标点一下。
+     *
+     * 三步把它拉到前台：
+     *   ① 提到 Z 序最上（不移动、不改大小）
+     *   ② 请求前台
+     *   ③ 显式把键盘焦点给客户区
+     * ②有可能被系统拒绝（前台锁），后面 ForceCursor + 首帧的
+     * SetFocus 兜底，至少鼠标点一下之后不会再丢。
+     * ================================================================== */
+    SetWindowPos(g_hwnd, HWND_TOP, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    SetForegroundWindow(g_hwnd);
+    SetFocus(g_hwnd);
     ForceCursor(1);
     ApplyDisplayMode();
     { const char* preview=getenv("CANITY_UI");
@@ -181,8 +197,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     while (running) {
 
-
-
         SyncWindowSize();   /* v2.2：每帧对齐 winW/winH（DPI/最大化/改窗口都能兜住） */
         int guard = 0;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
@@ -192,7 +206,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             if (++guard > 256) break;   /* 防止任何消息风暴把渲染饿死 */
         }
         if (!running) break;
-
 
         QueryPerformanceCounter(&now);
         double absNow = (double)(now.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
