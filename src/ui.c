@@ -3768,6 +3768,42 @@ void DrawHUD(void) {
         }
     }
 
+    /* ==================================================================
+     * 守门人**锁定倒计时**（2026-11-03）
+     * ------------------------------------------------------------------
+     * 他看见你之后不再立刻开追，而是先亮 1.5 秒。
+     * 这个数字必须显眼 —— 它是玩家唯一能读到的"还有多久挨抓"。
+     * 放在顶部正中，配一条消耗中的进度条。
+     * ================================================================ */
+    {
+        extern int   WardenSpotting(void);
+        extern float WardenSpotLeft(void);
+        extern float WardenSpotFrac(void);
+        if (WardenSpotting()) {
+            char cb[32];
+            sprintf(cb, "%.1f", (double)WardenSpotLeft());
+            int cxp = winW / 2;
+            int yb  = UIS(54);                 /* 顶部，别压 CANITY HUD 第一行 */
+
+            /* 文字：SPOTTED 0.9 */
+            char line[48];
+            sprintf(line, "%s  %s", "SPOTTED", cb);
+            DrawTextCenterWin(cxp, yb, line, 0x00FF5030u);
+
+            /* 进度条：从满到空 */
+            {
+                int barW = UIS(180), barH = UIS(6);
+                int x0 = cxp - barW / 2, y0 = yb + UIS(26);
+                float f = WardenSpotFrac();
+                BlendRectWin(x0, y0, x0 + barW, y0 + barH, 0x00301810u, 0.75f);
+                int fill = (int)((float)barW * f);
+                if (fill > 0)
+                    BlendRectWin(x0, y0, x0 + fill, y0 + barH, 0x00FF4020u, 0.95f);
+                FrameRectWin(x0, y0, x0 + barW, y0 + barH, 0x00FF8060u, 0.85f, 2);
+            }
+        }
+    }
+
     /* 状态效果：常驻显示在 FUSES 下面。
        玩家必须知道自己被怎么了 —— 否则「视野突然变窄」会被当成 bug。
        纵向排布（UIS 是设计分辨率，600 高）：

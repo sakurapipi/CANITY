@@ -1948,6 +1948,33 @@ void GenerateLevel(void) {
         GenerateThemeTextures(nt);
     }
     SpawnMonster();
+    /* ================================================================
+     * 修：**换层后第 2、3 只听声鬼会立刻全部出现**
+     * ----------------------------------------------------------------
+     * GenerateLevel() 原来只重生第一只（SpawnMonster）、重生追光鬼、清偷电怪，
+     * 唯独没碰 monHunters[1] / [2]。
+     * 于是它们在上一层还是 active=1 的话，会**原样带到新的一层**：
+     *   · 位置还是上一层的坐标（可能落进墙里）
+     *   · 出场时间表 s_hunterSpawned 仍等于 3，调度器永远不会再刷
+     * 玩家看到的就是「一进第二层，三只同时在场」。
+     *
+     * 现在换层时把它们清掉，并把时间表重置成「开局 1 只」：
+     * 新的一层重新按 60 秒 / 120 秒出场。
+     * ================================================================ */
+    {
+        extern Monster monHunters[MON_HUNTER_MAX];
+        for (int hi = 1; hi < MON_HUNTER_MAX; hi++) {
+            monHunters[hi].active = 0;
+            monHunters[hi].stun = 0.0f;
+            monHunters[hi].hitCooldown = 0.0f;
+            monHunters[hi].pathLen = 0;
+            monHunters[hi].pathIdx = 0;
+            monHunters[hi].suspTarget = -1;
+            monHunters[hi].huntTimer = 0.0f;
+            monHunters[hi].stillTimer = 0.0f;
+        }
+        { extern void ResetSecondSpawn(void); ResetSecondSpawn(); }
+    }
     SpawnLightBeast();
     /* v1.8 偷电怪：第 3 层起出现。主线每层 1 只；无尽每 5 层 +1，最多 3 只。 */
     ResetLeeches();

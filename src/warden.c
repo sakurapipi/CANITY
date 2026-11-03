@@ -55,7 +55,8 @@ extern void ApplyFx(int kind, float strength, float duration);
 #define WARDEN_RETREAT       20.0f    /* 解除后至少离开出口多少格 */
 #define WARDEN_EXIT_R         1.80f   /* v2.4.48 平调：2.2 → 1.8。
                                         出口格本身 + 半格余量，路过不该被吞。 */    /* v2.4.44 玩家进出口区域判定半径（3.0 太大，路过就被传） */
-#define WARDEN_TOUCH_R        1.30f   /* v2.4.48 平调：2.20 -> 1.30。2.2 格读感像空气墙 */
+#define WARDEN_TOUCH_R        1.10f   /* 2026-11-03 用户：再减一点（1.30 → 1.10）。
+                                          抓到就送回起点，范围大了读感像空气墙。 */
 /* ===== v2.4.47 **视野锥 + 5 秒追击 / 5 秒失明** =====
    用户要求：
      · 给守门人一个视野（锥形，不是 360 度）
@@ -63,10 +64,9 @@ extern void ApplyFx(int kind, float strength, float duration);
      · 5 秒后**失去视野**，持续 5 秒（这段时间它变白 = 没电形态）
      · 5 秒失明结束后重新开始
    这条设计让它变成「周期性压迫」而不是「一直知道你在哪」。 */
-#define WARDEN_CHASE_TIME      3.0f    /* 追击持续（2026-11-03 用户：5 → 3 秒） */
-#define WARDEN_LOST_TIME       4.0f    /* 眩晕/泄力持续（2026-11-03 用户：5 → 4 秒）。
-                                          这段时间它是白模、不动、也抓不到人，
-                                          是玩家拉开距离的窗口。 */
+#define WARDEN_CHASE_TIME      5.0f    /* 追击持续（2026-11-03 平衡：3 → 8 → 5 秒） */
+#define WARDEN_LOST_TIME       3.0f    /* 眩晕/泄力（2026-11-03 平衡调整：4 → 3 秒）。
+                                          这段时间他白模、不动、抓不到人。 */
 #define WARDEN_CONE_DIST       8.0f    /* v2.4.48 平调：9 → 8 格 */    /* 视野锥长度 */
 #define WARDEN_CONE_HALF       0.60f
 /* ===== v2.4.52 **听觉** =====
@@ -89,6 +89,23 @@ extern void ApplyFx(int kind, float strength, float duration);
 #define WARDEN_ARRIVE_EXIT    1.2f    /* 它自己到出口多近算「站到位可以堵了」 */
 #define WARDEN_ARRIVE_PT      0.9f    /* 巡逻端点到达判定 */
 #define WARDEN_MOVE_EPS       0.02f
+/* 2026-11-03 用户要求：**看见玩家后不是立刻追，而是先亮 1.5 秒倒计时**。
+   这段时间是他的"锁定动作"，玩家能看见数字在掉，也有机会退出视野 / 关灯 / 丢烟。
+   听觉仍然是即时的（那是另一条通道，听见就是听见）。 */
+/* 2026-11-03 平衡：**锁定倒计时随层数缩短**，给玩家的反应时间越来越少。
+   第 1 层 2.0 秒 → 每层 -0.12 秒 → 第 9 层起封底 1.0 秒（不能再低）。 */
+#define WARDEN_SPOT_MAX       2.0f
+#define WARDEN_SPOT_MIN       1.0f
+#define WARDEN_SPOT_STEP      0.12f
+
+static float wdSpotTimeNow(void) {
+    extern int currentLevel;
+    int lv = currentLevel > 0 ? currentLevel : 1;
+    float t = WARDEN_SPOT_MAX - WARDEN_SPOT_STEP * (float)(lv - 1);
+    if (t > WARDEN_SPOT_MAX) t = WARDEN_SPOT_MAX;
+    if (t < WARDEN_SPOT_MIN) t = WARDEN_SPOT_MIN;
+    return t;
+}
 
 typedef enum { WD_PATROL = 0, WD_RUSH, WD_BLOCK, WD_RETREAT, WD_CHASE, WD_LOST } WardenState;
 
@@ -107,9 +124,116 @@ typedef struct {
     float stateT;          /* 当前状态已持续多久 */
     int   blockCount;      /* v2.4.49：本局已经堵了几次门（上限 2） */
     float hearNow;         /* v2.4.53：当前听觉半径（0 = 听不到），调试用 */
+    float spotT;           /* 2026-11-03：**锁定倒计时** —— 看见玩家后累积到 1.5 秒才开追 */
 } Warden;
 
 Warden warden;
+
+/* ==================================================================
+ * 移动工具（2026-11-03：**照搬清道夫那一套**）
+ * ------------------------------------------------------------------
+ * 用户反馈：守门人容易卡脚。
+ * 根因：追击用的是 AIMoveToward（直线 + 沿墙滑），
+ *       站在墙角时目标在斜对角，直线过去正好被墙角挡住 —— 一直贴着不动。
+ *
+ * 清道夫不卡，因为它有两件守门人没有的东西：
+ *   ① stepToward()  **13 方向扇形**：正面撞墙就依次试 ±25°/±50°/…/±160°，
+ *      总能找到一个能走的偏角，绕开墙角而不是顶住。
+ *   ② stepAlongBfs() 从**玩家**做一次 BFS 距离场，沿梯度一格一格降，
+ *      隔房间也不会"看不见目标就直冲墙"。
+ * 这里把它们搬过来，出口那套 wdB 距离场继续留给巡逻/撤退用。
+ * ================================================================ */
+
+/* 13 方向扇形推进：正面堵就试偏角，绕开墙角 */
+static void wdStepToward(float* x, float* y, float tx, float ty, float sp, float dt) {
+    float dx = tx - *x, dy = ty - *y;
+    float d = sqrtf(dx * dx + dy * dy);
+    if (d < 0.001f) return;
+
+    float base = atan2f(dy, dx);
+    static const float offs[13] = {
+        0.00f,
+        0.44f, -0.44f,      /* ±25°  */
+        0.87f, -0.87f,      /* ±50°  */
+        1.31f, -1.31f,      /* ±75°  */
+        1.75f, -1.75f,      /* ±100° */
+        2.27f, -2.27f,      /* ±130° */
+        2.79f, -2.79f       /* ±160° */
+    };
+
+    float stepLen = sp * dt;
+    for (int i = 0; i < 13; i++) {
+        float a = base + offs[i];
+        float nx = *x + cosf(a) * stepLen;
+        float ny = *y + sinf(a) * stepLen;
+        if (!Blocked(nx, ny)) { *x = nx; *y = ny; return; }
+    }
+    /* 13 个方向全堵 = 真被围死，这一帧不动 */
+}
+
+/* 从**玩家**出发的 BFS 距离场（追击用） */
+static short wdPB[MAP_HEIGHT][MAP_WIDTH];
+static int   wdPBOK = 0;
+static float wdPBRebuildT = 0.0f;
+
+static void wdPBfsBuild(void) {
+    for (int y = 0; y < MAP_HEIGHT; y++)
+        for (int x = 0; x < MAP_WIDTH; x++)
+            wdPB[y][x] = -1;
+
+    int sx = (int)posX, sy = (int)posY;
+    if (sx < 0 || sx >= MAP_WIDTH || sy < 0 || sy >= MAP_HEIGHT) { wdPBOK = 0; return; }
+
+    static int qx[MAP_WIDTH * MAP_HEIGHT], qy[MAP_WIDTH * MAP_HEIGHT];
+    int head = 0, tail = 0;
+    wdPB[sy][sx] = 0;
+    qx[tail] = sx; qy[tail] = sy; tail++;
+
+    static const int dxs[4] = { 1, -1, 0, 0 };
+    static const int dys[4] = { 0, 0, 1, -1 };
+
+    while (head < tail) {
+        int cx = qx[head], cy = qy[head];
+        head++;
+        int nd = wdPB[cy][cx] + 1;
+        if (nd > 200) continue;
+        for (int i = 0; i < 4; i++) {
+            int nx = cx + dxs[i], ny = cy + dys[i];
+            if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+            if (worldMap[ny][nx] != 0) continue;
+            if (wdPB[ny][nx] >= 0) continue;
+            wdPB[ny][nx] = (short)nd;
+            qx[tail] = nx; qy[tail] = ny; tail++;
+        }
+    }
+    wdPBOK = 1;
+}
+
+/* 沿玩家距离场的梯度走一格（4 邻居里挑最小的） */
+static void wdStepAlongPlayerBfs(float* x, float* y, float sp, float dt) {
+    int cx = (int)(*x), cy = (int)(*y);
+    if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return;
+
+    int here = wdPB[cy][cx];
+    if (here < 0) { wdPBfsBuild(); return; }
+    if (here == 0) return;                 /* 已经在玩家格 */
+
+    static const int dxs[4] = { 1, -1, 0, 0 };
+    static const int dys[4] = { 0, 0, 1, -1 };
+    int bestI = -1, bestD = here;
+    for (int i = 0; i < 4; i++) {
+        int nx = cx + dxs[i], ny = cy + dys[i];
+        if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+        int d = wdPB[ny][nx];
+        if (d < 0) continue;
+        if (d < bestD) { bestD = d; bestI = i; }
+    }
+    if (bestI < 0) return;
+
+    float tx = (float)(cx + dxs[bestI]) + 0.5f;
+    float ty = (float)(cy + dys[bestI]) + 0.5f;
+    wdStepToward(x, y, tx, ty, sp, dt);
+}
 
 /* ---- BFS 距离场（以出口为源点）---- */
 static short wdB[MAP_HEIGHT][MAP_WIDTH];
@@ -212,7 +336,7 @@ static void wdStepGradient(float* x, float* y, float sp, float dt, int climb) {
     for (int i = 0; i < nc; i++) {
         float tx = (float)(cx + dxs[cand[i]]) + 0.5f;
         float ty = (float)(cy + dys[cand[i]]) + 0.5f;
-        AIMoveToward(x, y, tx, ty, sp, dt);
+        wdStepToward(x, y, tx, ty, sp, dt);
         if (*x != ox || *y != oy) {
             warden.stuckT = 0.0f;
             return;
@@ -259,6 +383,8 @@ float WardenY(void)       { return warden.y; }
 int   WardenBlocking(void){ return warden.state == WD_BLOCK && warden.blockT > 0.0f; }
 
 void WardenReset(void) {
+    wdPBOK = 0;
+    wdPBRebuildT = 0.0f;
     warden.active = 0;
     warden.x = warden.y = 0.0f;
     warden.tx = warden.ty = 0.0f;
@@ -444,6 +570,24 @@ static void SendPlayerToStart(void) {
 /* v2.4.54：调试用的 WardenStateName / WardenBlockT 已删除 */
 /* v2.4.47：渲染层用 —— 追击中变红、失明中变白（没电形态） */
 int WardenChasing(void) { return warden.state == WD_CHASE; }
+
+/* 2026-11-03：HUD 倒计时用 —— 正在锁定中 / 还剩几秒 */
+int WardenSpotting(void) {
+    if (!warden.active || warden.spotT <= 0.0f) return 0;
+    return warden.spotT < wdSpotTimeNow();
+}
+float WardenSpotLeft(void) {
+    if (!warden.active) return 0.0f;
+    float left = wdSpotTimeNow() - warden.spotT;
+    return left > 0.0f ? left : 0.0f;
+}
+float WardenSpotFrac(void) {
+    if (!warden.active) return 0.0f;
+    float total = wdSpotTimeNow();
+    if (total <= 0.0f) return 0.0f;
+    float f = warden.spotT / total;
+    return f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
+}
 int WardenLost(void)    { return warden.state == WD_LOST; }
 
 void UpdateWarden(float dt) {
@@ -553,8 +697,15 @@ void UpdateWarden(float dt) {
             PlaySfx(SFX_STEP, 0.6f);
             return;
         }
-        /* **无代价追踪**：不管视线、不管你在哪，直接朝你走 */
-        AIMoveToward(&warden.x, &warden.y, posX, posY, WARDEN_CHASE_SPEED, dt);
+        /* **追击**：走「从玩家出发的 BFS 梯度」，不是直线。
+           原来用 AIMoveToward 直线 + 沿墙滑，墙角处会顶住不动。
+           现在和清道夫同一套：隔房间也绕得过去。距离场 0.25 秒重建一次。 */
+        wdPBRebuildT -= dt;
+        if (!wdPBOK || wdPBRebuildT <= 0.0f) {
+            wdPBfsBuild();
+            wdPBRebuildT = 0.25f;
+        }
+        wdStepAlongPlayerBfs(&warden.x, &warden.y, WARDEN_CHASE_SPEED, dt);
         {
             float fx = posX - warden.x, fy = posY - warden.y;
             if (fx * fx + fy * fy > 0.01f) warden.facing = atan2f(fy, fx);
@@ -684,11 +835,48 @@ void UpdateWarden(float dt) {
                 !SegmentInSmoke(warden.x, warden.y, posX, posY)) heard = 1;
         }
 
-        /* 视觉仍然累积 0.28 秒（要"看一眼"才确认） */
-        if (inCone) warden.sightHold += dt; else warden.sightHold = 0.0f;
-
-        if (heard || (inCone && warden.sightHold >= 0.28f)) {
+        /* ============================================================
+         * 2026-11-03 用户重做「探查机制」
+         * ------------------------------------------------------------
+         * 原来：看见玩家累积 0.28 秒就直接进追击 —— 玩家读感是
+         *       「一进视野就被锁死，跑不掉」。
+         * 现在：**看见之后先亮 1.5 秒倒计时**，数字会掉，
+         *       这 1.5 秒就是玩家的反应窗口：
+         *         · 退出视野 / 拐角   → 倒计时清零
+         *         · 关手电             → 视野半径砍到 WARDEN_SIGHT_WALK
+         *         · 丢烟雾             → 视线被吞，倒计时清零
+         *       走完 1.5 秒才真的开始追。
+         *
+         * 听觉不走这套 —— 听见就是听见，那是另一条通道。
+         * ============================================================ */
+        /* ============================================================
+         * **两条通道共用同一个倒计时**（2026-11-03 修）
+         * ------------------------------------------------------------
+         * 上一版只让「看见」累积 spotT，听觉仍然即时开追。
+         * 但这两件事是绑死的：
+         *   他要"看见"你 → 前提是 playerMoveSpeedNow > MOVE_EPS
+         *                 → 你在移动 → 你就在持续发声
+         *                 → 他先"听见"了 → heard 抢先，倒计时永远不开始
+         * 实测就是：不管怎么走进去，都是立刻被追，顶部一直不亮。
+         *
+         * 现在听见和看见都往 spotT 里累加，
+         * 玩家必须**连续 1.5 秒**处在他的感知里，他才真的开追。
+         * 中途停下 / 退开 / 关灯 / 丢烟 → spotT 清零，锁定中断。
+         * ============================================================ */
+        int noticed = inCone || heard;
+        if (noticed) {
+            warden.sightHold = 0.0f;          /* 旧字段保留但不再当计时用 */
+            warden.spotT += dt;
+        } else {
             warden.sightHold = 0.0f;
+            warden.spotT = 0.0f;              /* 一脱离感知就放弃锁定 */
+        }
+        { float spotMax = wdSpotTimeNow();
+          if (warden.spotT > spotMax) warden.spotT = spotMax; }
+
+        if (warden.spotT >= wdSpotTimeNow()) {
+            warden.sightHold = 0.0f;
+            warden.spotT = 0.0f;
             /* ============================================================
              * 发现玩家 → **WD_CHASE（追）+ WD_RUSH（堵门）两层状态**
              * ------------------------------------------------------------
@@ -704,11 +892,15 @@ void UpdateWarden(float dt) {
              * 那个已经改成按文档取值了，所以追是追，但不会隔着半张图锁人。
              * ============================================================ */
             warden.state = WD_CHASE;
+            {   /* 锁定完成时把脸转过来，视觉上"他终于盯上你了" */
+                float fdx = posX - warden.x, fdy = posY - warden.y;
+                if (fdx * fdx + fdy * fdy > 0.01f) warden.facing = atan2f(fdy, fdx);
+            }
             PlaySfx(SFX_WARDEN, 1.0f);   /* v2.4.89 追击低频吼叫 */          /* ← 直接进入 5 秒追击 */
             warden.stateT = 0.0f;
             PlaySfx(SFX_HEART, 0.85f);
             pickupMsg = heard
-                ? ((g_lang == LANG_ZH) ? "守门人听见你了！" : "THE WARDEN HEARD YOU")
+                ? ((g_lang == LANG_ZH) ? "守门人锁定了你！" : "THE WARDEN LOCKED ON")
                 : ((g_lang == LANG_ZH) ? "守门人盯上你了！" : "THE WARDEN HAS YOU IN SIGHT");
             pickupMsgTimer = 2.0f;
             return;
@@ -734,7 +926,7 @@ void UpdateWarden(float dt) {
         if (st < 0) {
             /* 掉出距离场（极少见）→ 重建，并往出口挪一步 */
             wdBfsBuild();
-            AIMoveToward(&warden.x, &warden.y, exitX, exitY, WARDEN_SPEED, dt);
+            wdStepToward(&warden.x, &warden.y, exitX, exitY, WARDEN_SPEED, dt);
             return;
         }
 
