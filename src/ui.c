@@ -1072,7 +1072,7 @@ int MainMenuCount(void) {
        加「Bank」一行后表变了但这里没跟上，导致最后一行 Quit
        永远画不出来、也选不到，菜单里没有任何退出游戏的途径。
        表长度：有档 12 / 无档 11（无无尽）；各 +1（有无尽）。 */
-    int endlessUnlocked = (bestLevel >= 10) || gameWon;
+    int endlessUnlocked = EndlessUnlocked();
     if (endlessUnlocked) {
         return hasSave ? 13 : 12;
     }
@@ -1104,7 +1104,7 @@ static const char* MenuLabel(int i) {
             static const char* withEndless[] = {"Continue", "New Run", "Endless", "Hub", "Bank", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
             static const char* noSaveEndless[] = {"New Run", "Endless", "Hub", "Bank", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
             /* Endless 解锁条件：通关过第 10 层 */
-            int endlessUnlocked = (bestLevel >= 10) || gameWon;
+            int endlessUnlocked = EndlessUnlocked();
             int zh = (g_lang == LANG_ZH);
             if (endlessUnlocked) {
                 if (zh) return hasSave ? withEndlessZh[i] : noSaveEndlessZh[i];

@@ -9,6 +9,33 @@
 
 ## [未发布]
 
+### 修复（v28 存档 / 模式状态 / 锁箱）
+- **语言选项重启后丢失**：`g_save.lang` 一直在写，但 `LoadSettings` 读完从不赋值，
+  只有 `ContinueRun` 会恢复语言。现在启动读设置时也会恢复（越界值回退英文）。
+- **无尽模式重启后被锁回去**：解锁条件里的 `gameWon` 只是单局结果，而主线第 8 层
+  就结束、`bestLevel` 到不了 10，所以「通关过」一退出游戏就归零。新增跨局存档字段
+  `gameClearedSave`，并让菜单绘制与点击共用 `EndlessUnlocked()`；旧档用 FIRST EXIT
+  成就回填，老玩家升级后不会失去已解锁的无尽。
+- **Dynamic Res 未存盘**：设置页里的开关以前根本没进 `SaveBlob`，现在追加到 v28。
+- **在菜单里改设置会清掉 Continue**：启动后尚未 Continue 时运行时世界还是空的，
+  旧 `SaveGame` 会把 `hasRun=0`、地图全空的进度写回去。现在没有活动对局时，
+  `hasRun` 到 `thr[]` 这段连续进度字段沿用上一份存档，大厅/银行/成就/设置照常更新。
+- **每日/战役 → 教程 → Continue 卡在混合关卡**：退出教程时 `trainingMode` 与
+  `tutorialStep` 没有清，菜单又强行把 `hasSave` 置 1；再 Continue 就得到
+  「挑战地图 + 训练模式无限道具」，出口判定还被 `trainingMode` 跳过。
+  现在退出教程/训练会统一走 `ResetRunModeFlags()`，`ContinueRun` 先把所有模式标志
+  清零再由存档恢复，菜单是否显示 Continue 也回到真实存档状态。
+- **上锁箱子太少见**：原来只有保险丝箱会掷锁（18%、每层最多 2 个），补给箱完全不参与。
+  改成所有容器放完后统一判定（30%、每层最多 3 个），并保证锁完仍有足够的未上锁箱子
+  放本层保险丝，避免调高频率后卡关。
+- 存档格式 27 → **28**；v25/v26/v27 按前缀迁移，不丢进度。
+- **进战役 / 每日 / 无尽会静默丢掉进行中的存档**：主菜单先 `SaveGame()` 再
+  `DeleteSave()`，等于刚存一份、马上删掉。现在开始这三种模式不再删档，
+  等新模式第一次存档自然覆盖；即使开局立刻崩溃，也还能 Continue 回原进度。
+- **`DeleteSave()` 删不干净**：只删主档，`.bak` 还留在盘上；`LoadSettings`
+  在主档读不到时会回退 `.bak`，于是「新开一局 → 首次存档前退出」可能把旧局复活。
+  现在主档 / `.bak` / `.tmp` 一起删。
+
 ### 内置程序化配乐
 - 新增 `src/music_proc.c` / `include/music_proc.h`，把 `canity-music/horror3.c` 的四首曲子
   （Hollow / Crawl / Fracture / Lull）作为 `MUSIC_BUILTIN` provider 接进游戏，零素材、零启动卡顿。

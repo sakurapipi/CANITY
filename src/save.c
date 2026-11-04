@@ -166,6 +166,7 @@ static void CopyDisplaySettings(SaveBlob* s) {
     s->fullscreen = isFullscreen;
     s->fpsCap = fpsCapIndex;
     s->scale = renderScaleIndex;
+    s->dynamicRes = dynamicRes;
     s->fov = fovIndex;
     s->vignette = vignetteOn;
     s->showFps = showFps;
@@ -194,6 +195,9 @@ static void SaveSettingsOnly(void) {
         tmp.hasRun = 0;
     }
     CopyDisplaySettings(&tmp);
+    /* 训练场不写进度，但「通关过」和「无尽已解锁」是跨局记录，
+       不能被一次只写设置的存档覆盖掉。 */
+    tmp.gameClearedSave = gameCleared;
 
     char p[MAX_PATH];
     for (int i = 0; i < SAVE_CAND_COUNT; i++) {
@@ -210,6 +214,12 @@ static void SaveSettingsOnly(void) {
     g_saveState = 2;
 }
 
+/* 训练/教程退出后，菜单要知道「真正的存档里还有没有一局」。
+   直接读 g_save.hasRun，而不是沿用训练局强行置上的 hasSave。 */
+int SaveHasPendingRun(void) {
+    return g_save.hasRun ? 1 : 0;
+}
+
 void SaveGame(void) {
     /* 训练场不是正式进度：写进去的话 Continue 会读出一张走廊图。
        但设置项仍然要落盘，否则在教程里改完设置重开就白改了。 */
@@ -217,6 +227,26 @@ void SaveGame(void) {
         SaveSettingsOnly();
         return;
     }
+    /* ==================================================================
+     * v28：**在菜单里改设置时，别用空的世界覆盖掉 Continue**
+     * ------------------------------------------------------------------
+     * SaveGame 会把「运行时世界」整份序列化。但启动后如果玩家还没点
+     * Continue，运行时世界根本没加载（currentLevel/地图都是初值），
+     * 在菜单里改一下语言、买个技能也会走到这里 —— 原来就会写出一份
+     * hasRun=0、地图全空的存档，把可继续的进度毁掉。
+     *
+     * 结构体里从 hasRun 到 thr[] 正好是**连续的一整段进度字段**，
+     * 所以没有活动对局时把这一段从上一份 blob 原样搬回来即可；
+     * 大厅/银行/成就/设置仍然按当前运行时写。
+     * ================================================================ */
+    SaveBlob prev = g_save;
+    int keepPendingRun =
+        (!runInProgress && prev.magic == SAVE_MAGIC && prev.hasRun &&
+         prev.saveSlot == g_saveSlot &&   /* 刚切换存档槽时不要把旧槽的进度带过来 */
+         currentState != STATE_PLAYING && currentState != STATE_PAUSED &&
+         currentState != STATE_GAMEOVER);
+    size_t runOff = offsetof(SaveBlob, hasRun);
+    size_t runLen = offsetof(SaveBlob, hudDetail) - runOff;
     memset(&g_save, 0, sizeof(g_save));
     g_save.magic = SAVE_MAGIC;
     g_save.version = SAVE_VERSION;
@@ -388,6 +418,13 @@ void SaveGame(void) {
     g_save.bestEndlessLevel = bestEndlessLevel;
     g_save.bestEndlessScore = bestEndlessScore;
     g_save.isEndlessRunSaved = isEndlessRun;
+    /* v28：通关记录必须持久化，否则重启后 Endless 又从菜单里消失 */
+    g_save.gameClearedSave = gameCleared;
+
+    /* v28：没有活动对局（在菜单里改设置/买东西）→ 进度段沿用上一份存档，
+       不要让空的运行时世界把 Continue 覆盖掉。 */
+    if (keepPendingRun)
+        memcpy((char*)&g_save + runOff, (const char*)&prev + runOff, runLen);
 
     /* 逐个候选试写，第一个成功的就用它 */
     char p[MAX_PATH];
@@ -698,6 +735,10 @@ int LoadSettings(void) {
     /* 读进来的字节可能比当前结构短：先把尾部清零，后面才能安全地按
        “缺字段取默认值”处理。 */
     int hasMusicField = (fileSize >= offsetof(SaveBlob, musicVolume) + sizeof(float));
+    /* v28 字段：v27 及更早的存档不包含它们，读档时按「字段是否完整在文件里」判断，
+       缺字段时取默认值（Dynamic Res 默认开、未通关）。 */
+    int hasDynamicResField = (fileSize >= offsetof(SaveBlob, dynamicRes) + sizeof(int));
+    int hasGameClearedField = (fileSize >= offsetof(SaveBlob, gameClearedSave) + sizeof(int));
     if (fileSize < sizeof(g_save))
         memset((char*)&g_save + fileSize, 0, sizeof(g_save) - fileSize);
 
@@ -710,9 +751,10 @@ int LoadSettings(void) {
         MigrateV24(&g_save, &old);
         fileSize = sizeof(SaveBlob);
     }
-    /* v25 / v26：新字段都追加在结构末尾，前缀可以直接读。
-       v25 缺 runPrincipalSave，用本局本金兜底（和原来的迁移一致）。 */
-    if (g_save.version == 25 || g_save.version == 26) {
+    /* v25 / v26 / v27：新字段都追加在结构末尾，前缀可以直接读。
+       v25 缺 runPrincipalSave，用本局本金兜底（和原来的迁移一致）；
+       v28 新增的 Dynamic Res / 通关记录由下面的 has*Field 判断补默认值。 */
+    if (g_save.version == 25 || g_save.version == 26 || g_save.version == 27) {
         g_save.version = SAVE_VERSION;
         if (g_save.runPrincipalSave == 0) g_save.runPrincipalSave = g_save.carryGoldSave;
     }
@@ -763,11 +805,20 @@ int LoadSettings(void) {
     isFullscreen = g_save.fullscreen;
     fpsCapIndex = g_save.fpsCap;
     renderScaleIndex = g_save.scale;
+    /* v28：Dynamic Res 以前完全没有进存档，重启后总是回到默认开。 */
+    dynamicRes = hasDynamicResField ? g_save.dynamicRes : 1;
+    if (dynamicRes < 0 || dynamicRes > 1) dynamicRes = 1;
     fovIndex = g_save.fov;
     vignetteOn = g_save.vignette;
     showFps = g_save.showFps;
     hudDetail = g_save.hudDetail;
     qteHint = g_save.qteHint;
+    /* v28：**语言选项在启动时也必须恢复**。
+       以前只有 ContinueRun 会写 g_lang —— 也就是说：
+         · 改完语言、退出设置，当场生效（内存里已经改了）
+         · 重启后 LoadSettings 读完 g_save.lang 却从不赋值 → 又变回英文
+       这就是「语言选项没有保存」的直接原因。 */
+    g_lang = (g_save.lang == LANG_ZH) ? LANG_ZH : LANG_EN;
     gammaValue = g_save.gamma;
     mouseSens = g_save.sens;
     carryGold = g_save.carryGold;
@@ -857,6 +908,15 @@ int LoadSettings(void) {
         isEndlessRun = 0;
     }
 
+    /* v28：恢复「曾经通关」记录。
+       v27 及更早没有这个字段 —— 用 FIRST EXIT 成就回填，老玩家升级后
+       不会突然失去已经解锁的无尽模式（这个成就正好在成功撤离/通关时解锁）。 */
+    if (hasGameClearedField) {
+        gameCleared = g_save.gameClearedSave ? 1 : 0;
+    } else {
+        gameCleared = (g_achievements[1].unlocked != 0);
+    }
+
     /* 文件里也记了它属于哪个槽；以文件为准，防止扫描选错 */
     if (g_save.saveSlot >= 0 && g_save.saveSlot < SAVE_SLOTS)
         g_saveSlot = g_save.saveSlot;
@@ -875,6 +935,18 @@ int LoadSettings(void) {
 
 /* 把存档里的进度灌回运行时 */
 void ContinueRun(void) {
+    /* v28：**读档前必须先清模式标志**。
+       原来越野：每日/战役 → 暂停 → 主菜单（标志还留着）→ 教程 → 退出教程
+       （trainingMode 留着）→ Continue → 读出来的挑战地图上，
+       trainingMode 仍是 1：道具无限、出口判定被跳过，于是卡在关卡里。
+       现在训练/教程/每日/战役/无尽全部清零，再由存档决定这一局是什么模式。 */
+    if (!g_save.hasRun) {
+        /* 存档里没有可继续的进度（例如只写过设置的档）：别造一局空世界。 */
+        hasSave = 0;
+        runInProgress = 0;
+        return;
+    }
+    ResetRunModeFlags();
     { extern int knockCountRun,throwHitCountRun,echoCellsTotalRun,dailyEscapeCount;
       extern int floorsNoSanityLoss,wardenCleanFloors,fullHideDone;
       extern float doubleHuntSeconds;
@@ -1109,7 +1181,21 @@ void ContinueRun(void) {
 
 void DeleteSave(void) {
     char p[MAX_PATH];
-    for (int i = 0; i < SAVE_CAND_COUNT; i++) DeleteFileA(SavePathCand(i, p, sizeof(p)));
+    for (int i = 0; i < SAVE_CAND_COUNT; i++) {
+        const char* cand = SavePathCand(i, p, sizeof(p));
+        DeleteFileA(cand);
+        /* v29：**连 .bak / .tmp 一起删** ——
+           LoadSettings 在主档读不到时会回退 .bak；
+           只删主档的话，「新开一局 → 首次存档前退出/崩溃」
+           下次启动就会从 .bak 把旧局复活，等于删档没删干净。 */
+        {
+            char side[MAX_PATH + 8];
+            snprintf(side, sizeof(side), "%s.bak", cand);
+            DeleteFileA(side);
+            snprintf(side, sizeof(side), "%s.tmp", cand);
+            DeleteFileA(side);
+        }
+    }
     g_save.hasRun = 0;
     hasSave = 0;
     runInProgress = 0;

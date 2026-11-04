@@ -32,6 +32,7 @@ extern int showFps;
 extern int fpsCapIndex;             /* 30 / 60 / 120 / 144 / 不限制 */
 extern const int fpsCaps[5];
 extern int renderScaleIndex;        /* 0..3 = 100/75/50/25% */
+extern int dynamicRes;              /* 1 = 自动降分辨率 */
 extern const int renderScales[4];
 extern float mouseSens;             /* 0.2x - 3.0x */
 extern int vignetteOn;              /* 低理智红边特效 */
@@ -121,10 +122,17 @@ extern float pickupMsgTimer;
 extern int bestLevel;
 extern int bestEndlessLevel;      /* 无尽模式最高层数 */
 extern int bestEndlessScore;      /* 无尽模式最高分 */
+extern int gameCleared;           /* 曾经通关/成功撤离过（跨局持久，解锁无尽） */
+int  EndlessUnlocked(void);       /* 无尽模式是否已解锁（菜单/入口共用一份判定） */
 extern float volumeF;               /* 0..1，音效音量，0 = 静音 */
 extern float musicVolumeF;          /* 0..1，音乐音量，0 = 静音 */
 extern int runInProgress;
 extern int isEndlessRun;            /* 当前是否为无尽模式 */
+
+/* 离开一局 / 读档前必须调用：清掉训练、教程、每日、战役、无尽等
+   「当前模式」运行时标志。只在已经 SaveGame() 之后调用，
+   否则写进存档的模式会丢。 */
+void ResetRunModeFlags(void);
 
 /* ---- 交互 ---- */
 extern int hoverKind;               /* 0=无 1=容器 2=配电箱 */

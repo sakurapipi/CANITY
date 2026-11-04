@@ -241,6 +241,16 @@ int bestLevel = 0;
 int bestEndlessLevel = 0;   /* 无尽模式最高层数 */
 int bestEndlessScore = 0;   /* 无尽模式最高分 */
 int isEndlessRun = 0;       /* 当前是否为无尽模式 */
+/* v28：跨局持久记录 —— 只要成功撤离/通关过一次就置 1。
+   它取代了「用 gameWon 当解锁标志」的写法：gameWon 只描述**这一局**的结果，
+   退出游戏就归零，于是重启后 Endless 又锁上了。 */
+int gameCleared = 0;
+
+/* 无尽模式解锁判定：只留这一份，菜单绘制和点击判定都调它。
+   （以前 ui.c 和 game.c 各抄一份 `(bestLevel >= 10) || gameWon`。） */
+int EndlessUnlocked(void) {
+    return (bestLevel >= 10) || gameCleared || gameWon;
+}
 float volumeF = 0.8f;     /* 0..1，音效音量，0 = 静音 */
 float musicVolumeF = 0.8f;/* 0..1，音乐音量，0 = 静音 */
 int runInProgress = 0;    /* 当前是否有一局未结束 */
@@ -1363,8 +1373,12 @@ static void TutorialUpdate(float dt) {
     if (tutorialDone) {
         tutorialTimer += dt;
         if (tutorialTimer >= 3.5f) {
-            /* 教程不写存档，也不影响正式进度，直接回主菜单。 */
-            trainingMode = 0;
+            /* 教程不写存档，也不影响正式进度，直接回主菜单。
+               v28：必须把模式/教程状态全部清干净。否则训练场的 99 件道具
+               和走廊地图会跟着 trainingMode 一起留到下一次 Continue，
+               变成「挑战地图 + 无限道具」的混合关卡。 */
+            ResetRunModeFlags();
+            hasSave = SaveHasPendingRun();
             currentState = STATE_MAIN_MENU;
             menuSelection = 0;
             isMapOpen = 0;
@@ -1475,6 +1489,53 @@ static void FindFarthestFromCell(int sx, int sy, float* outX, float* outY) {
 /* 旧接口：从出生点 (1,1) 出发 */
 static void FindFarthestCell(float* outX, float* outY) {
     FindFarthestFromCell(1, 1, outX, outY);
+}
+
+/* ==================================================================
+ * v28：**上锁箱子的出现频率**
+ * ------------------------------------------------------------------
+ * 原来只有「阶段1：保险丝箱」会掷锁：18% 概率、每层最多 2 个；
+ * 阶段2 补出来的补给箱完全不参与，而保险丝箱本来就只有 2~6 个 ——
+ * 结果是很多层一个锁箱都见不到，四种锁盘几乎玩不到。
+ *
+ * 现在改成**所有容器放完之后统一判定**：每个箱子 30% 概率上锁，
+ * 每层最多 3 个。等容器数量确定后再判定，才能准确保证
+ * 「未上锁的箱子仍然够放本层要求的保险丝」—— 保险丝不许进锁箱，
+ * 锁太多会让整层无法通关。
+ * ================================================================ */
+#define LOCKBOX_CHANCE_PCT      30
+#define LOCKBOX_MAX_PER_FLOOR    3
+
+static void ApplyLockboxes(void) {
+    lockedThisFloor = 0;
+    if (currentLevel < 2 || containerCount <= 0) return;
+
+    int unlocked = 0;
+    for (int i = 0; i < containerCount; i++)
+        if (!containers[i].locked) unlocked++;
+
+    /* 锁完之后至少还要剩 fusesNeeded 个未上锁箱子放保险丝。 */
+    int room = unlocked - fusesNeeded;
+    if (room > LOCKBOX_MAX_PER_FLOOR) room = LOCKBOX_MAX_PER_FLOOR;
+    if (room <= 0) return;
+
+    /* 打乱顺序，避免「永远从 0 号箱开始锁」的规律感。 */
+    int order[MAX_CONTAINERS];
+    for (int i = 0; i < containerCount; i++) order[i] = i;
+    for (int i = containerCount - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        int t = order[i]; order[i] = order[j]; order[j] = t;
+    }
+
+    for (int n = 0; n < containerCount && lockedThisFloor < room; n++) {
+        int idx = order[n];
+        if (containers[idx].locked) continue;
+        if ((rand() % 100) >= LOCKBOX_CHANCE_PCT) continue;
+        lockedThisFloor++;
+        containers[idx].locked = 1;
+        containers[idx].lockType = rand() % LOCK_TYPE_COUNT;
+        containers[idx].lockCode = rand() & 0x7FF;
+    }
 }
 
 void GenerateLevel(void) {
@@ -1633,6 +1694,8 @@ void GenerateLevel(void) {
     for (int i = 0; i < MAX_CONTAINERS; i++) {
         containers[i].active = 0;
         containers[i].locked = 0;      /* v3.0：换层清锁 */
+        containers[i].lockType = 0;
+        containers[i].lockCode = 0;
         containers[i].searched = 0;
     }
     lockedThisFloor = 0;   /* v3.0：每层重新计数 */
@@ -1775,17 +1838,6 @@ void GenerateLevel(void) {
         containers[containerCount].searched = 0;
         containers[containerCount].content = 0;  /* 先占位，后面再分发内容 */
         containers[containerCount].active = 1;
-        /* v3.0：上锁箱子（移植自上游 v2.2.0）——
-           第 2 层起 18% 概率，每层最多 2 个。 */
-        containers[containerCount].locked = 0;
-        containers[containerCount].lockType = 0;
-        containers[containerCount].lockCode = 0;
-        if (currentLevel >= 2 && lockedThisFloor < 2 && (rand() % 100) < 18) {
-            lockedThisFloor++;
-            containers[containerCount].locked = 1;
-            containers[containerCount].lockType = rand() % LOCK_TYPE_COUNT;
-            containers[containerCount].lockCode = rand() & 0x7FF;
-        }
         containerCount++;
     }
     /* v3.0：藏身点 —— 两轮放置：
@@ -1894,6 +1946,9 @@ void GenerateLevel(void) {
         containers[containerCount].active = 1;
         containerCount++;
     }
+
+        /* v28：容器数量已经确定，统一判定这一层有哪些箱子上了锁。 */
+        ApplyLockboxes();
 
         /* 修复死局 Bug：优先保证能通关（放满 fusesNeeded）。
    只有在箱子极其充裕（多出 2 个以上）时，才留格子给其他物品。 */
@@ -3262,7 +3317,7 @@ void Update(float dt) {
                    的僵尸档，下次启动会出现假的 Continue。 */
                 runInProgress = 0;
                 dailyEscapeCount++; DailyObserve(DQ_ESCAPE,dailyEscapeCount);
-                gameWon=1; CheckAchievements();
+                gameWon=1; gameCleared=1; CheckAchievements();
                 BankSettle(1); hasSave=0;
             }
             gameWon = 1;
@@ -4348,6 +4403,7 @@ void Update(float dt) {
                 return;
             }
             gameWon = 1;
+            gameCleared = 1;   /* v28：跨局记录，重启后 Endless 仍然解锁 */
             runInProgress = 0;
             /* v2.2：战役通关原来**没有 ComputeScore**，结算页显示上一局残留，
                也不给核心。现在补上。 */
@@ -4374,6 +4430,7 @@ void Update(float dt) {
         if (currentLevel >= WIN_LEVEL && !isEndlessRun) {
             /* 主线通关：走进第 10 层的出口就是结局，不再生成下一层 */
             gameWon = 1;
+            gameCleared = 1;   /* v28：跨局记录，重启后 Endless 仍然解锁 */
             runInProgress = 0;
             /* Settle after all victory rewards and achievement checks. */
             currentState = STATE_GAMEOVER;
@@ -4535,7 +4592,7 @@ void StartDailyRun(void) {
     dailySeed = (tm->tm_year + 1900) * 10000 + (tm->tm_mon + 1) * 100 + tm->tm_mday;
     srand((unsigned)dailySeed);
     curWeapon = dailySeed % WPN_COUNT;
-    DeleteSave();
+    /* v29：不删旧存档 —— 见 ActivateMenuItem 里的说明。 */
     pendingStartMode = START_DAILY;
     StartGame();
     /* 强制机制：每日挑战理智流失 +25%，金币 +25%。
@@ -4549,7 +4606,7 @@ void StartCampaign(int stage) {
     if (stage >= CAMPAIGN_STAGE_COUNT) stage = CAMPAIGN_STAGE_COUNT - 1;
     srand((unsigned)(9000 + stage * 733));
     curWeapon = stage % WPN_COUNT;
-    DeleteSave();
+    /* v29：不删旧存档 —— 见 ActivateMenuItem 里的说明。 */
     pendingStartMode = START_CAMPAIGN;
     pendingCampaignStage = stage;
     StartGame();
@@ -4779,6 +4836,27 @@ static void ResetModeFlags(void) {
     dailyMode = 0;
     campaignMode = 0;
     campaignStage = 0;
+    /* v28：教程状态是「训练模式」的一部分，模式清零时必须一起清。
+       原来退出教程只把 trainingMode 置 0，tutorialStep/Done 会留到下一次
+       进入对局；如果 trainingMode 又被别的路径带回来，就会在
+       每日/战役地图上继续跑教程步骤。 */
+    tutorialStep = 0;
+    tutorialDone = 0;
+    tutorialGuideOn = 0;
+    tutorialTimer = 0.0f;
+    tutorialActionTimer = 0.0f;
+}
+
+/* v28：**离开一局 / 读档前统一清理运行时模式状态**。
+   必须在 SaveGame() 之后调用（先让存档记下 daily/campaign 模式），
+   否则会把「退出时还在每日挑战里」这件事也清掉，Continue 就回不去了。 */
+void ResetRunModeFlags(void) {
+    ResetModeFlags();
+    runInProgress = 0;
+    exitChoiceOpen = 0;
+    exitGoDeeper = 0;
+    { extern int lockActive; extern void CloseLockOverlay(void);
+      if (lockActive) CloseLockOverlay(); }
 }
 
 static void ApplyCampaignRules(int stage) {
@@ -5242,7 +5320,7 @@ void ActivateMenuItem(void) {
     }
     if (currentState == STATE_MAIN_MENU) {
         int base = hasSave ? 1 : 0;
-        int endlessUnlocked = (bestLevel >= 10) || gameWon;
+        int endlessUnlocked = EndlessUnlocked();
         int sel = menuSelection;
 
         /* ===== v6 **菜单索引彻底重写** =====
@@ -5284,8 +5362,7 @@ void ActivateMenuItem(void) {
         if (sel == 0 && hasSave) {
             ContinueRun();
         } else if (endlessUnlocked && sel == base + 1) {
-            /* Endless 模式 */
-            DeleteSave();
+            /* Endless 模式（v29：和战役/每日一样，不静默删旧档） */
             pendingStartMode = START_ENDLESS;
             StartGame();
         } else if (sel == ixNew) {
@@ -5337,12 +5414,14 @@ void ActivateMenuItem(void) {
             rebindConflict = -1;
             uiDirty = 1;
         } else if (sel == ixCampaign) {
-            /* v2.2：战役模式 */
-            SaveGame();
+            /* v2.2：战役模式。
+               v29：不再先 SaveGame() 再 DeleteSave() ——
+               那两句等于「刚存一份、马上删掉」，正在进行的普通局会被静默丢弃。
+               现在保留原存档，等战役第一次存档时自然覆盖；即使开局就崩溃，
+               玩家也还能 Continue 回原来的进度。 */
             StartCampaign(0);
         } else if (sel == ixDaily) {
-            /* v2.2：每日挑战 */
-            SaveGame();
+            /* v2.2：每日挑战（同上：不静默删档） */
             StartDailyRun();
         } else if (sel == ixTutorial) {
             /* v3.1：训练营改成新手教程 —— 不删档，不影响正式进度 */
@@ -5379,13 +5458,37 @@ void ActivateMenuItem(void) {
             rebindConflict = -1;
             uiDirty = 1;
         } else if (menuSelection == 2) {
+            /* v28：训练/教程不是正式进度。
+               原来这里无条件 SaveGame() + hasSave=1：
+                 · SaveGame() 只写了设置（正确）
+                 · 但 trainingMode **没有清**，hasSave 却被强行置 1
+               于是回到菜单点 Continue，会把上一份每日/战役存档读出来，
+               同时 trainingMode 还是 1 —— 挑战地图 + 训练模式无限道具，
+               教程的出口判定又因为 trainingMode 被跳过，玩家卡死在里面。
+               现在训练局直接丢弃，模式标志全部清掉；菜单里是否还有
+               Continue 由真正的存档决定，不再强行伪造一个。 */
+            if (trainingMode) {
+                ResetRunModeFlags();
+                hasSave = SaveHasPendingRun();
+                currentState = STATE_MAIN_MENU;
+                menuSelection = 0;
+                ForceCursor(1);
+                uiDirty = 1;
+                return;
+            }
             SaveGame();
             hasSave = 1;
+            /* 注意：这里**不能**清 dailyMode/campaignMode/runInProgress ——
+               菜单里改设置还会调用 SaveGame，而 SaveGame 会按运行时状态
+               重新序列化整份存档。清了模式标志，Continue 出来的每日/战役
+               就会退化成普通局。 */
             currentState = STATE_MAIN_MENU;
             menuSelection = 0;
             uiDirty = 1;
         }
     } else if (currentState == STATE_GAMEOVER) {
+        /* 结算已落盘：清掉本局模式标志，避免带进下一次开局/继续。 */
+        ResetRunModeFlags();
         currentState = STATE_MAIN_MENU;
         menuSelection = 0;
         uiDirty = 1;

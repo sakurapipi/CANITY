@@ -323,6 +323,100 @@ static void test_stable_visuals_and_input(void) {
     free((void*)render);
 }
 
+/* ==================================================================
+ * v28：**存档必须真的把设置和进度读回来**
+ * ------------------------------------------------------------------
+ * 用户报「语言、无尽模式没保存」。根因不是没写，而是：
+ *   · g_save.lang 只在 ContinueRun 里恢复，启动读设置时从不赋值；
+ *   · 无尽解锁看的是 gameWon（单局结果），退出游戏就归零；
+ *   · Dynamic Res 根本没进 SaveBlob。
+ * 这些都不是能靠手玩回归覆盖的，所以在这里钉住。
+ * ================================================================== */
+static void test_save_persist_contract(void) {
+    const char* saveh = read_file("include/save.h");
+    const char* savec = read_file("src/save.c");
+    const char* game  = read_file("src/game.c");
+    const char* gameh = read_file("include/game.h");
+    const char* uic   = read_file("src/ui.c");
+
+    check(contains(saveh, "SAVE_VERSION 28"), "save format must be v28");
+    check(contains(savec, "g_lang = (g_save.lang == LANG_ZH)"),
+          "language is saved but never restored at startup");
+    check(contains(savec, "s->dynamicRes = dynamicRes"),
+          "Dynamic Res is still not written to the save blob");
+    check(contains(savec, "g_save.gameClearedSave = gameCleared"),
+          "clear record is not written to the save blob");
+    check(contains(savec, "g_save.version == 27"),
+          "v27 saves must migrate by prefix instead of being archived");
+    check(contains(savec, "keepPendingRun"),
+          "menu SaveGame can still clobber the pending run with an empty world");
+    check(contains(gameh, "int  EndlessUnlocked(void)"),
+          "EndlessUnlocked declaration missing");
+    check(contains(game, "int EndlessUnlocked(void)"),
+          "EndlessUnlocked implementation missing");
+    check(contains(uic, "EndlessUnlocked()"),
+          "menu does not use the shared endless unlock rule");
+    check(!contains(uic, "(bestLevel >= 10) || gameWon"),
+          "duplicate endless unlock rule came back");
+
+    free((void*)saveh);
+    free((void*)savec);
+    free((void*)game);
+    free((void*)gameh);
+    free((void*)uic);
+}
+
+/* ==================================================================
+ * v28：**训练/教程不能把模式状态泄漏进 Continue**
+ * ------------------------------------------------------------------
+ * 复现：每日/战役 → 暂停 → 主菜单 → 教程 → 暂停 → 主菜单 → Continue
+ * 结果：挑战地图 + trainingMode 的无限道具，教程出口判定又被跳过。
+ * 修法固定成三条契约：
+ *   ① ContinueRun 先把所有模式标志清零，再由存档决定模式；
+ *   ② 离开教程后菜单保存只写设置（runSaveSuspended）；
+ *   ③ 菜单的 hasSave 回到真实存档状态，而不是强行置 1。
+ * ================================================================== */
+static void test_mode_leak_contract(void) {
+    const char* savec = read_file("src/save.c");
+    const char* game  = read_file("src/game.c");
+
+    check(contains(savec, "ResetRunModeFlags();"),
+          "ContinueRun must reset stale mode flags before loading");
+    check(contains(savec, "if (trainingMode)"),
+          "training runs must not serialize the tutorial world");
+    check(contains(savec, "keepPendingRun"),
+          "leaving the tutorial must preserve the suspended real run");
+    check(count_contains(game, "hasSave = SaveHasPendingRun();") >= 2,
+          "leaving the tutorial must restore hasSave from the real save");
+    check(count_contains(game, "RunModeFlags") >= 3,
+          "tutorial exit / continue paths are not wired to the shared reset");
+
+    free((void*)savec);
+    free((void*)game);
+}
+
+/* ==================================================================
+ * v28：**上锁箱子频率**
+ * 所有容器放完后统一判定（30% / 每层最多 3 个），同时保留
+ * 「未上锁箱子够放保险丝」的硬约束，否则调高频率会制造无法通关的层。
+ * ================================================================== */
+static void test_lockbox_contract(void) {
+    const char* game = read_file("src/game.c");
+    check(contains(game, "#define LOCKBOX_CHANCE_PCT      30"),
+          "lockbox chance constant missing");
+    check(contains(game, "#define LOCKBOX_MAX_PER_FLOOR    3"),
+          "lockbox per-floor cap missing");
+    check(contains(game, "ApplyLockboxes();"),
+          "lockbox pass is never called from level generation");
+    check(contains(game, "int room = unlocked - fusesNeeded;"),
+          "lockbox generation can lock away the fuse containers");
+    check(contains(game, "for (int n = 0; n < containerCount && lockedThisFloor < room; n++)"),
+          "lockbox pass must roll once per placed container");
+    check(!contains(game, "lockedThisFloor < 2"),
+          "old 18%/2-cap lock logic came back");
+    free((void*)game);
+}
+
 int main(void) {
     test_no_unwired_api();
     test_wallet_single_source();
@@ -331,6 +425,9 @@ int main(void) {
     test_hide_contract();
     test_tune_geometry();
     test_stable_visuals_and_input();
+    test_save_persist_contract();
+    test_mode_leak_contract();
+    test_lockbox_contract();
     puts("CANITY offline self-check: PASS");
     return 0;
 }

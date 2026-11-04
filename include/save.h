@@ -16,7 +16,9 @@
    读档时会按文件的**实际长度**判断是老版本还是新版本：
    老存档照样能读（新增字段取默认值），不用丢玩家进度。
    —— 参见 LoadSettings 里的迁移逻辑。 */
-#define SAVE_VERSION 27   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26 */
+/* v28: 末尾追加 Dynamic Res + 通关记录；v25/v26/v27 都按前缀迁移。
+   v27 及更早的存档没有这两个字段，读档时按文件长度取默认值。 */
+#define SAVE_VERSION 28   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26/v27 */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
@@ -167,6 +169,14 @@ typedef struct {
     int bestiaryKnowledge[18];
     /* v27：音乐音量独立于音效音量。追加在末尾，旧档读不到时回退到音效音量。 */
     float musicVolume;
+    /* v28：这两个设置/进度原来根本没有进存档。
+       · dynamicRes —— 设置页里的 Dynamic Res，重启后总是回到默认 ON；
+       · gameClearedSave —— 「通关过一局」的持久记录。无尽模式的解锁条件是
+         `bestLevel >= 10 || gameWon`，而 main 模式在第 8 层就结束、
+         bestLevel 永远到不了 10，所以唯一解锁途径 gameWon 只是运行时变量，
+         重启后 Endless 从菜单里消失。 */
+    int dynamicRes;
+    int gameClearedSave;
 } SaveBlob;
 
 /* 写当前进度（游戏中 / 退出时） */
@@ -175,6 +185,8 @@ void SaveGame(void);
 int LoadSettings(void);
 /* 把存档里的进度灌回运行时 */
 void ContinueRun(void);
+/* 存档里是否还有一局可继续（训练局退出后恢复菜单用） */
+int SaveHasPendingRun(void);
 void DeleteSave(void);
 
 #endif /* CANITY_SAVE_H */
