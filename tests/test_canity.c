@@ -339,7 +339,7 @@ static void test_save_persist_contract(void) {
     const char* gameh = read_file("include/game.h");
     const char* uic   = read_file("src/ui.c");
 
-    check(contains(saveh, "SAVE_VERSION 28"), "save format must be v28");
+    check(contains(saveh, "SAVE_VERSION 29"), "save format must be v29");
     check(contains(savec, "g_lang = (g_save.lang == LANG_ZH)"),
           "language is saved but never restored at startup");
     check(contains(savec, "s->dynamicRes = dynamicRes"),
@@ -348,6 +348,14 @@ static void test_save_persist_contract(void) {
           "clear record is not written to the save blob");
     check(contains(savec, "g_save.version == 27"),
           "v27 saves must migrate by prefix instead of being archived");
+    /* 2026-11-05 v29：第 6 条局内强化不能塞进 runUpgSave[5]（它在结构体中间，
+       一改就整体错位），必须追加在末尾并单独读。 */
+    check(contains(saveh, "runUpgMinimapSave"),
+          "minimap upgrade level is not persisted at all");
+    check(contains(savec, "RunUpgLoadExtra(g_save.runUpgMinimapSave)"),
+          "minimap upgrade level is written but never read back");
+    check(contains(savec, "g_save.version == 28"),
+          "v28 saves must still migrate by prefix (v29 appended a tail field)");
     check(contains(savec, "keepPendingRun"),
           "menu SaveGame can still clobber the pending run with an empty world");
     check(contains(gameh, "int  EndlessUnlocked(void)"),
@@ -376,6 +384,158 @@ static void test_save_persist_contract(void) {
  *   ② 离开教程后菜单保存只写设置（runSaveSuspended）；
  *   ③ 菜单的 hasSave 回到真实存档状态，而不是强行置 1。
  * ================================================================== */
+/* ==================================================================
+ * v29：地图耗电契约（2026-11-05 用户要求）
+ * ------------------------------------------------------------------
+ *   · 大地图（全屏）打开时游戏暂停，并且**不耗电**
+ *   · 小地图耗电可被局内强化降低：10 / 8 / 6 / 4 每秒
+ * ================================================================== */
+static void test_map_drain_contract(void) {
+    const char* game = read_file("src/game.c");
+    const char* upg  = read_file("src/upgrade_run.c");
+    const char* upgh = read_file("include/upgrade_run.h");
+
+    check(contains(game, "isMapOpen && !mapFullScreen"),
+          "full-screen map still drains the battery");
+    check(contains(game, "RunUpgMapDrainPct()"),
+          "minimap drain does not consult the upgrade level");
+    check(contains(upgh, "RUN_UPG_COUNT 6"),
+          "the minimap upgrade slot is missing");
+    check(contains(upg, "MAP_BATTERY_DRAIN - 2.0f"),
+          "minimap saving does not subtract 2 percent per rank");
+    check(contains(upg, "RunUpgMapDrainLevel"),
+          "minimap upgrade level accessor missing");
+
+    free((void*)game);
+    free((void*)upg);
+    free((void*)upgh);
+}
+
+/* ==================================================================
+ * 2026-11-05：**六种锁型必须都接到底**
+ * ------------------------------------------------------------------
+ * 新增一种锁最容易漏的三处：
+ *   ① LOCK_TYPE_COUNT 改了但绘制分发没加 → 开锁后是空白面板
+ *   ② 命中测试没加 → 鼠标点哪里都没反应
+ *   ③ 没有逐帧 Tick → 按住类的锁永远不动
+ * 这里把五种入口一起钉住。
+ * ================================================================== */
+static void test_lock_types_contract(void) {
+    const char* lk  = read_file("src/lockbox.c");
+    const char* lkh = read_file("include/lockbox.h");
+    const char* gm  = read_file("src/game.c");
+
+    check(contains(lkh, "LOCK_TYPE_OVERLOAD = 4"), "overload lock type missing");
+    check(contains(lkh, "LOCK_TYPE_SAW      = 5"), "saw lock type missing");
+    check(contains(lkh, "LOCK_TYPE_COUNT"), "lock type count missing");
+
+    /* 绘制分发 */
+    check(contains(lk, "lockType == LOCK_TYPE_OVERLOAD"),
+          "overload is never drawn");
+    check(contains(lk, "lockType == LOCK_TYPE_SAW"),
+          "saw is never drawn");
+    /* 逐帧推进 */
+    check(contains(lk, "void LockTick(float dt)"),
+          "LockTick missing");
+    check(contains(gm, "LockTick(dt)"),
+          "LockTick is never called from Update");
+    /* 按住 / 松开 */
+    check(contains(lk, "void LockHoldBegin(void)"), "LockHoldBegin missing");
+    check(contains(lk, "void LockHoldEnd(void)"),   "LockHoldEnd missing");
+    check(contains(gm, "LockHoldEnd()"),
+          "LBUTTONUP never releases the hold");
+    /* 几何共用（铁律二十一） */
+    check(contains(lk, "static LockBox LockHandleBarBox(void)"),
+          "handle bar geometry missing");
+    check(contains(lk, "LOCK_HIT_HANDLE"),
+          "handle hit code never returned");
+
+    /* 训练营：每种锁型各一个箱子 */
+    check(contains(gm, "containerCount = 1 + LOCK_TYPE_COUNT;"),
+          "training arena no longer spawns one box per lock type");
+
+    free((void*)lk);
+    free((void*)lkh);
+    free((void*)gm);
+}
+
+/* ==================================================================
+ * 2026-11-05：**宝箱怪契约**
+ * ------------------------------------------------------------------
+ * 这个怪最容易写错的四处：
+ *   ① 替换顺序：必须在 ApplyLockboxes 之前，否则会被发一把锁
+ *   ② 保险丝箱：绝不能替换，否则整层无解（铁律四十九）
+ *   ③ 扳手钩子：它不在 monHunters[] 里，不单独扫就永远敲不到
+ *   ④ 空壳：离场必须留下可翻的战利品，否则"冒险"没有回报
+ * ================================================================== */
+static void test_mimic_contract(void) {
+    const char* gm  = read_file("src/game.c");
+    const char* mc  = read_file("src/mimic.c");
+    const char* mh  = read_file("include/mimic.h");
+    const char* bs  = read_file("src/bestiary.c");
+    const char* rd  = read_file("src/render.c");
+
+    /* ① 生成期替换必须在 ApplyLockboxes 之前 */
+    check(contains(gm, "MimicTrySpawn(currentLevel, containerCount);\n    ApplyLockboxes();"),
+          "mimic spawn must run BEFORE ApplyLockboxes, or it gets a lock");
+
+    /* ② 保险丝箱永不被替换 */
+    check(contains(mc, "if (containers[i].content != 0) continue;"),
+          "a fuse crate must never become a mimic (that is an unwinnable floor)");
+    check(contains(mc, "if (containers[i].locked) continue;"),
+          "a locked crate must not become a mimic");
+
+    /* ③ 三个特有登记点 */
+    check(contains(gm, "MimicOnSearchStep("),   "search hook (bite at 60 percent) missing");
+    check(contains(gm, "MimicWrenchSweep("),    "wrench hook missing - it is not in monHunters[]");
+    check(contains(gm, "MimicOnGlue("),         "glue hook missing");
+
+    /* ④ 空壳 = 全部奖励的载体 */
+    check(contains(gm, "void MimicSpawnShell(int slot, float x, float y)"),
+          "shell spawner missing");
+    check(contains(gm, "c->mimicShell"),        "shell loot is never paid out");
+    check(contains(mc, "MimicSpawnShell(m->containerIdx, m->x, m->y)"),
+          "vanish does not leave a shell behind");
+
+    /* ⑤ 不可杀：没有 DEAD 状态 */
+    check(!contains(mh, "MIM_DEAD"),
+          "the mimic must stay unkillable (no combat in this game)");
+
+    /* ⑥ 追击阶段必须发噪音 —— 这才是它真正的危险性 */
+    check(contains(mh, "#define MIM_NOISE_R"),
+          "noise radius constant missing");
+    check(contains(mc, "MakeNoise(m->x, m->y, MIM_NOISE_R)"),
+          "the chase phase never makes noise");
+
+    /* ⑦ 结算加分上限 */
+    check(contains(gm, "MIM_SCORE_BONUS * mimicsEscapedThisRun"),
+          "score bonus not wired");
+    check(contains(mc, "if (mimicsEscapedThisRun > MIM_MAX) mimicsEscapedThisRun = MIM_MAX;"),
+          "score bonus has no cap");
+
+    /* ⑧ 已拍板的数值（2026-11-05 用户确认） */
+    check(contains(mh, "#define MIM_CHASE_TIME       8.0f"),  "chase time must be 8s");
+    check(contains(mh, "#define MIM_LOSE_DIST        3.5f"),  "lose distance must be 3.5 tiles");
+    check(contains(mh, "#define MIM_SCARE_SANITY     25.0f"), "bite sanity must be 25");
+    check(contains(mh, "#define MIM_CATCH_SANITY     35.0f"), "catch sanity must be 35");
+    check(contains(mh, "#define MIM_GOLD_BASE        150"),   "shell gold base must be 150");
+    check(contains(mh, "#define MIM_GOLD_STEP        50"),    "shell gold step must be 50");
+
+    /* ⑨ 回身：进渲染列表 + 图鉴有名字 */
+    check(contains(rd, "DrawMimicSprite(list[i].idx)"), "mimic is never rendered");
+    check(contains(bs, "\"MIMIC\""), "bestiary entry missing");
+
+    /* ⑩ 验收完就拆 —— 铁律四十四：调试热键不许留在发布版里 */
+    check(!contains(gm, "VK_F3"),
+          "the F3 debug spawn hotkey came back (iron law 44)");
+
+    free((void*)gm);
+    free((void*)mc);
+    free((void*)mh);
+    free((void*)bs);
+    free((void*)rd);
+}
+
 static void test_mode_leak_contract(void) {
     const char* savec = read_file("src/save.c");
     const char* game  = read_file("src/game.c");
@@ -396,24 +556,32 @@ static void test_mode_leak_contract(void) {
 }
 
 /* ==================================================================
- * v28：**上锁箱子频率**
- * 所有容器放完后统一判定（30% / 每层最多 3 个），同时保留
- * 「未上锁箱子够放保险丝」的硬约束，否则调高频率会制造无法通关的层。
+ * 上锁箱子频率（2026-11-05 改成**按层递增、封顶 80%**）
+ * ------------------------------------------------------------------
+ * 设计：第 1 层 0%，第 2 层 5%，之后每层 +9%，第 11 层起封顶 80%。
+ * 两条不能破的约束：
+ *   ① 至少留 2 个未上锁箱子（LOCKBOX_MIN_UNLOCKED）
+ *   ② 保险丝「先塞未上锁、再塞锁箱」—— 锁箱占比高时也必须放得下
  * ================================================================== */
 static void test_lockbox_contract(void) {
     const char* game = read_file("src/game.c");
-    check(contains(game, "#define LOCKBOX_CHANCE_PCT      30"),
-          "lockbox chance constant missing");
-    check(contains(game, "#define LOCKBOX_MAX_PER_FLOOR    3"),
-          "lockbox per-floor cap missing");
+    check(contains(game, "static int LockboxPctForFloor(int lv)"),
+          "per-floor lockbox ratio function missing");
+    check(contains(game, "#define LOCKBOX_PCT_CAP         70"),
+          "70 percent lock cap missing");
+    check(contains(game, "#define LOCKBOX_MIN_UNLOCKED     2"),
+          "minimum unlocked boxes missing");
     check(contains(game, "ApplyLockboxes();"),
           "lockbox pass is never called from level generation");
-    check(contains(game, "int room = unlocked - fusesNeeded;"),
-          "lockbox generation can lock away the fuse containers");
-    check(contains(game, "for (int n = 0; n < containerCount && lockedThisFloor < room; n++)"),
-          "lockbox pass must roll once per placed container");
-    check(!contains(game, "lockedThisFloor < 2"),
-          "old 18%/2-cap lock logic came back");
+    check(contains(game, "int limit = containerCount - LOCKBOX_MIN_UNLOCKED;"),
+          "lockbox pass can lock away every container");
+    /* 保险丝两遍填充：第一遍只找未上锁，第二遍才进锁箱 */
+    check(contains(game, "if (need <= keepFree) continue;"),
+          "locked boxes take fuses first but must keep one free");
+    check(contains(game, "const int keepFree = 1;"),
+          "at least one fuse must stay reachable without a lockpick");
+    check(!contains(game, "#define LOCKBOX_CHANCE_PCT"),
+          "old fixed-percent lock logic came back");
     free((void*)game);
 }
 
@@ -426,7 +594,7 @@ int main(void) {
     test_tune_geometry();
     test_stable_visuals_and_input();
     test_save_persist_contract();
-    test_mode_leak_contract();
+    test_mode_leak_contract();test_lock_types_contract();test_mimic_contract();test_map_drain_contract();
     test_lockbox_contract();
     puts("CANITY offline self-check: PASS");
     return 0;

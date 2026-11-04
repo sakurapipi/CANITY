@@ -1147,7 +1147,7 @@ static const char* MenuLabel(int i) {
                 case 2: sprintf(kb, "%s: HOLD %s  (NOISE)", Tr("SEARCH","翻找"), VkName(g_bindings[ACT_INTERACT])); break;
                 case 3: sprintf(kb, "%s: HOLD %s  (+32)", Tr("CRANK","摇电"), VkName(g_bindings[ACT_CRANK])); break;
                 case 4: sprintf(kb, "%s: %s", Tr("LIGHT","手电"), VkName(g_bindings[ACT_FLASHLIGHT])); break;
-                case 5: sprintf(kb, "%s: %s (FULL)  TAB (MINI)  -10/S", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
+                case 5: sprintf(kb, "%s: %s (FULL)  TAB (MINI)", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
                 case 6: sprintf(kb, "%s: %s", Tr("THROW","投掷"), VkName(g_bindings[ACT_THROW])); break;
                 case 7: sprintf(kb, "%s: %s %s %s  (WHEEL: ALL)", Tr("SLOT","选槽"),
                                 VkName(g_bindings[ACT_SELECT_1]), VkName(g_bindings[ACT_SELECT_2]),
@@ -1616,12 +1616,26 @@ static void DrawBenchTree(MenuGeo g) {
             sprintf(nb, "%s%s", benchNodes[id].star ? "* " : "",
                     Tr(benchNodes[id].name, benchNodes[id].nameZh));
             ClampRowText(nb, boxW - UIS(10));
-            DrawTextWin(bx + UIS(5), by + (boxH - th) / 2, nb, textc);
+            /* 有价格时名字靠上，没价格时居中 */
+            { int nameY = (boxH >= th * 2 + UIS(6)) ? (by + UIS(3))
+                                                   : (by + (boxH - th) / 2);
+              DrawTextWin(bx + UIS(5), nameY, nb, textc); }
 
-            if (treeVK > 0.55f) {
+            /* ============================================================
+             * 修：**价格画在框下面，会压到下一行的节点名**
+             * ------------------------------------------------------------
+             * ui_layout 实测（800x600，SHP_TREE 页）：
+             *   "350"(426,195..498,231)  x  "轻装"(426,225..498,261)
+             * 价格是「本框底部 + 2px」，而下一行的框紧挨着 ——
+             * 行距一小，价格的最后一个像素就落进下一行名字里。
+             *
+             * 现在改成**放进框里、贴底一行**，并留一个最小高度检查：
+             * 框太矮（放不下两行字）就干脆不显示价格，只看底部详情条。
+             * ============================================================ */
+            if (treeVK > 0.55f && boxH >= th * 2 + UIS(6)) {
                 char pb[24];
                 sprintf(pb, "%d", benchNodes[id].cost);
-                DrawTextWin(bx + UIS(5), by + boxH + UIS(2), pb,
+                DrawTextWin(bx + UIS(5), by + boxH - th - UIS(3), pb,
                             owned ? 0x00807850u : (affordable ? 0x00A0E0A0u : 0x00C06060u));
             }
         }
@@ -1734,7 +1748,15 @@ void DrawMenuPanels(void) {
             currentState != STATE_HUB &&
             currentState != STATE_BANK) {
             int ty = g.titleY + TextHeightWin() + TextHeightWin() / 2;
-            UiSectionRule(cx2, ty, (R2 - L2) - inner * 2);
+            if (currentState == STATE_SAFEHOUSE) {
+                /* 安全屋：线只铺「内容列」，不越过左边那一列页签 */
+                int tx0, ty0, tx1, ty1;
+                PageTabRect(0, &tx0, &ty0, &tx1, &ty1);
+                extern void UiSectionRuleSpan(int, int, int);
+                UiSectionRuleSpan(tx1 + UIS(24), R2 - inner, ty);
+            } else {
+                UiSectionRule(cx2, ty, (R2 - L2) - inner * 2);
+            }
         }
 
         /* 页脚横线 + 操作提示：只在**有行列表**的界面画。
@@ -1765,7 +1787,14 @@ void DrawMenuPanels(void) {
                现在改成：线必须落在最后一行下面且离面板底还有余量才画，
                放不下就不画 —— 少一条装饰线，不压字。 */
             if (lineY + UIS(2) <= fy) {
-                UiFooterRule(L2 + inner, R2 - inner, lineY);
+                int fx0 = L2 + inner;
+                if (currentState == STATE_SAFEHOUSE) {
+                    /* 同样只铺内容列 —— 否则页脚线会横穿页签列 */
+                    int tx0, ty0, tx1, ty1;
+                    PageTabRect(0, &tx0, &ty0, &tx1, &ty1);
+                    fx0 = tx1 + UIS(24);
+                }
+                UiFooterRule(fx0, R2 - inner, lineY);
             }
         }
     }
@@ -4043,7 +4072,12 @@ void DrawHUD(void) {
     {
         extern int MoneyBagNearestToPlayer(void);
         int bagAmt = MoneyBagNearestToPlayer();
-        if (bagAmt > 0 && hoverKind == 0) {
+        /* 2026-11-05：**拾取提示和藏身提示会画在同一行** ——
+           实测截图里 "PRESS E - HIDE" 和 "PRESS E PICK UP 272 GOLD"
+           叠成 "BRESE 272 HIDE"。
+           藏身提示更紧急（关系到会不会被抓），所以它优先占这一行，
+           钱袋提示让位。 */
+        if (bagAmt > 0 && hoverKind == 0 && !(hideSpotNear >= 0 && hiddenIn < 0)) {
             char mb[80];
             sprintf(mb, Tr("PRESS %s  PICK UP  %d GOLD", "按 %s 拾取  %d 金币"),
                     VkName(g_bindings[ACT_INTERACT]), bagAmt);
@@ -4123,7 +4157,18 @@ void DrawHUD(void) {
         /* v2.6：安全区里的操作提醒放到**左下角**（RUN 条下面）——
            原来挂在屏幕中间，直接压在校准条上。 */
         {
-            const char* shopHint = Tr("T: SHOP    SPACE: CALIBRATE", "T：商店    空格：校准");
+            /* ============================================================
+             * 2026-11-05：**「站在门口却没进门」要明确告诉玩家**
+             * ------------------------------------------------------------
+             * 安全区半径 1.4 格，进口半径 1.05 格 —— 中间那一圈里
+             * 屏幕上只有「T: 商店 空格: 校准」，玩家会以为自己已经到出口了。
+             * 现在这一圈里直接写「走进光柱」。
+             * ============================================================ */
+            extern int PlayerAtExit(void);
+            extern int breakerOpen;
+            const char* shopHint = (breakerOpen && !PlayerAtExit())
+                ? Tr("STEP INTO THE LIGHT", "走进光柱")
+                : Tr("T: SHOP    SPACE: CALIBRATE", "T：商店    空格：校准");
             int sx = UIS(20);
             int sy = UIS(424);
             int sw = TextWidthWin(shopHint);
@@ -4230,20 +4275,25 @@ void DrawHUD(void) {
                 if (hideRepairCount >= HIDESPOT_REPAIR_MAX) {
                     sprintf(rb, Tr("BROKEN  -  TOO DAMAGED TO REPAIR",
                                    "柜子坏了  -  破得太狠，修不了"));
-                    DrawTextWin(UIS(20), winH - UIS(150), rb, 0x00806060u);
+                    DrawTextWin(UIS(20), winH - UIS(214), rb, 0x00806060u);
                 } else if ((float)carryGold >= cost) {
                     sprintf(rb, Tr("PRESS E  -  REPAIR  %d   (YOU HAVE %d)",
                                    "按 E 修理  %d 金币   （你有 %d）"),
                             (int)(cost + 0.5f), (int)(carryGold + 0.5f));
-                    DrawTextWin(UIS(20), winH - UIS(150), rb, 0x0060FF90u);
+                    DrawTextWin(UIS(20), winH - UIS(214), rb, 0x0060FF90u);
                 } else {
                     sprintf(rb, Tr("REPAIR COST  %d   (SHORT %d)",
                                    "修复需要  %d 金币   （还差 %d）"),
                             (int)(cost + 0.5f), (int)(cost - (float)carryGold + 0.5f));
-                    DrawTextWin(UIS(20), winH - UIS(150), rb, 0x00FF6050u);
+                    DrawTextWin(UIS(20), winH - UIS(214), rb, 0x00FF6050u);
                 }
             } else {
-                DrawTextWin(UIS(20), winH - UIS(150),
+                /* 2026-11-05：**单独占一行**。
+                   原来和「拾取金币」提示同在 winH-150 —— 实测叠成
+                   "BRESE 272 HIDE"。靠条件让位不可靠（钱袋判定和藏身
+                   判定不是同一帧状态），所以直接给它们各自的行。
+                   底→上：150 钱袋 / 182 长按搜索 / 214 藏身-修理。 */
+                DrawTextWin(UIS(20), winH - UIS(214),
                             Tr("PRESS E  -  HIDE", "按 E 躲进去"), 0x0090D0F0u);
             }
         }
@@ -4456,7 +4506,9 @@ void DrawHUD(void) {
 
         int tw = TextWidthWin(pbuf);
         int px = (winW - tw) / 2;
-        int py = winH - UIS(150);
+        /* 2026-11-05：原来和「拾取 / 藏身」提示同在 winH-150，会叠字。
+           往上挪一行，进度条跟着走。 */
+        int py = winH - UIS(182);
         DrawTextWin(px, py, pbuf, (hoverKind == 2 && fusesHeld < fusesNeeded) ? 0x00C05050u : 0x00E8E8E8u);
 
         int barW = UIS(240), barH = UIS(8);
@@ -5275,6 +5327,20 @@ void UiSectionRule(int cx, int y, int w) {
     if (th < 2) th = 2;
     int half = w / 2;
     BlendRectWin(cx - half, y, cx + half, y + th, UI_ACCENT, 0.18f);
+    BlendRectWin(cx - half / 4, y, cx + half / 4, y + th, UI_ACCENT, 0.55f);
+}
+
+/* 2026-11-05：**按左右边界画的分组线**。
+   安全屋那几页左边有一列页签（sidebar），原来这条线是按整个面板居中的，
+   会横穿到页签列里 —— 用户截图「中间那两个白线过界了」。
+   现在给一个显式 x0..x1 的版本，安全屋用「内容列」的范围。 */
+void UiSectionRuleSpan(int x0, int x1, int y) {
+    int th = TextHeightWin() / 10;
+    if (th < 2) th = 2;
+    if (x1 <= x0) return;
+    int cx = (x0 + x1) / 2;
+    int half = (x1 - x0) / 2;
+    BlendRectWin(x0, y, x1, y + th, UI_ACCENT, 0.18f);
     BlendRectWin(cx - half / 4, y, cx + half / 4, y + th, UI_ACCENT, 0.55f);
 }
 

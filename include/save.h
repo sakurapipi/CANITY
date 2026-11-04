@@ -18,7 +18,7 @@
    —— 参见 LoadSettings 里的迁移逻辑。 */
 /* v28: 末尾追加 Dynamic Res + 通关记录；v25/v26/v27 都按前缀迁移。
    v27 及更早的存档没有这两个字段，读档时按文件长度取默认值。 */
-#define SAVE_VERSION 28   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26/v27 */
+#define SAVE_VERSION 29   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26/v27 */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
@@ -177,6 +177,11 @@ typedef struct {
          重启后 Endless 从菜单里消失。 */
     int dynamicRes;
     int gameClearedSave;
+    /* v29：局内强化第 6 条（小地图省电）。
+       **不能直接放大 runUpgSave[5] → [6]** —— 它在结构体中间，
+       一改就把后面所有字段整体挪 4 字节，v28 的旧档会全部错位。
+       所以新字段只能追加在末尾，读档时单独调用 RunUpgLoadExtra()。 */
+    int runUpgMinimapSave;
 } SaveBlob;
 
 /* 写当前进度（游戏中 / 退出时） */

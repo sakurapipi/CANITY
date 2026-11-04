@@ -35,7 +35,7 @@
    置 0 = 回到旧的战斗版本。 */
 #define NO_COMBAT 1
 
-#define CANITY_VERSION_STR "2.3.6"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_STR "2.3.8"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -450,6 +450,15 @@ typedef struct {
     int locked;       /* 1 = 上了锁，按 E 会弹锁盘而不是直接翻 */
     int lockType;     /* LOCK_TYPE_* */
     int lockCode;     /* 密码（按锁型解释） */
+    /* 2026-11-05：宝箱怪离场后留下的空壳。
+       翻它会走**专属结算**（150 + 50×层 金币 + 保险丝 + 道具），
+       不是普通箱子的掉落。 */
+    int mimicShell;
+    /* 2026-11-05：**这个箱子槽被宝箱怪占着**。
+       关键：槽必须保持 active，否则交互检测扫不到它 ——
+       玩家就看不到「HOLD E SEARCH」，也就永远触发不了那一咬。
+       渲染时跳过（由 DrawMimicSprite 单独画）。 */
+    int mimicHost;
 } Container;
 
 typedef struct { float x, y; int active; } Breaker;
@@ -464,6 +473,16 @@ typedef struct { float x, y; int active; } Breaker;
    地图本来是"无解"的信息优势（一眼看到整层结构），现在标了价：
    开得越久，手电可用的时间越短。 */
 #define MAP_BATTERY_DRAIN 10.0f
+/* 2026-11-05：**出口进入半径（格）**。
+   原来是 Dist2 < 0.30 → 半径 0.55 格，而一格宽就是 1.0 ——
+   玩家站在光柱正前方那一格，中心距正好 1.0 > 0.55，
+   **视觉上已经贴着门了，判定却还没到**。
+   表现就是「走到出口了但通不了关」，而且安全区提示（1.4 格）
+   还在旁边写着「T: 商店」，玩家以为自己到了。
+
+   现在 1.05 格：站在门口那一格就触发；仍小于安全区 1.4，
+   不会在走廊里远远路过就弹窗。 */
+#define EXIT_ENTER_R2        1.05f
 #define BATTERY_PICKUP 60.0f    /* v2.2：45→60（原来第 8 层就开始发黑） */     /* 电池补给量 */
 #define STAMINA_DRAIN 32.0f      /* v3.0 平衡：26→32，冲刺变成"救命"而不是常态 */      /* 冲刺每秒消耗 */
 #define STAMINA_REGEN 18.0f
@@ -500,12 +519,13 @@ typedef struct { float x, y; int active; } Breaker;
 /* v2.4 校准小游戏（参考第五人格的校准）：
    安全屋里按空格开一次，滑块左右扫，再按空格锁定。
    完美区命中给得多，普通区给得少，失手什么都没有。 */
-#define CALIB_ATTEMPTS       2        /* v2.6：**已取消次数限制**，这个常量不再参与判定 */
-#define CALIB_COOLDOWN      22.0f     /* v3.0：用户要求改成 30 秒 */
-#define CALIB_PER_LEVEL      99      /* v3.0：藏身点里校准，不再按层限次，只靠 60 秒冷却 */        /* v3.0：**每层只能校准 1 次** ——
-                                         原来无次数限制 + 安全屋不掉理智，
-                                         站 3 分钟能刷 190 能量，能量经济直接失效
-                                         （数值审查 #2）。 */
+/* CALIB_ATTEMPTS 已删除（取消次数限制后从未被读过，铁律 44） */
+#define CALIB_COOLDOWN      30.0f     /* 2026-11-05：和注释一致，和「每层 3 次」配套 */
+/* 2026-11-05：**每层限 3 次**。
+   原来这里是 99（= 不限），配 22 秒冷却 →
+   躲在柜子里每 22 秒回一次理智，理智系统直接被架空。
+   现在 3 次 + 30 秒冷却，「躲起来回一波」有上限。 */
+#define CALIB_PER_LEVEL       3      /* 2026-11-05 用户：每层 3 次 + 30 秒冷却 */
 #define CALIB_SWEEP         1.25f     /* 单程扫完用多久（秒），越小越难 */
 #define CALIB_ZONE_W        0.20f     /* 普通区半宽（0..1 的比例） */
 #define CALIB_PERFECT_W     0.055f    /* 完美区半宽 */
@@ -520,10 +540,19 @@ typedef struct { float x, y; int active; } Breaker;
      · 60 秒冷却 ≈ 一层流失 30~47 点
      · 完美 22 点 / 命中 11 点 —— 完美能抵掉大半层消耗，命中只抵 1/3
    这样「躲进柜子里校准」是值得的，但不足以完全替代找安全屋。 */
-#define CALIB_PERFECT_ENERGY_PCT 0.00f   /* 不再给能量 */
-#define CALIB_GOOD_ENERGY_PCT    0.00f
-#define CALIB_PERFECT_SANITY 30.0f  /* v3.4：22 → 30。STEP 上调后必须加强回智，
-                                       否则算出来第 3 层就死。 */
+/* CALIB_*_ENERGY_PCT 已删除 —— energy 属于已下线的武器系统，永远给 0（铁律 44） */
+
+/* 2026-11-05 重新定价：**奖励随层数成长**，和箱子金币曲线对齐。
+   完美：理智 12 + 2×层（封顶 34） / 金币 20 + 4×层 / 电量 +15
+   良好：理智  6 + 1×层（封顶 18） / 金币 10 + 2×层 / 电量  +8 */
+#define CALIB_SANITY_BASE     12.0f
+#define CALIB_SANITY_STEP      2.0f
+#define CALIB_SANITY_MAX      34.0f
+#define CALIB_GOOD_SANITY_BASE 6.0f
+#define CALIB_GOOD_SANITY_STEP 1.0f
+#define CALIB_GOOD_SANITY_MAX 18.0f
+#define CALIB_BATTERY_PERFECT 15.0f
+#define CALIB_BATTERY_GOOD     8.0f
 #define CALIB_GOOD_SANITY    15.0f  /* v3.4：11 → 15 */
 
 /* v2.6 校准难度成长：
@@ -561,7 +590,10 @@ typedef struct { float x, y; int active; } Breaker;
                                     等于自杀，用户要求降到 20% */
 #define GLUE_BODY_PAD    0.35f   /* 怪物/玩家的体积半径：中心还没进圈、
                                     身体边缘蹭到就该减速，否则「有时候不生效」 */
-#define ECHO_RADIUS     15.0f
+/* 2026-11-05：这个常量原来定义了 15.0f，但 throwing.c 里**写死 3.0f**，
+   等于从没生效过（铁律四十四）。现在它是唯一权威来源，
+   落地扫描半径直接读它 —— 改一个数，行为跟着变。 */
+#define ECHO_RADIUS     10.0f
 #define ECHO_LIFE       5.0f
 #define DECOY_SHOUT_EVERY 1.5f   /* v2.4.14：每 1.5 秒叫一次（原来 3 秒太慢） */
 #define DECOY_SHOUT_R    20.0f   /* 叫声半径（比投石最大噪音还大） */
@@ -749,8 +781,10 @@ extern Leech leeches[LEECH_MAX];
 
 #define GOLD_LOCK_BASE      40      /* 解开一个锁盘：40 + 层数×5 */
 #define GOLD_LOCK_STEP      5
-#define GOLD_CALIB_PERFECT  35      /* 校准完美 */
-#define GOLD_CALIB_GOOD     15      /* 校准良好 */
+#define GOLD_CALIB_PERFECT  20      /* 校准完美：20 + 4×层 */
+#define GOLD_CALIB_PERFECT_STEP 4
+#define GOLD_CALIB_GOOD_STEP    2
+#define GOLD_CALIB_GOOD     10      /* 校准良好：10 + 2×层 */
 #define GOLD_ESCAPE         30      /* 成功甩脱追捕（追捕者放弃） */
 #define GOLD_NEWROOM        5       /* 首次进入新房间 */
 #define GOLD_QUIET_BASE     20      /* 本层没触发警报：20 + 层数×2 */

@@ -11,7 +11,7 @@
 #ifndef CANITY_UPGRADE_RUN_H
 #define CANITY_UPGRADE_RUN_H
 
-#define RUN_UPG_COUNT 5   /* v7：+1 条 WRENCH */
+#define RUN_UPG_COUNT 6   /* 2026-11-05：+1 条 MINIMAP（小地图耗电） */
 #define RUN_UPG_MAX   3
 
 void  RunUpgReset(void);
@@ -35,6 +35,10 @@ int   RunUpgWrenchCharges(void);     /* 每层可用次数（冷却制时无意�
 float RunUpgWrenchRange(void);       /* 推开几格 */
 float RunUpgWrenchStun(void);        /* 硬直秒数 */
 int   RunUpgCarryBonus(void);        /* v3.0：投掷物携带上限 +2/级 */
+/* 2026-11-05：小地图耗电 —— 每级 -2 个百分点，3 级封顶 */
+int   RunUpgMapDrainLevel(void);     /* 0..3 */
+float RunUpgMapDrainPct(void);       /* 当前每秒耗电百分比（10 / 8 / 6 / 4） */
+void  RunUpgLoadExtra(int minimapLevel);   /* 存档单独读第 6 项 */
 void  RunUpgLoadFromSave(const int* arr);   /* v3.0 从存档载入 */
 
 #endif

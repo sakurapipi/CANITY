@@ -48,7 +48,8 @@ const char* RunUpgName(int kind) {
     case 1: return "RESISTANCE";
     case 2: return "STAMINA";
     case 3: return "FLASHLIGHT";
-    default: return "WRENCH KNOCK";
+    case 4: return "WRENCH KNOCK";
+    default: return "MINIMAP";
     }
 }
 
@@ -58,7 +59,8 @@ const char* RunUpgNameZh(int kind) {
     case 1: return "角色抗性";
     case 2: return "体能";
     case 3: return "手电效率";
-    default: return "扳手击退";
+    case 4: return "扳手击退";
+    default: return "小地图省电";
     }
 }
 
@@ -68,7 +70,8 @@ const char* RunUpgDesc(int kind) {
     case 1: return "Lose 10% less sanity when grabbed";
     case 2: return "Sprint stamina -15% / lv";
     case 3: return "Flashlight drain -15% / lv";
-    default: return "Push monsters back. Lv2+ becomes cooldown.";
+    case 4: return "Push monsters back. Lv2+ becomes cooldown.";
+    default: return "Minimap drain -2% / lv (10 to 4 per second)";
     }
 }
 
@@ -78,7 +81,8 @@ const char* RunUpgDescZh(int kind) {
     case 1: return "被抓时少掉 10% 理智 / 级";
     case 2: return "冲刺体力消耗 -15% / 级";
     case 3: return "手电耗电 -15% / 级";
-    default: return "推开怪物。2 级起改为冷却制。";
+    case 4: return "推开怪物。2 级起改为冷却制。";
+    default: return "小地图每秒耗电 -2%（10 → 4）";
     }
 }
 
@@ -91,6 +95,30 @@ int   RunUpgCarryBonus(void)  { return 2 * upg[0]; }
 float RunUpgResistMul(void)   { return 1.0f - 0.10f * (float)upg[1]; }
 float RunUpgStaminaMul(void)  { return 1.0f - 0.15f * (float)upg[2]; }
 float RunUpgFlashMul(void)    { return 1.0f - 0.15f * (float)upg[3]; }
+
+/* ===== 2026-11-05 用户要求：小地图省电 =====
+   基准每秒 10%，每级 -2 个百分点，3 级封顶 → 10 / 8 / 6 / 4。
+   **大地图不耗电**（见 game.c：全屏地图暂停且不扣电），
+   所以这条只作用于小窗地图。 */
+int RunUpgMapDrainLevel(void) {
+    int lv = upg[5];
+    if (lv < 0) lv = 0;
+    if (lv > RUN_UPG_MAX) lv = RUN_UPG_MAX;
+    return lv;
+}
+float RunUpgMapDrainPct(void) {
+    float v = MAP_BATTERY_DRAIN - 2.0f * (float)RunUpgMapDrainLevel();
+    if (v < 1.0f) v = 1.0f;
+    return v;
+}
+
+/* 存档只给 5 个 int（前缀兼容不能改结构），第 6 项单独读 */
+void RunUpgLoadExtra(int minimapLevel) {
+    int v = minimapLevel;
+    if (v < 0) v = 0;
+    if (v > RUN_UPG_MAX) v = RUN_UPG_MAX;
+    upg[5] = v;
+}
 
 /* ===== v7 扳手击退 =====
    0 级（默认）  每层 2 次      推开 2 格    无硬直
@@ -120,7 +148,9 @@ float RunUpgWrenchStun(void) {
 }
 
 void RunUpgLoadFromSave(const int* arr) {
-    for (int i = 0; i < RUN_UPG_COUNT; i++) {
+    /* 存档里只有 5 个 int（runUpgSave[5]），第 6 项由 RunUpgLoadExtra 单独读，
+       所以这里只回填前 5 条 —— 用 RUN_UPG_COUNT 会越界读。 */
+    for (int i = 0; i < RUN_UPG_COUNT && i < 5; i++) {
         int v = arr ? arr[i] : 0;
         if (v < 0) v = 0;
         if (v > RUN_UPG_MAX) v = RUN_UPG_MAX;

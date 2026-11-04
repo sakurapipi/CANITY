@@ -50,11 +50,13 @@ enum {
     SPR_MON_HUNTER2, SPR_MON_HUNTER2_W, SPR_MON_HUNTER2_S, SPR_MON_HUNTER2_SW,
     SPR_MON_HUNTER3, SPR_MON_HUNTER3_W, SPR_MON_HUNTER3_S, SPR_MON_HUNTER3_SW,
     SPR_MON_JUMPER, SPR_MON_SHADE, SPR_MON_SPIDER, SPR_MON_ECHO,
+    SPR_MON_MIMIC,         /* 2026-11-05 宝箱怪现形态：箱子站起来 + 宽口 */
     /* 道具 */
     SPR_PROP_CRATE, SPR_PROP_BREAKER, SPR_PROP_EXIT, SPR_PROP_SAFE,
     SPR_PROP_CRATE_OPEN,   /* 已翻过的空箱（盖子掀开） */
     SPR_PROP_CRATE_LOCKED, /* 未解锁：正面挂金锁 */
     SPR_PROP_TRASH,        /* 藏身点：垃圾桶 */
+    SPR_PROP_CRATE_MIMIC,  /* 2026-11-05 宝箱怪伪装态：华丽箱子（金包边 + 双层锁扣） */
     /* UI（v2.2） */
     SPR_UI_PANEL,      /* 9-slice 铆接金属板 */
     SPR_UI_PANEL_HOT,  /* 同上，聚焦态（边框泛琥珀） */

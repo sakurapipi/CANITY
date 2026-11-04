@@ -25,6 +25,7 @@
 #include "warden.h"
 #include "campaign.h"
 #include "lockbox.h"   /* v2.7 改造树 */
+#include "mimic.h"     /* 2026-11-05 宝箱怪 */
 #include "upgrade_run.h"
 #include "relics.h"
 #include "sprites.h"
@@ -124,7 +125,7 @@ int weaponPickSel = 0;          /* v2.0: 开局选武器光标 */
 int flares = 0, bottles = 0;
 int bricks = 0, acids = 0, smokeBombs = 0;   /* v1.16 新投掷物 */
 int firePots = 0, gluePots = 0, mirrors = 0; /* v2.0 三个新投掷物（v3.3：火/镜已删，只剩 gluPots 在用） */
-int echoBolts = 0;   /* v3.3 回声弹：落地显示 15 格内怪物位置 5 秒 */
+int echoBolts = 0;   /* 2026-11-05 回声弹 = 资源雷达：ECHO_RADIUS 内标容器 30 秒 / 活物 5 秒 */
 int decoys = 0;      /* v3.3 玩家诱饵玩偶：C 键放置，每 DECOY_SHOUT_EVERY 秒发声 */
 int g_dmgIgnoreArmor = 0;
 float smokeDim = 1.0f;      /* 烟幕内的光线衰减 */
@@ -527,8 +528,15 @@ void EnsureThrowSelectedValid(void) {
     int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
     if (throwSelected < 0 || throwSelected >= ITEM_SLOT_COUNT) throwSelected = 0;
     if (counts[throwSelected] > 0) return;
-    for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
-        if (counts[i] > 0) { throwSelected = i; uiDirty = 1; return; }
+    /* 2026-11-05：**就近取，不要永远拽回 0 号槽**。
+       原来是从 0 开始找第一个有货的 —— 配合滚轮的空槽问题，
+       造成"选中项永远回到最左边"的观感。
+       现在从当前槽向两边交替找，落在最近的有货槽上。 */
+    for (int d = 1; d < ITEM_SLOT_COUNT; d++) {
+        int fwd = (throwSelected + d) % ITEM_SLOT_COUNT;
+        if (counts[fwd] > 0) { throwSelected = fwd; uiDirty = 1; return; }
+        int bwd = (throwSelected - d + ITEM_SLOT_COUNT * 2) % ITEM_SLOT_COUNT;
+        if (counts[bwd] > 0) { throwSelected = bwd; uiDirty = 1; return; }
     }
 }
 
@@ -625,6 +633,9 @@ void SpawnGlue(float x, float y) {
     glues[best].y = y;
     glues[best].life = GLUE_LIFE;
     glues[best].active = 1;
+    /* 2026-11-05：宝箱怪不是普通怪，胶水管线扫不到它 —— 单独通知一次。
+       命中后它硬直 2 秒，玩家可以趁机搜空壳（铁律四十 登记点）。 */
+    MimicOnGlue(x, y);
 }
 
 /* 任意一点是否在某朵烟里（守门人/猎手/清道夫共用）。
@@ -662,6 +673,28 @@ int SegmentInSmoke(float x0, float y0, float x1, float y1) {
  * 以后任何「对所有猎手做某事」的地方，一律调这两个函数，
  * 不要再自己写数组。新增怪只需要改 MonsterCollect 一处。
  * ================================================================ */
+/* ==================================================================
+ * 2026-11-05：宝箱怪离场后，在原地留下一个**空壳**（可以翻）
+ * ------------------------------------------------------------------
+ * 它生成时占着一个 container 槽并把它 active=0 掉，
+ * 所以这里直接把那个槽重新激活就行 —— 不需要找新位置，
+ * 也不会突破 MAX_CONTAINERS。
+ * ================================================================ */
+void MimicSpawnShell(int slot, float x, float y) {
+    if (slot < 0 || slot >= MAX_CONTAINERS) return;
+    containers[slot].x        = x;
+    containers[slot].y        = y;
+    containers[slot].active   = 1;
+    containers[slot].searched = 0;
+    containers[slot].locked   = 0;     /* 空壳永不上锁 */
+    containers[slot].lockType = 0;
+    containers[slot].lockCode = 0;
+    containers[slot].content  = 0;
+    containers[slot].mimicShell = 1;
+    containers[slot].mimicHost  = 0;   /* 空壳不再是宝箱怪 */
+    uiDirty = 1;
+}
+
 int MonsterCollect(Monster** out, int maxOut, int includeLightBeast) {
     int n = 0;
     for (int i = 0; i < MON_HUNTER_MAX && n < maxOut; i++)
@@ -1237,14 +1270,16 @@ static void BuildTrainingArena(void) {
          x=7.5   安全区
          x=9.5   藏身点 1（衣柜）
          x=12.0  藏身点 2（床底）
-         x=13.5 / 15.5 / 17.5 / 19.5   四个锁箱
+         x=13.0 / 14.3 / 15.6 / 16.9 / 18.2 / 19.5   六个锁箱（每种锁型一个）
          x=20.5  固定靶
        注意调波器面板比别的锁宽（LUIS(760) vs LUIS(660)），
        正好用来验证宽面板在小窗口下的表现。 */
     {
         for (int k = 0; k < LOCK_TYPE_COUNT; k++) {
-            int i = 1 + k;                       /* containers[1..4] */
-            containers[i].x = 13.5f + (float)k * 2.0f;
+            int i = 1 + k;                       /* containers[1..LOCK_TYPE_COUNT] */
+            /* 2026-11-05：锁型 4 → 6，间距从 2.0 收到 1.3。
+               原来 2.0 × 6 会把最后一个推到 23.5 —— 跑出走廊(21)还压过靶子(20.5)。 */
+            containers[i].x = 13.0f + (float)k * 1.3f;
             containers[i].y = (float)(MAP_HEIGHT / 2) + 0.5f;
             containers[i].active = 1;
             containers[i].searched = 0;
@@ -1253,7 +1288,7 @@ static void BuildTrainingArena(void) {
             containers[i].lockType = k;          /* 0 拨盘 1 接线 2 均衡 3 调波 */
             containers[i].lockCode = 0x2A5;
         }
-        containerCount = 1 + LOCK_TYPE_COUNT;    /* 1 个可搜 + 4 个上锁 */
+        containerCount = 1 + LOCK_TYPE_COUNT;    /* 1 个可搜 + 每种锁型各一个 */
     }
 
     ApplyFov();
@@ -1434,7 +1469,8 @@ static void TutorialUpdate(float dt) {
         if (breakerOpen) TutorialAdvance();
         break;
     case TUT_EXIT:
-        if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f) TutorialAdvance();
+        if (breakerOpen &&
+        Dist2(posX, posY, exitX, exitY) < EXIT_ENTER_R2 * EXIT_ENTER_R2) TutorialAdvance();
         break;
     default:
         break;
@@ -1503,21 +1539,52 @@ static void FindFarthestCell(float* outX, float* outY) {
  * 「未上锁的箱子仍然够放本层要求的保险丝」—— 保险丝不许进锁箱，
  * 锁太多会让整层无法通关。
  * ================================================================ */
-#define LOCKBOX_CHANCE_PCT      30
-#define LOCKBOX_MAX_PER_FLOOR    3
+/* ==================================================================
+ * 2026-11-05 用户要求：**锁箱比例随层数递增，封顶 80%**
+ * ------------------------------------------------------------------
+ *   第 1 层   0%   —— 全部不上锁，先熟悉开箱
+ *   第 2 层   5%
+ *   之后每层 +9%，第 11 层起封顶 80%（8 箱 = 6 锁 2 不锁）
+ *
+ * 为什么用「比例」而不是「每箱掷骰」：
+ *   掷骰在 8 个箱子上方差极大，同样 30% 有时出 0 个、有时出 4 个。
+ *   改成先算「这一层该有几个锁箱」，再随机挑哪几个 —— 曲线才可控。
+ *   小数部分用概率进位，所以第 2 层 40% 的机会出 1 个，不是永远 0。
+ *
+ * **硬约束（必须留着）**：至少 2 个箱子不上锁。
+ *   保险丝只放未上锁的箱子（下面那段有说明），全锁 = 整层无解。
+ * ================================================================ */
+#define LOCKBOX_PCT_MIN_FLOOR    2      /* 第几层开始上锁 */
+#define LOCKBOX_PCT_BASE         5      /* 第 2 层的比例 */
+#define LOCKBOX_PCT_STEP         9      /* 之后每层 +9 */
+#define LOCKBOX_PCT_CAP         70      /* 封顶（2026-11-05 用户：80 → 70，减轻开锁疲劳） */
+#define LOCKBOX_MIN_UNLOCKED     2      /* 永远留这么多个不锁的 */
+
+static int LockboxPctForFloor(int lv) {
+    if (lv < LOCKBOX_PCT_MIN_FLOOR) return 0;
+    int pct = LOCKBOX_PCT_BASE + (lv - LOCKBOX_PCT_MIN_FLOOR) * LOCKBOX_PCT_STEP;
+    if (pct > LOCKBOX_PCT_CAP) pct = LOCKBOX_PCT_CAP;
+    return pct;
+}
 
 static void ApplyLockboxes(void) {
     lockedThisFloor = 0;
-    if (currentLevel < 2 || containerCount <= 0) return;
+    if (containerCount <= 0) return;
 
-    int unlocked = 0;
-    for (int i = 0; i < containerCount; i++)
-        if (!containers[i].locked) unlocked++;
+    int pct = LockboxPctForFloor(currentLevel);
+    if (pct <= 0) return;
 
-    /* 锁完之后至少还要剩 fusesNeeded 个未上锁箱子放保险丝。 */
-    int room = unlocked - fusesNeeded;
-    if (room > LOCKBOX_MAX_PER_FLOOR) room = LOCKBOX_MAX_PER_FLOOR;
-    if (room <= 0) return;
+    /* 这一层该锁几个：整数部分 + 小数部分概率进位 */
+    int scaled = containerCount * pct;          /* 分子 */
+    int want   = scaled / 100;
+    if ((rand() % 100) < (scaled % 100)) want++;
+
+    /* 至少留 LOCKBOX_MIN_UNLOCKED 个不上锁 —— 保险丝要靠它们 */
+    int limit = containerCount - LOCKBOX_MIN_UNLOCKED;
+    if (want > limit) want = limit;
+    if (want <= 0) return;
+
+    int room = want;
 
     /* 打乱顺序，避免「永远从 0 号箱开始锁」的规律感。 */
     int order[MAX_CONTAINERS];
@@ -1527,14 +1594,33 @@ static void ApplyLockboxes(void) {
         int t = order[i]; order[i] = order[j]; order[j] = t;
     }
 
+    /* ==================================================================
+     * 2026-11-05：**锁型发牌**
+     * ------------------------------------------------------------------
+     * 原来每箱独立 rand() % LOCK_TYPE_COUNT：
+     *   · 同一层可能连出三个「接线」，也可能一整层见不到新锁；
+     *   · 6 种锁能不能被玩到，靠运气。
+     *
+     * 现在按「一副牌」发：本层有 N 个锁箱就从洗好的 6 张里取前 N 张，
+     * 所以**同层绝不重复**；牌每层重新洗，
+     * 一层最多 6 个锁箱（MAX_CONTAINERS 8 - 2 个保底未上锁），
+     * 所以一层里 6 种锁都可能出现，跨层也一定都能轮到。
+     * ================================================================ */
+    int typeDeck[LOCK_TYPE_COUNT];
+    for (int i = 0; i < LOCK_TYPE_COUNT; i++) typeDeck[i] = i;
+    for (int i = LOCK_TYPE_COUNT - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        int t = typeDeck[i]; typeDeck[i] = typeDeck[j]; typeDeck[j] = t;
+    }
+
     for (int n = 0; n < containerCount && lockedThisFloor < room; n++) {
         int idx = order[n];
         if (containers[idx].locked) continue;
-        if ((rand() % 100) >= LOCKBOX_CHANCE_PCT) continue;
+        /* 数量已经在上面算好了（want），这里不再掷骰 —— 只决定锁哪几个 */
+        containers[idx].lockType = typeDeck[lockedThisFloor % LOCK_TYPE_COUNT];
+        containers[idx].lockCode = rand() & 0x7FF;
         lockedThisFloor++;
         containers[idx].locked = 1;
-        containers[idx].lockType = rand() % LOCK_TYPE_COUNT;
-        containers[idx].lockCode = rand() & 0x7FF;
     }
 }
 
@@ -1948,7 +2034,11 @@ void GenerateLevel(void) {
     }
 
         /* v28：容器数量已经确定，统一判定这一层有哪些箱子上了锁。 */
-        ApplyLockboxes();
+        /* 2026-11-05：宝箱怪必须在 ApplyLockboxes **之前**替换掉箱子 ——
+       否则那个箱子会先被发一把锁，变成"上锁的宝箱怪"（铁律四十九）。 */
+    MimicReset();
+    MimicTrySpawn(currentLevel, containerCount);
+    ApplyLockboxes();
 
         /* 修复死局 Bug：优先保证能通关（放满 fusesNeeded）。
    只有在箱子极其充裕（多出 2 个以上）时，才留格子给其他物品。 */
@@ -1956,20 +2046,54 @@ void GenerateLevel(void) {
         if (need > containerCount) {
             need = containerCount; // 极端兜底，防止越界
         }
-        for (int guard = 0; guard < 64 && need > 0 && containerCount > 0; guard++) {
-            int k = rand() % containerCount;
-        /* v3.0：**保险丝不能落在上锁的箱子里** ——
-           否则打不开锁就拿不到保险丝，整层死锁（玩法审查）。 */
+        /* ==================================================================
+         * 2026-11-05：**保险丝改成「先未上锁、再锁箱」两遍填充**
+         * ------------------------------------------------------------------
+         * 原来是「保险丝绝对不许进锁箱」，而锁箱现在最高能占到 80%（8 箱锁 6）。
+         * 那样未上锁的只剩 2 个，深层却需要 6 根保险丝 ——
+         * 物理上放不下，整层直接无解（比"开不了锁"更严重的死锁）。
+         *
+         * 现在两遍：
+         *   ① 先把保险丝塞进**未上锁**的箱子 —— 保证玩家不开锁也有保底路线；
+         *   ② 还有剩的再塞进锁箱 —— 深层必须开锁才能凑齐，这就是锁箱的代价。
+         * 因为 ① 只有 2 个空位，深层至少 2 根一定拿得到，不会一开局就卡死。
+         * ================================================================ */
         {
-            int tries = 0;
-            while (tries++ < 32 && containers[k].locked) {
-                k = rand() % containerCount;
+            /* 打乱一遍箱子顺序，避免「保险丝永远在前几个箱子」的规律感 */
+            int ord[MAX_CONTAINERS];
+            for (int i = 0; i < containerCount; i++) ord[i] = i;
+            for (int i = containerCount - 1; i > 0; i--) {
+                int j = rand() % (i + 1);
+                int t = ord[i]; ord[i] = ord[j]; ord[j] = t;
             }
-        }
-
-            if (containers[k].content == 0) {
-                containers[k].content = 1;
-                need--;
+            /* ============================================================
+             * 2026-11-05 用户：「锁箱里必定有保险丝」+「至少 1 根不用开锁」
+             * ------------------------------------------------------------
+             * 三遍填：
+             *   ① **锁箱优先**吃保险丝 —— 开锁=有明确回报，不是白费力气；
+             *      但每留一根（keepFree）给未上锁的箱子
+             *   ② 未上锁的箱子填剩下的
+             *   ③ 万一未上锁的箱子不够，再回填锁箱
+             *
+             * 结果：深层每个锁箱都装着保险丝，而玩家**永远有 1 根**
+             * 不开锁就能拿到，不会因为开锁不熟练直接卡死整层。
+             * ============================================================ */
+            const int keepFree = 1;
+            for (int pass = 0; pass < 3 && need > 0; pass++) {
+                for (int oi = 0; oi < containerCount && need > 0; oi++) {
+                    int k = ord[oi];
+                    if (containers[k].content != 0) continue;
+                    if (pass == 0) {                       /* ① 锁箱，留 keepFree */
+                        if (!containers[k].locked) continue;
+                        if (need <= keepFree) continue;
+                    } else if (pass == 1) {                /* ② 未上锁 */
+                        if (containers[k].locked) continue;
+                    } else {                               /* ③ 回填锁箱 */
+                        if (!containers[k].locked) continue;
+                    }
+                    containers[k].content = 1;
+                    need--;
+                }
             }
         }
         for (int k = 0; k < containerCount; k++) {
@@ -2321,7 +2445,10 @@ float calibPos = 0.5f;
 int calibUsedLevel = -1;   /* v3.0：本层已校准过的层数（每层限 1 次） */        /* 滑块位置 0..1 */
 float calibDir = 1.0f;        /* 扫动方向 */
 float calibZoneC = 0.5f;      /* 目标区中心 */
-int   calibAttempts = CALIB_ATTEMPTS;
+/* 2026-11-05：**本层已校准次数**。
+   CALIB_PER_LEVEL 原来是 99（等于不限），于是躲着就能无限刷理智；
+   现在用的是真计数。calibAttempts 这个死变量一并删掉。 */
+int   calibUsesThisFloor = 0;
 int   calibLevel = -1;        /* v2.4：这一层是否已经发过次数（防「出门再进来」刷满） */
 float calibCooldown = 0.0f;
 int   calibResult = 0;        /* 0 无 / 1 完美 / 2 普通 / 3 失手 */
@@ -2594,15 +2721,43 @@ void SpawnShards(float x, float y, float vx, float vy, float charge) {
    所以：回声弹落地时，把落点 3 格内的所有怪物**记下来**，
    这一层之内它们都会显示在小地图上（红色骷髅点）。
    换层时清空。 */
-#define ECHO_MARK_MAX 8
+/* ==================================================================
+ * 2026-11-05：**回声弹改成「资源雷达」（方案 A）**
+ * ------------------------------------------------------------------
+ * 旧版：半径 3 格、只标怪物、永不消失 —— 玩家在 3 格内本来就能听到怪，
+ *       等于零信息增量，纯占一个道具槽。
+ *
+ * 新版：半径 10 格、**标资源和威胁两种东西，各自有时效**。
+ *   容器 30 秒（保险丝箱金色、宝箱怪红闪）  ← 玩家真正的问题
+ *   活物  5 秒（红菱形，会跟着动）          ← 附带
+ *   落地自带 20 格噪音                      ← 代价：敲门，不是偷看
+ * ================================================================ */
+#define ECHO_MARK_MAX   24
+/* 扫描半径读 common.h 的 ECHO_RADIUS（唯一权威来源） */
+#define ECHO_NOISE_R    20.0f     /* 落地噪音半径 —— 这是它的代价 */
+#define ECHO_LIFE_MON    5.0f     /* 活物标记活多久 */
+#define ECHO_LIFE_CRATE 30.0f     /* 容器标记活多久 */
+
+/* 标记类型：决定小地图上画什么颜色 */
+enum {
+    EMK_MON   = 0,   /* 活物：红菱形 */
+    EMK_CRATE = 1,   /* 普通容器：白方块 */
+    EMK_FUSE  = 2,   /* 保险丝箱：金方块 */
+    EMK_MIMIC = 3    /* 宝箱怪：红色闪烁方块 */
+};
+
 float echoMarkX[ECHO_MARK_MAX];
 float echoMarkY[ECHO_MARK_MAX];
 int   echoMarkActive[ECHO_MARK_MAX];
+float echoMarkT[ECHO_MARK_MAX];      /* 剩余寿命（秒） */
+int   echoMarkKind[ECHO_MARK_MAX];   /* EMK_* */
 
 void EchoMarksReset(void) {
     for (int i = 0; i < ECHO_MARK_MAX; i++) {
         echoMarkActive[i] = 0;
         echoMarkX[i] = echoMarkY[i] = 0.0f;
+        echoMarkT[i] = 0.0f;
+        echoMarkKind[i] = EMK_MON;
     }
 }
 
@@ -2615,32 +2770,93 @@ void EchoMarksScan(float sx, float sy, float rad) {
     extern float WardenX(void), WardenY(void);
     extern int   trainingMode;
 
-    float px[8]; float py[8]; int n = 0;
-    if (monster.active)   { px[n] = monster.x;   py[n] = monster.y;   n++; }
-    if (monster2.active)  { px[n] = monster2.x;  py[n] = monster2.y;  n++; }
-    if (lightBeast.active){ px[n] = lightBeast.x; py[n] = lightBeast.y; n++; }
-    if (!trainingMode) {
-        if (CollectorActive()) { px[n] = CollectorX(); py[n] = CollectorY(); n++; }
-        if (ScavengerActive()) { px[n] = ScavengerX(); py[n] = ScavengerY(); n++; }
-        if (WardenActive())    { px[n] = WardenX();    py[n] = WardenY();    n++; }
-    }
+    /* 落点自带噪音 —— **这是它的代价**：敲门会让屋里的人知道。
+       没有这一下，回声就是免费情报，"什么时候用"就不再是个决策。 */
+    MakeNoise(sx, sy, ECHO_NOISE_R);
 
     float r2 = rad * rad;
-    for (int i = 0; i < n && i < 8; i++) {
-        float dx = px[i] - sx, dy = py[i] - sy;
-        if (dx * dx + dy * dy > r2) continue;
-        /* 找一个空槽记下 */
-        for (int k = 0; k < ECHO_MARK_MAX; k++) {
-            if (echoMarkActive[k]) {
-                /* 已经有同一只的标记 → 更新位置 */
-                float ox2 = echoMarkX[k] - px[i], oy2 = echoMarkY[k] - py[i];
-                if (ox2 * ox2 + oy2 * oy2 < 1.0f) { echoMarkX[k] = px[i]; echoMarkY[k] = py[i]; k = -1; break; }
-                continue;
+
+    /* 往标记表里放一条：同类同位置就刷新寿命，否则找空槽 */
+    /* （C89 风格：不用嵌套函数，直接内联展开成两段） */
+
+    /* ---------------- ① 活物：5 秒 ---------------- */
+    {
+        float px[10]; float py[10]; int n = 0;
+        if (monster.active)    { px[n] = monster.x;    py[n] = monster.y;    n++; }
+        if (monster2.active)   { px[n] = monster2.x;   py[n] = monster2.y;   n++; }
+        if (monster3.active)   { px[n] = monster3.x;   py[n] = monster3.y;   n++; }
+        if (lightBeast.active) { px[n] = lightBeast.x; py[n] = lightBeast.y; n++; }
+        if (!trainingMode) {
+            if (CollectorActive()) { px[n] = CollectorX(); py[n] = CollectorY(); n++; }
+            if (ScavengerActive()) { px[n] = ScavengerX(); py[n] = ScavengerY(); n++; }
+            if (WardenActive())    { px[n] = WardenX();    py[n] = WardenY();    n++; }
+        }
+        for (int i = 0; i < n && i < 10; i++) {
+            float dx = px[i] - sx, dy = py[i] - sy;
+            if (dx * dx + dy * dy > r2) continue;
+            int slot = -1, same = -1;
+            for (int k2 = 0; k2 < ECHO_MARK_MAX; k2++) {
+                if (echoMarkActive[k2] && echoMarkKind[k2] == EMK_MON) {
+                    float ox = echoMarkX[k2] - px[i], oy = echoMarkY[k2] - py[i];
+                    if (ox * ox + oy * oy < 1.0f) { same = k2; break; }
+                }
+                if (!echoMarkActive[k2] && slot < 0) slot = k2;
             }
-            echoMarkActive[k] = 1;
-            echoMarkX[k] = px[i];
-            echoMarkY[k] = py[i];
-            break;
+            if (same >= 0) { echoMarkX[same] = px[i]; echoMarkY[same] = py[i];
+                             echoMarkT[same] = ECHO_LIFE_MON; echoMarkKind[same] = EMK_MON; }
+            else if (slot >= 0) { echoMarkActive[slot] = 1;
+                             echoMarkX[slot] = px[i]; echoMarkY[slot] = py[i];
+                             echoMarkT[slot] = ECHO_LIFE_MON; echoMarkKind[slot] = EMK_MON; }
+        }
+    }
+
+    /* ---------------- ② 容器：30 秒（保险丝金、宝箱怪红闪）---------------- */
+    for (int ci = 0; ci < containerCount && ci < MAX_CONTAINERS; ci++) {
+        if (!containers[ci].active) continue;
+        if (containers[ci].searched && !containers[ci].mimicHost) continue;   /* 翻过的不再标 */
+        float dx = containers[ci].x - sx, dy = containers[ci].y - sy;
+        if (dx * dx + dy * dy > r2) continue;
+
+        int kind = EMK_CRATE;
+        if (containers[ci].mimicHost)                    kind = EMK_MIMIC;
+        else if (containers[ci].content == 1)            kind = EMK_FUSE;
+
+        int slot = -1, same = -1;
+        for (int k2 = 0; k2 < ECHO_MARK_MAX; k2++) {
+            if (echoMarkActive[k2] && echoMarkKind[k2] != EMK_MON) {
+                float ox = echoMarkX[k2] - containers[ci].x;
+                float oy = echoMarkY[k2] - containers[ci].y;
+                if (ox * ox + oy * oy < 1.0f) { same = k2; break; }
+            }
+            if (!echoMarkActive[k2] && slot < 0) slot = k2;
+        }
+        if (same >= 0) {
+            echoMarkX[same] = containers[ci].x; echoMarkY[same] = containers[ci].y;
+            echoMarkT[same] = ECHO_LIFE_CRATE; echoMarkKind[same] = kind;
+        } else if (slot >= 0) {
+            echoMarkActive[slot] = 1;
+            echoMarkX[slot] = containers[ci].x; echoMarkY[slot] = containers[ci].y;
+            echoMarkT[slot] = ECHO_LIFE_CRATE; echoMarkKind[slot] = kind;
+        }
+    }
+
+    /* ---------------- ③ 宝箱怪：优先当 EMK_MIMIC 标（第 ② 段已覆盖）---------------- */
+    for (int mi = 0; mi < mimicCount; mi++) {
+        if (mimics[mi].state != MIM_DISGUISED && mimics[mi].state != MIM_SEEN) continue;
+        float dx = mimics[mi].x - sx, dy = mimics[mi].y - sy;
+        if (dx * dx + dy * dy > r2) continue;
+        MimicOnEchoHit(mimics[mi].containerIdx);
+    }
+}
+
+/* 每帧推进标记寿命 —— 信息有时效才是信息 */
+void EchoMarksTick(float dt) {
+    for (int i = 0; i < ECHO_MARK_MAX; i++) {
+        if (!echoMarkActive[i]) continue;
+        echoMarkT[i] -= dt;
+        if (echoMarkT[i] <= 0.0f) {
+            echoMarkActive[i] = 0;
+            echoMarkT[i] = 0.0f;
         }
     }
 }
@@ -2800,6 +3016,11 @@ void WrenchTick(float dt) {
     if (WrenchSwingFrame() >= WRENCH_HIT_FRAME) {
         wrenchSwingHit = 1;
         WrenchApplyHit(wrenchSwingPower);
+        /* 2026-11-05：宝箱怪**不在 monHunters[] 里**，MonsterCollect 永远扫不到。
+           这里单独扫一遍：伪装态被敲 → 直接现形且**不挨咬**。 */
+        { extern float RunUpgWrenchRange(void);
+          MimicWrenchSweep(posX, posY, dirX >= 0.0f ? 0.0f : 3.14159265f,
+                           RunUpgWrenchRange()); }
     }
 }
 
@@ -2862,6 +3083,13 @@ static int FlashlightUseAllowed(void) {
     return !(DailyForbidLight() || HasKeystone(SK_SALVAGE));
 }
 
+/* 2026-11-05：给 HUD 用 —— 玩家是否真的站在门口。
+   安全区（1.4 格）比门口（1.05 格）大，所以「在安全区里但没进门」
+   是一段真实存在的状态，提示要能区分这两件事。 */
+int PlayerAtExit(void) {
+    return (breakerOpen && Dist2(posX, posY, exitX, exitY) < EXIT_ENTER_R2 * EXIT_ENTER_R2);
+}
+
 void Update(float dt) {
     { extern float playerMoveSpeedNow; playerMoveSpeedNow = 0.0f; }   /* v8: 守门人判断「在动/冲刺」用 */
     /* v7：可疑点表每帧衰减 / 过期 */
@@ -2892,6 +3120,8 @@ void Update(float dt) {
     { extern float wrenchCd; if (wrenchCd > 0.0f) { wrenchCd -= dt; if (wrenchCd < 0.0f) wrenchCd = 0.0f; } }
 
     CalibTick(dt);   /* v2.4：校准小游戏计时（冷却与滑块） */
+    MimicTick(dt);   /* 2026-11-05 宝箱怪状态机 */
+    { extern void EchoMarksTick(float); EchoMarksTick(dt); }   /* 回声标记寿命 */
     /* v2.1 屏幕特效推进：抖动 / 红闪 / 枪口闪 */
     if (hitFlash > 0.0f) { hitFlash -= dt * 3.2f; if (hitFlash < 0.0f) hitFlash = 0.0f; }
     if (muzzleFlash > 0.0f) { muzzleFlash -= dt * 9.0f; if (muzzleFlash < 0.0f) muzzleFlash = 0.0f; }
@@ -2930,8 +3160,12 @@ void Update(float dt) {
 
        （v2.4 的注保留：必须在「全屏地图暂停」判断之前 ——
         全屏看图时整个 Update 会提前 return，放后面就永远不扣电。） */
-    if (isMapOpen && currentState == STATE_PLAYING) {
-        battery -= MAP_BATTERY_DRAIN * dt;
+    /* 2026-11-05 用户要求：
+       · **大地图不耗电**（全屏规划路线是免费的）
+       · 小地图耗电，且可以被局内强化「小地图省电」降低（10 → 4 /秒） */
+    if (isMapOpen && !mapFullScreen && currentState == STATE_PLAYING) {
+        extern float RunUpgMapDrainPct(void);
+        battery -= RunUpgMapDrainPct() * dt;
         if (battery <= 0.0f) {
             battery = 0.0f;
             isMapOpen = 0;
@@ -2988,6 +3222,9 @@ void Update(float dt) {
        解一把弦线锁要 30~60 秒，按第 1 层 0.5/秒算是 15~30 点理智，
        到了第 10 层就是 30~60 点 —— 解谜变成自杀。
        现在把开锁当作和暂停同等的状态：理智冻结。 */
+    /* 2026-11-05：过载 / 锯锁是**按住不放**的，需要逐帧推进。
+       必须在下面的 if (lockActive) return 之前调用，否则永远不动。 */
+    { extern void LockTick(float); LockTick(dt); }
     if (lockActive) return;
 
     /* v3.3 **藏身回电** ——
@@ -3858,8 +4095,20 @@ void Update(float dt) {
             PlaySfx(SFX_SEARCH, 0.55f);  /* 专用翻箱声：金属刮擦+木板闷响 */
             MakeNoise(posX, posY, 10.0f * SkillSearchNoiseMul() * BenchSearchQuiet() * RunSearchNoiseMul2());   /* v2.2：FAST SEARCH 的 +10% */  /* 比走路大一点，比跑步小 */
         }
+        /* 2026-11-05：宝箱怪在翻找进度 60% 时咬人。
+           低于 45% 松手完全安全 —— 所以"起疑就松手"是有效解法。
+           被咬的那一帧不推进 holdTimer，也不触发"翻完"结算。 */
+        int mimicBit = 0;
+        if (hoverKind == 1) {
+            float prog = holdTimer / (SEARCH_TIME * RunSearchTimeMul());
+            if (MimicOnSearchStep(hoverIndex, prog)) {
+                holdTimer = 0.0f;
+                hideBlockTimer = 0.4f;
+                mimicBit = 1;
+            }
+        }
         holdTimer += dt;
-        if (holdTimer >= SEARCH_TIME * RunSearchTimeMul()) {
+        if (!mimicBit && holdTimer >= SEARCH_TIME * RunSearchTimeMul()) {
             holdTimer = 0.0f;
             /* v3.0：翻完箱也上 0.4 秒封锁 ——
                否则 E 还按着，同一帧/下一帧就会被旁边的藏身点吸进去。 */
@@ -3937,6 +4186,46 @@ void Update(float dt) {
             else if (r2 == 3) { if (gluePots < BottleCap()) { gluePots++; pickupMsg = "+GLUE"; } }
             else if (r2 == 4) { if (echoBolts < BottleCap()) { echoBolts++; pickupMsg = "+ECHO"; } }
             else { if (decoys < BottleCap()) { decoys++; pickupMsg = "+DECOY"; } }
+        }
+        /* ============================================================
+         * 2026-11-05：**宝箱怪空壳的额外奖励**
+         * ------------------------------------------------------------
+         * 放在普通结算**之后**，这样它覆盖 pickupMsg，
+         * 玩家看到的是"空壳里翻出 400 金币"而不是普通的 +GOLD 提示。
+         *
+         * 为什么不拦截普通结算：普通箱子那 8+1.5×层的金币量级很小，
+         * 为了省这点钱去改一大段缩进，只会增加出错面（铁律四十九）。
+         * ============================================================ */
+        if (c->mimicShell) {
+            int bigGold = MIM_GOLD_BASE + MIM_GOLD_STEP * currentLevel;
+            bigGold = (int)((float)bigGold * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
+            carryGold += bigGold;
+            totalGoldEarned += bigGold;
+
+            fusesHeld++;                 /* 必给一根保险丝 */
+            fusesCollectedRun++;
+
+            {   /* 再给一件道具（沿用箱子那套权重） */
+                int r = rand() % 100;
+                if      (r < 20) { if (bottles   < BottleCap()) bottles++;   }
+                else if (r < 38) { if (flares    < BottleCap()) flares++;    }
+                else if (r < 54) { if (smokeBombs< BottleCap()) smokeBombs++; }
+                else if (r < 70) { if (gluePots  < BottleCap()) gluePots++;  }
+                else if (r < 85) { if (echoBolts < BottleCap()) echoBolts++; }
+                else             { if (decoys     < BottleCap()) decoys++;   }
+            }
+
+            PlaySfx(SFX_POWER, 1.0f);
+            {
+                static char shellMsg[112];
+                snprintf(shellMsg, sizeof(shellMsg),
+                         g_lang == LANG_ZH ? "空壳里翻出  +%d 金币  +1 保险丝  +1 道具"
+                                           : "SHELL LOOT  +%d GOLD  +1 FUSE  +1 ITEM",
+                         bigGold);
+                pickupMsg = shellMsg;
+            }
+            pickupMsgTimer = 2.2f;
+            uiDirty = 1;
         }
         if (pickupMsg) pickupMsgTimer = 2.0f;
             } else if (hoverKind == 2) {
@@ -4081,7 +4370,11 @@ void Update(float dt) {
                 echoBolts--;
                 /* v7 第 65 轮：CARTOGRAPHER 成就的计数器**从来没被加过**
                    —— 掷一枚回声弹揭示 15 格（见 echoBolts 的定义）。 */
-                { extern int echoCellsTotalRun; echoCellsTotalRun += 15; }
+                /* 2026-11-05：原来写死 +15，而实际扫描半径是 3 格 ——
+                   成就在统计一个不存在的数字。现在按**真实覆盖格数**近似。 */
+                { extern int echoCellsTotalRun;
+                  int cells = (int)(3.14159265f * ECHO_RADIUS * ECHO_RADIUS / 2.0f);
+                  echoCellsTotalRun += cells; }
             }
                     pickupMsg = (g_lang == LANG_ZH) ? "双投！" : "TWIN THROW!";
                     pickupMsgTimer = 1.0f;
@@ -4332,7 +4625,8 @@ void Update(float dt) {
        第 WIN_LEVEL 层的出口是「逃出生天」，必须走通关结算（含成就）。
        原来弹窗会把它截成「撤离」，导致通关画面/成就永远不出现。 */
     int isFinalFloor = campaignMode || (currentLevel >= WIN_LEVEL && !isEndlessRun);
-    int atExit = (breakerOpen && Dist2(posX, posY, exitX, exitY) < 0.30f);
+    int atExit = (breakerOpen &&
+                  Dist2(posX, posY, exitX, exitY) < EXIT_ENTER_R2 * EXIT_ENTER_R2);
 
     /* v6 **出口二选一：弹窗** ——
        只有「还没弹过、也不是刚选了深入」才弹。 */
@@ -4498,7 +4792,11 @@ void Update(float dt) {
             {
                 ScoreInput si = { currentLevel, 0, 1, runSearched, bottlesKilled, runTime, modsSeenCount };
                 ComputeScore(&si, &lastScore);
-                lastScore.score += eventBonus;   /* v1.8：事件加分 */
+                lastScore.score += eventBonus;
+    /* 2026-11-05：宝箱怪 —— 每甩掉一只 +400，一局上限 2 只。
+       和事件加分走同一条通道（结算页不单独列一行）。 */
+    { extern int mimicsEscapedThisRun;
+      lastScore.score += MIM_SCORE_BONUS * mimicsEscapedThisRun; }   /* v1.8：事件加分 */
                 if (currentLevel > bestEndlessLevel) bestEndlessLevel = currentLevel;
                 if (lastScore.score > bestEndlessScore) bestEndlessScore = lastScore.score;
             }
@@ -4691,6 +4989,14 @@ void CalibStart(void) {
        现在只靠冷却控制节奏。 */
     /* (calibUsedLevel 检查已移除) */
     /* v2.6：**取消次数限制** —— 只靠 60 秒冷却控制节奏 */
+    /* 2026-11-05：**每层限 CALIB_PER_LEVEL 次**。
+       原来只有冷却、没有次数上限（CALIB_PER_LEVEL 是 99），
+       躲在柜子里可以无限回理智。 */
+    if (calibUsesThisFloor >= CALIB_PER_LEVEL) {
+        pickupMsg = g_lang == LANG_ZH ? "本层校准已用完" : "NO CALIBRATION LEFT THIS FLOOR";
+        pickupMsgTimer = 1.4f;
+        return;
+    }
     if (calibCooldown > 0.0f) {
         char* m = (char*)(g_lang == LANG_ZH ? "校准冷却中" : "CALIBRATION COOLING");
         pickupMsg = m;
@@ -4716,6 +5022,7 @@ void CalibLock(void) {
     calibActive = 0;
     calibCooldown = CALIB_COOLDOWN;   /* v2.6：只上冷却 */
     calibUsedLevel = currentLevel;    /* v3.0：记下本层用过了 */
+    calibUsesThisFloor++;             /* 2026-11-05：本层计数，配合 CALIB_PER_LEVEL */
 
     float d = calibPos - calibZoneC;
     if (d < 0.0f) d = -d;
@@ -4723,13 +5030,23 @@ void CalibLock(void) {
     float perfW = CALIB_PERFECT_W * zs;
     float zoneW = CALIB_ZONE_W * zs;
 
+    /* 2026-11-05 重新定价：**所有奖励随层数成长**，和箱子金币曲线对齐。
+       完美：理智 12+2×层（封顶 34） / 金币 20+4×层 / 电量 +15
+       良好：理智  6+1×层（封顶 18） / 金币 10+2×层 / 电量  +8
+       （energy 属于已下线的武器系统，不再给） */
+    int   lvNow   = currentLevel > 0 ? currentLevel : 1;
+    float sanP    = CALIB_SANITY_BASE + CALIB_SANITY_STEP * (float)lvNow;
+    float sanG    = CALIB_GOOD_SANITY_BASE + CALIB_GOOD_SANITY_STEP * (float)lvNow;
+    if (sanP > CALIB_SANITY_MAX)      sanP = CALIB_SANITY_MAX;
+    if (sanG > CALIB_GOOD_SANITY_MAX) sanG = CALIB_GOOD_SANITY_MAX;
+    int   goldP   = GOLD_CALIB_PERFECT + GOLD_CALIB_PERFECT_STEP * lvNow;
+    int   goldG   = GOLD_CALIB_GOOD    + GOLD_CALIB_GOOD_STEP    * lvNow;
+
     if (d <= perfW) {
-        /* v2.9：黄区（完美）= 能量上限的 70% */
-        float gain = (float)EnergyMax() * CALIB_PERFECT_ENERGY_PCT;
         calibResult = 1;
-        energy += gain;
-        sanity += CALIB_PERFECT_SANITY;
-        if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
+        sanity += sanP;
+        battery += CALIB_BATTERY_PERFECT;
+        if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
         if (sanity > SanityMax()) sanity = SanityMax();
         /* v3.4：完美校准额外给金币 —— 高技能动作应该比搜箱子值钱。
            **注意**：pickupMsg 是 `const char*`（指向字符串字面量），
@@ -4737,31 +5054,36 @@ void CalibLock(void) {
            必须走静态缓冲区（和 DrawSaveStatusBanner 那次踩的坑一模一样）。 */
         {
             static char calibMsg[96];
-            int gld = (int)(GOLD_CALIB_PERFECT * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
+            int gld = (int)((float)goldP * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
             carryGold += gld;
             totalGoldEarned += gld;
             snprintf(calibMsg, sizeof(calibMsg),
-                     g_lang == LANG_ZH ? "完美校准  +%d 理智  +%d 金币"
-                                       : "PERFECT  +%d SANITY  +%d GOLD",
-                     (int)CALIB_PERFECT_SANITY, gld);
+                     g_lang == LANG_ZH ? "完美校准  +%d 理智  +%d 金币  +%d 电"
+                                       : "PERFECT  +%d SANITY  +%d GOLD  +%d BAT",
+                     (int)(sanP + 0.5f), gld, (int)CALIB_BATTERY_PERFECT);
             pickupMsg = calibMsg;
         }
         PlaySfx(SFX_POWER, 1.0f);
     } else if (d <= zoneW) {
-        /* v2.9：绿区（命中）= 能量上限的 40% */
-        float gain = (float)EnergyMax() * CALIB_GOOD_ENERGY_PCT;
         calibResult = 2;
-        energy += gain;
-        sanity += CALIB_GOOD_SANITY;
+        sanity  += sanG;
+        battery += CALIB_BATTERY_GOOD;
+        if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
         /* v3.4：良好校准也给金币（少一半） */
         {
-            int gld = (int)(GOLD_CALIB_GOOD * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
+            int gld = (int)((float)goldG * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
             carryGold += gld;
             totalGoldEarned += gld;
+            /* 文案原来写死 "+11 理智"，而实际给的是 CALIB_GOOD_SANITY(15) ——
+               数字改了文案没改。现在统一用一个缓冲区。 */
+            static char calibMsgG[96];
+            snprintf(calibMsgG, sizeof(calibMsgG),
+                     g_lang == LANG_ZH ? "校准成功  +%d 理智  +%d 金币  +%d 电"
+                                       : "CALIBRATED  +%d SANITY  +%d GOLD  +%d BAT",
+                     (int)(sanG + 0.5f), gld, (int)CALIB_BATTERY_GOOD);
+            pickupMsg = calibMsgG;
         }
-        if (energy > (float)EnergyMax()) energy = (float)EnergyMax();
         if (sanity > SanityMax()) sanity = SanityMax();
-        pickupMsg = g_lang == LANG_ZH ? "校准成功  +11 理智" : "CALIBRATED  +11 SANITY";
         PlaySfx(SFX_POWER, 0.7f);
     } else {
         /* v2.9：**失手不给任何能量**（原来也是 0，这里写明防以后改坏） */
@@ -4787,9 +5109,10 @@ void CalibTick(float dt) {
        原来是在「进店」那一刻重置，于是出门再进来就又满 3 次 ——
        而安全屋会回理智，站够冷却就能无限刷能量和理智。 */
     /* v2.6：取消次数限制后，这里只需要保证「每层进来时不要残留上一次的滑块状态」 */
-    if (currentState == STATE_SAFEHOUSE && calibLevel != currentLevel) {
+    if (calibLevel != currentLevel) {
         calibLevel = currentLevel;
         calibActive = 0;
+        calibUsesThisFloor = 0;    /* 2026-11-05：换层重置「本层校准次数」 */
         uiDirty = 1;
     }
 
@@ -4919,6 +5242,10 @@ void StartGame(void) {
     }
 
     currentState = STATE_PLAYING;
+    /* 2026-11-05：新局同样要重置鼠标基准 ——
+       从菜单/商店直接开局时，lastMousePos 还是上一次的位置，
+       第一帧会把它当成一次巨大的视角输入。 */
+    firstMouseMove = 1;
     DailyTick(); DailyBeginRun();
     currentLevel = campaignMode ? CampaignStartFloor(campaignStage) : 1;
     gameWon = 0;
@@ -5057,6 +5384,7 @@ void StartGame(void) {
 
     /* 重置成就追踪变量 */
     knockCountRun=throwHitCountRun=echoCellsTotalRun=0;
+    { extern int mimicsEscapedThisRun; mimicsEscapedThisRun = 0; }
     floorsNoSanityLoss=dailyEscapeCount=wardenCleanFloors=fullHideDone=0;
     doubleHuntSeconds=0.0f; pendingSkillDraft=0;
     totalGoldEarned = 0;
@@ -6306,7 +6634,27 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (wheelAcc >= 60 || wheelAcc <= -60) {
                     if (g_timeSec - wheelCd > 0.09) {
                         int dir = (wheelAcc > 0) ? +1 : -1;
-                        throwSelected = (throwSelected + dir + ITEM_SLOT_COUNT) % ITEM_SLOT_COUNT;
+                        /* ============================================================
+                         * 2026-11-05 修 bug：**滚轮永久卡死**
+                         * ------------------------------------------------------------
+                         * 旧写法是 (sel + dir + 6) % 6 —— 会落在**空槽**上。
+                         * 而 Update() 每帧都调 EnsureThrowSelectedValid()，
+                         * 它发现当前槽空着，就把选中拽回"第一个有货的槽"。
+                         *
+                         * 于是：槽0 有货、槽1 空 → 滚轮 +1 到槽1 → 下一帧拽回槽0
+                         *       → 再滚 +1 又到槽1 又拽回槽0 …… **永远出不去**。
+                         * 玩家看到的就是"滚轮切换不出来"。
+                         *
+                         * 现在直接跳到**下一个有货的槽**，空槽整个跳过。
+                         * ============================================================ */
+                        int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs,
+                                                        gluePots, echoBolts, decoys };
+                        int moved = 0;
+                        for (int step = 0; step < ITEM_SLOT_COUNT; step++) {
+                            throwSelected = (throwSelected + dir + ITEM_SLOT_COUNT) % ITEM_SLOT_COUNT;
+                            if (counts[throwSelected] > 0) { moved = 1; break; }
+                        }
+                        if (!moved) throwSelected = 0;   /* 一件都没有：回 0 号槽 */
                         wheelCd = g_timeSec;
                         uiDirty = 1;
                     }
@@ -6425,6 +6773,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_LBUTTONUP:
+            /* 2026-11-05：松开要通知锁盘 —— 过载的判定就发生在这一刻 */
+            if (lockActive) {
+                extern void LockHoldEnd(void);
+                LockHoldEnd();
+                uiDirty = 1;
+                return 0;
+            }
             if (currentState == STATE_HUB) {
                 /* 修：没拖动就当成单击 —— 选中鼠标下的节点（见 ui.c 的注释） */
                 extern int SkillDragWasClick(void);
@@ -6778,10 +7133,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
                 if (menuConfirm) ShopActivate();
                 if (menuCancel) {
-                    currentState = STATE_PLAYING;
-                    resetInputState = 1;
-                    ForceCursor(0);
-                    uiDirty = 1;
+                    /* 2026-11-05：**ESC 和 LEAVE 行走同一条出口**。
+                       原来这里各写一遍，ShopLeave 补了 firstMouseMove
+                       而这里漏了 —— 于是 ESC 退出仍会视角翻转。
+                       一份实现，两处调用，才不会再有这种半修。 */
+                    extern void ShopLeave(void);
+                    ShopLeave();
                 }
             } else if (currentState == STATE_WEAPON_PICK) {
                 if (menuUp)      { weaponPickSel = (weaponPickSel + WPN_COUNT - 1) % WPN_COUNT; uiDirty = 1; }

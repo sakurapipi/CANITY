@@ -446,7 +446,37 @@ void ShopNextPage(void) {
 /* 找一个"已拥有但没装在这把武器上"的配件，返回 id；没有则 -1 */
 
 
+/* ==================================================================
+ * 哪些行是「离开」？—— **一个地方判断，三个页面共用**
+ * ------------------------------------------------------------------
+ * 2026-11-05 用户反馈：「强化页最后那行 LEAVE 必须按 ESC 才能退出，
+ * 用鼠标点它没反应，每次下意识去戳一下鼠标。」
+ *
+ * 根因：各页的 LEAVE 行在 ShopActivate() 里全都「什么都不做」——
+ *   强化页  if (shopRow > RUN_UPG_COUNT) return;
+ *   改装页  只处理 row 0..2，row 3 落空
+ *   休息页  只处理 row 0..3，row 4 落空
+ * 只有商店页写了 ShopLeave()。
+ * 而鼠标点击走的是 ClickMenu → ActivateMenuItem → ShopActivate，
+ * 所以「点 LEAVE 没反应」= 回车也没反应，只有 ESC 能走。
+ *
+ * 现在统一：谁负责画 LEAVE 行，就在这张表里登记一次。
+ * ================================================================ */
+static int ShopLeaveRow(int row) {
+    switch (shopPage) {
+    case SHP_SHOP:    return row >= SHOP_OFFERS;         /* 补给行之后就是 LEAVE */
+    case SHP_BENCH:   return row == 3;                   /* CORE/MOD/CLEAR/LEAVE */
+    case SHP_REST:    return row == 4;                   /* REST/CHARGE/STAMINA/SHORTCUT/LEAVE */
+    case SHP_UPGRADE: return row > RUN_UPG_COUNT;        /* 强化行 + CONTRACT + LEAVE */
+    default:          return 0;                          /* SHP_TREE 自己处理 */
+    }
+}
+
 void ShopActivate(void) {
+    extern void ShopLeave(void);
+    /* 鼠标点 LEAVE / 回车敲 LEAVE 都从这里走，和 ESC 同一条路径 */
+    if (ShopLeaveRow(shopRow)) { ShopLeave(); return; }
+
     /* v3.0：金币强化 */
     if (shopPage == SHP_UPGRADE) {
         if (shopRow == RUN_UPG_COUNT) {
@@ -459,7 +489,7 @@ void ShopActivate(void) {
         PlaySfx(SFX_POWER, 0.7f);
         return;
     }
-    if (shopRow > RUN_UPG_COUNT) return;      /* LEAVE 由 Esc 处理 */
+    if (shopRow > RUN_UPG_COUNT) return;      /* 理论到不了：LEAVE 已在上面的 ShopLeaveRow 拦掉 */
         int r = RunUpgTryBuy(shopRow);
         if (r == 0)            { pickupMsg = Tr("UPGRADED", "已强化"); }
         else if (r == 2)       { pickupMsg = Tr("MAX LEVEL", "已满级"); }
@@ -625,8 +655,10 @@ void ShopActivate(void) {
         extern void SkipOneLevel(void);
         extern int shortcutUsed, bossLevel;
         if (SkillShortcutAvailable() && !shortcutUsed && !bossLevel) {
+            extern int firstMouseMove;
             currentState = STATE_PLAYING;
             resetInputState = 1;
+            firstMouseMove = 1;      /* 同上：别把菜单里的鼠标位移带进游戏 */
             ForceCursor(0);
             SkipOneLevel();
         }
@@ -678,9 +710,24 @@ void ShopSetSafeLv(int heal, int charge, int stamina) {
    玩家选中它按回车毫无反馈。这里和 ESC 走同一条路径。 */
 void ShopLeave(void) {
     extern int resetInputState, uiDirty;
+    extern int firstMouseMove;          /* 2026-11-05：**必须一起置位** */
     extern void ForceCursor(int on);
     currentState = STATE_PLAYING;
     resetInputState = 1;
+    /* ============================================================
+     * 修：**离开商店后视角会瞬间翻转 180°**
+     * ------------------------------------------------------------
+     * 原因：菜单里鼠标是**自由光标**，玩家左右滑页签时鼠标已经跑到
+     *       屏幕另一头；而转视角用的是
+     *           dx = currentPos.x - lastMousePos.x
+     *       lastMousePos 还停在进菜单前的位置 —— 菜单期间根本没更新。
+     *       一回到游戏，第一帧就把「菜单里滑过的全部距离」当成一次
+     *       视角输入，于是猛地转过去。滑得越多转得越狠。
+     *
+     * firstMouseMove = 1 的作用就是：下一帧只把光标拉回中心、
+     * 丢弃这一帧的位移（见 WM_MOUSEMOVE 开头那段）。
+     * ============================================================ */
+    firstMouseMove = 1;
     ForceCursor(0);
     uiDirty = 1;
 }

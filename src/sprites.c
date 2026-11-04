@@ -879,6 +879,82 @@ static void BakeMonster(int id, int kind, int pose) {
         /* 上下各一缕外泄的尖刺（不对称：上面长、下面短） */
         cvLine(cx, ECHO_CY - 26.0f, cx - 4.0f, ECHO_CY - 62.0f, 3.0f, hi, 0.5f);
         cvLine(cx, ECHO_CY + 26.0f, cx + 3.0f, ECHO_CY + 44.0f, 3.0f, hi, 0.5f);
+    } else if (kind == 13) {
+        /* ============================================================
+         * 宝箱怪现形态（2026-11-05）
+         * ------------------------------------------------------------
+         * 填黑剪影的四个地标：
+         *   ① **掀开的盖子**（像宝箱盖一样向后翻）—— 最强的识别特征
+         *   ② 四条短粗腿（箱子不会走路，这是"它活了"的证据）
+         *   ③ **横贯上部的宽口**（比任何一只怪的嘴都宽）
+         *   ④ 背甲的木板纹路 + 金包边 —— 和伪装态同源（铁律七）
+         * ============================================================ */
+        float bw = 44.0f;                 /* 比普通箱略宽：它撑开了 */
+        float topY = baseY - 92.0f;
+        float botY = baseY - 18.0f;
+
+        /* ---- ① 掀开的盖子（向后翻 55°）---- */
+        {
+            float lid[8] = { c - bw, topY,
+                             c + bw, topY,
+                             c + bw - 16.0f, topY - 52.0f,
+                             c - bw - 16.0f, topY - 52.0f };
+            cvPoly(lid, 4, 0x00301408u, 1.0f);
+            float lid2[8] = { c - bw + 4, topY - 2,
+                              c + bw - 4, topY - 2,
+                              c + bw - 20.0f, topY - 46.0f,
+                              c - bw - 12.0f, topY - 46.0f };
+            cvPolyGrad(lid2, 4, 0x00906A3Cu, 0x00301C0Cu, 1.0f);
+            /* 盖子内侧是肉 —— 这点红让"箱子"立刻变成"生物" */
+            cvLine(c - bw + 8, topY - 6, c + bw - 8, topY - 6, 7.0f, 0x00501818u, 1.0f);
+            cvLine(c - bw + 10, topY - 6, c + bw - 10, topY - 6, 3.0f, 0x00A03028u, 0.85f);
+        }
+
+        /* ---- ② 口腔（宽口，横贯上部）---- */
+        {
+            cvLine(c - bw + 6, topY + 12, c + bw - 6, topY + 12, 26.0f, 0x00060404u, 1.0f);
+            /* 上下两排牙：上排 9 颗、下排 9 颗，参差不齐 */
+            for (int i = 0; i < 9; i++) {
+                float tx = c - bw + 12.0f + (float)i * ((bw * 2.0f - 24.0f) / 8.0f);
+                float h = 7.0f + (float)((i * 37) % 5);
+                cvLine(tx, topY + 2, tx, topY + 2 + h, 4.0f, 0x00E8E0C8u, 1.0f);
+                cvLine(tx + 2.0f, topY + 24, tx + 2.0f, topY + 24 - h, 4.0f, 0x00D8D0B0u, 1.0f);
+            }
+        }
+
+        /* ---- ③ 箱体（和伪装态同一个色系）---- */
+        {
+            float body[8] = { c - bw, topY + 24, c + bw, topY + 24, c + bw, botY, c - bw, botY };
+            cvPoly(body, 4, 0x00080604u, 1.0f);
+            float body2[8] = { c - bw + 5, topY + 28, c + bw - 5, topY + 28,
+                               c + bw - 5, botY - 4, c - bw + 5, botY - 4 };
+            cvPolyGrad(body2, 4, 0x00885E32u, 0x00301C0Cu, 1.0f);
+            /* 木板纹路：和伪装态一致（铁律七：让玩家认出是同一只） */
+            for (int i = 1; i < 3; i++)
+                cvLine(c - bw + 6, topY + 28 + (float)i * 22.0f,
+                       c + bw - 6, topY + 28 + (float)i * 22.0f, 3.0f, 0x00281408u, 0.8f);
+            /* 金包边留在两侧 —— 这就是"豪华箱子"的残留 */
+            cvLine(c - bw + 6, topY + 28, c - bw + 6, botY - 4, 6.0f, 0x00B89238u, 0.95f);
+            cvLine(c + bw - 6, topY + 28, c + bw - 6, botY - 4, 6.0f, 0x00B89238u, 0.95f);
+        }
+
+        /* ---- ④ 四条短粗腿（两条在前、两条在后，剪影错开）---- */
+        {
+            float legTop = botY - 2.0f;
+            float legY[4] = { c - bw + 10, c - 8, c + 8, c + bw - 10 };
+            float legL[4] = { 20.0f, 26.0f, 26.0f, 20.0f };
+            for (int i = 0; i < 4; i++) {
+                float lx = legY[i];
+                float ly = legTop + legL[i];
+                cvLine(lx, legTop, lx - 3.0f, ly, 9.0f, 0x002A1A0Eu, 1.0f);
+                cvLine(lx - 1.0f, legTop, lx - 3.0f, ly, 5.0f, 0x005A3E22u, 0.95f);
+                cvEllipse(lx - 3.5f, ly, 6.0f, 3.0f, 0x00140C06u, 1.0f);
+            }
+        }
+
+        /* ---- ⑤ 两点眼：在口腔上方，极小的红 —— 铁律九（威胁要高对比）---- */
+        cvEllipse(c - 16.0f, topY - 4.0f, 3.5f, 3.0f, 0x00FF4020u, 1.0f);
+        cvEllipse(c + 16.0f, topY - 4.0f, 3.5f, 3.0f, 0x00FF4020u, 1.0f);
     } else if (kind == 0 || kind == 1 || kind == 2 || kind == 7 || kind == 8 || kind == 9
                || kind == 11 || kind == 12) {
         float narrow = (kind == 1) ? 0.82f : (kind == 2 ? 1.35f : 1.0f);   /* 体型胖瘦 */
@@ -1510,6 +1586,43 @@ static void BakeProp(int id, int kind) {
         cvLine(c + 10, baseY - 58, c + 10, baseY - 72, 4.0f, 0x00E0C050u, 1.0f);
         cvLine(c - 10, baseY - 72, c + 10, baseY - 72, 4.0f, 0x00E0C050u, 1.0f);
         cvEllipse(c, baseY - 40, 4.0f, 5.0f, 0x00201808u, 1.0f);
+    } else if (kind == 7) {
+        /* ============================================================
+         * 宝箱怪伪装态（2026-11-05）
+         * ------------------------------------------------------------
+         * 和普通箱子（kind 0）**同宽同高** —— 铁律一：剪影必须仍读作"箱子"，
+         * 否则玩家一眼就看出不对，破绽设计就废了。
+         *
+         * 只改两处「约定部件」（铁律十五）：
+         *   ① 金属包边从暗铁色改成**暗金色** → 看起来更值钱（这是诱饵）
+         *   ② 锁扣是**双层**（普通箱子单层） → 破绽②，细看才发现
+         * ============================================================ */
+        float b[8]  = { c - 46, baseY - 96, c + 46, baseY - 96, c + 46, baseY, c - 46, baseY };
+        float b2[8] = { c - 40, baseY - 90, c + 40, baseY - 90, c + 40, baseY - 4, c - 40, baseY - 4 };
+        cvPoly(b, 4, 0x00080604u, 1.0f);
+        /* 箱体：比普通箱的木色更暖更亮（金丝楠那种） */
+        cvPolyGrad(b2, 4, 0x00A87E46u, 0x004A3218u, 1.0f);
+        for (int i = 0; i < 3; i++)
+            cvLine(c - 40, baseY - 74 + (float)i * 26, c + 40, baseY - 74 + (float)i * 26,
+                   3.0f, 0x00341E0Cu, 0.8f);
+
+        /* ① 暗金色包边（区别 1：普通箱是 0x00605848 铁灰） */
+        cvLine(c - 40, baseY - 90, c - 40, baseY - 4, 8.0f, 0x00C8A040u, 1.0f);
+        cvLine(c + 40, baseY - 90, c + 40, baseY - 4, 8.0f, 0x00C8A040u, 1.0f);
+        cvLine(c - 40, baseY - 90, c + 40, baseY - 90, 5.0f, 0x00E8C050u, 0.95f);
+        cvSpeckle((int)c, (int)baseY - 50, 36, 50, 0x00402010u, 0.35f);
+        cvBevel(c - 40, baseY - 90, c + 40, baseY - 4, 3.0f, 0.42f);
+        /* 包角高光：让金边读作金属而不是涂色 */
+        cvLine(c - 40, baseY - 90, c - 30, baseY - 90, 4.0f, 0x00FFE080u, 0.6f);
+        cvLine(c + 30, baseY - 4,  c + 40, baseY - 4,  4.0f, 0x00603C10u, 0.6f);
+
+        /* ② **双层锁扣**（破绽②）：上面一块大、下面一块小的错位 2 像素 */
+        cvLine(c - 9, baseY - 62, c + 9, baseY - 62, 15.0f, 0x00D8B050u, 1.0f);
+        cvLine(c - 9, baseY - 62, c + 9, baseY - 62, 11.0f, 0x00F0D070u, 0.95f);
+        /* 第二层：偏右 2 像素、低 14 像素 —— 这就是"歪锁扣"的破绽 */
+        cvLine(c - 2, baseY - 48, c + 14, baseY - 48, 9.0f, 0x00C8A040u, 1.0f);
+        cvLine(c + 1, baseY - 48, c + 11, baseY - 48, 5.0f, 0x00FFE890u, 0.8f);
+        cvEllipse(c, baseY - 62, 3.0f, 3.5f, 0x00140C04u, 1.0f);
     } else if (kind == 6) {     /* 藏身点：垃圾桶 */
         float body[8] = { c - 34, baseY - 150, c + 34, baseY - 150, c + 42, baseY, c - 42, baseY };
         cvPoly(body, 4, 0x000A0C0Au, 1.0f);
@@ -1757,6 +1870,7 @@ void SpritesInit(void) {
     BakeMonster(SPR_MON_SPIDER, 9, 0);   /* v2.4.1: 槽位复用 -> 守门人（三眼） */
     BakeMonster(SPR_MON_LEECH_W, 9, 2);   /* v2.4.81: 守门人 **追击变体**（红眼直接烘，不用 key） */
     BakeMonster(SPR_MON_ECHO, 10, 0);
+    BakeMonster(SPR_MON_MIMIC, 13, 0);   /* 2026-11-05 宝箱怪现形态 */
     /* v2.4.84 调试导出 */
     if (getenv("CANITY_DUMP")) {
         SpriteDumpPPM(SPR_MON_SPIDER,  "dump_warden_patrol.ppm");
@@ -1770,6 +1884,7 @@ void SpritesInit(void) {
     BakeProp(SPR_PROP_CRATE_OPEN, 4);
     BakeProp(SPR_PROP_CRATE_LOCKED, 5);
     BakeProp(SPR_PROP_TRASH, 6);
+    BakeProp(SPR_PROP_CRATE_MIMIC, 7);   /* 2026-11-05 宝箱怪伪装态 */
     BakeUiPanel(SPR_UI_PANEL, 0);
     BakeUiPanel(SPR_UI_PANEL_HOT, 1);
     BakeUiCursor();

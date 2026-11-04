@@ -253,13 +253,16 @@ void UpdateShots(float dt) {
                     }
                 }
 
-                /* v2.4.62：**记录落点 3 格内的怪物**，本层永久显示在小地图上 */
+                /* 2026-11-05：**回声弹改成资源雷达**
+                   半径 3 → 10 格，容器标 30 秒（保险丝金 / 宝箱怪红闪），
+                   活物标 5 秒，落地自带 20 格噪音。
+                   详细设计见 game.c 的 EchoMarksScan 注释。 */
                 {
                     extern void EchoMarksScan(float, float, float);
-                    EchoMarksScan(shot[i].x, shot[i].y, 3.0f);
+                    EchoMarksScan(shot[i].x, shot[i].y, ECHO_RADIUS);
                 }
-                pickupMsg = (g_lang == LANG_ZH) ? "声呐扫描：地图已揭示"
-                                                : "SONAR: MAP REVEALED";
+                pickupMsg = (g_lang == LANG_ZH) ? "声呐扫描：资源已标出（有声）"
+                                                : "SONAR: RESOURCES MARKED (LOUD)";
                 pickupMsgTimer = 1.8f;
                 PlaySfx(SFX_ECHO, 0.85f);
             } else {

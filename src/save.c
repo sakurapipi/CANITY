@@ -308,6 +308,9 @@ void SaveGame(void) {
     }
     /* v7 第 ㊿ 轮：数组是 runUpgSave[5]，原来只存 4 个 → 第 5 项（扳手）永远丢 */
     for (int i = 0; i < 5; i++) g_save.runUpgSave[i] = RunUpgLevel(i);
+    /* v29：第 6 条单独存（数组不能加长，见 save.h 的注释） */
+    { extern int RunUpgMapDrainLevel(void);
+      g_save.runUpgMinimapSave = RunUpgMapDrainLevel(); }
     g_save.flashlightOn = flashlightOn;
     g_save.posX = posX; g_save.posY = posY;
     g_save.dirX = dirX; g_save.dirY = dirY;
@@ -754,7 +757,8 @@ int LoadSettings(void) {
     /* v25 / v26 / v27：新字段都追加在结构末尾，前缀可以直接读。
        v25 缺 runPrincipalSave，用本局本金兜底（和原来的迁移一致）；
        v28 新增的 Dynamic Res / 通关记录由下面的 has*Field 判断补默认值。 */
-    if (g_save.version == 25 || g_save.version == 26 || g_save.version == 27) {
+    if (g_save.version == 25 || g_save.version == 26 ||
+        g_save.version == 27 || g_save.version == 28) {
         g_save.version = SAVE_VERSION;
         if (g_save.runPrincipalSave == 0) g_save.runPrincipalSave = g_save.carryGoldSave;
     }
@@ -1015,7 +1019,9 @@ void ContinueRun(void) {
     BestiaryLoad(g_save.bestiaryKnowledge);
     RestoreBankFromSave();
     if (hiddenIn >= hideSpotCount) hiddenIn = -1;
-    RunUpgLoadFromSave(g_save.runUpgSave);   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
+    RunUpgLoadFromSave(g_save.runUpgSave);
+    { extern void RunUpgLoadExtra(int);
+      RunUpgLoadExtra(g_save.runUpgMinimapSave); }   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
     if (!(energy > 0.0f)) energy = ENERGY_MAX;
     flashlightOn = g_save.flashlightOn;
     /* v8：模式规则优先于存档里的开关状态 ——

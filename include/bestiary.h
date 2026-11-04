@@ -21,7 +21,7 @@
 
 #include "common.h"
 
-#define BESTIARY_COUNT 6   /* 六种怪 */
+#define BESTIARY_COUNT 7   /* 2026-11-05：+1 宝箱怪 */
 
 /* ---- 揭示阶段 ---- */
 enum {

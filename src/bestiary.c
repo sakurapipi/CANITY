@@ -45,6 +45,13 @@ static float bstSpeedWarden(void) { extern float WardenChaseSpeedNow(void); retu
 static float bstHearWarden(void)  { return 4.0f; }
 static float bstChaseWarden(void) { return 5.0f; }
 
+/* 2026-11-05 宝箱怪：数值全部从 mimic.h 的真实常量读，
+   改一个常量图鉴自动跟着变（这是本文件的设计原则） */
+#include "mimic.h"
+static float bstSpeedMimic(void) { return MIM_SPEED_MUL; }       /* 相对玩家的倍数 */
+static float bstHearMimic(void)  { return 0.0f; }                /* 它不听声音，只装死 */
+static float bstChaseMimic(void) { return MIM_CHASE_TIME; }
+
 /* ---- 表：加一种怪 = 加一行 ---- */
 const BestiaryEntry bestiary[BESTIARY_COUNT] = {
     {
@@ -94,6 +101,14 @@ const BestiaryEntry bestiary[BESTIARY_COUNT] = {
         "配电箱通电之后，有东西在出口那条路上巡逻。",
         "It only sees motion. Stand still and it walks past you.",
         "它只对移动有反应。站着不动它会走过去。"
+    },
+    {
+        "MIMIC", "宝箱怪", "TRAP", "陷阱", 0,
+        bstSpeedMimic, bstHearMimic, bstChaseMimic,
+        "It looks like a crate. It is not. You cannot kill it.",
+        "它长得像箱子。它不是。打不死。",
+        "Echo reveals it. Wrench flushes it out. Hiding loses it.",
+        "回声箭能照出来；扳手能敲出原形；躲起来能甩掉。"
     },
 };
 

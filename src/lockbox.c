@@ -52,6 +52,27 @@ int lockEqVal[LOCK_EQ_BANDS] = {0, 0, 0};
 int lockTuneVal[LOCK_TUNE_KNOBS] = {0, 0, 0};
 int lockIgnoreVK = 0;
 
+/* ==================================================================
+ * 2026-11-05：**两种新锁的状态**
+ * ------------------------------------------------------------------
+ * 这两种和原来四种的根本区别：原来四种都是「点一下就变一个值」，
+ * 这两种是**按住不放**才有意义 —— 所以需要一个逐帧的 LockTick()。
+ *
+ * 设计意图（对照旧四种的三个缺陷）：
+ *   · 旧四种没有失败代价  → SAW 拖太快会卡锯（发噪音）
+ *   · 旧四种零世界联动    → SAW 卡锯 / OVERLOAD 过载都会 MakeNoise
+ *   · 旧四种技能维度单一  → 一个是节奏、一个是蓄力控制
+ * ================================================================ */
+int   lockMouseDown   = 0;
+float lockOvVal       = 0.0f;
+float lockOvTarget    = 0.60f;
+float lockOvFlash     = 0.0f;
+float lockSawProgress = 0.0f;
+float lockSawBeat     = 0.0f;
+float lockSawStall    = 0.0f;
+static float lockSawLastX = 0.0f;   /* 上一帧鼠标 X（算拖动量） */
+static int   lockSawArm   = 0;      /* 已经按下过才算拖动 */
+
 int locksOpened = 0;
 static float lockCooldown = 0.0f;
 
@@ -79,6 +100,16 @@ void LockOpenFor(int idx, int type) {
     for (int i = 0; i < LOCK_WIRES; i++) lockWireLink[i] = -1;
     for (int i = 0; i < LOCK_EQ_BANDS; i++) lockEqVal[i] = 0;
     for (int i = 0; i < LOCK_TUNE_KNOBS; i++) lockTuneVal[i] = 0;
+    /* 2026-11-05：新锁的状态也要清 —— 否则上一次过载的充能会带进来，
+       OPEN 的瞬间就直接判成过红线。 */
+    lockMouseDown   = 0;
+    lockOvVal       = 0.0f;
+    lockOvFlash     = 0.0f;
+    lockSawProgress = 0.0f;
+    lockSawStall    = 0.0f;
+    lockSawArm      = 0;
+    /* 过载的绿区位置由这个箱子的 lockCode 决定，同一个箱子每次重开位置一致 */
+    lockOvTarget = 0.42f + (float)((contLockCode[idx] >> 2) % 34) * 0.01f;
     /* v3.0：**必须释放鼠标** —— 上游 OpenLockOverlay 有这段，我移植时漏了。
        不释放的话：光标还在隐藏（游戏内 ForceCursor(0)），
        鼠标还被锁在屏幕中心做视角控制，玩家既看不到指针也移不动，
@@ -336,6 +367,139 @@ void LockTuneAdjust(int knob, int delta) {
 
 /* 鼠标点击锁盘：按锁型分派到各自的控件。
    布局由 ui.c 的 LockHitTest 提供，和绘制共用同一套几何。 */
+/* ==================================================================
+ * 2026-11-05：**过载 OVERLOAD 与 锯锁 SAW**
+ * ================================================================== */
+
+/* ---- 共用：几何。铁律二十一 [AD-21]：布局 / 绘制 / 命中同一份几何 ---- */
+static LockBox LockPanelBox(void);   /* 定义在下面（命中测试那一节） */
+
+static LockBox LockHandleBarBox(void) {
+    LockBox p = LockPanelBox();
+    LockBox b;
+    b.x0 = p.x0 + LUIS(60);
+    b.x1 = p.x1 - LUIS(60);
+    b.y0 = p.y0 + LUIS(196);
+    b.y1 = b.y0 + LUIS(40);
+    return b;
+}
+
+/* ---- 过载：过红线的惩罚 ---- */
+static void OverloadBlow(void) {
+    extern float battery;
+    extern float sanity;
+    lockOvFlash = 0.45f;
+    lockOvVal   = 0.0f;
+    battery -= 10.0f;
+    if (battery < 0.0f) battery = 0.0f;
+    sanity -= 3.0f;
+    if (sanity < 0.0f) sanity = 0.0f;
+    MakeNoise(posX, posY, 15.0f);
+    PlaySfx(SFX_GLASS, 0.75f);
+    uiDirty = 1;
+}
+
+/* ---- 过载：松手判定 ---- */
+static void OverloadRelease(void) {
+    float d = lockOvVal - lockOvTarget;
+    if (d < 0.0f) d = -d;
+
+    if (d <= LOCK_OV_ZONE_W) {
+        if (lockTarget >= 0) LockUnlock(lockTarget);
+        PlaySfx(SFX_POWER, 0.9f);
+    } else {
+        /* 没进绿区就松手 = 空放：不炸，但要重来 */
+        lockOvVal = 0.0f;
+        PlaySfx(SFX_GLASS, 0.35f);
+    }
+    uiDirty = 1;
+}
+
+/* ---- 锯锁：卡锯惩罚 ---- */
+static void SawStall(void) {
+    lockSawStall    = 0.0f;
+    lockSawProgress -= 0.06f;
+    if (lockSawProgress < 0.0f) lockSawProgress = 0.0f;
+    MakeNoise(posX, posY, 18.0f);      /* 锯卡住 = 一声刺耳巨响 */
+    PlaySfx(SFX_GLASS, 0.7f);
+    uiDirty = 1;
+}
+
+void LockHoldBegin(void) {
+    if (!lockActive) return;
+    lockMouseDown = 1;
+    lockSawArm    = 1;
+    lockSawLastX  = (float)g_mousePos.x;
+    uiDirty = 1;
+}
+
+void LockHoldEnd(void) {
+    if (!lockActive) return;
+    lockMouseDown = 0;
+    lockSawArm    = 0;
+    if (lockType == LOCK_TYPE_OVERLOAD) OverloadRelease();
+    uiDirty = 1;
+}
+
+void LockTick(float dt) {
+    if (!lockActive) return;
+    if (dt < 0.0f) dt = 0.0f;
+    if (dt > 0.10f) dt = 0.10f;          /* 掉帧时不要把充能一次性推过头 */
+
+    if (lockOvFlash > 0.0f) {
+        lockOvFlash -= dt;
+        if (lockOvFlash < 0.0f) lockOvFlash = 0.0f;
+        uiDirty = 1;
+    }
+
+    if (lockType == LOCK_TYPE_OVERLOAD) {
+        /* 充能**越往后越快**：玩家必须提前预判松手，而不是匀速等 */
+        if (lockMouseDown) {
+            lockOvVal += dt * (0.30f + 0.55f * lockOvVal);
+            if (lockOvVal >= LOCK_OV_RED) OverloadBlow();
+            uiDirty = 1;
+        }
+        return;
+    }
+
+    if (lockType == LOCK_TYPE_SAW) {
+        extern float gameTime;
+        /* 节拍标记来回摆 —— 玩家要「跟着节拍的方向」拖鼠标 */
+        float ph = gameTime * (2.0f * 3.14159265f * LOCK_SAW_BEAT_HZ);
+        lockSawBeat = 0.5f + 0.5f * sinf(ph);
+        int beatDir = (cosf(ph) >= 0.0f) ? 1 : -1;
+
+        if (lockMouseDown && lockSawArm) {
+            float dx = (float)g_mousePos.x - lockSawLastX;
+            float adx = dx < 0.0f ? -dx : dx;
+            int   dir = (dx > 0.5f) ? 1 : (dx < -0.5f ? -1 : 0);
+
+            /* 阈值 = 一帧拖动 LUIS(55)。约 3300 px/秒 ——
+               正常来回拖到不了，猛甩一下就会卡住。 */
+            if (adx > (float)LUIS(55)) {
+                /* 一下拖太远 = 锯子卡住 */
+                SawStall();
+            } else if (dir == beatDir && dir != 0) {
+                lockSawProgress += adx * LOCK_SAW_GAIN;
+                lockSawStall = 0.0f;
+            } else if (dir != 0) {
+                /* 逆着节拍锯：进度倒退一点，不惩罚也不给 */
+                lockSawProgress -= adx * LOCK_SAW_LOSS;
+                lockSawStall += dt;
+                if (lockSawStall > LOCK_SAW_STALL) SawStall();
+            }
+            if (lockSawProgress < 0.0f) lockSawProgress = 0.0f;
+            if (lockSawProgress >= 1.0f) {
+                lockSawProgress = 1.0f;
+                if (lockTarget >= 0) LockUnlock(lockTarget);
+            }
+            uiDirty = 1;
+        }
+        lockSawLastX = (float)g_mousePos.x;
+        return;
+    }
+}
+
 void LockClick(int mx, int my) {
     int a = -1;
     int hit = LockHitTest(mx, my, &a);
@@ -355,6 +519,8 @@ void LockClick(int mx, int my) {
     } else if (lockType == LOCK_TYPE_TUNE) {
         if (hit == LOCK_HIT_KNOB_INC) LockTuneAdjust(a, +1);
         else if (hit == LOCK_HIT_KNOB_DEC) LockTuneAdjust(a, -1);
+    } else if (lockType == LOCK_TYPE_OVERLOAD || lockType == LOCK_TYPE_SAW) {
+        if (hit == LOCK_HIT_HANDLE) LockHoldBegin();
     }
 }
 
@@ -545,6 +711,10 @@ int LockHitTest(int mx, int my, int* a) {
             if (LockIn(dec, mx, my)) { if (a) *a = k; return LOCK_HIT_KNOB_DEC; }
             if (LockIn(inc, mx, my)) { if (a) *a = k; return LOCK_HIT_KNOB_INC; }
         }
+    } else if (lockType == LOCK_TYPE_OVERLOAD || lockType == LOCK_TYPE_SAW) {
+        /* 两种新锁都只有一个「按住」区域，几何和绘制共用 LockHandleBarBox() */
+        LockBox bar = LockHandleBarBox();
+        if (LockIn(bar, mx, my)) { if (a) *a = 0; return LOCK_HIT_HANDLE; }
     }
     return LOCK_HIT_NONE;
 }
@@ -751,6 +921,137 @@ static void LockDrawTuneBody(int hit, int ha) {
 
 /* 开锁覆盖层总入口：四种锁型共用同一块面板与底栏 */
 
+/* ==================================================================
+ * 2026-11-05：过载 / 锯锁的绘制
+ * 铁律：只画「玩家需要读的信息」，不加装饰性噪点。
+ * 三种状态各有明确语义色（AD-19）：
+ *   绿 = 命中区    黄 = 当前位置    红 = 失败线
+ * ================================================================ */
+
+/* ==================================================================
+ * 2026-11-05：**锁盘文案一律不许出界**
+ * ------------------------------------------------------------------
+ * 用户截图：「SAW BACK AND FORTH WITH THE BEAT」左右都顶到面板外面。
+ * 根因是标题用 DrawTextCenterWin(winW/2, ...) 居中到**窗口**，
+ * 而面板只有 LUIS(660) 宽 —— 文字一长就必然溢出。
+ *
+ * 这里统一收口：先量面板内宽，超了就截断加 ".."。
+ * 以后再加锁型也不会重犯（铁律十四：文案要读得出来）。
+ * ================================================================ */
+static void LockHintFit(int y, const char* s, unsigned int col) {
+    LockBox p = LockPanelBox();
+    int maxW = (p.x1 - p.x0) - LUIS(56);
+    if (maxW < LUIS(120)) maxW = LUIS(120);
+    if (!s) return;
+    if (TextWidthWin(s) <= maxW) {
+        DrawTextCenterWin(winW / 2, y, s, col);
+        return;
+    }
+    {   /* 锁盘文案全是 ASCII，按字节截断安全 */
+        static char buf[160];
+        int n = (int)strlen(s);
+        if (n > (int)sizeof(buf) - 3) n = (int)sizeof(buf) - 3;
+        memcpy(buf, s, (size_t)n);
+        buf[n] = 0;
+        while (n > 0 && TextWidthWin(buf) > maxW) {
+            n--;
+            buf[n] = 0;
+        }
+        strcat(buf, "..");
+        DrawTextCenterWin(winW / 2, y, buf, col);
+    }
+}
+
+static void LockDrawOverloadBody(int hit, int ha) {
+    LockBox p   = LockPanelBox();
+    LockBox bar = LockHandleBarBox();
+    (void)ha;
+    int hot = (hit == LOCK_HIT_HANDLE);
+    int bh  = bar.y1 - bar.y0;
+
+    /* 底槽 */
+    BlendRectWin(bar.x0, bar.y0, bar.x1, bar.y1, 0x00141A20u, 0.98f);
+
+    /* 绿区（目标） */
+    {
+        int zx0 = bar.x0 + (int)((lockOvTarget - LOCK_OV_ZONE_W) * (float)(bar.x1 - bar.x0));
+        int zx1 = bar.x0 + (int)((lockOvTarget + LOCK_OV_ZONE_W) * (float)(bar.x1 - bar.x0));
+        if (zx0 < bar.x0) zx0 = bar.x0;
+        if (zx1 > bar.x1) zx1 = bar.x1;
+        BlendRectWin(zx0, bar.y0 + 2, zx1, bar.y1 - 2, 0x00207040u, 0.92f);
+        FrameRectWin(zx0, bar.y0 + 2, zx1, bar.y1 - 2, 0x0060E080u, 0.90f, 1);
+    }
+
+    /* 已充能的部分：从左边填到当前位置 */
+    {
+        int fx = bar.x0 + (int)(lockOvVal * (float)(bar.x1 - bar.x0));
+        if (fx > bar.x1) fx = bar.x1;
+        unsigned int fill = (lockOvFlash > 0.0f) ? 0x00A03028u : 0x00A08040u;
+        BlendRectWin(bar.x0, bar.y0 + 4, fx, bar.y1 - 4, fill, 0.95f);
+    }
+
+    /* 红线（=1.0，就在右端）—— 只画一条细竖线，它本身就是「不许超过」 */
+    BlendRectWin(bar.x1 - LUIS(3), bar.y0 - LUIS(4),
+                 bar.x1, bar.y1 + LUIS(4), 0x00C03030u, 0.95f);
+
+    /* 当前位置游标 */
+    {
+        int cx = bar.x0 + (int)(lockOvVal * (float)(bar.x1 - bar.x0));
+        if (cx > bar.x1) cx = bar.x1;
+        BlendRectWin(cx - LUIS(3), bar.y0 - LUIS(6),
+                     cx + LUIS(3), bar.y1 + LUIS(6), 0x00FFE070u, 0.98f);
+    }
+
+    FrameRectWin(bar.x0, bar.y0, bar.x1, bar.y1,
+                 hot ? 0x00FFE080u : 0x004A525A, 0.95f, hot ? 2 : 1);
+
+    /* 读数：百分比 + 状态 —— 文案必须反映真实值（AD-14） */
+    {
+        char buf[64];
+        sprintf(buf, "%d%%", (int)(lockOvVal * 100.0f));
+        DrawTextCenterWin(winW / 2, bar.y0 - TextHeightWin() - LUIS(10), buf,
+                          lockOvFlash > 0.0f ? 0x00FF6050u : 0x00D8E0E8u);
+    }
+    LockHintFit(bar.y1 + LUIS(14),
+                lockMouseDown ? "RELEASE INSIDE THE GREEN" : "HOLD THE BAR TO CHARGE",
+                lockMouseDown ? 0x00FFE070u : 0x0090A0A8u);
+    (void)p; (void)bh;
+}
+
+static void LockDrawSawBody(int hit, int ha) {
+    LockBox bar = LockHandleBarBox();
+    (void)ha;
+    int hot = (hit == LOCK_HIT_HANDLE);
+
+    /* 底槽 */
+    BlendRectWin(bar.x0, bar.y0, bar.x1, bar.y1, 0x00141A20u, 0.98f);
+
+    /* 进度 */
+    {
+        int fx = bar.x0 + (int)(lockSawProgress * (float)(bar.x1 - bar.x0));
+        BlendRectWin(bar.x0, bar.y0 + 4, fx, bar.y1 - 4, 0x0050A0C0u, 0.95f);
+    }
+
+    /* 节拍标记：一条竖线在槽里来回摆 —— 玩家要跟着它的方向拖 */
+    {
+        int bx = bar.x0 + (int)(lockSawBeat * (float)(bar.x1 - bar.x0));
+        BlendRectWin(bx - LUIS(2), bar.y0 - LUIS(8),
+                     bx + LUIS(2), bar.y1 + LUIS(8), 0x00E8C040u, 0.98f);
+    }
+
+    FrameRectWin(bar.x0, bar.y0, bar.x1, bar.y1,
+                 hot ? 0x00FFE080u : 0x004A525A, 0.95f, hot ? 2 : 1);
+
+    {
+        char buf[64];
+        sprintf(buf, "%d%%", (int)(lockSawProgress * 100.0f));
+        DrawTextCenterWin(winW / 2, bar.y0 - TextHeightWin() - LUIS(10), buf, 0x00D8E0E8u);
+    }
+    LockHintFit(bar.y1 + LUIS(14),
+                lockMouseDown ? "TOO FAST WILL STALL IT" : "HOLD AND FOLLOW THE BEAT",
+                lockMouseDown ? 0x00FFE070u : 0x0090A0A8u);
+}
+
 void DrawLockOverlay(void) {
     if (!lockActive) return;   /* v3.0：没开锁盘就什么都不画 */
     /* v3.0：**面板尺寸兜底** ——
@@ -777,15 +1078,21 @@ void DrawLockOverlay(void) {
     DrawTextCenterWin(winW / 2, p.y0 + LUIS(24), "LOCKED", 0x00E05050u);
 
     if (lockType == LOCK_TYPE_DIAL) {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "TURN EACH DIAL UNTIL IT CLICKS", 0x0090A0A8u);
+        LockHintFit(p.y0 + LUIS(52), "TURN EACH DIAL UNTIL IT CLICKS", 0x0090A0A8u);
         LockDrawDialBody(hit, ha);
     } else if (lockType == LOCK_TYPE_WIRE) {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH LEFT TERMINALS BY COLOR", 0x0090A0A8u);
+        LockHintFit(p.y0 + LUIS(52), "MATCH LEFT TERMINALS BY COLOR", 0x0090A0A8u);
         LockDrawWireBody(hit, ha);
     } else if (lockType == LOCK_TYPE_EQ) {
-        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "PUSH BARS TO THEIR GREEN LINES", 0x0090A0A8u);
+        LockHintFit(p.y0 + LUIS(52), "PUSH BARS TO THEIR GREEN LINES", 0x0090A0A8u);
         LockDrawEqBody(hit, ha);
-    } else {        DrawTextCenterWin(winW / 2, p.y0 + LUIS(52), "MATCH THE BRIGHT WAVE TO THE DIM", 0x0090A0A8u);
+    } else if (lockType == LOCK_TYPE_OVERLOAD) {
+        LockHintFit(p.y0 + LUIS(52), "LET GO INSIDE THE GREEN", 0x0090A0A8u);
+        LockDrawOverloadBody(hit, ha);
+    } else if (lockType == LOCK_TYPE_SAW) {
+        LockHintFit(p.y0 + LUIS(52), "SAW WITH THE BEAT", 0x0090A0A8u);
+        LockDrawSawBody(hit, ha);
+    } else {        LockHintFit(p.y0 + LUIS(52), "MATCH THE BRIGHT WAVE TO THE DIM", 0x0090A0A8u);
         LockDrawTuneBody(hit, ha);
     }
 

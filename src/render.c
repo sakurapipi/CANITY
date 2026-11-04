@@ -12,6 +12,7 @@
 #include "extras.h"
 #include "sprites.h"
 #include "game.h"
+#include "mimic.h"
 #include "entity.h"
 #include "ui.h"
 
@@ -551,6 +552,9 @@ static float SpriteAtten(float dist) {
 static void DrawCrateSprite(int i) {
     if (i < 0 || i >= containerCount) return;
     Container* c = &containers[i];
+    /* 2026-11-05：这个槽被宝箱怪占着 —— 它由 DrawMimicSprite 自己画。
+       这里再画一次就会出现「箱子上叠一个箱子」。 */
+    if (c->mimicHost) return;
     if (c->searched) {
         /* 翻过：盖子掀开、里面黑 */
         DrawBakedProp(SPR_PROP_CRATE_OPEN, c->x, c->y, 0.34f, 0.55f);
@@ -559,6 +563,23 @@ static void DrawCrateSprite(int i) {
         DrawBakedProp(SPR_PROP_CRATE_LOCKED, c->x, c->y, 0.42f, 1.0f);
     } else {
         DrawBakedProp(SPR_PROP_CRATE, c->x, c->y, 0.42f, 1.0f);
+    }
+}
+
+/* 2026-11-05：宝箱怪。
+   伪装态 / 识破态 → 华丽箱子（呼吸起伏在 mimic.c 的 MimicTick 里推进相位）
+   现形态         → 箱子站起来的那只 */
+static void DrawMimicSprite(int i) {
+    if (i < 0 || i >= mimicCount) return;
+    Mimic* m = &mimics[i];
+    if (m->state == MIM_NONE || m->state == MIM_GONE) return;
+
+    if (m->state == MIM_ANGRY) {
+        DrawBakedProp(SPR_MON_MIMIC, m->x, m->y, 0.52f, 1.0f);
+    } else {
+        /* 破绽①：呼吸。用相位算，不依赖全局时钟 —— 每只相位不同 */
+        float bob = sinf(m->breathPh) * 0.012f;
+        DrawBakedProp(SPR_PROP_CRATE_MIMIC, m->x, m->y + bob, 0.42f, 1.0f);
     }
 }
 
@@ -2095,6 +2116,17 @@ void RenderSprites(void) {
         list[n].idx = i;
         n++;
     }
+
+    /* 2026-11-05：宝箱怪也走渲染列表 —— 这样它和箱子/怪共享同一套
+       深度排序与光照，不会出现"穿墙显示"或"永远在最上面"。 */
+    for (int i = 0; i < mimicCount; i++) {
+        if (mimics[i].state == MIM_NONE || mimics[i].state == MIM_GONE) continue;
+        if (n >= MAX_SPRITES) break;
+        list[n].d2 = Dist2(mimics[i].x, mimics[i].y, posX, posY);
+        list[n].kind = 15;
+        list[n].idx = i;
+        n++;
+    }
     if (breaker.active) {
         if (n < MAX_SPRITES) {
             list[n].d2 = Dist2(breaker.x, breaker.y, posX, posY);
@@ -2222,6 +2254,7 @@ void RenderSprites(void) {
             case 2: DrawMonsterSprite(); break;
             case 13: DrawMonster2Sprite(); break;   /* v2.4.12 第二只听声怪 */
             case 14: DrawMonster3Sprite(); break;   /* 第三只听声鬼 */
+            case 15: DrawMimicSprite(list[i].idx); break;   /* 2026-11-05 宝箱怪 */
         case 9: DrawLeechSprite(list[i].idx); break;
             case 5: DrawLightBeastSprite(); break;
             case 6: DrawFlareSprite(list[i].idx); break;
@@ -3247,29 +3280,54 @@ void RenderMap(void) {
         }
     }
 
-    /* ===== v2.4.62 **回声弹标记的怪物**（本层永久）=====
-       被声呐照到过的怪物，一整个楼层都显示在小地图上 —— 红色菱形 + 中间一点，
-       和藏身点（青白菱形）、箱子（黄方块）一眼分开。 */
+    /* ==================================================================
+     * 2026-11-05：**回声弹标记**（资源雷达）
+     * ------------------------------------------------------------------
+     * 四种标记、四种形状/颜色，扫一眼能分开：
+     *   EMK_MON    活物      红菱形（会动，5 秒）
+     *   EMK_CRATE  普通容器   白方块（30 秒）
+     *   EMK_FUSE   保险丝箱   **金方块** ← 玩家真正要找的东西
+     *   EMK_MIMIC  宝箱怪     **红色闪烁方块** ← 一眼看出哪个箱子是假的
+     * 铁律九 [AD-09]：威胁与资源的可读性预算不同 ——
+     *   资源用实心方块（安静、好找），威胁用菱形 + 亮芯（更刺眼）。
+     * ================================================================== */
     {
-        extern float echoMarkX[], echoMarkY[];
-        extern int   echoMarkActive[];
-        int emax = 8;
-        for (int i = 0; i < emax; i++) {
+        extern float echoMarkX[], echoMarkY[], echoMarkT[];
+        extern int   echoMarkActive[], echoMarkKind[];
+        extern float gameTime;
+        int flash = ((int)(gameTime * 6.0f) & 1);   /* 宝箱怪红闪：每秒 3 次 */
+        for (int i = 0; i < 24; i++) {
             if (!echoMarkActive[i]) continue;
+            if (echoMarkT[i] <= 0.0f) continue;
             int mx = (int)echoMarkX[i], my = (int)echoMarkY[i];
             if (mx < 0 || mx >= MAP_WIDTH || my < 0 || my >= MAP_HEIGHT) continue;
             int px2 = mapStartX + mx * cellSize + cellSize / 2;
             int py2 = mapStartY + my * cellSize + cellSize / 2;
-            /* 菱形外框 */
-            for (int d = -3; d <= 3; d++) {
-                int span = 3 - (d < 0 ? -d : d);
-                for (int e = -span; e <= span; e++) {
-                    int edge = (e == -span || e == span || d == -3 || d == 3);
-                    PutPixel(px2 + e, py2 + d, edge ? 0x00FF3020u : 0x00601010u);
+            int kind = echoMarkKind[i];
+
+            if (kind == 0) {
+                /* 活物：红菱形 + 亮芯 */
+                for (int d = -3; d <= 3; d++) {
+                    int span = 3 - (d < 0 ? -d : d);
+                    for (int e = -span; e <= span; e++) {
+                        int edge = (e == -span || e == span || d == -3 || d == 3);
+                        PutPixel(px2 + e, py2 + d, edge ? 0x00FF3020u : 0x00601010u);
+                    }
                 }
+                PutPixel(px2, py2, 0x00FFD0D0u);
+            } else {
+                /* 资源：实心 5x5 方块，按类型换色 */
+                unsigned int core, edge;
+                if (kind == 2)      { core = 0x00FFE070u; edge = 0x00806020u; }   /* 保险丝：金 */
+                else if (kind == 3) { core = flash ? 0x00FF4030u : 0x00701010u;   /* 宝箱怪：红闪 */
+                                      edge = 0x00FFB0A0u; }
+                else                { core = 0x00D8D8D8u; edge = 0x00505050u; }   /* 普通：白 */
+                for (int d = -2; d <= 2; d++)
+                    for (int e = -2; e <= 2; e++) {
+                        int isEdge = (d == -2 || d == 2 || e == -2 || e == 2);
+                        PutPixel(px2 + e, py2 + d, isEdge ? edge : core);
+                    }
             }
-            /* 中间一点亮芯 */
-            PutPixel(px2, py2, 0x00FFD0D0u);
         }
     }
 
@@ -3289,9 +3347,17 @@ void RenderMap(void) {
        v2.4 起看图要花电，这个数字必须一直在眼前，否则玩家不会知道自己
        正在为什么买单。 */
     {
-        const char* label = mapFullScreen
-            ? "MAP  -10 BAT/S   M: CLOSE   HOLD TAB"
-            : "MAP  -10/S   HOLD TAB   M: FULL";
+        /* 2026-11-05：**数字必须跟着强化走**。
+           原来写死 "-10/S"，玩家升了「小地图省电」还是显示 -10，等于骗人。
+           另外全屏地图现在**不耗电**（游戏也暂停），所以标 FREE 而不是数字。 */
+        extern float RunUpgMapDrainPct(void);
+        static char labelBuf[80];
+        if (mapFullScreen)
+            snprintf(labelBuf, sizeof(labelBuf), "MAP  FREE   M: CLOSE   HOLD TAB");
+        else
+            snprintf(labelBuf, sizeof(labelBuf), "MAP  -%d/S   HOLD TAB   M: FULL",
+                     (int)(RunUpgMapDrainPct() + 0.5f));
+        const char* label = labelBuf;
         int tw = TextWidthRaw(label);
         int tx = mapFullScreen ? (renderW - tw) / 2 : mapStartX;
         /* 小地图在右下角，标题从左往右排会顶出窗口 —— 夹回来 */
