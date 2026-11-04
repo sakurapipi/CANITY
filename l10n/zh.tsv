@@ -159,6 +159,12 @@ ENTER-SWAP 3000 GOLD	回车切换（3000 金币）	table
 ESC  BACK	ESC  返回	tr
 ESC TO CANCEL	ESC 取消	table
 ESCAPE ARTIST	逃生专家	table
+ESC CLOSE	ESC 关闭	tr
+离开  (ESC)	LEAVE  (ESC)	tr
+上下选择   回车购买   ESC CLOSE	UP/DOWN SELECT   ENTER BUY   ESC CLOSE	tr
+回车切换   ESC 返回	ENTER SWITCH   ESC BACK	tr
+滚轮缩放   拖拽平移   HOME 复位   回车购买	R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY	tr
+该页暂用旧布局（ESC 返回）	THIS PAGE USES THE OLD LAYOUT (ESC BACK)	tr
 EXECUTIONER	处刑人	table
 Endless	无尽	table
 FACE DODGER	闪避高手	table
@@ -468,6 +474,7 @@ TRUE SURVIVOR	真·幸存者	table
 TURN EACH DIAL UNTIL IT CLICKS	转动每个拨盘，直到咔哒一声	table
 TURN THE LIGHT ON AND IT VANISHES. THEY CAN BE KILLED NOW.	开灯它就消失。现在它也能被打死了。	table
 TUTORIAL COMPLETE	教程完成	tr
+TUTORIAL  %d / %d	教程  %d / %d	tr
 TYPE WORK	熟能生巧	table
 Throw	投掷	table
 Throw 30 objects total	累计投掷 30 次	table
@@ -512,3 +519,188 @@ Show FPS	显示帧率	table
 Display	显示	table
 Key Bindings	按键绑定	table
 Gameplay	玩法	table
+Minimal	最简	table
+Normal	标准	table
+Full	完整	table
+ENGLISH	ENGLISH	table
+中文	中文	table
+BACK	返回	table
+MOVE  -  %s %s %s %s	移动  -  %s %s %s %s	tr
+LOOK  :  MOUSE	视角  :  鼠标	tr
+SPRINT  -  HOLD %s	冲刺  -  长按 %s	tr
+FLASHLIGHT  -  %s	手电  -  %s	tr
+MAP  -  %s	地图  -  %s	tr
+LOCK / SEARCH  -  %s	锁 / 搜索  -  %s	tr
+CRANK  -  HOLD %s	摇电  -  长按 %s	tr
+THROW  -  HOLD %s	投掷  -  长按 %s	tr
+KNOCK  -  HOLD %s	敲击  -  长按 %s	tr
+BREAKER  -  HOLD %s	配电箱  -  长按 %s	tr
+REACH THE EXIT	到达出口	tr
+WALK A FEW STEPS DOWN THE HALL.	在走廊里走几步。	table
+MOVE THE MOUSE TO LOOK AROUND.	移动鼠标环视四周。	table
+HOLD SPRINT AND RUN FOR A MOMENT.	按住冲刺跑一小段。	table
+TURN THE FLASHLIGHT OFF, THEN BACK ON.	关掉手电，再打开。	table
+OPEN THE MAP, THEN CLOSE IT.	打开地图，再关上。	table
+SOLVE THE LOCK, THEN HOLD INTERACT.	解开锁，然后长按交互。	table
+HOLD CRANK UNTIL THE BATTERY RISES.	一直摇电直到电量上升。	table
+HOLD THROW, AIM AT THE TARGET, RELEASE.	按住投掷，瞄准目标，松手。	table
+HOLD KNOCK, RELEASE TO MAKE NOISE.	按住敲击，松手制造噪音。	table
+TAKE THE FUSE TO THE BREAKER.	把保险丝带到配电箱。	table
+THE EXIT IS AT THE END OF THE HALL.	出口在走廊尽头。	table
+NICE WORK. RETURNING TO THE MAIN MENU...	做得好。返回主菜单...	table
+Walking noise reduced 35% per rank	每级降低 35% 行走噪音	table
+Searching makes NO noise at max rank	满级时搜索完全无声	table
+Silent footsteps while light is off	关灯时脚步无声	table
+Crates yield +25% gold per rank	每级箱子金币 +25%	table
+Crank while walking (move -40%, noise x2)	边走边摇电（移速 -40%，噪音 ×2）	table
+Safe house rest restores +30 sanity	安全屋休息回复 +30 理智	table
+BREATH	屏息	table
+Hunters reach the locker but never open it	追捕者会到达藏身点但永不打开	table
+STILL FACE	静默面容	table
+Standing still makes you invisible to sound	静止站立让你对声音隐形	table
+SLIP AWAY	溜之大吉	table
+Vanish after 2s out of sight (was 3s)	脱离视野 2 秒后消失（原 3 秒）	table
+PLAY DEAD	装死	table
+Once per run: escape a grab	每局一次：逃脱抓捕	table
+CARTO	制图	table
+BREAKER	配电手	table
+Locked crates open 40% faster	锁箱开启速度 +40%	table
+SILENT RUN	静默奔跑	table
+Sprint makes no noise (stamina -30%)	冲刺无声（续航 -30%）	table
+GREED	贪婪	table
+Gold x1.5, gold threat tier +2	金币 ×1.5，金币威胁档 +2	table
+SECOND WIND	二段气	table
+Sprint 3s after empty stamina, healing -50%	续航耗尽后冲刺 3 秒，治疗 -50%	table
+LIGHTLESS	无光	table
+No flashlight; quieter movement (-25%)	无手电；移动更安静（-25%）	table
+SILENT DEAL	静默交易	table
+Crates are silent; crate gold +50%	箱子无声；箱子金币 +50%	table
+GOLDEN ESCAPE	黄金撤离	table
+Escape bonus +50%	撤离奖励 +50%	table
+APPRENTICE	学徒	table
+Cranking noise -50%, walking penalty halved	摇电噪音 -50%，移动惩罚减半	table
+SHORTCUT JR	小捷径	table
+Fuse need -1 (minimum 2)	保险丝需求 -1（最低 2）	table
+NIGHT WALKER	夜行者	table
+Light on drains 25% slower	开灯耗电慢 25%	table
+ORIGIN	起点	table
+The center. Light this to unlock the net.	中心节点。点亮它解锁网络。	table
+GREEDY HAND	贪手	table
+Gold +20% per rank, THREAT +1 per rank	每级金币 +20%，威胁 +1	table
+GOLD SCENT	金币嗅觉	table
+Noise -10% per rank while carrying gold	携带金币时每级噪音 -10%	table
+GAMBLER	赌徒	table
+10% per rank chance for double crate gold	每级 10% 概率箱子金币翻倍	table
+DESPERATE	绝境	table
+Below 30 sanity: move +4% per rank	理智低于 30：每级移速 +4%	table
+SPARE CELL	备用电池	table
++45 battery now	立即 +45 电量	table
+GLASS SUPPLY	玻璃补给	table
++1 bottle	+1 瓶子	table
+FLARE SUPPLY	照明补给	table
++1 flare	+1 照明弹	table
+MED KIT	急救包	table
++25 sanity now	立即 +25 理智	table
+GOLD BAG	金币袋	table
++40 bankGold	+40 银行金币	table
+LIGHT FOOT	轻步	table
+Noise -20%, speed -3%	噪音 -20%，移速 -3%	table
+FAST CRANK	快摇	table
+Crank -25% time, noise +15%	摇电时间 -25%，噪音 +15%	table
+FAST SEARCH	快手	table
+Search -25% time, noise +10%	搜索时间 -25%，噪音 +10%	table
+SAVER	节能	table
+Drain -15%, cap -5	耗电 -15%，上限 -5	table
+LONG WIND	长气	table
+Stamina +25, heal -10%	体力 +25，治疗 -10%	table
+THICK HIDE	厚皮	table
+Grab sanity loss -35%	被抓扣理智 -35%	table
+SILENT BOTTLE	静音瓶	table
+Silent breaks, dmg -10%	瓶子不发声，伤害 -10%	table
+DARK WALK	暗行	table
+Off-light +12%, drain +10%	关灯移速 +12%，流失 +10%	table
+LIGHT FUSES	省保险丝	table
+Fuse need -1, gold -10%	所需保险丝 -1，金币 -10%	table
+WHISTLE	哨声	table
+Lure every hunter far away	把所有追捕者引向远处	table
+SMOKE OUT	烟幕	table
+Break line of sight instantly	立刻断开所有视线	table
+FIELD REPAIR	现场维修	table
++35 battery, -5 sanity	+35 电量，-5 理智	table
+NERVE SHOT	镇定剂	table
++15 sanity, -10 battery	+15 理智，-10 电量	table
+PACK RAT	囤积者	table
++2 bottles +30 bankGold	+2 瓶子，+30 金币	table
+OIL CAN	油壶	table
++25 battery, +20 stamina	+25 电量，+20 体力	table
+LUCKY FUSE	幸运保险丝	table
++1 fuse held	+1 持有保险丝	table
+QUIET SOLE	静底	table
+Walk noise -25%	走路噪音 -25%	table
+COLD BLOOD	冷血	table
+Sanity drain -20%	理智流失 -20%	table
+BLACKOUT	全黑	table
+All hunters blind for 10s	全场追捕者失明 10 秒	table
+FIRST BREATH	第一次呼吸	table
+Start your first run	开始第一局	table
+FIRST EXIT	第一次撤离	table
+Escape once	成功撤离一次	table
+FLOOR 5	五层	table
+Reach floor 5	到达第 5 层	table
+FLOOR 10	十层	table
+Reach floor 10	到达第 10 层	table
+FLOOR 15	十五层	table
+Reach floor 15	到达第 15 层	table
+TEN MINUTES	十分钟	table
+Survive 10 minutes in one run	单局存活 10 分钟	table
+HALF HOUR	半小时	table
+Survive 30 minutes in one run	单局存活 30 分钟	table
+FLOOR 30	三十层	table
+Reach floor 30	到达第 30 层	table
+Carry 20,000 gold	携带 2 万金币	table
+WEALTHY	富有	table
+Carry 100,000 gold	携带 10 万金币	table
+HALF MILLION	半百万	table
+Carry 500,000 gold	携带 50 万金币	table
+CLAWBACK	追回	table
+Take bounty back from the Collector 3 times	从拾荒者手里抢回赃款 3 次	table
+PIGGY BANK	存钱罐	table
+Bank 100,000 gold total	累计存入银行 10 万	table
+CLEAN ESCAPE	全身而退	table
+Escape without being caught once	一次都没被抓就撤离	table
+Escape with full sanity	理智全满撤离	table
+DISRUPTOR	震荡大师	table
+Knock monsters back 20 times	用扳手击退 20 次	table
+PITCHER	投手	table
+Hit monsters with throwables 10 times	用投掷物命中 10 次	table
+WARDEN BANE	守门人克星	table
+Survive 3 floors under the Warden	连续三层不被守门人抓住	table
+Reveal 100 cells with echo bolts	用回声弹揭示 100 格地图	table
+EMPTY HANDED	空手道	table
+Escape without opening any container	单局不开任何箱子撤离	table
+Escape a run without the flashlight	单局全程不开手电撤离	table
+MAX THREAT	威胁拉满	table
+Reach THREAT 18 in one run	单局 THREAT 达到 18	table
+BESTIARY 1/6	图鉴 1/6	table
+Meet your first monster	见过第一种怪	table
+BESTIARY 3/6	图鉴 3/6	table
+Meet three monsters	见过三种怪	table
+BESTIARY 6/6	全图鉴	table
+Meet all six monsters	见过全部六种怪	table
+TREE MASTER	技能树毕业	table
+Light up 30 skill nodes	局外技能树点亮 30 个	table
+UNDER THE WARDEN	???	table
+Escape while the Warden watches	在守门人视野内撤离	table
+DOUBLE HUNT	???	table
+Survive 30s chased by two hunters	被两只听声鬼同时追 30 秒	table
+300K ON 12	???	table
+Carry 300,000 gold on floor 12	携带 30 万金到达第 12 层	table
+META RESET	???	table
+Reset the meta tree once	局外重置一次	table
+Complete the bestiary	六种怪全部见过	table
+FULL HIDE	???	table
+Hide through an entire hunt	在藏身点里躲过一整次追捕	table
+PROGRESS	进程	table
+SKILL	技巧	table
+COLLECT	收藏	table
+SECRET	隐藏	table

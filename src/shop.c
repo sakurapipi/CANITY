@@ -776,12 +776,10 @@ void DrawShopPanel(void) {
     /* 只有商店页画物品行；其他页（改造树/休息/强化）暂用一行提示，
        避免把它们也拖进这条新路径 —— 那三页本来能画（走老路径）。 */
     if (shopPage != SHP_SHOP) {
-        const char* note = (g_lang == LANG_ZH)
-            ? "该页暂用旧布局（ESC 返回）"
-            : "THIS PAGE USES THE OLD LAYOUT (ESC BACK)";
+        const char* note = Tr("THIS PAGE USES THE OLD LAYOUT (ESC BACK)", "该页暂用旧布局（ESC 返回）");
         DrawTextWin(px0 + ShopUIS(24), y, note, PAL_DIM_V);
         DrawTextCenterWin((px0 + px1) / 2, py1 - th * 2,
-                          (g_lang == LANG_ZH) ? "ESC 关闭" : "ESC  CLOSE", PAL_DIM_V);
+                          Tr("ESC CLOSE", "ESC 关闭"), PAL_DIM_V);
         return;
     }
 
