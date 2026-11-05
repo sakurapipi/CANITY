@@ -1,5 +1,6 @@
 /* Integration checks link the real game modules; all saves are isolated. */
 #include "common.h"
+#include "map_validator.h"
 #include "hatch.h"
 #include "game.h"
 #include "entity.h"
@@ -263,6 +264,127 @@ static void test_wallet_save(void) {
  * 这是舱门系统里唯一能完整单测的部分：它不认识金币/电量/理智，
  * 只吃自己的数组。所以状态转移和存档掩码都在这里钉死。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06：**舱门 + 崩塌 端到端**（第 5 轮）
+ * ------------------------------------------------------------------
+ * 前面几轮都是分段测的：状态机测过了、崩塌参数测过了，
+ * 但"生成一层 → 真有门 → 门槛能过 → 开门 → 效果结算 → 崩塌黑屏
+ * → 重掷 → 还能玩"这一整条链**从来没跑过**。
+ *
+ * 这个用例就是那条链。它用真实的 GenerateLevel()，不是模拟。
+ * ================================================================== */
+static void test_hatch_end_to_end(void) {
+    extern int hatchCount;
+    extern Hatch hatches[MAX_HATCHES];
+    extern void MapValidate(MapCheck* out);
+    extern int collapsedLevel;
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    /* ---- ① 生成到一层真的有门 ---- */
+    int found = 0;
+    for (int i = 0; i < 60 && !found; i++) {
+        currentLevel = 1;
+        GenerateLevel();
+        if (hatchCount > 0) found = 1;
+    }
+    CHECK(found == 1, "a generated level must contain at least one themed room with a hatch");
+    CHECK(hatchCount <= MAX_HATCHES, "hatch table must never exceed MAX_HATCHES");
+
+    /* ---- ② 资源拉满时，**每一种**门槛都必须能过 ---- */
+    carryGold = 99999; fusesHeld = 8; battery = 150.0f;
+    sanity = 5.0f; stamina = 100.0f; flares = 5; bottles = 5;
+    for (int i = 0; i < hatchCount; i++) {
+        char why[96];
+        CHECK(HatchGateCheck(i, why, (int)sizeof(why)) == 1,
+              "with resources maxed, every hatch gate must pass");
+    }
+
+    /* ---- ③ 资源清零时，门槛必须真的挡人（并且给出原因） ---- */
+    carryGold = 0; fusesHeld = 0; battery = 0.0f;
+    sanity = 100.0f; stamina = 0.0f; flares = 0; bottles = 0;
+    {
+        int blocked = 0;
+        for (int i = 0; i < hatchCount; i++) {
+            char why[96];
+            why[0] = 0;
+            if (HatchGateCheck(i, why, (int)sizeof(why)) == 0) {
+                blocked++;
+                CHECK(why[0] != 0, "a blocked gate must say what is missing");
+            }
+        }
+        CHECK(blocked == hatchCount, "with no resources, every hatch gate must block");
+    }
+
+    /* ---- ④ 开门 → 动画 → 效果结算 ---- */
+    {
+        int idx = 0;
+        int kindBefore = hatches[idx].kind;
+        int goldBefore = carryGold;
+        HatchSetState(idx, HATCH_OPENING);
+        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
+        CHECK(hatches[idx].state == HATCH_FIRED,
+              "opening a hatch must end in FIRED");
+        (void)kindBefore; (void)goldBefore;
+    }
+
+    /* ---- ⑤ 崩塌：黑屏 → 重掷 → 淡入 → 仍可玩 ---- */
+    {
+        extern void CollapseBegin(void);
+        extern int CollapseTick(float);
+        extern float screenBlackout;
+
+        extern int CollapseRerollCount(void);
+        int rerollsBefore = CollapseRerollCount();
+        CollapseBegin();
+        CHECK(CollapseTick(0.40f) == 1, "collapse must report busy during fade-out");
+        CHECK(screenBlackout > 0.4f && screenBlackout < 0.6f,
+              "0.4s into the 2s timeline the screen must be about half black");
+
+        /* 这一刻画面应在全黑附近，重掷就发生在这一帧 */
+        CHECK(CollapseTick(0.42f) == 1, "collapse must still be busy at the reroll");
+        CHECK(screenBlackout > 0.95f,
+              "the reroll must happen while the screen is (nearly) fully black");
+
+        /* 走完淡入 */
+        CollapseTick(1.30f);
+        CHECK(screenBlackout == 0.0f, "after 2 seconds the blackout must be fully cleared");
+        /* **关键补断言**：重掷必须真的执行过。
+           只断言"塌完之后地图可玩"是不够的 ——
+           "根本没塌"同样满足它，第一版就是这样假绿的。 */
+        CHECK(CollapseRerollCount() == rerollsBefore + 1,
+              "the collapse must actually execute the reroll");
+
+        /* 塌成功 → 是崩塌层；塌失败 → 已回滚成原层。两种都必须是可玩地图。 */
+        {
+            MapCheck mc;
+            memset(&mc, 0, sizeof(mc));
+            MapValidate(&mc);
+            CHECK(mc.ok, "after collapse the level must still validate as playable");
+            CHECK(mc.exitReachable, "after collapse the exit must still be reachable");
+            CHECK(mc.spawnOpen, "after collapse the spawn must still be open");
+        }
+        (void)collapsedLevel;
+    }
+
+    /* ---- ⑥ 崩塌层不生成舱门（防无限重掷）---- */
+    /* 注意：本用例会把 collapsedLevel 置 1，结束时必须还原 ——
+       否则后面的平衡断言会读到 1.8 倍金币而失败。
+       （第一次跑就踩到了：FAIL per-crate gold must be about 7） */
+    collapsedLevel = 0;
+
+    /* ---- ⑥ 崩塌层不生成舱门（防无限重掷）---- */
+    {
+        extern int HatchPlaceInRoom(int, int, int, int, int);
+        int save = collapsedLevel;
+        collapsedLevel = 1;
+        CHECK(HatchPlaceInRoom(2, 2, 4, 4, 5) == -1,
+              "collapsed layers must not spawn new hatches");
+        collapsedLevel = save;
+    }
+}
+
 static void test_hatch_state_and_mask(void) {
     extern Hatch hatches[MAX_HATCHES];
     extern int hatchCount;
@@ -1963,6 +2085,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

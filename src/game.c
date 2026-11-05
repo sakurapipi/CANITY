@@ -1985,6 +1985,8 @@ static int s_collapseGen = 0;
 float screenBlackout   = 0.0f;   /* 0 = 无，1 = 全黑 */
 static float collapseT = 0.0f;   /* 崩塌计时 */
 static int   collapseArmed = 0;  /* 1 = 崩塌流程进行中 */
+static int   s_collapseRerolled = 0;  /* 本次崩塌是否已经执行过重掷 */
+static int   s_collapseRerollCount = 0; /* 进程内累计重掷次数（测试用） */
 
 /* 原层快照 —— 只在崩塌开始时写一次，失败时整块还原 */
 typedef struct {
@@ -2065,6 +2067,7 @@ void CollapseBegin(void) {
     collapseArmed = 1;
     collapseT = 0.0f;
     screenBlackout = 0.0f;
+    s_collapseRerolled = 0;
 }
 
 /* 每帧推进。返回 1 表示"正在崩塌，本帧应吞掉玩家输入"。 */
@@ -2080,8 +2083,23 @@ int CollapseTick(float dt) {
         return 1;
     }
 
-    /* 全黑这一帧：执行重掷（只做一次） */
-    if (screenBlackout >= 1.0f && collapseT - dt < 0.8f) {
+    /* ==================================================================
+     * 2026-11-06（**第 5 轮修**）：重掷触发条件原来是
+     *     if (screenBlackout >= 1.0f && collapseT - dt < 0.8f)
+     * 这个条件是**永远不会成立的**：
+     *   淡出阶段只在 collapseT < 0.8 时跑，所以 blackout 最多到 0.98x；
+     *   跨过 0.8 的那一帧用的还是**上一帧**的值（约 0.98），
+     *   于是 `>= 1.0` 为假 → 重掷被跳过；
+     *   下一帧 blackout 终于等于 1.0，但 `collapseT - dt < 0.8` 又为假。
+     * 结果：玩家看到黑屏，然后**什么都没发生**。
+     *
+     * 实测这件事被端到端用例掩盖过 —— 用例只断言"塌完之后地图可玩"，
+     * 而"根本没塌"同样满足那个断言。所以这里同时加了一个计数器，
+     * 让测试能断言"重掷真的执行了"。
+     * ================================================================ */
+    if (!s_collapseRerolled && collapseT >= 0.8f) {
+        s_collapseRerolled = 1;
+        s_collapseRerollCount++;
         CollapseSnapshotTake();
         collapsedLevel = 1;
         s_collapseGen = 1;      /* 告诉 GenerateLevel：这一次是崩塌重掷 */
@@ -2111,6 +2129,11 @@ int CollapseTick(float dt) {
 }
 
 int CollapseBusy(void) { return collapseArmed; }
+
+/* 仅测试用：进程内累计执行过几次"重掷"。
+   没有它就没法区分"塌了"和"黑屏完什么都没发生"，
+   而那正是本轮抓到的 bug。 */
+int CollapseRerollCount(void) { return s_collapseRerollCount; }
 
 int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId) {
     /* 崩塌层**不生成舱门** —— 否则可以在崩塌层里再触发一次崩塌，
