@@ -1252,7 +1252,15 @@ int LoadSettings(void) {
         if (activeKeystone < -1 || activeKeystone >= SKILL_COUNT) activeKeystone = -1;
         if (activeKeystone >= 0 && !skillDefs[activeKeystone].isKeystone) activeKeystone = -1;
         bestMainScore = g_save.bestMainScore < 0 ? 0 : g_save.bestMainScore;
-        bestiarySeen = g_save.seenMonsters;
+        /* P0-2：图鉴解锁位掩码只保留真实存在的位 ——
+       坏档里 104857600 这种值会让"已解锁数量"变成荒谬的数字。 */
+    {
+        extern int BestiaryUnlockedCount(void);
+        int mask = g_save.seenMonsters;
+        int valid = 0;
+        for (int bi = 0; bi < BESTIARY_COUNT && bi < 31; bi++) valid |= (1 << bi);
+        bestiarySeen = mask & valid;
+    }
 
         /* v8 新增：恢复无尽模式进度 */
         bestEndlessLevel = g_save.bestEndlessLevel;
@@ -1450,10 +1458,27 @@ void ContinueRun(void) {
     for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = g_save.relicOwned[i];
     relicTotal = g_save.relicTotal;
     /* v8: boss 字段已移除。bossLevel 恒为 0，下面两行本就永不成立。 */
-    dailyMode = g_save.dailyMode;
+    /* ==================================================================
+     * 2026-11-06（**P0-2 读档字段没有合法性夹取**）
+     * ------------------------------------------------------------------
+     * 现象：普通局启动后手电永远打不开 —— 因为 dailyMode 读成了 -1，
+     *       而 DailyForbidLight() 的判据是 `dailyMode && ...`，
+     *       -1 是真值，于是"每日模式的禁灯限制"漏进了普通模式。
+     *
+     * 根因：这几个是**布尔/枚举**语义，但读档时原样赋值，没有归一。
+     *       存档被错误迁移过一次（P0-1）就会留下任意值，
+     *       而一个"看起来像真"的垃圾值会静默改变整个玩法。
+     *
+     * 原则：**布尔只接受 0/1，枚举夹进合法区间**。
+     *       宁可把坏值当成"关"，也不要让它带出一个不存在的规则。
+     * ================================================================ */
+    dailyMode = (g_save.dailyMode == 1) ? 1 : 0;
     dailySeed = g_save.dailySeed;
-    campaignMode = g_save.campaignMode;
+    campaignMode = (g_save.campaignMode == 1) ? 1 : 0;
     campaignStage = g_save.campaignStage;
+    if (campaignStage < 0) campaignStage = 0;
+    /* CAMPAIGN_STAGE_COUNT 是段数，关卡序号不设上限，这里只防负数与荒谬值 */
+    if (campaignStage > 1000) campaignStage = 0;
     firePots = g_save.firePots;   CLAMP_ITEM_RARE(firePots);
     gluePots = g_save.gluePots;   CLAMP_ITEM_RARE(gluePots);
     mirrors = g_save.mirrors;   CLAMP_ITEM_RARE(mirrors);

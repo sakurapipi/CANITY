@@ -173,6 +173,82 @@ static void test_wallet_save(void) {
     CHECK(bankGold == 4567 && skillRank[1] == 1,
           "v25 migration keeps bank and skill progress");
 }
+/* ==================================================================
+ * 2026-11-06（v2.4-rc / **P0-2**）：读档必须夹取布尔与枚举
+ * ------------------------------------------------------------------
+ * 现象：普通局进游戏后手电永远打不开。
+ * 根因：dailyMode 读成 -1，而 DailyForbidLight() 的判据是
+ *       `dailyMode && ...` —— -1 是真值，于是每日模式的禁灯规则
+ *       漏进了普通模式。
+ *
+ * 这条用例**故意写一个坏档**，然后断言读回来的是"关"而不是"垃圾值"。
+ * 没有夹取的话第一条就会红。
+ * ================================================================== */
+static void test_load_clamps_flags(void) {
+    extern int dailyMode, campaignMode, campaignStage, bestiarySeen;
+
+    SaveBlob blob;
+    memset(&blob, 0, sizeof(blob));
+    blob.magic = SAVE_MAGIC;
+    blob.version = SAVE_VERSION;
+    blob.hasRun = 1;
+    blob.dailyMode = -1;          /* 坏值：看起来像真 */
+    blob.dailySeed = 12345;
+    blob.campaignMode = 7;        /* 坏值：不是 0/1 */
+    blob.campaignStage = -5;      /* 坏值：负数段 */
+    blob.seenMonsters = 0x7FFFFFFF;  /* 坏值：全是位 */
+
+    const char* dir = getenv("CANITY_DATA_DIR");
+    char path[MAX_PATH];
+    /* 三个槽都清掉：LoadSettings 会挑"最新的那个槽"，
+       如果别的用例留下了 canity1/2.sav，写的 canity0 根本不会被读。 */
+    for (int slot = 0; slot < 3; slot++) {
+        char p3[MAX_PATH];
+        snprintf(p3, sizeof(p3), "%s\\canity%d.sav", dir, slot);
+        remove(p3);
+        snprintf(p3, sizeof(p3), "%s\\canity%d.sav.bak", dir, slot);
+        remove(p3);
+    }
+    snprintf(path, sizeof(path), "%s\\canity0.sav", dir);
+    FILE* f = fopen(path, "wb");
+    CHECK(f != NULL, "create the corrupt-flag fixture");
+    CHECK(fwrite(&blob, 1, sizeof(blob), f) == sizeof(blob), "write the corrupt-flag fixture");
+    fclose(f);
+
+    CHECK(LoadSettings() != 0, "a save with corrupt flag values must still load");
+    /* 这些字段是在 ContinueRun() 里灌回全局的（不是 LoadSettings），
+       所以必须按真实流程走一遍 —— 只调 LoadSettings 测不到。 */
+    ContinueRun();
+
+    CHECK(dailyMode == 0, "dailyMode must be clamped to 0/1 (a -1 leaks daily restrictions into a normal run)");
+    CHECK(campaignMode == 0, "campaignMode must be clamped to 0/1");
+    CHECK(campaignStage == 0, "a negative campaignStage must be clamped to 0");
+
+    /* 图鉴位掩码只保留真实存在的位 */
+    {
+        int valid = 0;
+        for (int bi = 0; bi < BESTIARY_COUNT && bi < 31; bi++) valid |= (1 << bi);
+        CHECK((bestiarySeen & ~valid) == 0,
+              "bestiarySeen must not keep bits for monsters that do not exist");
+    }
+
+    /* 正常值必须原样保留 —— 夹取不能把合法存档也改坏 */
+    blob.dailyMode = 1;
+    blob.campaignMode = 1;
+    blob.campaignStage = 2;
+    blob.seenMonsters = 0x5;
+    f = fopen(path, "wb");
+    CHECK(f != NULL, "rewrite the fixture with valid values");
+    (void)fwrite(&blob, 1, sizeof(blob), f);
+    fclose(f);
+    CHECK(LoadSettings() != 0, "a valid save must still load");
+    ContinueRun();
+    CHECK(dailyMode == 1, "a legitimate dailyMode=1 must survive");
+    CHECK(campaignMode == 1, "a legitimate campaignMode=1 must survive");
+    CHECK(campaignStage == 2, "a legitimate campaignStage=2 must survive");
+    CHECK(bestiarySeen == 0x5, "a valid bestiary mask must be preserved exactly");
+}
+
 static void test_trees_shop(void) {
     clear_meta();bankGold=1000000;activeKeystone=-1;
     CHECK(SkillsSelfTest()==0,"skill data costs, ranks and prerequisites validate");
@@ -1629,6 +1705,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
