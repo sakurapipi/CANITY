@@ -1461,6 +1461,80 @@ static void BakeProp(int id, int kind) {
         /* 铁角：四角各再点一块高光，让包角读作金属而不是木纹 */
         cvLine(c - 40, baseY - 90, c - 30, baseY - 90, 4.0f, 0x00A89880u, 0.55f);
         cvLine(c + 30, baseY - 4, c + 40, baseY - 4, 4.0f, 0x00201810u, 0.6f);
+    } else if (kind == 8) {     /* 货架（v2.4-rc）：三层横板 */
+        /* 填黑测试：两根立柱 + 三层横板 → 剪影是 〓，一眼是货架。
+           横板比立柱略宽，这样剪影的横向条纹更清楚。 */
+        float px0 = c - 44, px1 = c + 44;
+        float top = baseY - 132;
+
+        /* 背板（先铺，让横板之间有"里面的东西"的感觉） */
+        float bk[8] = { px0 + 4, top + 4, px1 - 4, top + 4, px1 - 4, baseY, px0 + 4, baseY };
+        cvPolyGrad(bk, 4, 0x00201A14u, 0x000C0906u, 1.0f);
+
+        /* 两根立柱 */
+        cvLine(px0, top, px0, baseY, 9.0f, 0x00403020u, 1.0f);
+        cvLine(px1, top, px1, baseY, 9.0f, 0x00403020u, 1.0f);
+        cvLine(px0 - 2, top, px0 - 2, baseY, 3.0f, 0x00705A3Eu, 0.85f);
+        cvLine(px1 - 2, top, px1 - 2, baseY, 3.0f, 0x00705A3Eu, 0.85f);
+
+        /* 三层横板（每层：暗底 + 亮上沿） */
+        for (int k = 0; k < 3; k++) {
+            float sy = top + 20.0f + (float)k * 44.0f;
+            cvLine(px0 - 7, sy, px1 + 7, sy, 9.0f, 0x00281E14u, 1.0f);
+            cvLine(px0 - 7, sy - 3, px1 + 7, sy - 3, 3.5f, 0x00907A54u, 0.9f);
+            /* 板下的阴影，让横板有厚度 */
+            cvLine(px0 - 5, sy + 4, px1 + 5, sy + 4, 2.0f, 0x00000000u, 0.45f);
+        }
+
+        /* 板上零散堆放：两块方箱 + 一只窄罐（用剪影打破对称） */
+        cvPolyGrad((float[]){ px0 + 6, top + 16, px0 + 30, top + 16, px0 + 30, top + 34, px0 + 6, top + 34 },
+                   4, 0x00806640u, 0x00382A18u, 1.0f);
+        cvBevel(px0 + 6, top + 16, px0 + 30, top + 34, 2.5f, 0.40f);
+        cvPolyGrad((float[]){ px1 - 34, top + 58, px1 - 8, top + 58, px1 - 8, top + 80, px1 - 34, top + 80 },
+                   4, 0x00705C3Cu, 0x002E2416u, 1.0f);
+        cvBevel(px1 - 34, top + 58, px1 - 8, top + 80, 2.5f, 0.40f);
+        cvEllipse(px0 + 18, top + 104, 8.0f, 12.0f, 0x004C4438u, 1.0f);
+        cvLine(px0 + 12, top + 104, px0 + 24, top + 104, 1.6f, 0x00A09070u, 0.5f);
+
+        cvSpeckle((int)c, (int)(top + 70), 52, 40, 0x00100800u, 0.35f);
+
+    } else if (kind == 9) {     /* 控制台（v2.4-rc）：矮柜 + 斜面板 */
+        /* 填黑测试：一个宽矮的柜体 + 一条斜上去的面板 + 面板上两颗指示灯
+           → 剪影是"上沿不平的矮箱"，和箱子（平顶方块）区分得开。 */
+        float top = baseY - 96;
+
+        /* 柜体 */
+        float b[8] = { c - 58, top + 26, c + 58, top + 26, c + 58, baseY, c - 58, baseY };
+        cvPoly(b, 4, 0x0008080Cu, 1.0f);
+        float b2[8] = { c - 52, top + 32, c + 52, top + 32, c + 52, baseY - 4, c - 52, baseY - 4 };
+        cvPolyGrad(b2, 4, 0x00505C66u, 0x00141A20u, 1.0f);
+
+        /* 斜面板（往观察者方向倾，靠梯形而不是矩形） */
+        float pn[8] = { c - 58, top + 26, c + 58, top + 26, c + 46, top, c - 46, top };
+        cvPoly(pn, 4, 0x000A0E12u, 1.0f);
+        float pn2[8] = { c - 52, top + 23, c + 52, top + 23, c + 42, top + 4, c - 42, top + 4 };
+        cvPolyGrad(pn2, 4, 0x00768290u, 0x00303840u, 1.0f);
+
+        /* 面板上的三颗指示灯（琥珀/绿/红） */
+        cvEllipse(c - 26, top + 14, 5.0f, 4.2f, 0x00FFB030u, 0.95f);
+        cvEllipse(c - 6,  top + 13, 5.0f, 4.2f, 0x0040E060u, 0.90f);
+        cvEllipse(c + 14, top + 14, 5.0f, 4.2f, 0x00E03818u, 0.90f);
+        /* 灯座 */
+        cvEllipse(c - 26, top + 14, 6.6f, 5.6f, 0x00181C20u, 0.55f);
+        cvEllipse(c - 6,  top + 13, 6.6f, 5.6f, 0x00181C20u, 0.55f);
+        cvEllipse(c + 14, top + 14, 6.6f, 5.6f, 0x00181C20u, 0.55f);
+
+        /* 柜门分缝 + 拉手 */
+        cvLine(c, top + 34, c, baseY - 6, 2.0f, 0x00000000u, 0.5f);
+        cvLine(c - 10, top + 62, c + 10, top + 62, 3.0f, 0x00A8B4C0u, 0.5f);
+
+        /* 右侧垂下来的一束线缆（打破左右对称，剪影更像机器） */
+        cvLine(c + 52, top + 40, c + 62, top + 78, 3.0f, 0x002A2418u, 1.0f);
+        cvLine(c + 62, top + 78, c + 58, baseY - 6, 3.0f, 0x002A2418u, 1.0f);
+
+        cvBevel(c - 52, top + 32, c + 52, baseY - 4, 3.0f, 0.42f);
+        cvSpeckle((int)c, (int)(baseY - 40), 48, 26, 0x00000000u, 0.3f);
+
     } else if (kind == 1) {     /* 配电箱（v2.4.7 重新建模） */
         /* 按 art_direction.h 重设计：
              地标 ① 顶部两根**瓷瓶 + 垂下的导线**（剪影上凸出柜体上沿）
@@ -1847,6 +1921,8 @@ void SpritesInit(void) {
     BakeProp(SPR_PROP_CRATE_LOCKED, 5);
     BakeProp(SPR_PROP_TRASH, 6);
     BakeProp(SPR_PROP_CRATE_MIMIC, 7);   /* 2026-11-05 宝箱怪伪装态 */
+    BakeProp(SPR_PROP_SHELF, 8);          /* v2.4-rc 房间家具 */
+    BakeProp(SPR_PROP_CONSOLE, 9);
     BakeUiPanel(SPR_UI_PANEL, 0);
     BakeUiPanel(SPR_UI_PANEL_HOT, 1);
     BakeUiCursor();

@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "map_rooms.h"
 #include "cell_meta.h"
 #include "render.h"
 #include "suspicion.h"
@@ -2531,6 +2532,19 @@ void RenderSprites(void) {
         list[n].idx = i;
         n++;
     }
+    /* v2.4-rc：房间家具也走同一个渲染列表，共享深度排序与光照 */
+    {
+        extern RoomProp roomProps[MAX_ROOM_PROPS];
+        extern int roomPropCount;
+        for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++) {
+            if (!roomProps[i].active) continue;
+            if (n >= MAX_SPRITES) break;
+            list[n].d2 = Dist2(roomProps[i].x, roomProps[i].y, posX, posY);
+            list[n].kind = 16;
+            list[n].idx = i;
+            n++;
+        }
+    }
     if (breaker.active) {
         if (n < MAX_SPRITES) {
             list[n].d2 = Dist2(breaker.x, breaker.y, posX, posY);
@@ -2665,6 +2679,18 @@ void RenderSprites(void) {
             case 8: DrawShotSprite(list[i].idx); break;
             case 10: DrawSlashSprite(); break;
             case 12: DrawHideSpotSprite(list[i].idx); break;   /* v3.0 藏身点 */
+        case 16: {   /* v2.4-rc：房间家具 */
+            extern RoomProp roomProps[MAX_ROOM_PROPS];
+            int ri = list[i].idx;
+            if (ri >= 0 && ri < MAX_ROOM_PROPS && roomProps[ri].active) {
+                extern void DrawBakedProp(int, float, float, float, float);
+                if (roomProps[ri].kind == ROOMPROP_CONSOLE)
+                    DrawBakedProp(SPR_PROP_CONSOLE, roomProps[ri].x, roomProps[ri].y, 0.42f, 1.0f);
+                else
+                    DrawBakedProp(SPR_PROP_SHELF, roomProps[ri].x, roomProps[ri].y, 0.42f, 1.0f);
+            }
+            break;
+        }
             case 11: DrawExtraSprite(list[i].idx); break;
             case 7: DrawFlowerSprite(); break;
             default: DrawExitBeamSprite(); break;
@@ -2912,6 +2938,27 @@ static void RenderFloorBand(int y0, int y1) {
         unsigned int fogG = (unsigned int)(fogAmt * (float)themeFogG);
         unsigned int fogB = (unsigned int)(fogAmt * (float)themeFogB);
 
+        /* ==================================================================
+         * 2026-11-06（v2.4-rc）：**地板和天花板也要按房间上色**
+         * ------------------------------------------------------------------
+         * 实测反馈：「还是只有一些发光的墙，其他什么都没有。」
+         *
+         * 那是必然的 —— 我只给墙面加了补光，**地板没加**。
+         * 而第一人称视角里，画面下半部分几乎全是地板；
+         * 只让墙发光，结果就是"角落里有一段墙在发亮"，
+         * 完全构不成"我走进了一个房间"。
+         *
+         * 这里用每行的 shadow 预乘一个系数，所以远处/暗处的地板
+         * 补光同样会被压下去，不会出现"远处的房间亮得反常"。
+         * 成本：每像素一次数组取值 + 一次移位 —— 地板本来就最贵，
+         * 这点增量实测无感。
+         * ================================================================ */
+        int tintMul = (int)(shadow * 256.0f * 1.7f);
+        if (tintMul < 0) tintMul = 0;
+        if (tintMul > 1024) tintMul = 1024;
+        extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+        extern int roomCount;
+
         for (int x = 0; x < renderW; x++) {
             int cX = (int)fx, cY = (int)fy;
             int tx2 = ((int)((fx - cX) * (float)TEX_WIDTH)) & (TEX_WIDTH - 1);
@@ -2926,6 +2973,24 @@ static void RenderFloorBand(int y0, int y1) {
                 k8 = shadeLut[k8];
                 int lvl = k8 >> PREMUL_K8_SHIFT;
                 color = premulFloor[floorColorIdx[ty2][tx2]][lvl];
+
+                /* 房间补光：先叠，后面安全屋/出口的特效可以覆盖它 */
+                if (roomCount > 0 &&
+                    (unsigned)cX < (unsigned)MAP_WIDTH && (unsigned)cY < (unsigned)MAP_HEIGHT) {
+                    unsigned char rid = cellMeta[cY][cX].roomId;
+                    if (rid != 0) {
+                        int t = cellMeta[cY][cX].themeId;
+                        if (t < 0 || t >= THEME_COUNT) t = 0;
+                        int tr = CellThemeTintR(t), tg = CellThemeTintG(t), tb = CellThemeTintB(t);
+                        int cr = (int)((color >> 16) & 0xFFu) + ((tr * tintMul) >> 8);
+                        int cg = (int)((color >> 8) & 0xFFu)  + ((tg * tintMul) >> 8);
+                        int cb = (int)(color & 0xFFu)         + ((tb * tintMul) >> 8);
+                        if (cr > 255) cr = 255;
+                        if (cg > 255) cg = 255;
+                        if (cb > 255) cb = 255;
+                        color = (unsigned int)((cr << 16) | (cg << 8) | cb);
+                    }
+                }
 
                 /* 安全屋花圃 */
                 if (safeRoom.active) {

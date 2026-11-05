@@ -63,6 +63,68 @@ extern int explored[MAP_HEIGHT][MAP_WIDTH];
 #define ROOM_BORDER      1      /* 外圈墙厚 */
 #define ROOM_DOOR_DEPTH  2      /* 从门向外挖几格 */
 
+RoomProp roomProps[MAX_ROOM_PROPS];
+int roomPropCount = 0;
+
+void RoomPropReset(void) {
+    for (int i = 0; i < MAX_ROOM_PROPS; i++) {
+        roomProps[i].x = 0.0f; roomProps[i].y = 0.0f;
+        roomProps[i].kind = 0; roomProps[i].active = 0;
+    }
+    roomPropCount = 0;
+}
+
+int RoomPropAdd(float x, float y, int kind) {
+    if (roomPropCount >= MAX_ROOM_PROPS) return 0;
+    roomProps[roomPropCount].x = x;
+    roomProps[roomPropCount].y = y;
+    roomProps[roomPropCount].kind = kind;
+    roomProps[roomPropCount].active = 1;
+    roomPropCount++;
+    return 1;
+}
+
+/* 给一个房间放家具：沿内圈墙角挑地板格。
+   featureId 决定放什么：
+     SHELF（仓储室）→ 货架
+     POWER（供电室）→ 控制台
+     其它          → 货架（货架更通用，锅炉房/储藏间也合理） */
+static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
+    if (!t) return;
+    int innerX = fx + ROOM_BORDER;
+    int innerY = fy + ROOM_BORDER;
+    int want = 2 + (int)(rand() % 2);          /* 每间 2~3 件 */
+    int placed = 0;
+
+    int propKind = (t->featureId == ROOM_FEATURE_POWER) ? ROOMPROP_CONSOLE : ROOMPROP_SHELF;
+
+    /* 沿房间内圈一圈走，优先靠墙的格子 */
+    for (int pass = 0; pass < 2 && placed < want; pass++) {
+        for (int y = 0; y < t->h && placed < want; y++) {
+            for (int x = 0; x < t->w && placed < want; x++) {
+                /* pass 0 = 只放最外一圈（贴墙），pass 1 = 里面也放 */
+                int edge = (x == 0 || y == 0 || x == t->w - 1 || y == t->h - 1);
+                if (pass == 0 && !edge) continue;
+                if (pass == 1 && edge) continue;
+
+                unsigned char tile = t->tiles[y][x];
+                if (tile != ROOM_TILE_FLOOR) continue;
+
+                /* 别和已放的家具撞同一格 */
+                int cx = innerX + x, cy = innerY + y;
+                int taken = 0;
+                for (int k = 0; k < roomPropCount; k++) {
+                    if (!roomProps[k].active) continue;
+                    if ((int)roomProps[k].x == cx && (int)roomProps[k].y == cy) taken = 1;
+                }
+                if (taken) continue;
+
+                if (RoomPropAdd((float)cx + 0.5f, (float)cy + 0.5f, propKind)) placed++;
+            }
+        }
+    }
+}
+
 /* 模板瓦片 → worldMap */
 static int TileToMap(unsigned char t) {
     switch (t) {
@@ -215,6 +277,8 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
         }
 
     /* ---- ⑤ 两个门都接不上，或者挖完发现房间走不到 → 全部回滚 ---- */
+    /* 家具放在连通性检查**之后**：它会读 worldMap 找地板格，
+       而这里已经确认房间是通的。 */
     if ((!okA && !okB) || !RoomReachable()) {
         memcpy(worldMap, savedMap, sizeof(savedMap));
         memcpy(cellMeta, savedMeta, sizeof(savedMeta));
@@ -225,6 +289,8 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
                 if (cellMeta[y][x].roomId > roomCount) roomCount = cellMeta[y][x].roomId;
         return 0;
     }
+
+    FurnishRoom(t, fx, fy);
     return 1;
 }
 
@@ -285,7 +351,11 @@ static int TryPlace(int placed, int idMin, int idMax) {
  * 所以出现率可以做到接近 100%。
  * 宁可不放，也不放坏的 —— 但没有"坏"的形态了。
  * ================================================================ */
+/* 前置声明：下面 GenerateThemeRooms 末尾要用（定义在本文件靠后） */
+static void RoomDumpIfRequested(int placed);
+
 int GenerateThemeRooms(int wantCount) {
+    RoomPropReset();
     if (wantCount <= 0) return 0;
 
     int placed = 0, attempts = 0;
@@ -299,7 +369,52 @@ int GenerateThemeRooms(int wantCount) {
         attempts++;
         if (TryPlace(placed, 3, 3)) placed++;
     }
+    RoomDumpIfRequested(placed);
     return placed;
+}
+
+/* ==================================================================
+ * 诊断：把**游戏真正生成的那一层**打成 ASCII 文件。
+ * ------------------------------------------------------------------
+ * 为什么需要它：tools/map_gen_dump.c 复制了 DFS，但 rand() 的调用序列
+ * 和真实游戏不一样，生成出来的层也不同。判断"房间里到底有没有东西"
+ * 必须看真实的那一张图。
+ *
+ * 为什么不用 stdio：本工程的 partition 规则要求系统头只出现在 common.h，
+ * 游戏源码里出现 <stdio.h> 会被 partition_check 拦下。
+ * 所以这里直接用 Win32 写文件（windows.h 由 common.h 提供）。
+ *
+ * 默认关闭；设了环境变量 CANITY_ROOM_DUMP=<路径> 才写，每层追加一段。
+ * ================================================================ */
+static void RoomDumpIfRequested(int placed) {
+    char path[MAX_PATH];
+    DWORD got = GetEnvironmentVariableA("CANITY_ROOM_DUMP", path, (DWORD)sizeof(path));
+    if (got == 0 || got >= sizeof(path)) return;
+
+    static char buf[4096];
+    int n = 0;
+    n += _snprintf(buf + n, (size_t)(sizeof(buf) - (size_t)n),
+                   "=== rooms=%d exit=(%.1f,%.1f) ===\r\n", placed, exitX, exitY);
+    for (int y = 0; y < MAP_HEIGHT && n < (int)sizeof(buf) - 40; y++) {
+        for (int x = 0; x < MAP_WIDTH && n < (int)sizeof(buf) - 4; x++) {
+            int wall = worldMap[y][x];
+            unsigned char rid = cellMeta[y][x].roomId;
+            char c;
+            if (rid != 0) c = wall ? '+' : ',';   /* + 房间结构  , 房间地面 */
+            else          c = wall ? '#' : '.';
+            buf[n++] = c;
+        }
+        buf[n++] = '\r';
+        buf[n++] = '\n';
+    }
+    buf[n++] = '\r'; buf[n++] = '\n';
+
+    HANDLE h = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ, NULL,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD written = 0;
+    WriteFile(h, buf, (DWORD)n, &written, NULL);
+    CloseHandle(h);
 }
 
 int RoomCount(void) { return roomCount; }

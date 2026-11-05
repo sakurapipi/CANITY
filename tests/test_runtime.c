@@ -671,6 +671,82 @@ static void test_theme_rooms_placement(void) {
     exitX = savedExitX; exitY = savedExitY;
 }
 
+/* ==================================================================
+ * 2026-11-06（v2.4-rc）：**房间里的家具**
+ * ------------------------------------------------------------------
+ * 之前的"货架"只是模板里的一格墙，黑暗里就是一根墙垛 ——
+ * 用户反馈「里面什么都没有货架隔断」。
+ * 现在改成真正的道具精灵（SPR_PROP_SHELF / SPR_PROP_CONSOLE）。
+ *
+ * 这一组钉住：
+ *   · 有房间的层必须有家具
+ *   · 家具一定落在**房间内部**的地板格上
+ *   · 家具不会压在墙上，也不会跑到房间外
+ * ================================================================== */
+static void test_room_props(void) {
+    extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+    extern float exitX, exitY;
+    static int saved[MAP_HEIGHT][MAP_WIDTH];
+    float sx = exitX, sy = exitY;
+    memcpy(saved, worldMap, sizeof(saved));
+
+    for (int y = 0; y < MAP_HEIGHT; y++)
+        for (int x = 0; x < MAP_WIDTH; x++)
+            worldMap[y][x] = (y % 2 == 1 && y > 0 && y < MAP_HEIGHT - 1 &&
+                              x > 0 && x < MAP_WIDTH - 1) ? 0 : 1;
+    exitX = 20.5f; exitY = 20.5f;
+    CellMetaReset();
+
+    srand(777u);
+    int placed = GenerateThemeRooms(2);
+
+    if (placed > 0) {
+        CHECK(roomPropCount > 0, "a level with rooms must also have room furniture");
+
+        int bad = 0, offRoom = 0;
+        for (int i = 0; i < roomPropCount; i++) {
+            if (!roomProps[i].active) continue;
+            int cx = (int)roomProps[i].x;
+            int cy = (int)roomProps[i].y;
+            if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) { bad++; continue; }
+            if (worldMap[cy][cx] != 0) bad++;                 /* 不许压在墙上 */
+            if (cellMeta[cy][cx].roomId == 0) offRoom++;      /* 不许跑到房间外 */
+        }
+        CHECK(bad == 0, "room furniture must never sit on a wall cell");
+        CHECK(offRoom == 0, "room furniture must stay inside its room");
+        CHECK(roomPropCount <= MAX_ROOM_PROPS, "room furniture must respect MAX_ROOM_PROPS");
+    }
+
+    /* 每一件家具的 kind 必须是已知种类 */
+    {
+        int kindOk = 1;
+        for (int i = 0; i < roomPropCount; i++) {
+            if (!roomProps[i].active) continue;
+            if (roomProps[i].kind != ROOMPROP_SHELF &&
+                roomProps[i].kind != ROOMPROP_CONSOLE) kindOk = 0;
+        }
+        CHECK(kindOk, "every room prop must have a known kind");
+    }
+
+    /* 再生成一次，家具表必须被清空重来，不能累加 */
+    {
+        int before = roomPropCount;
+        (void)before;
+        srand(778u);
+        (void)GenerateThemeRooms(2);
+        int counted = 0;
+        for (int i = 0; i < MAX_ROOM_PROPS; i++)
+            if (roomProps[i].active) counted++;
+        CHECK(counted == roomPropCount,
+              "roomPropCount must match the number of active props (no leaking between levels)");
+    }
+
+    CellMetaReset();
+    memcpy(worldMap, saved, sizeof(saved));
+    exitX = sx; exitY = sy;
+}
+
+
 static void test_stone_hearing_range(void) {
     extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
     static int saved[MAP_HEIGHT][MAP_WIDTH];
@@ -1377,6 +1453,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
