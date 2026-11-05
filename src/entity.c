@@ -89,6 +89,9 @@ int jumperResolved = 0;       /* 本次事件是否已结算（防止重复结�
 /* 2026-11-06（用户要求）：一局累计出过几只（上限 JUMPER_MAX_PER_RUN）
    与失败后的"控制玩家"计时。 */
 int   jumperSpawnedRun = 0;
+/* 2026-11-06：连戳空格 —— 还剩几下、还剩多久 */
+int   jumperMashLeft = 0;
+float jumperMashTimer = 0.0f;
 float jumperControlT   = 0.0f;
 float jumperTrigger = -1.0f;  /* 本关什么时候触发（秒）；<0 = 本关不出现 */
 float battery = 100.0f;          /* 0..100 */
@@ -851,9 +854,43 @@ void UpdateParasite(float dt) {
     case JMP_LURK: {
         float d2 = Dist2(parasite.x, parasite.y, posX, posY);
         if (d2 < JUMPER_LURK_TRIGGER_R * JUMPER_LURK_TRIGGER_R && hiddenIn < 0) {
-            jumperPhase = JMP_APPROACH;
-            jumperTimer = JUMPER_APPROACH_TIME;
-            if (!monsterMuted) PlaySfx(SFX_SCREAM, 0.9f);
+            /* ==================================================================
+             * 2026-11-06（用户要求）：**没有前摇，直接贴脸**
+             * 原来是 JMP_APPROACH 飞 0.3 秒 —— 用户说"有很长的前摇"。
+             * 现在一帧之内就到脸上，玩家的反应时间全部花在"戳空格"上。
+             * ================================================================ */
+            parasite.x = posX + dirX * 0.75f;
+            parasite.y = posY + dirY * 0.75f;
+            jumperPhase = JMP_MASH;
+            jumperMashLeft = JUMPER_MASH_COUNT;
+            jumperMashTimer = JUMPER_MASH_WINDOW;
+            if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
+        }
+        break;
+    }
+
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**连戳三下空格**
+     * ------------------------------------------------------------------
+     * 虫子已经在脸上。每按一次 ACT_DODGE 减 1，戳满就挣脱；
+     * 窗口走完还没戳满就失败（控 10 秒 + 召唤附近所有怪）。
+     * ================================================================ */
+    case JMP_MASH: {
+        jumperMashTimer -= dt;
+        parasite.x = posX + dirX * 0.75f;
+        parasite.y = posY + dirY * 0.75f;
+        if (IsActionPressed(ACT_DODGE)) {
+            jumperMashLeft--;
+            PlaySfx(SFX_GLASS, 0.55f);
+            if (jumperMashLeft <= 0) {
+                JumperDodged();
+                return;
+            }
+        }
+        if (jumperMashTimer <= 0.0f) {
+            if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
+            JumperFail();
+            JumperFinish();
         }
         break;
     }

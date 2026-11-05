@@ -179,6 +179,43 @@ void ThrowItem(int type, float charge) {
     /* ---- v3.3 投掷物重做：2 烟雾 / 3 胶水 / 4 回声，全部走 shot 弹道 ----
        槽位：0 光球 / 1 投石 / 2 烟雾 / 3 胶水 / 4 回声 / 5 诱饵（C 键放置，不走这里）
        shot.kind 约定：1 投石 / 4 烟雾 / 8 胶水 / 10 回声 */
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**两套相位投掷物**
+     * ------------------------------------------------------------------
+     * 槽 6 = 相位信标：落地成为回溯点，再按 Q 传送回去
+     * 槽 7 = 相位锚  ：落地**立刻**把玩家拉过去
+     *
+     * 两者都走 shot 弹道（和烟雾/胶水同一套），所以飞行、撞墙、
+     * 落地的物理都是现成的，不需要新写一套投掷流程。
+     * kind 约定：12 = 信标 / 13 = 锚
+     * ================================================================ */
+    if (type == 6 || type == 7) {
+        int kind = (type == 6) ? 12 : 13;
+        for (int i = 0; i < MAX_SHOTS; i++) {
+            if (shot[i].active) continue;
+            shot[i].x = posX;
+            shot[i].y = posY;
+            shot[i].z = SHOT_HEIGHT;
+            shot[i].vx = dirX * speed * cosf(angle);
+            shot[i].vy = dirY * speed * cosf(angle);
+            shot[i].vz = speed * sinf(angle);
+            shot[i].life = 2.0f;
+            shot[i].age = 0.0f;
+            shot[i].charge = charge;
+            shot[i].kind = kind;
+            shot[i].dmg = 0;
+            shot[i].pierce = 0;
+            shot[i].mirrorRebounded = 0;
+            shot[i].ignoreTarget = -1;
+            shot[i].ignoreTargetTime = 0.0f;
+            shot[i].active = 1;
+            g_throwOk = 1;
+            break;
+        }
+        PlaySfx(SFX_THROW, 0.6f);
+        return;
+    }
+
     if (type >= 2) {
         int kind = (type == 2) ? 4 : (type == 3) ? 8 : 10;
         float itemSpeed = speed;
@@ -423,6 +460,11 @@ void UpdateShots(float dt) {
                 /* 2026-11-05：**破门石** —— 落在锁箱旁边就把锁砸开。 */
                 int brokeGround = 0;
                 if (shot[i].kind == 1) brokeGround = StoneBreakLockAt(shot[i].x, shot[i].y);
+                /* 2026-11-06：相位投掷物落地结算 */
+                if (shot[i].kind == 12 || shot[i].kind == 13) {
+                    extern void PhaseOnThrowLanded(int kind, float lx, float ly);
+                    PhaseOnThrowLanded(shot[i].kind, shot[i].x, shot[i].y);
+                }
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 PlaySfx(SFX_GLASS, 0.7f);
                 /* v2.4-alpha：**一次物理撞击只结算一次逻辑噪音**。
@@ -444,6 +486,10 @@ void UpdateShots(float dt) {
                    所以撞墙分支也要试一次，否则「贴着墙的锁箱永远砸不开」。 */
                 int brokeWall = 0;
                 if (shot[i].kind == 1) brokeWall = StoneBreakLockAt(shot[i].x, shot[i].y);
+                if (shot[i].kind == 12 || shot[i].kind == 13) {
+                    extern void PhaseOnThrowLanded(int kind, float lx, float ly);
+                    PhaseOnThrowLanded(shot[i].kind, shot[i].x, shot[i].y);
+                }
                 /* 2026-11-05 修「回响触发机制」：撞墙也算一次投掷结束。
                    见下面 EchoTryTrigger 的说明。 */
                 EchoTryTrigger(shot[i].x, shot[i].y);

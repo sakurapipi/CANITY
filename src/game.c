@@ -135,6 +135,9 @@ int upgRest = 0;         /* 安全屋回智 +25%/级 */
 int hubSelection = 0;
 int weaponPickSel = 0;          /* v2.0: 开局选武器光标 */
 int flares = 0, bottles = 0;
+/* 2026-11-06：两套相位投掷物（槽 6 / 7） */
+int phaseBeacons = 0;
+int phaseAnchors = 0;
 int bricks = 0, acids = 0, smokeBombs = 0;   /* v1.16 新投掷物 */
 int firePots = 0, gluePots = 0, mirrors = 0; /* v2.0 三个新投掷物（v3.3：火/镜已删，只剩 gluPots 在用） */
 int echoBolts = 0;   /* 2026-11-05 回声弹 = 资源雷达：ECHO_RADIUS 内标容器 30 秒 / 活物 5 秒 */
@@ -539,7 +542,7 @@ int itemHasStock(void) {
    只能靠滚轮 —— 玩家看到 HUD 上明明写着 ACID x2 却用不了。
    现在改成"第 N 个**有货的**槽"：HUD 只列有货的槽，第 3 行按 3 就对了。 */
 static void SelectVisibleSlot(int n) {
-    int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
+    int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys, phaseBeacons, phaseAnchors };
     int k = 0;
     for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
         if (counts[i] <= 0) continue;
@@ -555,7 +558,7 @@ void EnsureThrowSelectedValid(void) {
     /* v1.18：这里原来写死 2 个槽位 —— 滚到砖头/酸瓶时
        counts[throwSelected] 越界读到垃圾值，随即被拉回第 0/1 槽，
        表现就是"选不中砖头和酸瓶"。 */
-    int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
+    int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys, phaseBeacons, phaseAnchors };
     if (throwSelected < 0 || throwSelected >= ITEM_SLOT_COUNT) throwSelected = 0;
     if (counts[throwSelected] > 0) return;
     /* 2026-11-05：**就近取，不要永远拽回 0 号槽**。
@@ -1154,6 +1157,41 @@ void PhaseReset(void) {
     phaseCharges = 0;
     phasePlaced = 0;
     phaseX = phaseY = 0.0f;
+}
+
+/* ==================================================================
+ * 2026-11-06（用户要求）：**相位投掷物落地结算**
+ * ------------------------------------------------------------------
+ * kind 12 = 信标：落点成为回溯点，之后按 Q 传送回来
+ * kind 13 = 锚  ：落点**立刻**把玩家拉过去
+ *
+ * 两个都要先校验落点可站立 —— 投进墙里的话，
+ * 信标设为无效、锚直接不传送，绝不能把玩家塞进几何体。
+ * ================================================================ */
+void PhaseOnThrowLanded(int kind, float lx, float ly) {
+    if (Blocked(lx, ly)) {
+        pickupMsg = (g_lang == LANG_ZH) ? "落点不能用" : "BAD LANDING SPOT";
+        pickupMsgTimer = 1.4f;
+        return;
+    }
+
+    if (kind == 12) {
+        /* 信标：设定回溯点，给 2 次传送 */
+        phaseX = lx; phaseY = ly;
+        phasePlaced = 1;
+        phaseOwned = 1;
+        phaseCharges = PHASE_MAX_CHARGES;
+        pickupMsg = (g_lang == LANG_ZH) ? "信标已固定 - 按 Q 传送回来" : "BEACON SET - PRESS Q TO RETURN";
+        pickupMsgTimer = 2.0f;
+        PlaySfx(SFX_POWER, 0.7f);
+    } else if (kind == 13) {
+        /* 锚：立刻拉过去 */
+        posX = lx; posY = ly;
+        pickupMsg = (g_lang == LANG_ZH) ? "相位跃迁！" : "PHASE JUMP!";
+        pickupMsgTimer = 1.6f;
+        PlaySfx(SFX_POWER, 0.95f);
+    }
+    uiDirty = 1;
 }
 
 int PhaseTryPlace(void) {
@@ -5520,7 +5558,7 @@ void Update(float dt) {
             mouseCharge = 0.0f;
         } else if (mouseLeftNow) {
             /* 持续按住：累积蓄力（仅当选中道具有库存时） */
-            int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
+            int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys, phaseBeacons, phaseAnchors };
             int sel = throwSelected;
             if (sel < 0 || sel >= ITEM_SLOT_COUNT) sel = 0;
             if (counts[sel] > 0) {
@@ -5531,7 +5569,7 @@ void Update(float dt) {
         } else {
             /* 松开左键：发射（v1.16：0..4 = 荧光棒/瓶/砖/酸/烟） */
             isCharging = 0;
-            int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
+            int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys, phaseBeacons, phaseAnchors };
             int sel = throwSelected;
             if (sel < 0 || sel >= ITEM_SLOT_COUNT) sel = 0;
             /* ===== v3.3 六槽位的右键行为 =====
@@ -6504,7 +6542,13 @@ void StartGame(void) {
      * 于是 PhaseGive 永远不执行，训练营里根本没有装置，按 C 当然没反应。
      * ================================================================ */
     { extern void PhaseReset(void); PhaseReset(); }
-    if (trainingMode) { extern void PhaseGive(void); PhaseGive(); }
+    if (trainingMode) {
+        /* 2026-11-06：训练营里直接发一批相位投掷物 —— 那里就是拿来试机制的。
+           相位装置已经改成投掷物（槽 6/7），不再需要 PhaseGive。 */
+        extern int phaseBeacons, phaseAnchors;
+        phaseBeacons = 5;
+        phaseAnchors = 5;
+    }
     /* 2026-11-05：新局同样要重置鼠标基准 ——
        从菜单/商店直接开局时，lastMousePos 还是上一次的位置，
        第一帧会把它当成一次巨大的视角输入。 */
