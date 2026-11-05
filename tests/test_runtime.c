@@ -394,6 +394,160 @@ static void test_hatch_screenshot(void) {
     }
 }
 
+/* ==================================================================
+ * 2026-11-06（第 9 轮）：**七个舱门效果逐个验**
+ * ------------------------------------------------------------------
+ * 之前只验了"开门会到 FIRED"和"崩塌会重掷"。
+ * 其余六个效果**从来没被断言过** —— 它们完全可能什么都没做，
+ * 而测试全绿（这类假绿这几轮已经踩过两次）。
+ *
+ * 做法：对每一种，构造一扇门 → 满足门槛 → 开门 → 断言**可观测的状态变化**。
+ * 不看 pickupMsg，只认数值/数组。
+ * ================================================================== */
+static void test_all_hatch_effects(void) {
+    extern Hatch hatches[MAX_HATCHES];
+    extern int hatchCount;
+    extern float hatchLightsT, hatchGoldMulT, hatchBloodT, hatchSpeedT;
+    extern int collapsedLevel;
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+    currentLevel = 1;
+    GenerateLevel();          /* 需要一张真实地图（拆墙、崩塌都要用） */
+
+    /* ---- ① 供电室：全灯清雾 ---- */
+    {
+        HatchReset();
+        HatchAdd(2.5f, 2.5f, HATCH_POWER, 4);
+        hatchLightsT = 0.0f;
+        battery = 150.0f; fusesHeld = 0;
+        float batBefore = battery;
+        HatchSetState(0, HATCH_OPENING);
+        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
+        CHECK(hatches[0].state == HATCH_FIRED, "POWER hatch must fire");
+        CHECK(hatchLightsT > 19.0f && hatchLightsT < 21.0f,
+              "POWER must turn the lights on for ~20 seconds");
+        CHECK(battery < batBefore, "POWER must spend battery when no fuses are held");
+    }
+
+    /* ---- ② 地狱：血祭（金 + 理智 + 加速）---- */
+    {
+        HatchReset();
+        HatchAdd(2.5f, 2.5f, HATCH_HELL, 2);
+        hatchSpeedT = 0.0f;
+        carryGold = 500; sanity = 60.0f;
+        HatchSetState(0, HATCH_OPENING);
+        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
+        CHECK(hatches[0].state == HATCH_FIRED, "HELL hatch must fire");
+        CHECK(carryGold == 400, "HELL must burn exactly 100 gold");
+        CHECK(sanity > 44.0f && sanity < 46.0f, "HELL must cost 15 sanity");
+        CHECK(hatchSpeedT > 29.0f && hatchSpeedT < 31.0f,
+              "HELL must grant a ~30 second speed window");
+    }
+
+    /* ---- ③ 病房：包扎（理智 + 体力 + 血迹）---- */
+    {
+        HatchReset();
+        HatchAdd(2.5f, 2.5f, HATCH_WARD, 3);
+        hatchBloodT = 0.0f;
+        sanity = 20.0f; stamina = 0.0f;
+        HatchSetState(0, HATCH_OPENING);
+        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
+        CHECK(hatches[0].state == HATCH_FIRED, "WARD hatch must fire");
+        CHECK(sanity > 59.0f, "WARD must restore ~40 sanity");
+        CHECK(stamina > 1.0f, "WARD must refill stamina");
+        CHECK(hatchBloodT > 59.0f && hatchBloodT < 61.0f,
+              "WARD must leave a 60 second blood trail");
+    }
+
+    /* ---- ④ 仓储室：开仓（付钱 + 家具回满 + 金币倍率）---- */
+    {
+        extern RoomProp roomProps[MAX_ROOM_PROPS];
+        extern int roomPropCount;
+        HatchReset();
+        HatchAdd(2.5f, 2.5f, HATCH_STORAGE, 1);
+        hatchGoldMulT = 0.0f;
+        carryGold = 500;
+        /* 造一件搜空的家具，看它会不会被回满 */
+        roomProps[0].active = 1;
+        roomProps[0].kind = ROOMPROP_SHELF;
+        roomProps[0].searchLeft = 0;
+        roomProps[0].searched = 7;
+        if (roomPropCount < 1) roomPropCount = 1;
+
+        HatchSetState(0, HATCH_OPENING);
+        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
+        CHECK(hatches[0].state == HATCH_FIRED, "STORAGE hatch must fire");
+        CHECK(carryGold == 350, "STORAGE must cost exactly 150 gold");
+        CHECK(roomProps[0].searchLeft == 3,
+              "STORAGE must refill the shelf's three searches");
+        CHECK(hatchGoldMulT > 59.0f && hatchGoldMulT < 61.0f,
+              "STORAGE must grant a 60 second gold boost");
+    }
+
+    /* ---- ⑤ 血肉洞窟：喂食（消耗投掷物 + 全图僵直）---- */
+    {
+        extern Monster monHunters[MON_HUNTER_MAX];
+        HatchReset();
+        HatchAdd(2.5f, 2.5f, HATCH_FLESH, 6);
+        flares = 2; bottles = 0; smokeBombs = 0; gluePots = 0; echoBolts = 0;
+        monHunters[0].active = 1;
+        monHunters[0].stun = 0.0f;
+        HatchSetState(0, HATCH_OPENING);
+        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
+        CHECK(hatches[0].state == HATCH_FIRED, "FLESH hatch must fire");
+        CHECK(flares == 1, "FLESH must consume exactly one throwable");
+        CHECK(monHunters[0].stun > 19.0f,
+              "FLESH must freeze every hunter for ~20 seconds");
+    }
+
+    /* ---- ⑥ 砖墙：拆墙（墙的数量必须变少）---- */
+    {
+        extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+        int wallsBefore = 0, wallsAfter = 0;
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++)
+                if (worldMap[y][x]) wallsBefore++;
+
+        HatchReset();
+        /* 放在地图中间，四周一定有墙可砸 */
+        HatchAdd((float)(MAP_WIDTH / 2) + 0.5f, (float)(MAP_HEIGHT / 2) + 0.5f, HATCH_BRICK, 0);
+        stamina = 100.0f;
+        HatchSetState(0, HATCH_OPENING);
+        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
+        CHECK(hatches[0].state == HATCH_FIRED, "BRICK hatch must fire");
+
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++)
+                if (worldMap[y][x]) wallsAfter++;
+        CHECK(wallsAfter < wallsBefore,
+              "BRICK must carve away at least one wall");
+        CHECK(stamina < 76.0f, "BRICK must cost stamina");
+    }
+
+    /* ---- ⑦ 锅炉房：崩塌（走黑屏流程，计次 +1）---- */
+    {
+        extern int CollapseRerollCount(void);
+        extern void CollapseBegin(void);
+        extern int CollapseTick(float);
+        int before = CollapseRerollCount();
+        HatchReset();
+        HatchAdd(2.5f, 2.5f, HATCH_BOILER, 5);
+        HatchSetState(0, HATCH_OPENING);
+        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
+        CHECK(hatches[0].state == HATCH_FIRED, "BOILER hatch must fire");
+        /* 效果只是"开始崩塌"，真正的重掷在黑屏流程里 */
+        CollapseTick(0.5f);
+        CollapseTick(0.5f);
+        CHECK(CollapseRerollCount() == before + 1,
+              "BOILER must start the collapse reroll");
+        CollapseTick(2.0f);          /* 走完，清掉黑屏 */
+        collapsedLevel = 0;
+    }
+
+    HatchReset();
+}
+
 static void test_hatch_end_to_end(void) {
     extern int hatchCount;
     extern Hatch hatches[MAX_HATCHES];
@@ -2275,6 +2429,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
