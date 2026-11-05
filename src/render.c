@@ -2752,42 +2752,23 @@ void RenderSprites(void) {
             extern RoomProp roomProps[MAX_ROOM_PROPS];
             int ri = list[i].idx;
             if (ri >= 0 && ri < MAX_ROOM_PROPS && roomProps[ri].active) {
-                extern int RoomPropLayers(int, PropLayer*, int);
-                PropLayer lp[PROP_MAX_LAYERS];
-                int ln = RoomPropLayers(roomProps[ri].kind, lp, PROP_MAX_LAYERS);
                 /* ================================================================
-                 * 2026-11-06（**B：层数多导致路过掉帧**）
+                 * 2026-11-06（**精灵数过多导致掉帧**）
                  * ----------------------------------------------------------------
-                 * 一个货架 4 层，每层都是一次带 z-test 的大面积像素 blit。
-                 * 走过架子时 4 层同时占满屏幕，代价是单图的 4 倍。
+                 * 用户实测：「货架算三个精灵，箱子算两个精灵，精灵过多，
+                 * 每次路过都掉帧。」
                  *
-                 * 远处根本看不出层间视差（角度变化太小），
-                 * 所以按距离降级：>7 格只画框架（1 层），>3.5 格画 2 层。
-                 * 近处才画满 —— 视差本来也只在近处有意义。
+                 * 分层伪立体的视觉收益，远小于它带来的绘制开销 ——
+                 * 尤其 36x36 之后一层有更多家具。
+                 * 现在**每个家具只画 1 个精灵**，改由 searchLeft 承担内容量：
+                 *   货架 3 次 / 木箱堆 2 次 / 控制台 2 次
                  * ================================================================ */
-                {
-                    float ddx = roomProps[ri].x - posX;
-                    float ddy = roomProps[ri].y - posY;
-                    float d2 = ddx * ddx + ddy * ddy;
-                    if (d2 > 49.0f)       ln = 1;      /* > 7 格 */
-                    else if (d2 > 12.25f) ln = (ln < 2) ? ln : 2;   /* > 3.5 格 */
-                }
-                int isConsole = (roomProps[ri].kind == ROOMPROP_CONSOLE);
-                int isCrates  = (roomProps[ri].kind == ROOMPROP_CRATES);
-                for (int L2 = 0; L2 < ln; L2++) {
-                    /* 层表里 spr 是**层内索引**：0 = 主体，1 = 附加层。
-                       在这里映射到真正的精灵 id —— 层表本身不依赖渲染层。 */
-                    int sid;
-                    if (isCrates) {
-                        sid = SPR_PROP_CRATE;
-                    } else if (isConsole) {
-                        sid = (lp[L2].spr == 0) ? SPR_PROP_CONSOLE_BASE : SPR_PROP_CONSOLE_PANEL;
-                    } else {
-                        sid = (lp[L2].spr == 0) ? SPR_PROP_SHELF_FRAME : SPR_PROP_SHELF_BOARD;
-                    }
-                    DrawBakedPropArt(sid, roomProps[ri].x, roomProps[ri].y,
-                                     lp[L2].baseZ, lp[L2].halfH, 1.0f);
-                }
+                int oneSpr = SPR_PROP_SHELF;
+                if (roomProps[ri].kind == ROOMPROP_CONSOLE)     oneSpr = SPR_PROP_CONSOLE;
+                else if (roomProps[ri].kind == ROOMPROP_CRATES) oneSpr = SPR_PROP_CRATE;
+                DrawBakedPropArt(oneSpr, roomProps[ri].x, roomProps[ri].y, 0.0f, 0.62f, 1.0f);
+                break;
+                break;
             }
             break;
         }
@@ -3732,6 +3713,21 @@ void RenderMap(void) {
         mapStartY = (renderH - mapH) / 2;
     } else {
         cellSize = MAP_CORNER_CELL;
+        /* ==================================================================
+         * 2026-11-06：**地图变大不该让 HUD 变大**
+         * ------------------------------------------------------------------
+         * 24x24 时是 24*8 = 192px；36x36 变成 288px ——
+         * 多出来的高度直接压到了右侧的状态提示（用户截图）。
+         *
+         * HUD 的占地面积应该是**固定**的：把格子缩到 190px 以内，
+         * 地图越大格子越小，但面板尺寸不变。
+         * ================================================================ */
+        {
+            int target = UIS(190);
+            int maxCell = target / MAP_WIDTH;
+            if (maxCell < 3) maxCell = 3;
+            if (cellSize > maxCell) cellSize = maxCell;
+        }
         mapW = MAP_WIDTH * cellSize;
         /* v3.0 **BUG 修复**：mapH 原来在 else 分支里**没有初始化**，
            而下面 `while (mapH > room ...)` 直接读它 ——

@@ -70,6 +70,7 @@ void RoomPropReset(void) {
     for (int i = 0; i < MAX_ROOM_PROPS; i++) {
         roomProps[i].x = 0.0f; roomProps[i].y = 0.0f;
         roomProps[i].kind = 0; roomProps[i].active = 0;
+        roomProps[i].searchLeft = 0; roomProps[i].searched = 0;
     }
     roomPropCount = 0;
 }
@@ -82,7 +83,11 @@ int RoomPropAdd(float x, float y, int kind) {
     roomProps[roomPropCount].active = 1;
     /* 家具是实体：挡住玩家和怪。高度按种类给，渲染层据此算投影。 */
     roomProps[roomPropCount].blocks = 1;
-    roomProps[roomPropCount].height = (kind == ROOMPROP_CONSOLE) ? 0.62f : 0.62f;
+    roomProps[roomPropCount].height = 0.62f;
+    /* 搜查次数：货架最多，箱子其次 */
+    roomProps[roomPropCount].searchLeft =
+        (kind == ROOMPROP_SHELF) ? 3 : 2;
+    roomProps[roomPropCount].searched = 0;
     roomPropCount++;
     return 1;
 }
