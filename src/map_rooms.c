@@ -80,9 +80,39 @@ int RoomPropAdd(float x, float y, int kind) {
     roomProps[roomPropCount].y = y;
     roomProps[roomPropCount].kind = kind;
     roomProps[roomPropCount].active = 1;
+    /* 家具是实体：挡住玩家和怪。高度按种类给，渲染层据此算投影。 */
+    roomProps[roomPropCount].blocks = 1;
+    roomProps[roomPropCount].height = (kind == ROOMPROP_CONSOLE) ? 0.62f : 0.62f;
     roomPropCount++;
     return 1;
 }
+
+void RoomPropRemoveLast(void) {
+    if (roomPropCount <= 0) return;
+    roomPropCount--;
+    roomProps[roomPropCount].active = 0;
+    roomProps[roomPropCount].x = 0.0f;
+    roomProps[roomPropCount].y = 0.0f;
+}
+
+int PropBlocksAt(int cx, int cy) {
+    for (int i = 0; i < roomPropCount; i++) {
+        if (!roomProps[i].active || !roomProps[i].blocks) continue;
+        if ((int)roomProps[i].x == cx && (int)roomProps[i].y == cy) return 1;
+    }
+    return 0;
+}
+
+int RoomPropAt(float x, float y) {
+    int cx = (int)floorf(x), cy = (int)floorf(y);
+    for (int i = 0; i < roomPropCount; i++) {
+        if (!roomProps[i].active) continue;
+        if ((int)roomProps[i].x == cx && (int)roomProps[i].y == cy) return i;
+    }
+    return -1;
+}
+
+static int RoomReachable(void);   /* FurnishRoom 要用 */
 
 /* 给一个房间放家具：沿内圈墙角挑地板格。
    featureId 决定放什么：
@@ -119,7 +149,11 @@ static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
                 }
                 if (taken) continue;
 
-                if (RoomPropAdd((float)cx + 0.5f, (float)cy + 0.5f, propKind)) placed++;
+                if (!RoomPropAdd((float)cx + 0.5f, (float)cy + 0.5f, propKind)) continue;
+                /* P2：**放完立刻验连通**。堵死就撤掉这一件。
+                   宁可这间少一件家具，也不能让玩家进不去或出不来。 */
+                if (!RoomReachable()) { RoomPropRemoveLast(); continue; }
+                placed++;
             }
         }
     }
@@ -207,6 +241,9 @@ static int RoomReachable(void) {
             int nx = cx + dxs[k], ny = cy + dys[k];
             if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
             if (seen[ny][nx] || worldMap[ny][nx]) continue;
+            /* v2.4-rc P2：**挡路的家具也算墙** ——
+               否则"放完家具再验连通"会漏掉家具把通道堵死的情况。 */
+            if (PropBlocksAt(nx, ny)) continue;
             seen[ny][nx] = 1;
             qx[tail] = nx; qy[tail] = ny; tail++;
         }
@@ -216,6 +253,9 @@ static int RoomReachable(void) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             if (cellMeta[y][x].roomId == 0) continue;
             if (worldMap[y][x]) continue;
+            /* 家具自己占的格当然走不到 —— 那是**它挡住**的，不是堵死。
+               不排除的话每放一件家具都会判定失败，全部回滚。 */
+            if (PropBlocksAt(x, y)) continue;
             if (!seen[y][x]) return 0;         /* 有房间地板走不到 = 封死 */
         }
     return 1;

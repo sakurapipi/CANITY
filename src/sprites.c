@@ -227,6 +227,7 @@ static void cvGlow(float cx, float cy, float r, unsigned int col, float a) {
 static void cvFinish(Sprite* s) {
     s->w = SPR_W;
     s->h = SPR_H;
+    s->bx0 = SPR_W; s->by0 = SPR_H; s->bx1 = -1; s->by1 = -1;
     for (int y = 0; y < SPR_H; y++) {
         for (int x = 0; x < SPR_W; x++) {
             int r = 0, g = 0, b = 0, a = 0;
@@ -246,6 +247,12 @@ static void cvFinish(Sprite* s) {
                半透明边缘的颜色被 alpha 拉黑，每张精灵因此有一圈黑晕，
                细轮廓光最脏。正确做法：颜色 = Σ(c·a) / Σa。 */
             int outA = a / n;
+            if (outA > 0) {
+                if (x < s->bx0) s->bx0 = x;
+                if (y < s->by0) s->by0 = y;
+                if (x > s->bx1) s->bx1 = x;
+                if (y > s->by1) s->by1 = y;
+            }
             int rr, gg, bb;
             if (a > 0) {
                 rr = r * 255 / a;
@@ -760,7 +767,10 @@ static void BakeMonster(int id, int kind, int pose) {
     int walk = (pose == 1 || pose == 3) ? 1 : 0;
 
     /* v3.0：走路时**不再整体下沉** —— 原来 baseY+4 让脚每次迈步都往地里踩 */
-    float baseY = 244.0f;
+    /* v2.4-rc P1：244 -> 254。画布 256 高、缩放后是 128；
+       原来底部留 12px（缩放后 6px），物件看起来悬空 5% 高度。
+       贴到 254 之后包围盒底边就是画布底边，落地才实。 */
+    float baseY = 254.0f;
     float lean  = walk ? 3.0f : 0.0f;
 
     /* 每个物种的调色板：暗边 / 中间调 / 受光 */

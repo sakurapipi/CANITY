@@ -103,4 +103,14 @@ unsigned int CjkDecodeOne(const char** s);
 /* 12*scale 行位图（scale 1..4 预烘），每行最高位是左侧像素；找不到返回 NULL。 */
 const unsigned long long* CjkRows(unsigned int cp, int scale);
 
+
+/* ==================================================================
+ * v2.4-rc P1：道具绘制（billboard）
+ * ------------------------------------------------------------------
+ * baseZ  = 底边离地高度（墙高 = 1.0）；0 = 贴地
+ * halfH  = 投影高度（墙高 = 1.0）
+ * 绘制时按精灵的**内容包围盒**还原宽高比，并把包围盒底边对齐到 baseZ。
+ * ================================================================== */
+void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float lightK);
+
 #endif /* CANITY_RENDER_H */

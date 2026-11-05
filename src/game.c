@@ -1098,8 +1098,20 @@ int Blocked(float x, float y) {
     int y0 = (int)floorf(y - PLAYER_RADIUS), y1 = (int)floorf(y + PLAYER_RADIUS);
     if (x0 < 0 || y0 < 0 || x1 >= MAP_WIDTH || y1 >= MAP_HEIGHT) return 1;
     for (int cy = y0; cy <= y1; cy++)
-        for (int cx = x0; cx <= x1; cx++)
+        for (int cx = x0; cx <= x1; cx++) {
             if (worldMap[cy][cx]) return 1;
+            /* ==================================================================
+             * 2026-11-06（v2.4-rc P2）：**房间家具是实体**
+             * ------------------------------------------------------------------
+             * 在此之前全工程没有任何物件参与碰撞 —— 渲染层自己的注释就写着
+             * 「箱子/配电箱没有碰撞，玩家可以站进模型里」。
+             * 那正是"没有实体模型"的根源：不是画得不像，是它本来就不是实体。
+             *
+             * 这里让家具进入**唯一**的碰撞入口，玩家和所有 AI 都自动生效。
+             * ================================================================== */
+            { extern int PropBlocksAt(int, int);
+              if (PropBlocksAt(cx, cy)) return 1; }
+        }
     return 0;
 }
 

@@ -485,9 +485,23 @@ static float SpriteShade(float ty, float minK) {
     return k;
 }
 
-static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK);   /* v2.1 */
+void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float lightK);   /* v2.1 */
 
-static SpriteBox ProjectSprite(float wx, float wy, float lift, float halfH) {
+/* ==================================================================
+ * 2026-11-06（v2.4-rc P1）：**lift 改成 baseZ**
+ * ------------------------------------------------------------------
+ * 原来第 3 个参数叫 lift，作用是从**顶部**把精灵往下裁：
+ *     s.y0 = yTop + unit * lift;
+ * 于是它只能让物件"变矮"，不能让底边离开地面 ——
+ * 想做"货架三层叠起来"根本做不到。
+ *
+ * baseZ 是把**底边**抬到指定高度：
+ *     cyBase = cyFloor - unit * baseZ;
+ * 这样同一个物件可以用 2~3 层精灵叠出真实的高度差，
+ * 走动时层间有视差，才像立体的。
+ * baseZ = 0 时与旧行为**逐像素相同**。
+ * ================================================================ */
+static SpriteBox ProjectSprite(float wx, float wy, float baseZ, float halfH) {
     SpriteBox s;
     s.ok = 0;
     float dx = wx - posX, dy = wy - posY;
@@ -504,14 +518,16 @@ static SpriteBox ProjectSprite(float wx, float wy, float lift, float halfH) {
     int cx = (int)((renderW / 2.0f) * (1.0f + tx / ty));
     int half = (int)(unit * 0.28f);
     int cyFloor = renderH / 2 - (int)(v2 * unit);
+    /* P1：底边按 baseZ 抬高（baseZ=0 时与原实现完全一致） */
+    int cyBase = cyFloor - (int)(unit * baseZ);
     int hgt = (int)(unit * halfH);
-    int yTop = cyFloor - hgt;
+    int yTop = cyBase - hgt;
 
     s.ty = ty;
     s.x0 = cx - half; if (s.x0 < 0) s.x0 = 0;
     s.x1 = cx + half; if (s.x1 >= renderW) s.x1 = renderW - 1;
-    s.y0 = yTop + (int)(unit * lift); if (s.y0 < 0) s.y0 = 0;
-    s.y1 = cyFloor; if (s.y1 >= renderH) s.y1 = renderH - 1;
+    s.y0 = yTop; if (s.y0 < 0) s.y0 = 0;
+    s.y1 = cyBase; if (s.y1 >= renderH) s.y1 = renderH - 1;
     s.ok = (s.x1 > s.x0 && s.y1 > s.y0);
     return s;
 }
@@ -559,12 +575,12 @@ static void DrawCrateSprite(int i) {
     if (c->mimicHost) return;
     if (c->searched) {
         /* 翻过：盖子掀开、里面黑 */
-        DrawBakedProp(SPR_PROP_CRATE_OPEN, c->x, c->y, 0.34f, 0.55f);
+        DrawBakedProp(SPR_PROP_CRATE_OPEN, c->x, c->y, 0.0f, 0.34f, 0.55f);
     } else if (c->locked) {
         /* 未解锁：正常木箱 + 金锁 */
-        DrawBakedProp(SPR_PROP_CRATE_LOCKED, c->x, c->y, 0.42f, 1.0f);
+        DrawBakedProp(SPR_PROP_CRATE_LOCKED, c->x, c->y, 0.0f, 0.42f, 1.0f);
     } else {
-        DrawBakedProp(SPR_PROP_CRATE, c->x, c->y, 0.42f, 1.0f);
+        DrawBakedProp(SPR_PROP_CRATE, c->x, c->y, 0.0f, 0.42f, 1.0f);
     }
 }
 
@@ -577,11 +593,11 @@ static void DrawMimicSprite(int i) {
     if (m->state == MIM_NONE || m->state == MIM_GONE) return;
 
     if (m->state == MIM_ANGRY) {
-        DrawBakedProp(SPR_MON_MIMIC, m->x, m->y, 0.52f, 1.0f);
+        DrawBakedProp(SPR_MON_MIMIC, m->x, m->y, 0.0f, 0.52f, 1.0f);
     } else {
         /* 破绽①：呼吸。用相位算，不依赖全局时钟 —— 每只相位不同 */
         float bob = sinf(m->breathPh) * 0.012f;
-        DrawBakedProp(SPR_PROP_CRATE_MIMIC, m->x, m->y + bob, 0.42f, 1.0f);
+        DrawBakedProp(SPR_PROP_CRATE_MIMIC, m->x, m->y + bob, 0.0f, 0.42f, 1.0f);
     }
 }
 
@@ -595,12 +611,12 @@ static void DrawHideSpotSprite(int i) {
     HideSpot* h = &hideSpots[i];
     if (!h->active) return;
     float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.90f : 0.82f);
-    DrawBakedProp(SPR_PROP_TRASH, h->x, h->y, 0.46f, 0.72f * k);
+    DrawBakedProp(SPR_PROP_TRASH, h->x, h->y, 0.0f, 0.46f, 0.72f * k);
 }
 static void DrawBreakerSprite(void) {
     if (!breaker.active) return;
     float k = breakerOpen ? 1.15f : 0.95f;
-    DrawBakedProp(SPR_PROP_BREAKER, breaker.x, breaker.y, 0.52f, k);
+    DrawBakedProp(SPR_PROP_BREAKER, breaker.x, breaker.y, 0.0f, 0.52f, k);
 }
 
 /* ------------------------------------------------------------------ */
@@ -615,8 +631,8 @@ static void DrawBreakerSprite(void) {
 /* v2.4.3: 距离曲线已统一到 src/art.c 的 ArtPropLight() */
 static float PropProximityLight(float wx, float wy) { return ArtPropLight(wx, wy); }
 
-static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK) {
-    SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
+void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float lightK) {
+    SpriteBox s = ProjectSprite(wx, wy, baseZ, halfH);
     if (!s.ok) return;
     /* v3.2：贴脸时直接不画。箱子/配电箱没有碰撞，玩家可以站进模型里，
        这时 billboard 的投影会被放大到几倍屏幕、看起来像视角畸变。
@@ -629,11 +645,40 @@ static void DrawBakedProp(int spr, float wx, float wy, float halfH, float lightK
        用 max 会把箱子按宽度放大 1.65 倍，贴脸时尤其像一个巨大的方块。
        烘焙图的画布是正方形的，按高度画才能保持半高参数的真实含义。 */
     int size = h;
-    int x = (s.x0 + s.x1) / 2 - size / 2;
-    int y = s.y1 - size;
+
     float light = SpriteShade(s.ty, 0.12f) * PropProximityLight(wx, wy);   /* v2.4.3 距离衰减 */
     DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
-    DrawSprite(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty);
+
+    /* ==================================================================
+     * P1：**按内容包围盒还原宽高比**
+     * ------------------------------------------------------------------
+     * 画布固定 128x128，但每张图真正有像素的只有一块。
+     * 原来一律按正方形绘制 → 窄高的货架被横向拉宽、矮扁的控制台被拉高，
+     * 而且画布底部的留白让物件看起来悬空。
+     *
+     * 现在：把包围盒的高度映射到投影高度 h，
+     * 再把包围盒的底边对齐到 s.y1（地面），其余按同一比例缩放。
+     * 包围盒无效（全透明）时退回原来的正方形绘制。
+     * ================================================================ */
+    Sprite* sp = SpriteGet(spr);
+    int bw = 0, bh = 0;
+    if (sp) { bw = sp->bx1 - sp->bx0 + 1; bh = sp->by1 - sp->by0 + 1; }
+
+    if (bw > 0 && bh > 0 && sp) {
+        float scale = (float)size / (float)bh;
+        int canvasW = (int)((float)SPR_W * scale);
+        int canvasH = (int)((float)SPR_H * scale);
+        if (canvasW < 1) canvasW = 1;
+        if (canvasH < 1) canvasH = 1;
+        int bxMid = (sp->bx0 + sp->bx1 + 1) / 2;
+        int x = (s.x0 + s.x1) / 2 - (int)((float)bxMid * scale);
+        int y = s.y1 - (int)((float)(sp->by1 + 1) * scale);
+        DrawSprite(spr, x, y, canvasW, canvasH, light * lightK, 1.0f, 1, s.ty);
+    } else {
+        int x = (s.x0 + s.x1) / 2 - size / 2;
+        int y = s.y1 - size;
+        DrawSprite(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty);
+    }
 }
 
 /* v2.1：怪物改用烘焙精灵                                              */
@@ -1421,7 +1466,7 @@ static void DrawMoneyBagModel(int idx) {
     /* 快过期时闪烁，提醒玩家去捡 */
     float blink = 1.0f;
     if (lf < 8.0f) blink = 0.55f + 0.45f * (float)((int)(lf * 6.0f) % 2);
-    DrawBakedProp(SPR_PROP_CRATE, wx, wy, 0.22f, 0.85f * blink);
+    DrawBakedProp(SPR_PROP_CRATE, wx, wy, 0.0f, 0.22f, 0.85f * blink);
 }
 
 /* ==================================================================
@@ -2343,7 +2388,7 @@ static void DrawFlowerSprite(void) {
         float dx = posX - safeRoom.x, dy = posY - safeRoom.y;
         if (dx * dx + dy * dy < 1.69f) return;
     }
-    DrawBakedProp(SPR_PROP_SAFE, safeRoom.x, safeRoom.y, 0.30f, 1.0f);
+    DrawBakedProp(SPR_PROP_SAFE, safeRoom.x, safeRoom.y, 0.0f, 0.30f, 1.0f);
 }
 
 /* ===== v2.4.4 **出口重新设计 v2**（按 art_direction.h + art.c）=====
@@ -2494,7 +2539,7 @@ static void DrawHearingMarker(void) {
     float dx = noiseSrcX - posX, dy = noiseSrcY - posY;
     if (dx * dx + dy * dy > 400.0f) return;   /* 20 格内才显示 */
     /* 在地面投影一个闪烁的点（用 billboard 精灵代替） */
-    DrawBakedProp(SPR_PROP_CRATE, noiseSrcX, noiseSrcY, 0.18f, 0.45f + 0.3f * noiseDisplay);
+    DrawBakedProp(SPR_PROP_CRATE, noiseSrcX, noiseSrcY, 0.0f, 0.18f, 0.45f + 0.3f * noiseDisplay);
 }
 
 void RenderSprites(void) {
@@ -2683,11 +2728,10 @@ void RenderSprites(void) {
             extern RoomProp roomProps[MAX_ROOM_PROPS];
             int ri = list[i].idx;
             if (ri >= 0 && ri < MAX_ROOM_PROPS && roomProps[ri].active) {
-                extern void DrawBakedProp(int, float, float, float, float);
-                if (roomProps[ri].kind == ROOMPROP_CONSOLE)
-                    DrawBakedProp(SPR_PROP_CONSOLE, roomProps[ri].x, roomProps[ri].y, 0.42f, 1.0f);
+                    if (roomProps[ri].kind == ROOMPROP_CONSOLE)
+                    DrawBakedProp(SPR_PROP_CONSOLE, roomProps[ri].x, roomProps[ri].y, 0.0f, 0.62f, 1.0f);
                 else
-                    DrawBakedProp(SPR_PROP_SHELF, roomProps[ri].x, roomProps[ri].y, 0.42f, 1.0f);
+                    DrawBakedProp(SPR_PROP_SHELF, roomProps[ri].x, roomProps[ri].y, 0.0f, 0.62f, 1.0f);
             }
             break;
         }

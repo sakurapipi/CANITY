@@ -33,6 +33,8 @@ typedef struct {
     float x, y;
     int   kind;
     int   active;
+    int   blocks;     /* 1 = 挡路（参与 Blocked）；0 = 纯装饰 */
+    float height;     /* 总高（墙高 = 1.0） */
 } RoomProp;
 
 extern RoomProp roomProps[MAX_ROOM_PROPS];
@@ -40,5 +42,12 @@ extern int roomPropCount;
 
 void RoomPropReset(void);
 int  RoomPropAdd(float x, float y, int kind);   /* 返回 1 = 放下 */
+void RoomPropRemoveLast(void);                  /* 回滚最后一件（连通性检查失败时用） */
+
+/* 这一格有没有挡路的家具。给 game.c 的 Blocked() 用。 */
+int  PropBlocksAt(int cx, int cy);
+
+/* 这个位置有没有家具（含装饰）。测试用。 */
+int  RoomPropAt(float x, float y);
 
 #endif /* CANITY_MAP_ROOMS_H */
