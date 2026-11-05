@@ -2063,6 +2063,36 @@ static int CollapseLevelPlayable(void) {
     return 1;
 }
 
+/* ==================================================================
+ * 2026-11-06（第 6 轮）：**把玩家从墙里挪出来**
+ * ------------------------------------------------------------------
+ * 返回 1 = 挪过位置，0 = 原地就是空的。
+ *
+ * 为什么单独成函数：第一次我把它内联写在崩塌分支里，
+ * 端到端用例**抓不到** —— 那个种子里玩家恰好落在空地，
+ * 删掉修复测试照样绿（实测）。
+ * 抽出来之后可以直接"把玩家塞进墙里"再断言。
+ * ================================================================ */
+int CollapseUnstickPlayer(void) {
+    if (!Blocked(posX, posY)) return 0;
+    for (int r = 1; r <= 12; r++) {
+        for (int dy = -r; dy <= r; dy++) {
+            for (int dx = -r; dx <= r; dx++) {
+                /* 只走这一圈的边上，圈内已经找过 */
+                if (dx > -r && dx < r && dy > -r && dy < r) continue;
+                int cx = (int)posX + dx, cy = (int)posY + dy;
+                if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) continue;
+                if (worldMap[cy][cx]) continue;
+                float nx = (float)cx + 0.5f, ny = (float)cy + 0.5f;
+                if (Blocked(nx, ny)) continue;      /* 家具也算 */
+                posX = nx; posY = ny;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 void CollapseBegin(void) {
     collapseArmed = 1;
     collapseT = 0.0f;
@@ -2111,6 +2141,18 @@ int CollapseTick(float dt) {
             pickupMsg = (g_lang == LANG_ZH) ? "这里塌不动" : "IT WON'T GIVE WAY";
             pickupMsgTimer = 2.2f;
         } else {
+            /* ================================================================
+             * 2026-11-06（第 6 轮）：**重掷后玩家可能被埋进新地形**
+             * ----------------------------------------------------------------
+             * GenerateLevel 换掉了整张图，但玩家坐标没动。
+             * 原来那里是空地、现在是墙 —— 玩家会被卡在墙里：
+             * Blocked() 对当前位置返回 1，两个轴向都动不了，
+             * 除了重开没有任何出路。
+             *
+             * 现在：塌成功之后检查脚下，被埋就挪到最近的空地中心。
+             * 顺着半径一圈圈找，找到的第一个空地就是最近的。
+             * ================================================================ */
+            CollapseUnstickPlayer();
         }
         /* 重掷会把舱门表清空并重置计时器 —— 这是期望行为，
            崩塌层不生成舱门（防止连锁刷）。 */

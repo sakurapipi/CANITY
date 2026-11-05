@@ -364,6 +364,48 @@ static void test_hatch_end_to_end(void) {
             CHECK(mc.ok, "after collapse the level must still validate as playable");
             CHECK(mc.exitReachable, "after collapse the exit must still be reachable");
             CHECK(mc.spawnOpen, "after collapse the spawn must still be open");
+            /* **关键**：重掷换了整张图，而玩家坐标没动 ——
+               如果落点变成墙，玩家会被永久卡住（两个轴向都 Blocked）。
+               这条断言钉住第 6 轮的那个修复。 */
+            {
+                extern float posX, posY;
+                extern int Blocked(float, float);
+                CHECK(!Blocked(posX, posY),
+                      "after collapse the player must not be stuck inside the new terrain");
+            }
+
+            /* ================================================================
+             * **确定性地**验证"把玩家从墙里挪出来"
+             * ----------------------------------------------------------------
+             * 端到端那条断言不够：崩塌重掷后玩家**恰好**落在空地上时，
+             * 删掉修复测试照样绿（我实测过，真的没有红）。
+             * 所以这里直接把玩家坐标塞进一个已知墙格，再调修复函数。
+             * ================================================================ */
+            {
+                extern float posX, posY;
+                extern int Blocked(float, float);
+                extern int CollapseUnstickPlayer(void);
+                extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+
+                /* 找一个墙格（外墙一定有） */
+                int wx = 0, wy = 0, foundWall = 0;
+                for (int y = 0; y < MAP_HEIGHT && !foundWall; y++)
+                    for (int x = 0; x < MAP_WIDTH && !foundWall; x++)
+                        if (worldMap[y][x]) { wx = x; wy = y; foundWall = 1; }
+                CHECK(foundWall, "a generated map must contain at least one wall");
+
+                float savedX = posX, savedY = posY;
+                posX = (float)wx + 0.5f;
+                posY = (float)wy + 0.5f;
+                CHECK(Blocked(posX, posY), "the chosen cell must really be blocked");
+
+                int moved = CollapseUnstickPlayer();
+                CHECK(moved == 1, "CollapseUnstickPlayer must report that it moved the player");
+                CHECK(!Blocked(posX, posY),
+                      "after unstick the player must stand on a free cell");
+
+                posX = savedX; posY = savedY;
+            }
         }
         (void)collapsedLevel;
     }
