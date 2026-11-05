@@ -1,49 +1,49 @@
 name: Build and Release
 
-# 触发条件：只有当推送以 v 开头的标签（比如 v1.6.0）时才运行
+# 触发条件：只有当推送以 v 开头的标签（比如 v2.4-alpha）时才运行
 on:
   push:
     tags:
       - 'v*'
 
-# 权限设置：允许 Actions 创建 Release 和上传附件
 permissions:
   contents: write
 
 jobs:
   build-and-release:
-    # 使用最新的 Windows 环境
     runs-on: windows-latest
-    
+
     steps:
-      # 步骤 1：拉取你的代码
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 步骤 2：配置 MSYS2 环境，安装 MinGW (GCC)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           update: true
-          install: >
+          install: >-
             mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
 
-      # 步骤 3：编译资源（图标 / 版本信息 / 清单）再链接
-      #   资源不能省：没有清单的 exe 会被系统套兼容性垫片，
-      #   没有图标/版本信息在别人电脑上更像"可疑程序"。
-      - name: Build with gcc
+      # ================================================================
+      # 2026-11-06：**发布必须建立在测试通过之上**。
+      # 原来这里是手写 `gcc src/*.c src/save/*.c src/steam/*.c` ——
+      # 上一个版本就漏过一次 src/save/。现在改成调用同一个
+      # build_validate.py：编译 + test_canity + test_runtime + 分区检查
+      # 任一失败，这个 job 就红，不会生成 Release。
+      # ================================================================
+      - name: Build and validate (gates the release)
         shell: msys2 {0}
         run: |
-          windres res/canity.rc -O coff -o res/canity_res.o
-          # src/steam/ 与 src/save/ 都是独立子目录，`src/*.c` 的通配匹配不到它们。
-          # 少了 steam/：链接报 SteamZoneInit / SteamZoneSetStatInt 等 20 个 undefined reference。
-          # 少了 save/ ：链接报 SaveContainerPack / SaveBackendWrite 等 undefined reference。
-          gcc src/*.c src/save/*.c src/steam/*.c res/canity_res.o -Iinclude -o canity.exe -O2 -Wall -Wextra \
-              -lgdi32 -luser32 -lwinmm -mwindows
+          python -X utf8 tools/build_sources.py --check
+          python -X utf8 tools/build_validate.py
+          cp canity_verify.exe canity.exe
 
-      # 步骤 4：打包产物（exe + 解除锁定脚本 + 说明）
-      #   为什么会弹「Windows 已保护你的电脑」→ 见 docs/分发与免弹窗.md
       - name: Package files
         shell: pwsh
         run: |
@@ -61,11 +61,13 @@ jobs:
 
           Compress-Archive -Path $name -DestinationPath "$name.zip"
 
-      # 步骤 5：创建 Release 并上传 zip 包
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v2
         with:
           files: CANITY_v*_win64.zip
-          generate_release_notes: true # 自动根据 commit 生成更新日志
+          generate_release_notes: true
+          # v2.4-alpha / beta / rc 是预发布：releases/latest 不会指向它们。
+          # 正式版标签（v2.4、v2.4.0、v2.3.9 这类不带后缀的）不勾。
+          prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

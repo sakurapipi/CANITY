@@ -1,0 +1,67 @@
+name: CI
+
+# 每个 push 和 PR 都跑编译 + 三条检查。
+# Release 工作流也调用同一个 build_validate.py —— 让"发布"必须建立在"测试通过"上。
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python 必须在 MSYS2 之前装好：setup-msys2 的 path-type: inherit 会把
+      # 当前 PATH 带进 msys2 shell，python 才在那边可见。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup MSYS2 + MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
+
+      # 先打印工具链，失败时一眼看出是环境问题还是代码问题
+      - name: Toolchain diagnostic
+        shell: msys2 {0}
+        run: |
+          echo "--- which ---"
+          which python gcc windres || true
+          echo "--- versions ---"
+          python --version || true
+          gcc --version | head -1 || true
+          windres --version | head -1 || true
+
+      # 源文件清单必须和磁盘一致（CI / Release / 本地同源）
+      - name: Source list check
+        shell: msys2 {0}
+        run: python -X utf8 tools/build_sources.py --check
+
+      # 编译 + test_canity + test_runtime + partition_check
+      - name: Build and validate
+        shell: msys2 {0}
+        run: python -X utf8 tools/build_validate.py
+
+      # 可复核性：证明产物真的存在且不是 0 字节
+      - name: Artifact sanity
+        shell: pwsh
+        run: |
+          $exe = Get-Item canity_verify.exe
+          if ($exe.Length -lt 500KB) {
+            Write-Error "canity.exe is suspiciously small: $($exe.Length) bytes"
+            exit 1
+          }
+          "canity_verify.exe = {0:N0} bytes" -f $exe.Length
