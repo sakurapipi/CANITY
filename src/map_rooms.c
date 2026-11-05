@@ -23,6 +23,16 @@
 #define ROOM_KEEP_EXIT   3      /* 出口周围 3 格不许压 */
 #define ROOM_KEEP_SPAWN  4      /* 出生区 1..3，外扩 1 格 */
 #define ROOM_MIN_GAP     1      /* 房间之间至少隔 1 格 */
+/* 2026-11-06（R5 实测修正）：**贴外墙的房间读起来不像房间**。
+   地图边界 1 格是外墙，房间若紧挨着它，外侧就没有"自己的墙"，
+   看起来只是走廊变宽。留 2 格边距，房间四围都是真正的内墙。 */
+#define ROOM_MARGIN      2
+
+/* 房间必须**挖进实心岩体**：候选矩形里至少 60% 当前是墙。
+   挖在已有空地上 = 把一条走廊扩宽，看不出是房间；
+   挖在实心区里 = 出现一个独立空间，四周都是自己挖出来的墙。 */
+#define ROOM_SOLID_NUM   6
+#define ROOM_SOLID_DEN   10
 
 /* 每一格在 worldMap 里的落地值 */
 static int TileToMap(unsigned char t) {
@@ -81,6 +91,21 @@ static int ReservedBlocked(int ox, int oy, int w, int h) {
     return 0;
 }
 
+/* 目标矩形里"当前是墙"的比例够不够高。 */
+static int SolidEnough(int ox, int oy, int w, int h) {
+    int walls = 0, total = 0;
+    for (int y = oy; y < oy + h; y++) {
+        if (y < 0 || y >= MAP_HEIGHT) continue;
+        for (int x = ox; x < ox + w; x++) {
+            if (x < 0 || x >= MAP_WIDTH) continue;
+            total++;
+            if (worldMap[y][x]) walls++;
+        }
+    }
+    if (total <= 0) return 0;
+    return walls * ROOM_SOLID_DEN >= total * ROOM_SOLID_NUM;
+}
+
 static void CarveRoom(const RoomTemplate* t, int ox, int oy, int roomId) {
     for (int y = 0; y < t->h; y++)
         for (int x = 0; x < t->w; x++)
@@ -99,29 +124,64 @@ static void CarveRoom(const RoomTemplate* t, int ox, int oy, int roomId) {
         }
 }
 
+/* 一次放置尝试。strict=1 时要求边距 2 + 实心 60%；=0 时放宽到边距 1 + 实心 35%。
+   返回 1 = 放下去了。 */
+static int TryPlaceOne(int wantCount, int placed, int strict) {
+    int id = rand() % ROOM_TEMPLATE_COUNT;
+    int rot = rand() % 4;
+    RoomTemplate t;
+    if (!RoomTemplateRotate(id, rot, &t)) return 0;
+    if (t.w <= 0 || t.h <= 0) return 0;
+    (void)wantCount;
+
+    int margin = strict ? ROOM_MARGIN : 1;
+    int ox = 1 + rand() % (MAP_WIDTH - 2 - t.w);
+    int oy = 1 + rand() % (MAP_HEIGHT - 2 - t.h);
+
+    if (!RoomTemplateFits(&t, ox, oy, margin)) return 0;
+    if (ReservedBlocked(ox, oy, t.w, t.h)) return 0;
+
+    if (strict) {
+        if (!SolidEnough(ox, oy, t.w, t.h)) return 0;
+    } else {
+        /* 放宽：只要不是整片空地就行 */
+        int walls = 0, total = 0;
+        for (int y = oy; y < oy + t.h; y++)
+            for (int x = ox; x < ox + t.w; x++) {
+                total++;
+                if (worldMap[y][x]) walls++;
+            }
+        if (total <= 0 || walls * 100 < total * 35) return 0;
+    }
+
+    CarveRoom(&t, ox, oy, placed + 1);
+    return 1;
+}
+
+/* ==================================================================
+ * 两段式放置（R5 实测修正）
+ * ------------------------------------------------------------------
+ * 只跑严格档：seed 7 一个房间都放不下（rooms=0）。
+ * 只跑放宽档：房间会挖在已有空地上，读起来像"走廊变宽"。
+ * 所以先严格、不够再放宽 —— 优先要"围得住的房间"，
+ * 实在没有才退一步，保证每层都有东西可看。
+ * ================================================================ */
 int GenerateThemeRooms(int wantCount) {
     if (wantCount <= 0) return 0;
 
     int placed = 0;
     int attempts = 0;
 
-    while (placed < wantCount && attempts < 60) {
+    /* 第一段：严格（边距 2 + 实心 60%） */
+    while (placed < wantCount && attempts < 150) {
         attempts++;
-
-        int id = rand() % ROOM_TEMPLATE_COUNT;
-        int rot = rand() % 4;
-        RoomTemplate t;
-        if (!RoomTemplateRotate(id, rot, &t)) continue;
-        if (t.w <= 0 || t.h <= 0) continue;
-
-        int ox = 1 + rand() % (MAP_WIDTH - 2 - t.w);
-        int oy = 1 + rand() % (MAP_HEIGHT - 2 - t.h);
-
-        if (!RoomTemplateFits(&t, ox, oy, 1)) continue;
-        if (ReservedBlocked(ox, oy, t.w, t.h)) continue;
-
-        CarveRoom(&t, ox, oy, placed + 1);
-        placed++;
+        if (TryPlaceOne(wantCount, placed, 1)) placed++;
+    }
+    /* 第二段：放宽（边距 1 + 实心 35%） */
+    attempts = 0;
+    while (placed < wantCount && attempts < 150) {
+        attempts++;
+        if (TryPlaceOne(wantCount, placed, 0)) placed++;
     }
     return placed;
 }
