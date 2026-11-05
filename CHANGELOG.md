@@ -7,6 +7,57 @@
 
 ---
 
+## [2.4-beta] - 2026-11-06
+
+预发布。v2.4 四站里的第二站：声音第一次真正参与玩法。
+
+### 新增
+- include/sound_event.h + src/sound_event.c：声音事件中心。
+  SoundKind 六类（WALK/IMPACT/SEARCH/VOICE/MONSTER/SCAN），
+  每类的 susSource / decay / ttl / 默认强度在一张表里。
+  把「类别」「强度」「传播半径」拆成三个独立字段 ——
+  以前一个 radius 同时决定三件事，改半径会顺手改类别和寿命。
+  同帧同 eventId 去重（一次物理事件只结算一次）。
+- include/sound_propagation.h + src/sound_propagation.c：
+  24x24 四向 BFS 传播场，按源格缓存。
+  SoundReach = max(直线距离, 路径步数) 的平方衰减。
+- AudioPlayWorld / AudioUpdateListener / AudioComputeGains（audio.c）。
+- CANITY_SOUND_EVENT / CANITY_SOUND_PROP 两个开关，可用 -D 关掉做新旧对比。
+
+### 改动
+- 混音器改成左右两路独立累加；声像用**峰值归一**（只砍不增），
+  正前方 1.00/1.00 与旧行为一致，正侧方 1.00/0.00。
+  每缓冲重算 + 缓冲内逐采样插值，转身时平滑滑动。
+- 距离衰减（平方）+ 超出 maxDist 完全静音 + 优先级抢占
+  （8 路满员只抢优先级更低的）。
+- 听声鬼挑点改用 SuspicionBestReach：路径步数 + 可达度加权，
+  **隔墙的脚步声低于阈值**。
+- 搜查阶段改成以记忆点（memX/memY）为锚的定向搜查，
+  范围 1.5~4.4 格，角度随记忆年龄轮换。
+- 诱饵玩偶走 SoundEmit(SK_VOICE) 且声音带位置；
+  回声弹（连锁/落地/撞墙）与破门石的碎玻璃声同样带位置。
+
+### 修复
+- 声像第一版用等功率（一侧乘 √2），近距离被放大 41% 撞上限幅，
+  波形压平后左右电平差消失 —— **越近越分不清左右**。
+  改成峰值归一 + 混音末尾软限幅。
+- AudioUpdateListener 无条件进未初始化临界区，没开音频时进程直接崩。
+- 测试里变量名用了 near/far（Windows 宏）导致编译失败。
+
+### 测试
+- 11,508 -> 11,576 项。
+- 新增 6 组：声音事件中心 / 声像数学 / 声学传播 / 挑点对照 /
+  定向搜查 / 破门石听觉范围。
+- 其中 test_suspicion_best_uses_propagation 与 test_monster_search_around
+  都是**对照组**：旧函数与新函数给出不同结论，证明改动真的生效。
+
+### 已知问题
+- 战役第 3/5 关出口位置可能不正确（归 v2.4-rc）。
+- Steam 云同步仍未真机验证。
+- 声学传播只有几何，没有材质加权（走廊与积水通道听起来一样）。
+
+---
+
 ## [2.4-alpha] - 2026-11-06
 
 预发布。v2.4 是「一个版本四个站点」的第一站：地基。
