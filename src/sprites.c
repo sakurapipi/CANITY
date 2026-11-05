@@ -1479,12 +1479,6 @@ static void BakeHatch(int id, int frame) {
     const float ix0 = fx0 + fr, ix1 = fx1 - fr;
     const float iy0 = fy0 + fr, iy1 = fy1;
 
-    /* ---- ① 门后：全黑（开门后看到的洞） ---- */
-    {
-        float hole[8] = { ix0, iy0, ix1, iy0, ix1, iy1, ix0, iy1 };
-        cvPoly(hole, 4, 0x00000000u, 1.0f);
-    }
-
     /* ---- ② 门框：5 段明暗 ---- */
     {
         float framePts[8] = { fx0, fy0, fx1, fy0, fx1, fy1, fx0, fy1 };
@@ -1502,61 +1496,66 @@ static void BakeHatch(int id, int frame) {
         cvLine(fx0, fy1, fx1, fy1, 2.0f, 0x00000000u, 0.60f);
     }
 
+    /* ---- ②b 门后全黑：**必须在门框之后画** ----
+       第一版先画洞再画框，框的渐变把整块矩形铺满，洞就被盖成了灰色，
+       于是"开门"完全读不出来。 */
+    /* ---- ① 门后：全黑（开门后看到的洞） ---- */
+    {
+        float hole[8] = { ix0, iy0, ix1, iy0, ix1, iy1, ix0, iy1 };
+        cvPoly(hole, 4, 0x00000000u, 1.0f);
+    }
+
     /* ---- ③ 两扇门板：向外滑开 ---- */
     {
         float open = (float)frame / 3.0f;              /* 0, 1/3, 2/3, 1 */
         float innerW = ix1 - ix0;
         float halfW = innerW * 0.5f;
         float slide = halfW * open;
+        const float gap = 1.5f;                        /* 中缝负空间 */
 
-        /* 左扇：从 ix0 往左滑；右扇：从 ix1 往右滑 */
-        float lx0 = ix0 - slide, lx1 = ix0 + halfW - 1.0f - slide;
-        float rx0 = ix0 + halfW + 1.0f + slide, rx1 = ix1 + slide;
-
-        /* 裁到门框外，否则门板会画到框外去 */
-        if (lx0 < fx0 - 2.0f) lx0 = fx0 - 2.0f;
-        if (rx1 > fx1 + 2.0f) rx1 = fx1 + 2.0f;
+        /* 左扇 [ix0, mid-gap] 向左滑；右扇 [mid+gap, ix1] 向右滑。
+           滑到 open=1 时两扇宽度 <= 0，自然消失，露出后面的黑洞。 */
+        float lx0 = ix0 - slide, lx1 = ix0 + halfW - gap - slide;
+        float rx0 = ix0 + halfW + gap + slide, rx1 = ix1 + slide;
 
         for (int side = 0; side < 2; side++) {
             float x0 = side ? rx0 : lx0;
             float x1 = side ? rx1 : lx1;
-            if (x1 - x0 < 2.0f) continue;
+            if (x1 - x0 < 2.0f) continue;              /* 已经滑出视野 */
 
             float pts[8] = { x0, iy0, x1, iy0, x1, iy1, x0, iy1 };
-            cvPolyGrad(pts, 4, 0x0078746Cu, 0x00383430u, 1.0f);
+            cvPolyGrad(pts, 4, 0x00827E76u, 0x003A3632u, 1.0f);
 
             /* 5 段明暗 */
             for (int k = 1; k <= 4; k++) {
                 float y = iy0 + (iy1 - iy0) * (float)k / 5.0f;
-                cvLine(x0 + 1, y, x1 - 1, y, 1.0f, 0x00000000u, 0.14f);
-                cvLine(x0 + 1, y + 1, x1 - 1, y + 1, 1.0f, 0x009A968E, 0.09f);
+                cvLine(x0 + 1, y, x1 - 1, y, 1.0f, 0x00000000u, 0.16f);
+                cvLine(x0 + 1, y + 1, x1 - 1, y + 1, 1.0f, 0x00A6A29Au, 0.10f);
             }
-            /* ⑥ 每扇门自己的左上边缘光 */
-            cvLine(x0, iy0, x1, iy0, 1.5f, 0x00A8A49Cu, 0.70f);
-            cvLine(x0, iy0, x0, iy1, 1.5f, 0x0088847Cu, 0.50f);
-
-            /* ⑤ 铆钉：虚线（x += 3），不用实线 */
-            for (float ry = iy0 + 8.0f; ry < iy1 - 6.0f; ry += 13.0f) {
-                for (float rx = x0 + 5.0f; rx < x1 - 4.0f; rx += 3.0f) {
-                    cvLine(rx, ry, rx + 1.0f, ry, 1.0f, 0x00D8D4CCu, 0.30f);
+            /* 边缘光：每扇门自己的左上 */
+            cvLine(x0, iy0, x1, iy0, 1.5f, 0x00B4B0A8u, 0.80f);
+            cvLine(x0, iy0, x0, iy1, 1.5f, 0x00949088u, 0.55f);
+            /* 阴影侧 */
+            cvLine(x1, iy0, x1, iy1, 1.5f, 0x00000000u, 0.45f);
+            /* 铆钉：虚线 */
+            for (float ry = iy0 + 9.0f; ry < iy1 - 7.0f; ry += 14.0f) {
+                for (float rx = x0 + 4.0f; rx < x1 - 3.0f; rx += 3.0f) {
+                    cvLine(rx, ry, rx + 1.0f, ry, 1.0f, 0x00DCD8D0u, 0.28f);
                 }
             }
-            /* ③ AO：门板底部与地面相接压暗 */
-            cvLine(x0, iy1 - 2.0f, x1, iy1 - 2.0f, 3.0f, 0x00000000u, 0.28f);
-        }
-
-        /* ④ 负空间：中缝留 1px 真透明（frame 0 时两扇之间有缝） */
-        if (frame == 0) {
-            cvLine(c, iy0, c, iy1, 1.5f, 0x00000000u, 1.0f);
+            /* AO：门板接地 */
+            cvLine(x0, iy1 - 2.0f, x1, iy1 - 2.0f, 3.0f, 0x00000000u, 0.30f);
         }
     }
 
-    /* ---- ④ 门框上的主题色条：洋红 key，按房间主题换色 ---- */
+    /* ---- ④ 主题色：门框顶部三盏小灯（洋红 key，按房间主题换色）----
+       原来画成左右两条通高竖条 + 一条横条，出来是个霓虹边框，
+       抢过了"门"本身。改成三盏小灯：有颜色识别，但不喧宾夺主。 */
     {
-        /* 左右各一条竖条 + 顶部一条横条 */
-        cvLine(fx0 + 2.0f, fy0 + 12.0f, fx0 + 2.0f, fy1 - 10.0f, 3.0f, 0x00FF00FFu, 1.0f);
-        cvLine(fx1 - 2.0f, fy0 + 12.0f, fx1 - 2.0f, fy1 - 10.0f, 3.0f, 0x00FF00FFu, 1.0f);
-        cvLine(fx0 + 12.0f, fy0 + 3.0f, fx1 - 12.0f, fy0 + 3.0f, 3.0f, 0x00FF00FFu, 1.0f);
+        float ly = fy0 + fr * 0.5f;
+        cvLine(c - 26.0f, ly, c - 22.0f, ly, 4.0f, 0x00FF00FFu, 1.0f);
+        cvLine(c -  2.0f, ly, c +  2.0f, ly, 4.0f, 0x00FF00FFu, 1.0f);
+        cvLine(c + 22.0f, ly, c + 26.0f, ly, 4.0f, 0x00FF00FFu, 1.0f);
     }
 
     /* ---- ⑤ 门框底部 AO ---- */
@@ -2041,6 +2040,23 @@ void SpritesInit(void) {
     BakeUiCursor();
     BakeUiRow();
     g_ready = 1;
+    /* ==================================================================
+     * **舱门样张导出必须放在所有烘焙之后**
+     * ------------------------------------------------------------------
+     * 我第一次把它放在 SpritesInit 开头 —— 那是烘之前，
+     * 导出来 4 张全透明的图（我看了样张才发现，测试断言反而没抓到，
+     * 因为 test_runtime 走的是另一条烘焙完成后的路径）。
+     * ================================================================ */
+    {
+        const char* hd = getenv("CANITY_HATCH_DUMP");
+        if (hd && hd[0]) {
+            char hp[MAX_PATH];
+            for (int f = 0; f < 4; f++) {
+                snprintf(hp, sizeof(hp), "%s/hatch_%d.ppm", hd, f);
+                SpriteDumpPPM(SPR_HATCH_0 + f, hp);
+            }
+        }
+    }
 }
 
 Sprite* SpriteGet(int id) {
