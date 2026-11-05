@@ -20,6 +20,28 @@ enum { SFX_STEP = 0, SFX_HEART, SFX_PICKUP, SFX_POWER, SFX_GATE, SFX_CRANK,
        SFX_COUNT };
 
 void PlaySfx(int id, float vol);
+
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B02）：**世界音效**
+ * ------------------------------------------------------------------
+ * PlaySfx 保持原样（菜单 / 成就 / 提示，居中等功率，行为不变）。
+ * 需要「听得出方向」的声音走这里：
+ *   x,y      世界坐标
+ *   maxDist  超过这个距离完全听不见（内部平方衰减）
+ *   priority 越大越重要；8 路满员时只抢占优先级更低的，
+ *            抢不到就丢弃 —— 破门石的冲击声不该被路过的脚步挤掉。
+ * ================================================================ */
+void AudioPlayWorld(int id, float x, float y, float vol, float maxDist, int priority);
+
+/* 每帧由游戏线程喂一次玩家位姿；转身时声像才会跟着平滑移动。 */
+void AudioUpdateListener(float px, float py, float dirX, float dirY);
+
+/* B02：声像 + 距离衰减的纯计算（不读全局、不加锁）。
+   存在只为可单测 —— 试听时判"手感"，这里判"数学"。 */
+void AudioComputeGains(float lisX, float lisY, float lisDirX, float lisDirY,
+                       float srcX, float srcY, float maxDist,
+                       float* outL, float* outR);
+
 void InitAudio(void);
 void ShutdownAudio(void);
 

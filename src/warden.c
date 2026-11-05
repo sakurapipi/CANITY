@@ -896,7 +896,10 @@ void UpdateWarden(float dt) {
                 float fdx = posX - warden.x, fdy = posY - warden.y;
                 if (fdx * fdx + fdy * fdy > 0.01f) warden.facing = atan2f(fdy, fdx);
             }
-            PlaySfx(SFX_WARDEN, 1.0f);   /* v2.4.89 追击低频吼叫 */          /* ← 直接进入 5 秒追击 */
+            /* v2.4-beta B02：低频吼叫来自守门人所在方向 ——
+               这是"它在哪边"最重要的听觉线索，比看见更早。 */
+            { extern void AudioPlayWorld(int, float, float, float, float, int);
+              AudioPlayWorld(SFX_WARDEN, warden.x, warden.y, 1.0f, 26.0f, 3); }          /* ← 直接进入 5 秒追击 */
             warden.stateT = 0.0f;
             PlaySfx(SFX_HEART, 0.85f);
             pickupMsg = heard

@@ -981,7 +981,9 @@ static int PlaceHunter(int idx) {
         M->prevX = x;
         M->prevY = y;
 
-        PlaySfx(SFX_WARDEN, 0.55f);
+        /* v2.4-beta B02：这一步来自**它所在的方向**，不是正前方 */
+        { extern void AudioPlayWorld(int, float, float, float, float, int);
+          AudioPlayWorld(SFX_WARDEN, x, y, 0.55f, 20.0f, 2); }
         pickupMsg = (idx == 1) ? "A SECOND SET OF FOOTSTEPS..."
                                : "FOOTSTEPS FROM EVERY SIDE...";
         pickupMsgTimer = 2.2f;

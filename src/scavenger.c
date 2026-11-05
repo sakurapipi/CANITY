@@ -543,7 +543,9 @@ void UpdateScavenger(float dt) {
         /* (a) 玩家躲着 → 拉柜门 */
         if (hiddenIn >= 0) {
             scavenger.warnT = SCAV_GRAB_WARN;
-        PlaySfx(SFX_SCAVENGER, 0.85f);   /* v2.4.89 刺耳刮擦 */
+        /* v2.4-beta B02：刮擦声来自柜门外那一边 */
+        { extern void AudioPlayWorld(int, float, float, float, float, int);
+          AudioPlayWorld(SFX_SCAVENGER, scavenger.x, scavenger.y, 0.85f, 18.0f, 3); }
             PlaySfx(SFX_STEP, 0.9f);
             pickupMsg = (g_lang == LANG_ZH) ? "柜门被抓住了！" : "THE LOCKER IS GRABBED!";
             pickupMsgTimer = 1.4f;
@@ -644,7 +646,11 @@ void UpdateScavenger(float dt) {
                 if (dist < 12.0f) {
                     float vol = 1.0f - dist / 12.0f;
                     vol = 0.22f + vol * 0.78f;  /* 远处也留一点，让你听见它在靠近 */
-                    PlaySfx(SFX_SCAV_STEP, vol);
+                    /* v2.4-beta B02：脚步带位置 —— 玩家能听出它从哪边绕过来。
+                       原来只是按距离调音量，方向信息完全丢失。 */
+                    { extern void AudioPlayWorld(int, float, float, float, float, int);
+                      AudioPlayWorld(SFX_SCAV_STEP, scavenger.x, scavenger.y,
+                                     vol, 12.0f, 1); }
                 }
             }
         }

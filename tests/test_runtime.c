@@ -12,6 +12,7 @@
 #include "save_format.h"   /* R8: SaveEnvelope / SaveEnvelopeSeal */
 #include "steam_zone.h"    /* R8: SteamZoneCloudDecide / STEAM_SYNC_* */
 #include "sound_event.h"   /* B01: SoundEmit / SoundKind */
+#include "audio.h"          /* B02: AudioComputeGains */
 #include "wallet.h"
 #include "threat.h"
 #include "ui.h"
@@ -461,6 +462,93 @@ static void test_floor_resets_hunters(void) {
  *   ② 同帧同 eventId 只结算一次（一次物理事件 = 一个逻辑事件），
  *      但 eventId == 0 时不去重（真实的连续脚步不能被合并）。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B02）：**声像与距离衰减的数学**
+ * ------------------------------------------------------------------
+ * 这一组是纯函数测试，不需要声卡。
+ * 它钉住"实现对不对"；"听起来像不像左边"仍然要人耳 ——
+ * 但至少不会出现"以为调了参数其实公式是反的"。
+ *
+ * 坐标约定：玩家朝向 (dirX,dirY)，右向量 = (-dirY, dirX)。
+ * ================================================================== */
+static void test_audio_pan_math(void) {
+    float l = 0.0f, r = 0.0f;
+
+    /* 玩家在原点朝 +X；右向量 = (0, 1) → +Y 是右边 */
+    const float px = 0.0f, py = 0.0f, dx = 1.0f, dy = 0.0f;
+
+    /* ---- ① 正前方：左右必须相等。
+           注意距离衰减对正前方同样生效，所以"满增益"只在距离 0 时成立。
+           这两条分开测，才不会被衰减掩盖掉声像问题。 ---- */
+    {
+        AudioComputeGains(px, py, dx, dy, 0.0f, 0.0f, 20.0f, &l, &r);
+        CHECK(l > 0.99f && l < 1.01f, "at zero distance the center gain must be 1.0 (left)");
+        CHECK(r > 0.99f && r < 1.01f, "at zero distance the center gain must be 1.0 (right)");
+
+        AudioComputeGains(px, py, dx, dy, 3.0f, 0.0f, 20.0f, &l, &r);
+        CHECK((l - r) < 0.001f && (r - l) < 0.001f,
+              "straight ahead must be perfectly centered at any distance");
+        CHECK(l > 0.0f && l < 1.0f, "straight ahead must still be distance-attenuated");
+    }
+
+    /* ---- ② 正右方：右明显大于左 ---- */
+    {
+        AudioComputeGains(px, py, dx, dy, 0.0f, 3.0f, 20.0f, &l, &r);
+        CHECK(r > l, "a sound on the right must be louder on the right channel");
+        CHECK(l < 0.2f, "a sound fully on the right must nearly vanish on the left");
+    }
+
+    /* ---- ③ 正左方：左明显大于右（对称） ---- */
+    {
+        AudioComputeGains(px, py, dx, dy, 0.0f, -3.0f, 20.0f, &l, &r);
+        CHECK(l > r, "a sound on the left must be louder on the left channel");
+        CHECK(r < 0.2f, "a sound fully on the left must nearly vanish on the right");
+    }
+
+    /* ---- ④ 正后方：左右相等（后方没法分左右，只能变小） ---- */
+    {
+        float fl = 0.0f, fr = 0.0f;
+        AudioComputeGains(px, py, dx, dy, -3.0f, 0.0f, 20.0f, &fl, &fr);
+        CHECK(fl > 0.0f && fr > 0.0f, "a sound behind must still be audible");
+        CHECK((fl - fr) < 0.01f && (fr - fl) < 0.01f,
+              "a sound directly behind must not bias either channel");
+    }
+
+    /* ---- ⑤ 距离衰减：远处更轻，超过 maxDist 完全听不见 ---- */
+    {
+        float nl = 0.0f, nr = 0.0f, fl2 = 0.0f, fr2 = 0.0f, zl = 0.0f, zr = 0.0f;
+        AudioComputeGains(px, py, dx, dy, 2.0f, 0.0f, 20.0f, &nl, &nr);
+        AudioComputeGains(px, py, dx, dy, 15.0f, 0.0f, 20.0f, &fl2, &fr2);
+        AudioComputeGains(px, py, dx, dy, 25.0f, 0.0f, 20.0f, &zl, &zr);
+        CHECK(nl > fl2, "a nearer sound must be louder than a farther one");
+        CHECK(zl == 0.0f && zr == 0.0f,
+              "a sound beyond maxDist must be completely silent");
+    }
+
+    /* ---- ⑥ 常量功率：左右能量之和只随距离变 ---- */
+    {
+        float al = 0.0f, ar = 0.0f, bl = 0.0f, br = 0.0f;
+        AudioComputeGains(px, py, dx, dy, 3.0f, 0.0f, 20.0f, &al, &ar);   /* 正前 */
+        AudioComputeGains(px, py, dx, dy, 0.0f, 3.0f, 20.0f, &bl, &br);   /* 正右 */
+        float ea = al * al + ar * ar;
+        float eb = bl * bl + br * br;
+        CHECK(ea > (eb - 0.05f) && ea < (eb + 0.05f),
+              "constant-power panning: total energy must not depend on direction");
+    }
+
+    /* ---- ⑦ 转身 90 度：同一个声源从右变成前方 ---- */
+    {
+        float gl = 0.0f, gr = 0.0f;
+        AudioComputeGains(px, py, dx, dy, 0.0f, 3.0f, 20.0f, &l, &r);        /* 朝 +X */
+        /* 朝向 +Y 之后，(0,3) 在正前方 */
+        AudioComputeGains(px, py, 0.0f, 1.0f, 0.0f, 3.0f, 20.0f, &gl, &gr);
+        CHECK(l < 0.2f, "before turning the sound is hard on one side");
+        CHECK((gl - gr) < 0.001f && (gr - gl) < 0.001f,
+              "after turning toward it, the sound must become centered");
+        CHECK(gl > l, "after turning toward it, the near channel must get louder");
+    }
+}
+
 static void test_sound_event_center(void) {
     SoundEvent ev;
 
@@ -832,6 +920,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

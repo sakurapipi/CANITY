@@ -3103,6 +3103,10 @@ void Update(float dt) {
     /* v2.4-beta B01：清掉"本帧已见的 eventId"去重表。
        放在 Update 的帧首，和 DailyTick 同一处 —— 两者都是"每帧一次"的簿记。 */
     { extern void SoundEventTick(void); SoundEventTick(); }
+    /* v2.4-beta B02：把玩家位姿喂给音频层，世界音效才能算出左右声像。
+       每帧一次；音频线程只读快照，不做 BFS、不分配内存。 */
+    { extern void AudioUpdateListener(float, float, float, float);
+      AudioUpdateListener(posX, posY, dirX, dirY); }
     DailyTick();   /* Calendar rollover also applies while in menus. */
     if(currentState==STATE_PLAYING && exitChoiceOpen && !keyPressed['1'] && !keyPressed['2']) return;
     if(currentState==STATE_PLAYING && !trainingMode) {

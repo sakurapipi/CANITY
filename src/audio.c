@@ -42,7 +42,30 @@ static short g_sndWarden[35280];    /* 1.60s 守门人：极低频压迫 */
 static short g_sndScavenger[26460]; /* 1.20s 清道夫：刺耳刮擦 */
 static short g_sndScavStep[2646];   /* 0.12s 清道夫脚步：高速摩擦 */
 
-typedef struct { const short* data; int len, pos; float vol; int active; } Voice;
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B02）：**Voice 增加声像**
+ * ------------------------------------------------------------------
+ * 原来 MixInto 把所有音效累加进一个单声道 mix[]，然后左右各拷一份 ——
+ * 于是任何声音都来自"正前方"，玩家听不出怪在左边还是右边。
+ *
+ * 现在每路 voice 带一对左右增益：
+ *   · 居中音（PlaySfx：菜单、成就、提示）= 1.0 / 1.0 → 和以前完全一样
+ *   · 世界音（AudioPlayWorld）= 常量功率声像 × 距离衰减
+ * 声像每缓冲重算一次，并在缓冲内**逐采样插值**，
+ * 所以转身时不会"啪"地跳到另一侧。
+ * ================================================================ */
+typedef struct {
+    const short* data;
+    int len, pos;
+    float vol;
+    int active;
+    /* B02：声像 */
+    int   useWorld;      /* 1 = 每缓冲按世界坐标重算增益 */
+    float srcX, srcY;
+    float maxDist;       /* 超过这个距离完全听不见 */
+    float gainL, gainR;  /* 当前增益（含距离衰减），逐采样插值 */
+    int   priority;      /* 越大越重要；满员时低优先级被抢 */
+} Voice;
 
 static Voice g_voices[MAX_VOICES];
 static HWAVEOUT g_wave = NULL;
@@ -59,15 +82,87 @@ static void AudioCallback(HWAVEOUT h, UINT msg, DWORD_PTR inst, DWORD_PTR p1, DW
     if (msg == WOM_DONE && g_audioEvent) SetEvent(g_audioEvent);
 }
 
+/* ---------------- B02：监听者（玩家）快照 ---------------- */
+static float s_lisX = 0.0f, s_lisY = 0.0f;
+static float s_lisDirX = 1.0f, s_lisDirY = 0.0f;
+static int   s_lisValid = 0;
+
+void AudioUpdateListener(float px, float py, float dx, float dy) {
+    /* **必须在 g_audioOn 之前挡住**：没有 InitAudio 时
+       g_audioLock 是未初始化的临界区，进它会让进程直接崩 ——
+       而 test_runtime 就是在这种环境下跑的（它只做逻辑，不开声音）。 */
+    if (!g_audioOn) return;
+    /* 只由游戏线程调用；和混音线程抢一次锁，代价可忽略（每帧一次） */
+    EnterCriticalSection(&g_audioLock);
+    s_lisX = px; s_lisY = py;
+    s_lisDirX = dx; s_lisDirY = dy;
+    s_lisValid = 1;
+    LeaveCriticalSection(&g_audioLock);
+}
+
+/* 常量功率声像，归一到"正前方 = 1.0 / 1.0"（和旧的居中行为一致）。
+   pan = -1 全左，0 正前，+1 全右。 */
+#define PAN_SQRT2   1.41421356f
+static void PanGains(float pan, float att, float* gl, float* gr) {
+    if (pan < -1.0f) pan = -1.0f;
+    if (pan >  1.0f) pan =  1.0f;
+    float theta = (pan + 1.0f) * 0.78539816f;      /* 0..pi/2 */
+    /* cosf/sinf 在音频线程里每缓冲只调两次，8 路也才 16 次 —— 可接受 */
+    float l = cosf(theta) * PAN_SQRT2;
+    float r = sinf(theta) * PAN_SQRT2;
+    *gl = l * att;
+    *gr = r * att;
+}
+
+/* ==================================================================
+ * 2026-11-06（B02）：**纯函数**，不读全局、不加锁、不碰 Steam。
+ * ------------------------------------------------------------------
+ * 存在的理由和 R8 的 SteamZoneCloudDecide 一样：让"数学对不对"
+ * 可以被单元测试钉住，这样试听时你只需要判断"手感对不对"，
+ * 不用替我排查"是不是根本没实现对"。
+ * ================================================================== */
+void AudioComputeGains(float lisX, float lisY, float lisDirX, float lisDirY,
+                       float srcX, float srcY, float maxDist,
+                       float* outL, float* outR) {
+    float dx = srcX - lisX;
+    float dy = srcY - lisY;
+    float dist = sqrtf(dx * dx + dy * dy);
+
+    /* 距离衰减：线性到 maxDist，再平方一下让近处更突出 */
+    float maxD = (maxDist > 1.0f) ? maxDist : 1.0f;
+    float att = 1.0f - dist / maxD;
+    if (att < 0.0f) att = 0.0f;
+    att = att * att;
+
+    /* 声像：把"从玩家指向声音"的向量投到玩家右向量上。
+       右向量 = (-dirY, dirX)，和 raycaster 的 camera plane 一致。 */
+    float pan = 0.0f;
+    if (dist > 0.001f) {
+        float rx = -lisDirY, ry = lisDirX;
+        pan = (dx * rx + dy * ry) / dist;
+        if (pan >  1.0f) pan =  1.0f;
+        if (pan < -1.0f) pan = -1.0f;
+    }
+    PanGains(pan, att, outL, outR);
+}
+
+/* 算一路世界音的当前目标增益。调用时已持有 g_audioLock。 */
+static void WorldGains(const Voice* vo, float* gl, float* gr) {
+    if (!s_lisValid) { PanGains(0.0f, 1.0f, gl, gr); return; }
+    AudioComputeGains(s_lisX, s_lisY, s_lisDirX, s_lisDirY,
+                      vo->srcX, vo->srcY, vo->maxDist, gl, gr);
+}
+
 static void MixInto(short* out) {
-    /* 音效是单声道素材，居中复制到左右；音乐自带声像，直接进立体声总线。 */
-    static int mix[AUDIO_SAMPLES];
+    /* 音效按每路的左右增益分开累加（B02）；音乐自带声像，直接进立体声总线。 */
+    static int mixL[AUDIO_SAMPLES];
+    static int mixR[AUDIO_SAMPLES];
     static float musicL[AUDIO_SAMPLES];
     static float musicR[AUDIO_SAMPLES];
     int i;
 
     for (i = 0; i < AUDIO_SAMPLES; i++) {
-        mix[i] = 0;
+        mixL[i] = mixR[i] = 0;
         musicL[i] = musicR[i] = 0.0f;
     }
     MusicProcMix(musicL, musicR, AUDIO_SAMPLES);
@@ -76,16 +171,31 @@ static void MixInto(short* out) {
     for (int v = 0; v < MAX_VOICES; v++) {
         Voice* vo = &g_voices[v];
         if (!vo->active) continue;
+
+        /* 世界音：每缓冲重算目标增益，再在缓冲内逐采样插值过去。
+           这就是"转身时声像平滑变化" —— 不做插值会听到台阶。 */
+        float tgtL = vo->gainL, tgtR = vo->gainR;
+        if (vo->useWorld) WorldGains(vo, &tgtL, &tgtR);
+
+        float dl = (tgtL - vo->gainL) / (float)AUDIO_SAMPLES;
+        float dr = (tgtR - vo->gainR) / (float)AUDIO_SAMPLES;
+
         for (i = 0; i < AUDIO_SAMPLES; i++) {
             if (vo->pos >= vo->len) { vo->active = 0; break; }
-            mix[i] += (int)(vo->data[vo->pos++] * vo->vol);
+            int smp = (int)(vo->data[vo->pos++] * vo->vol);
+            mixL[i] += (int)(smp * vo->gainL);
+            mixR[i] += (int)(smp * vo->gainR);
+            vo->gainL += dl;
+            vo->gainR += dr;
         }
+        vo->gainL = tgtL;
+        vo->gainR = tgtR;
     }
     LeaveCriticalSection(&g_audioLock);
 
     for (i = 0; i < AUDIO_SAMPLES; i++) {
-        int l = mix[i] + (int)(musicL[i] * MUSIC_MIX_SCALE);
-        int r = mix[i] + (int)(musicR[i] * MUSIC_MIX_SCALE);
+        int l = mixL[i] + (int)(musicL[i] * MUSIC_MIX_SCALE);
+        int r = mixR[i] + (int)(musicR[i] * MUSIC_MIX_SCALE);
         if (l > 32767) l = 32767;
         else if (l < -32768) l = -32768;
         if (r > 32767) r = 32767;
@@ -108,6 +218,94 @@ static DWORD WINAPI AudioThreadMain(LPVOID param) {
         }
     }
     return 0;
+}
+
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B02）：**统一的 voice 分配器**
+ * ------------------------------------------------------------------
+ * 两条来路：
+ *   PlaySfx        → useWorld=0，增益 1.0/1.0（和以前完全一样）
+ *   AudioPlayWorld → useWorld=1，增益每缓冲按世界坐标重算
+ *
+ * 抢占规则：
+ *   priority < 0（PlaySfx 旧行为）→ 全忙时抢第 0 路（保持原样）
+ *   priority >= 0               → 只抢**优先级更低**的那一路；
+ *                                 抢不到就丢弃本次音效
+ * 为什么：破门石的冲击声被一只路过的脚步挤掉，玩家会觉得"这游戏在骗我"。
+ * ================================================================ */
+static void AudioStartVoice(const short* data, int len, float vol,
+                            int useWorld, float sx, float sy, float maxDist,
+                            int priority) {
+    if (!g_audioOn || !data || len <= 0 || vol <= 0.001f) return;
+
+    EnterCriticalSection(&g_audioLock);
+    int slot = -1;
+    for (int i = 0; i < MAX_VOICES; i++) if (!g_voices[i].active) { slot = i; break; }
+
+    if (slot < 0) {
+        if (priority < 0) {
+            slot = 0;                       /* 旧行为：全忙就抢第一路 */
+        } else {
+            int worst = -1, worstPri = 0x7FFFFFFF;
+            for (int i = 0; i < MAX_VOICES; i++) {
+                if (g_voices[i].priority < worstPri) { worstPri = g_voices[i].priority; worst = i; }
+            }
+            if (worst >= 0 && priority > worstPri) slot = worst;
+            else { LeaveCriticalSection(&g_audioLock); return; }   /* 丢弃，别挤掉更重要的 */
+        }
+    }
+
+    g_voices[slot].data = data;
+    g_voices[slot].len = len;
+    g_voices[slot].pos = 0;
+    g_voices[slot].vol = vol;
+    g_voices[slot].active = 1;
+    g_voices[slot].useWorld = (useWorld && s_lisValid) ? 1 : 0;
+    g_voices[slot].srcX = sx;
+    g_voices[slot].srcY = sy;
+    g_voices[slot].maxDist = (maxDist > 1.0f) ? maxDist : 16.0f;
+    g_voices[slot].priority = (priority < 0) ? 0 : priority;
+
+    if (g_voices[slot].useWorld) {
+        /* 出生时直接给到目标增益，避免第一缓冲从 0 淡入 */
+        WorldGains(&g_voices[slot], &g_voices[slot].gainL, &g_voices[slot].gainR);
+    } else {
+        g_voices[slot].gainL = 1.0f;
+        g_voices[slot].gainR = 1.0f;
+    }
+    LeaveCriticalSection(&g_audioLock);
+}
+
+/* 音效 id → 采样数据 */
+static int SfxLookup(int id, const short** data, int* len) {
+    switch (id) {
+        case SFX_STEP:      *data = g_sndStep;      *len = (int)(sizeof(g_sndStep) / sizeof(short)); return 1;
+        case SFX_HEART:     *data = g_sndHeart;     *len = (int)(sizeof(g_sndHeart) / sizeof(short)); return 1;
+        case SFX_PICKUP:    *data = g_sndPickup;    *len = (int)(sizeof(g_sndPickup) / sizeof(short)); return 1;
+        case SFX_POWER:     *data = g_sndPower;     *len = (int)(sizeof(g_sndPower) / sizeof(short)); return 1;
+        case SFX_GATE:      *data = g_sndGate;      *len = (int)(sizeof(g_sndGate) / sizeof(short)); return 1;
+        case SFX_CRANK:     *data = g_sndCrank;     *len = (int)(sizeof(g_sndCrank) / sizeof(short)); return 1;
+        case SFX_SCREAM:    *data = g_sndScream;    *len = (int)(sizeof(g_sndScream) / sizeof(short)); return 1;
+        case SFX_GLASS:     *data = g_sndGlass;     *len = (int)(sizeof(g_sndGlass) / sizeof(short)); return 1;
+        case SFX_SEARCH:    *data = g_sndSearch;    *len = (int)(sizeof(g_sndSearch) / sizeof(short)); return 1;
+        case SFX_THROW:     *data = g_sndThrow;     *len = (int)(sizeof(g_sndThrow) / sizeof(short)); return 1;
+        case SFX_GLUE:      *data = g_sndGlue;      *len = (int)(sizeof(g_sndGlue) / sizeof(short)); return 1;
+        case SFX_ECHO:      *data = g_sndEcho;      *len = (int)(sizeof(g_sndEcho) / sizeof(short)); return 1;
+        case SFX_DECOY:     *data = g_sndDecoy;     *len = (int)(sizeof(g_sndDecoy) / sizeof(short)); return 1;
+        case SFX_WARDEN:    *data = g_sndWarden;    *len = (int)(sizeof(g_sndWarden) / sizeof(short)); return 1;
+        case SFX_SCAVENGER: *data = g_sndScavenger; *len = (int)(sizeof(g_sndScavenger) / sizeof(short)); return 1;
+        case SFX_SCAV_STEP: *data = g_sndScavStep;  *len = (int)(sizeof(g_sndScavStep) / sizeof(short)); return 1;
+        default: return 0;
+    }
+}
+
+/* 世界音效：带位置、带距离衰减、带优先级。
+   maxDist 之外完全听不见（内部按平方衰减）。 */
+void AudioPlayWorld(int id, float x, float y, float vol, float maxDist, int priority) {
+    const short* data = NULL;
+    int len = 0;
+    if (!SfxLookup(id, &data, &len)) return;
+    AudioStartVoice(data, len, vol * volumeF, 1, x, y, maxDist, priority);
 }
 
 void PlaySfx(int id, float vol) {
@@ -134,16 +332,7 @@ void PlaySfx(int id, float vol) {
         case SFX_SCAV_STEP: data = g_sndScavStep; len = (int)(sizeof(g_sndScavStep) / sizeof(short)); break;
         default: return;
     }
-    EnterCriticalSection(&g_audioLock);
-    int slot = -1;
-    for (int i = 0; i < MAX_VOICES; i++) if (!g_voices[i].active) { slot = i; break; }
-    if (slot < 0) slot = 0;    /* 全忙就抢第一路 */
-    g_voices[slot].data = data;
-    g_voices[slot].len = len;
-    g_voices[slot].pos = 0;
-    g_voices[slot].vol = vol;
-    g_voices[slot].active = 1;
-    LeaveCriticalSection(&g_audioLock);
+    AudioStartVoice(data, len, vol, 0, 0.0f, 0.0f, 0.0f, -1);
 }
 
 /* 合成：噪声、正弦、扫频，全部给 16bit 单声道 */
