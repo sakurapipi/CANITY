@@ -13,6 +13,7 @@
 #include "steam_zone.h"    /* R8: SteamZoneCloudDecide / STEAM_SYNC_* */
 #include "sound_event.h"   /* B01: SoundEmit / SoundKind */
 #include "audio.h"          /* B02: AudioComputeGains */
+#include "sound_propagation.h"  /* B03: SoundReach */
 #include "wallet.h"
 #include "threat.h"
 #include "ui.h"
@@ -471,6 +472,103 @@ static void test_floor_resets_hunters(void) {
  *
  * 坐标约定：玩家朝向 (dirX,dirY)，右向量 = (-dirY, dirX)。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B03）：**声学传播 —— 隔墙必须变弱**
+ * ------------------------------------------------------------------
+ * 这一组自己搭一个小地图，不依赖 GenerateLevel 的随机布局。
+ * 钉住的核心事实：
+ *   直线 3 格 + 中间一堵墙  → 传播步数远大于 3，可信度显著低于直通
+ *   完全封死的房间          → 不可达，只有贴脸才给一点点
+ *   同一个源重复查询        → 命中缓存，不重复跑 BFS
+ * ================================================================== */
+static void test_sound_propagation(void) {
+    extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+    static int saved[MAP_HEIGHT][MAP_WIDTH];
+
+    /* 备份真实地图，测完还原 —— 后面还有用例要用 */
+    memcpy(saved, worldMap, sizeof(saved));
+
+    /* 先把整张图填成墙，再挖出一条直走廊和一个封闭房间 */
+    for (int y = 0; y < MAP_HEIGHT; y++)
+        for (int x = 0; x < MAP_WIDTH; x++)
+            worldMap[y][x] = 1;
+
+    /* 走廊：y=5，x=2..12 全通 */
+    for (int x = 2; x <= 12; x++) worldMap[5][x] = 0;
+    /* 走廊上方一格也打通一小段，用来测"绕路" */
+    for (int y = 3; y <= 5; y++) worldMap[y][10] = 0;
+    for (int x = 8; x <= 10; x++) worldMap[3][x] = 0;
+    worldMap[3][8] = 0;
+
+    /* 声源放在 (2.5, 5.5) —— 走廊最左端 */
+    SoundPropReset();
+    SoundPropBuild(2.5f, 5.5f);
+
+    /* ---- ① 直走廊：步数 == 直线距离 ---- */
+    {
+        int c5 = SoundPropCostAt(7.5f, 5.5f);      /* 直线上 5 格 */
+        CHECK(c5 == 5, "along an open corridor the step count must equal the distance");
+
+        float dNear = SoundReach(2.5f, 5.5f, 7.5f, 5.5f, 20.0f);
+        float dFar  = SoundReach(2.5f, 5.5f, 11.5f, 5.5f, 20.0f);
+        CHECK(dNear > 0.0f && dFar > 0.0f, "both corridor points must be audible");
+        CHECK(dNear > dFar, "a nearer corridor point must be more audible than a farther one");
+    }
+
+    /* ---- ② 隔墙：直线 2 格，但要走一大圈 ----
+           声源 (2.5,5.5)，目标 (4.5,3.5)：直线约 2.8 格，
+           而中间隔着 y=4 整排墙，只能绕到 x=10 上去再回来。 */
+    {
+        int detour = SoundPropCostAt(4.5f, 3.5f);
+        CHECK(detour == PROP_UNREACHABLE || detour > 10,
+              "a point behind a wall must cost far more steps than its straight-line distance");
+
+        /* 走不到 → 可信度必须接近 0（只有贴脸才给一点） */
+        float through = SoundReach(2.5f, 5.5f, 4.5f, 3.5f, 20.0f);
+        float open    = SoundReach(2.5f, 5.5f, 4.5f, 5.5f, 20.0f);   /* 同距离但直通 */
+        CHECK(through < open,
+              "a sound through a wall must be weaker than the same distance in the open");
+    }
+
+    /* ---- ③ 超过 maxRadius 完全听不见 ---- */
+    {
+        float zero = SoundReach(2.5f, 5.5f, 11.5f, 5.5f, 3.0f);
+        CHECK(zero == 0.0f, "beyond maxRadius the reach must be exactly zero");
+    }
+
+    /* ---- ④ 声源自己那一格 = 最强 ---- */
+    {
+        float self = SoundReach(2.5f, 5.5f, 2.5f, 5.5f, 20.0f);
+        CHECK(self > 0.99f, "the source cell itself must be fully audible");
+    }
+
+    /* ---- ⑤ 缓存命中：同一个源不重复建场 ---- */
+    {
+        int before = SoundPropBuildCount();
+        (void)SoundReach(2.5f, 5.5f, 6.5f, 5.5f, 20.0f);
+        (void)SoundReach(2.5f, 5.5f, 7.5f, 5.5f, 20.0f);
+        (void)SoundReach(2.5f, 5.5f, 8.5f, 5.5f, 20.0f);
+        CHECK(SoundPropBuildCount() == before,
+              "repeated queries from the same source must hit the cache");
+
+        (void)SoundReach(9.5f, 5.5f, 8.5f, 5.5f, 20.0f);   /* 换源 */
+        CHECK(SoundPropBuildCount() == before + 1,
+              "changing the source must rebuild the field exactly once");
+    }
+
+    /* ---- ⑥ 封死的格子：不可达 ---- */
+    {
+        /* (20,20) 四周全是墙，从来没被打通 */
+        CHECK(SoundPropCostAt(20.5f, 20.5f) == PROP_UNREACHABLE,
+              "a sealed cell must be unreachable");
+        float r = SoundReach(2.5f, 5.5f, 20.5f, 20.5f, 20.0f);
+        CHECK(r == 0.0f, "an unreachable point far away must be inaudible");
+    }
+
+    SoundPropReset();
+    memcpy(worldMap, saved, sizeof(saved));
+}
+
 static void test_audio_pan_math(void) {
     float l = 0.0f, r = 0.0f;
 
@@ -925,6 +1023,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
