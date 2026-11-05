@@ -609,6 +609,29 @@ static void test_global_balance_invariants(void) {
     CHECK(MAX_HATCHES <= 6, "too many hatches per floor would trivialise the effects");
 }
 
+/* ==================================================================
+ * 2026-11-06（用户实测第二轮）：**爆脸怪反应窗口必须够狠**
+ * ------------------------------------------------------------------
+ * 用户原话：「现在是直接跳到你脸上。如果你第一时间不能按低的话，
+ *           就会控你。你现在这个版本给的反应时间太多了。」
+ *
+ * 这条断言把"够狠"变成可检验的数字：
+ *   · 从扑出到判定，总共不得超过 1 秒
+ *   · 唯一的机会窗必须在 0.5 秒以内（人类反应约 0.25s，0.42s 刚够）
+ * 以后谁把窗口调宽，这里会立刻红。
+ * ================================================================== */
+static void test_facehugger_is_brutal(void) {
+    float total = JUMPER_APPROACH_TIME + JUMPER_DODGE_WINDOW;
+    CHECK(total < 1.0f,
+          "the whole jump->judge window must stay under 1 second");
+    CHECK(JUMPER_DODGE_WINDOW <= 0.5f,
+          "the dodge window must be a reflex test, not a decision window");
+    CHECK(JUMPER_DODGE_WINDOW >= 0.25f,
+          "the dodge window must still be humanly reachable (>= 0.25s)");
+    CHECK(JUMPER_APPROACH_TIME < JUMPER_DODGE_WINDOW,
+          "the lunge itself must be faster than the reaction window it opens");
+}
+
 static void test_room_wall_flags(void) {
     extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
     extern int CellIsRoomWall(int, int, int*, int*, int*);
@@ -2977,6 +3000,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_facehugger_is_brutal();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

@@ -6495,6 +6495,16 @@ void StartGame(void) {
     }
 
     currentState = STATE_PLAYING;
+
+    /* ==================================================================
+     * 2026-11-06（用户实测）：**训练营里放不了信标**
+     * ------------------------------------------------------------------
+     * 原来这两行放在 StartGame 开头 —— 那一刻 trainingMode 还是 0
+     * （ResetModeFlags 刚把它清掉，真正的赋值在下面 startMode 分支里）。
+     * 于是 PhaseGive 永远不执行，训练营里根本没有装置，按 C 当然没反应。
+     * ================================================================ */
+    { extern void PhaseReset(void); PhaseReset(); }
+    if (trainingMode) { extern void PhaseGive(void); PhaseGive(); }
     /* 2026-11-05：新局同样要重置鼠标基准 ——
        从菜单/商店直接开局时，lastMousePos 还是上一次的位置，
        第一帧会把它当成一次巨大的视角输入。 */
@@ -6638,10 +6648,8 @@ void StartGame(void) {
 
     /* 重置成就追踪变量 */
     knockCountRun=throwHitCountRun=echoCellsTotalRun=0;
-    { extern void PhaseReset(void); PhaseReset(); }   /* 2026-11-06：相位信标按局重置 */
     /* 2026-11-06（用户实测）：**训练营里没有相位信标** ——
        那是个测试场，所有机制都该能试。这里直接发一个。 */
-    if (trainingMode) { extern void PhaseGive(void); PhaseGive(); }
     { extern int mimicsEscapedThisRun; mimicsEscapedThisRun = 0; }
     floorsNoSanityLoss=dailyEscapeCount=wardenCleanFloors=fullHideDone=0;
     doubleHuntSeconds=0.0f; pendingSkillDraft=0;

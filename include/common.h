@@ -425,8 +425,18 @@ extern SmokeCloud smokes[MAX_SMOKE];
 #define JUMPER_CONTROL_RADIUS 12.0f/* 召唤附近怪物的半径 */
 #define JUMPER_APPEAR_CHANCE 35   /* 保留：老的概率常量，现在不再直接决定出现 */
 #define JUMPER_MIN_LEVEL 3        /* 第几层开始可能出现 */
-#define JUMPER_APPROACH_TIME 1.1f /* 从远处弹到面前的秒数 */
-#define JUMPER_DODGE_WINDOW 1.0f  /* 阶段一：躲开的时间窗 */
+/* ==================================================================
+ * 2026-11-06（用户实测第二轮）：**反应时间太多**
+ * ------------------------------------------------------------------
+ * 用户原话：「现在是直接跳到你脸上。如果你第一时间不能按低的话，
+ *           就会控你。你现在这个版本给的反应时间太多了。」
+ *
+ * 旧：扑脸 1.1s + 躲开窗 1.0s + 按键窗 1.5s ≈ 3.6 秒，够从容喝完一口水。
+ * 新：扑脸 0.30s + 躲开窗 0.42s，**没有第二阶段** ——
+ *     第一下没按到就直接被控。这才是"跳脸"该有的压迫感。
+ * ================================================================ */
+#define JUMPER_APPROACH_TIME 0.30f
+#define JUMPER_DODGE_WINDOW 0.42f /* 唯一的机会：0.42 秒 */
 #define JUMPER_QTE_WINDOW 1.5f    /* 阶段二：按键的时间窗 */
 #define JUMPER_FAIL_SANITY 20.0f  /* 失败的理智惩罚 */
 #define JUMPER_FAIL_FX_TIME 3.0f  /* 失败的 debuff 持续时间 */
