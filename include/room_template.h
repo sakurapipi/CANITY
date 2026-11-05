@@ -20,7 +20,10 @@
 
 #define ROOM_MAX_W 6
 #define ROOM_MAX_H 6
-#define ROOM_TEMPLATE_COUNT 4
+/* 2026-11-06：4 -> 7。补上三个**一直没进地图**的主题：
+   砖墙 BRICK / 地狱 HELL / 血肉洞窟 FLESH CAVE。
+   之前 7 种全局主题只用了 4 种，而没用到的三种恰恰最有辨识度。 */
+#define ROOM_TEMPLATE_COUNT 7
 
 /* tiles 取值 */
 #define ROOM_TILE_FLOOR  0
@@ -33,6 +36,9 @@
 #define ROOM_FEATURE_STEAM  1     /* 锅炉房：蒸汽 */
 #define ROOM_FEATURE_SHELF  2     /* 仓储室：货架 */
 #define ROOM_FEATURE_POWER  3     /* 配电室：供电 */
+#define ROOM_FEATURE_BRICK  4     /* 砖墙：拆墙 */
+#define ROOM_FEATURE_HELL   5     /* 地狱：血祭 */
+#define ROOM_FEATURE_FLESH  6     /* 血肉洞窟：喂食 */
 
 typedef struct {
     int id;

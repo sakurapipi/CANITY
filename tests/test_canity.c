@@ -265,6 +265,79 @@ static void test_no_dead_monster_hp(void) {
     }
 }
 
+/* ==================================================================
+ * 2026-11-06：**模板内部必须连通**
+ * ------------------------------------------------------------------
+ * 这是本项目里代价最高的一个静默 bug：
+ *
+ *   供电控制室（模板 2）的 L 形隔断把右列两格围成了封闭口袋。
+ *   CarveRoomBordered 每次都因为 RoomReachable() 失败而回滚，
+ *   于是那张模板**被试了 197 次、成功 0 次**，冰窖主题在 500 个
+ *   种子里出现 0%。
+ *
+ *   没有任何报错，没有测试失败 —— 只是那张房间永远不会出现。
+ *
+ * 这条测试纯读模板数据：对每个模板 × 每个旋转，
+ * 用 BFS 检查所有地面格是否互相可达。
+ * 它不需要地图、不需要 rand()，所以能把这类错误挡在提交之前。
+ * ================================================================== */
+static void test_room_template_internal_connectivity(void) {
+    for (int id = 0; id < ROOM_TEMPLATE_COUNT; id++) {
+        for (int rot = 0; rot < 4; rot++) {
+            RoomTemplate t;
+            if (!RoomTemplateRotate(id, rot, &t)) {
+                check(0, "template rotation must succeed");
+                continue;
+            }
+            if (t.w <= 0 || t.h <= 0) { check(0, "template size"); continue; }
+
+            int total = 0, seen = 0;
+            int startX = -1, startY = -1;
+            for (int y = 0; y < t.h; y++)
+                for (int x = 0; x < t.w; x++) {
+                    unsigned char c = t.tiles[y][x];
+                    if (c == ROOM_TILE_FLOOR || c == ROOM_TILE_WATER) {
+                        total++;
+                        if (startX < 0) { startX = x; startY = y; }
+                    }
+                }
+            if (total <= 0) { check(0, "template must have floor"); continue; }
+
+            /* BFS over floor tiles */
+            static unsigned char vis[ROOM_MAX_H][ROOM_MAX_W];
+            for (int y = 0; y < ROOM_MAX_H; y++)
+                for (int x = 0; x < ROOM_MAX_W; x++) vis[y][x] = 0;
+            int qx[ROOM_MAX_W * ROOM_MAX_H], qy[ROOM_MAX_W * ROOM_MAX_H];
+            int qh = 0, qt = 0;
+            qx[qt] = startX; qy[qt] = startY; qt++;
+            vis[startY][startX] = 1;
+            static const int dx4[4] = { 1, -1, 0, 0 };
+            static const int dy4[4] = { 0, 0, 1, -1 };
+            while (qh < qt) {
+                int cx = qx[qh], cy = qy[qh]; qh++;
+                for (int k = 0; k < 4; k++) {
+                    int nx = cx + dx4[k], ny = cy + dy4[k];
+                    if (nx < 0 || ny < 0 || nx >= t.w || ny >= t.h) continue;
+                    if (vis[ny][nx]) continue;
+                    unsigned char c = t.tiles[ny][nx];
+                    if (c != ROOM_TILE_FLOOR && c != ROOM_TILE_WATER) continue;
+                    vis[ny][nx] = 1;
+                    qx[qt] = nx; qy[qt] = ny; qt++;
+                }
+            }
+            for (int y = 0; y < t.h; y++)
+                for (int x = 0; x < t.w; x++) {
+                    unsigned char c = t.tiles[y][x];
+                    if ((c == ROOM_TILE_FLOOR || c == ROOM_TILE_WATER) && vis[y][x]) seen++;
+                }
+
+            /* 每个模板 × 每个旋转都必须全连通 —— 有口袋就永远放不进去 */
+            check(seen == total,
+                  "every room template must have no sealed pocket (would never be placed)");
+        }
+    }
+}
+
 static void test_hidespot_gap_contract(void) {
     char* g = read_file("src/game.c");
     strip_comments(g);
@@ -1035,6 +1108,7 @@ static void test_lockbox_contract(void) {
 int main(void) {
     test_room_template_contract();
     test_tutorial_and_keystone_contract();
+    test_room_template_internal_connectivity();
     test_hidespot_gap_contract();
     test_no_dead_monster_hp();   /* v2.4-rc C01：纯函数，最便宜先跑 */
     test_no_unwired_api();

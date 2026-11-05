@@ -173,7 +173,16 @@ static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
     int want = 3 + (int)(rand() % 2);          /* 每间 3~4 件（含木箱堆） */
     int placed = 0;
 
-    int propKind = (t->featureId == ROOM_FEATURE_POWER) ? ROOMPROP_CONSOLE : ROOMPROP_SHELF;
+    /* 2026-11-06：新三种房间的家具搭配。
+       供电室/地狱用控制台（人造装置），其余用货架/木箱堆。
+       血肉洞窟用木箱堆 —— "洞窟里有整齐货架"读起来是错的。 */
+    int propKind;
+    switch (t->featureId) {
+    case ROOM_FEATURE_POWER:
+    case ROOM_FEATURE_HELL:  propKind = ROOMPROP_CONSOLE; break;
+    case ROOM_FEATURE_FLESH: propKind = ROOMPROP_CRATES;  break;
+    default:                 propKind = ROOMPROP_SHELF;   break;
+    }
     /* C：再放 1~2 个木箱堆 —— 房间不能只有货架一种东西。
        它们走同一套"放一件→验连通→不行就撤"的流程。 */
     int crates = 1 + (int)(rand() % 2);
@@ -461,8 +470,15 @@ static int ReservationsOk(int fx, int fy, int fw, int fh) {
 }
 
 /* 试放一个模板（任意模板），成功返回 1 */
+/* 2026-11-06：模板级诊断计数。
+   为什么要它：上一版只看"主题出现率"，结果发现某张模板出现 0%，
+   但分不清"没被尝试"还是"每次都被回滚"。这两个原因要改的地方完全不同。 */
+int RoomTplTried[ROOM_TEMPLATE_COUNT];
+int RoomTplPlaced[ROOM_TEMPLATE_COUNT];
+
 static int TryPlace(int placed, int idMin, int idMax) {
     int id = idMin + (int)(rand() % (unsigned)(idMax - idMin + 1));
+    if (id >= 0 && id < ROOM_TEMPLATE_COUNT) RoomTplTried[id]++;
     int rot = rand() % 4;
     RoomTemplate t;
     if (!RoomTemplateRotate(id, rot, &t)) return 0;
@@ -480,6 +496,7 @@ static int TryPlace(int placed, int idMin, int idMax) {
 
     int doorRot = (int)(rand() % 2);
     if (!CarveRoomBordered(&t, fx, fy, placed + 1, doorRot)) return 0;
+    if (id >= 0 && id < ROOM_TEMPLATE_COUNT) RoomTplPlaced[id]++;
     return 1;
 }
 
@@ -500,14 +517,29 @@ int GenerateThemeRooms(int wantCount) {
 
     int placed = 0, attempts = 0;
 
-    while (placed < wantCount && attempts < 120) {
-        attempts++;
-        if (TryPlace(placed, 0, 2)) placed++;
+    /* ==================================================================
+     * 2026-11-06：**放置策略改造**
+     * ------------------------------------------------------------------
+     * 原来的写法是"先用 0..2 放满，放不满再用 3 兜底"。
+     * 实测（500 种子）：第二档**一次都没跑过** —— 因为第一档通常已经
+     * 放满了 wantCount（1~2 间），于是 3..6 那四张模板永远见不到，
+     * 新加的三张主题房等于白加。
+     *
+     * 现在：第一间房有 45% 概率直接从扩展档（3..6）里挑，
+     * 保证跨种子一定能看到全部 7 种。第二间房全范围随机。
+     * ================================================================ */
+    if (wantCount > 0) {
+        int lo = 0, hi = 2;
+        if ((rand() % 100) < 45) { lo = 3; hi = 6; }
+        while (placed < 1 && attempts < 120) {
+            attempts++;
+            if (TryPlace(placed, lo, hi)) placed++;
+        }
     }
-    attempts = 0;
-    while (placed < wantCount && attempts < 120) {
+    /* 其余房间：全范围，允许和第一间同主题（一层两间同款不奇怪） */
+    while (placed < wantCount && attempts < 360) {
         attempts++;
-        if (TryPlace(placed, 3, 3)) placed++;
+        if (TryPlace(placed, 0, 6)) placed++;
     }
     RoomDumpIfRequested(placed);
     return placed;
