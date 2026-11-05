@@ -103,12 +103,75 @@ static void test_wallet_save(void) {
     CHECK(BestiaryStage(0)==BST_COUNTER,"bestiary knowledge survives restart");
     ContinueRun();CHECK(carryGold==321 && carryAtRunStart==200,"saved carry and principal are distinct");
     CHECK(knockCountRun==7 && throwHitCountRun==8 && echoCellsTotalRun==99,"run counters survive resume");
-    /* v25 uses the exact prefix of the new save, not a shifted struct. */
-    SaveBlob old={0};old.magic=SAVE_MAGIC;old.version=25;old.bankGoldSave=4567;old.bankHistMaxSave=8000;old.skillRank[1]=1;
-    const char* dir=getenv("CANITY_DATA_DIR");char path[MAX_PATH];snprintf(path,sizeof(path),"%s\\canity0.sav",dir);
-    FILE* f=fopen(path,"wb");CHECK(f!=NULL,"create isolated v25 fixture");
-    fwrite(&old,1,offsetof(SaveBlob,dailyQuestDate),f);fclose(f);
-    LoadSettings();CHECK(bankGold==4567 && skillRank[1]==1,"v25 migration keeps bank and skill progress");
+    /* ==================================================================
+     * v25 夹具：**必须是真正的 v25 布局**
+     * ------------------------------------------------------------------
+     * 2026-11-06（P0-1）：原来这里直接把"当前 SaveBlob 截断"当成 v25 文件。
+     * 那正是 bug 本身的假设 —— v25 的 Container 是 32 字节，
+     * 现在是 40 字节，cont[8] 之后整段差 64 字节。
+     * 用当前布局写的"假 v25"会让迁移读到错位数据（旧代码就是这么放过的）。
+     *
+     * 现在按**老布局**构造：前缀照抄 → 8 条 32 字节 Container →
+     * cont 之后的字节整体前移 64。这正是 LoadLegacyV28 的逆变换，
+     * 所以这条用例同时验证了"迁移是对的"和"夹具是老的"。
+     * ================================================================ */
+    {
+        SaveBlob cur;
+        memset(&cur, 0, sizeof(cur));
+        cur.magic = SAVE_MAGIC;
+        cur.version = 25;
+        cur.bankGoldSave = 4567;
+        cur.bankHistMaxSave = 8000;
+        cur.skillRank[1] = 1;
+        cur.hasRun = 1;
+
+        static unsigned char legacy[sizeof(SaveBlob) + 256];
+        memset(legacy, 0, sizeof(legacy));
+
+        const size_t contOff   = offsetof(SaveBlob, cont);
+        const size_t oldContSz = 32u * MAX_CONTAINERS;
+        const size_t newContSz = sizeof(Container) * MAX_CONTAINERS;
+        const size_t cutOff    = offsetof(SaveBlob, dailyQuestDate);   /* v25 的截断点 */
+        const size_t tailLen   = cutOff - (contOff + newContSz);
+
+        /* ① 前缀（cont 之前两种布局完全相同） */
+        memcpy(legacy, &cur, contOff);
+
+        /* ② 8 条 32 字节 Container：只抄老版本存在的 6 个 int */
+        for (int ci = 0; ci < MAX_CONTAINERS; ci++) {
+            unsigned char* dst = legacy + contOff + (size_t)ci * 32u;
+            const Container* src = &cur.cont[ci];
+            memcpy(dst + 0,  &src->x,        sizeof(float));
+            memcpy(dst + 4,  &src->y,        sizeof(float));
+            memcpy(dst + 8,  &src->active,   sizeof(int));
+            memcpy(dst + 12, &src->searched, sizeof(int));
+            memcpy(dst + 16, &src->content,  sizeof(int));
+            memcpy(dst + 20, &src->locked,   sizeof(int));
+            memcpy(dst + 24, &src->lockType, sizeof(int));
+            memcpy(dst + 28, &src->lockCode, sizeof(int));
+        }
+
+        /* ③ cont 之后的字节整体前移 64 */
+        memcpy(legacy + contOff + oldContSz,
+               (const unsigned char*)&cur + contOff + newContSz, tailLen);
+
+        const size_t legacyLen = contOff + oldContSz + tailLen;
+
+        const char* dir = getenv("CANITY_DATA_DIR");
+        char path[MAX_PATH];
+        snprintf(path, sizeof(path), "%s\\canity0.sav", dir);
+        FILE* f = fopen(path, "wb");
+        CHECK(f != NULL, "create isolated v25 fixture");
+        CHECK(fwrite(legacy, 1, legacyLen, f) == legacyLen, "write the whole v25 fixture");
+        fclose(f);
+
+        /* 夹具自检：老布局比新布局**短 64 字节**，这是这次 bug 的全部内容 */
+        CHECK(sizeof(SaveBlob) - legacyLen > 0,
+              "the legacy fixture must be shorter than the current struct");
+    }
+    CHECK(LoadSettings(), "legacy v25 save must still load");
+    CHECK(bankGold == 4567 && skillRank[1] == 1,
+          "v25 migration keeps bank and skill progress");
 }
 static void test_trees_shop(void) {
     clear_meta();bankGold=1000000;activeKeystone=-1;

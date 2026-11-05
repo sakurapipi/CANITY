@@ -912,77 +912,88 @@ typedef struct {
    · 成就表从 40 条重建为 32 条，旧 ID 不保证对应 → 清零，避免误弹成就；
    · 技能树前 20 项按位置保留（新树 20..29 级从 0 开始）；
    · 其余大厅进度、金币、银行、遗物、藏身点原样带走。 */
-static void MigrateV24(SaveBlob* cur, const LegacySaveV24* old) {
-    memset(cur, 0, sizeof(*cur));
-    /* 到 upgRest 为止两边布局完全一致（成就是第一个尺寸变化的数组） */
-    memcpy(cur, old, offsetof(LegacySaveV24, achUnlocked));
-    cur->magic = SAVE_MAGIC;
-    cur->version = SAVE_VERSION;
+/* ==================================================================
+ * 2026-11-06（**P0-1 存档布局错位**）：v28 及更早的 Container 是 32 字节
+ * ------------------------------------------------------------------
+ * 现象：读 v27 老档，图鉴变成 104857600、电量 153.95、每日模式变成 -1、
+ *       地图和箱子全乱。
+ *
+ * 根因：v29 给 Container 加了 mimicShell / mimicHost 两个 int
+ *       （32 → 40 字节），而 `Container cont[8]` 在 SaveBlob 的**中间**、
+ *       就在 worldMap **前面**。于是 worldMap 之后的所有字段
+ *       整体**提前 64 字节**。
+ *       "新增字段永远追加在末尾"这条前提只对**顶层**字段成立，
+ *       对嵌套结构不成立 —— 这就是这次的教训。
+ *
+ * 为什么不能整份 memcpy：老文件里的 cont[] 是 8 条 32 字节记录，
+ * 新结构要 8 条 40 字节。所以必须在**原始字节**上重排：
+ *   ① 前缀（到 cont 之前）布局相同 → 直接拷
+ *   ② cont[] 逐字段展开，新增的两个字段补 0
+ *   ③ 尾部从"老 cont 结束"搬到"新 cont 结束"，等价于整体后移 64 字节
+ *
+ * 返回 1 = 成功；0 = 文件太小/明显不对，调用方按"归档不解释"处理。
+ * ================================================================ */
+#define LEGACY_CONTAINER_BYTES 32      /* x,y + active,searched,content,locked,lockType,lockCode */
+#define LEGACY_CONTAINER_INTS  6
 
-    cur->bestEndlessLevel = old->bestEndlessLevel;
-    cur->bestEndlessScore = old->bestEndlessScore;
-    cur->isEndlessRunSaved = old->isEndlessRunSaved;
-    for (int i = 0; i < 20; i++) cur->skillRank[i] = old->skillRank[i];
-    cur->cores = old->cores;
-    cur->activeKeystone = old->activeKeystone;
-    cur->bestMainScore = old->bestMainScore;
-    cur->seenMonsters = old->seenMonsters;
-    cur->bricks = old->bricks;
-    cur->acids = old->acids;
-    cur->smokeBombs = old->smokeBombs;
-    cur->runSkillMask = old->runSkillMask;
-    cur->lang = old->lang;
-    cur->saveSlot = old->saveSlot;
-    for (int i = 0; i < 3; i++) {
-        cur->weaponRank[i] = old->weaponRank[i];
-        cur->weaponXp[i] = old->weaponXp[i];
+typedef char container_must_be_40[(sizeof(Container) == 40) ? 1 : -1];
+
+static int LoadLegacyV28(const unsigned char* src, size_t size, SaveBlob* out) {
+    if (!src || !out || size < 16) return 0;
+
+    size_t contOff   = offsetof(SaveBlob, cont);
+    size_t oldContSz = (size_t)LEGACY_CONTAINER_BYTES * MAX_CONTAINERS;   /* 256 */
+    size_t newContSz = sizeof(Container) * MAX_CONTAINERS;                /* 320 */
+    if (newContSz <= oldContSz) return 0;                                 /* 布局没变，别乱动 */
+
+    memset(out, 0, sizeof(*out));
+
+    /* ---- ① 前缀：cont 之前布局完全相同 ---- */
+    size_t pre = (contOff < size) ? contOff : size;
+    memcpy(out, src, pre);
+
+    /* ---- ② cont[] 逐字段展开 ---- */
+    for (int i = 0; i < MAX_CONTAINERS; i++) {
+        size_t off = contOff + (size_t)i * LEGACY_CONTAINER_BYTES;
+        if (off + LEGACY_CONTAINER_BYTES > size) break;      /* 文件更短：其余留 0 */
+        const unsigned char* p = src + off;
+        memcpy(&out->cont[i].x,        p + 0,  sizeof(float));
+        memcpy(&out->cont[i].y,        p + 4,  sizeof(float));
+        memcpy(&out->cont[i].active,   p + 8,  sizeof(int));
+        memcpy(&out->cont[i].searched, p + 12, sizeof(int));
+        memcpy(&out->cont[i].content,  p + 16, sizeof(int));
+        memcpy(&out->cont[i].locked,   p + 20, sizeof(int));
+        memcpy(&out->cont[i].lockType, p + 24, sizeof(int));
+        memcpy(&out->cont[i].lockCode, p + 28, sizeof(int));
+        out->cont[i].mimicShell = 0;      /* v29 新增，老档没有 */
+        out->cont[i].mimicHost  = 0;
     }
-    for (int i = 0; i < RELIC_COUNT; i++) cur->relicOwned[i] = old->relicOwned[i];
-    cur->relicTotal = old->relicTotal;
-    cur->dailyMode = old->dailyMode;
-    cur->dailySeed = old->dailySeed;
-    cur->campaignMode = old->campaignMode;
-    cur->campaignStage = old->campaignStage;
-    cur->firePots = old->firePots;
-    cur->gluePots = old->gluePots;
-    cur->mirrors = old->mirrors;
-    cur->bankStreak = old->bankStreak;
-    cur->modBatteryMul = old->modBatteryMul;
-    cur->modShardMul = old->modShardMul;
-    cur->modNoiseMul = old->modNoiseMul;
-    for (int i = 0; i < 3; i++) {
-        cur->weaponAttach[i][0] = old->weaponAttach[i][0];
-        cur->weaponAttach[i][1] = old->weaponAttach[i][1];
+
+    /* ---- ③ 尾部整体后移 64 字节 ---- */
+    {
+        size_t oldTailOff = contOff + oldContSz;
+        size_t newTailOff = contOff + newContSz;
+        if (size > oldTailOff) {
+            size_t n = size - oldTailOff;
+            size_t cap = sizeof(SaveBlob) - newTailOff;
+            if (n > cap) n = cap;
+            memcpy((unsigned char*)out + newTailOff, src + oldTailOff, n);
+        }
     }
-    for (int i = 0; i < 10; i++) cur->attachOwned[i] = old->attachOwned[i];
-    cur->curWeapon = old->curWeapon;
-    cur->runUltimate = old->runUltimate;
-    cur->energy = old->energy;
-    cur->benchOwnedSave = old->benchOwnedSave;
-    for (int i = 0; i < 5; i++) cur->runUpgSave[i] = old->runUpgSave[i];
-    cur->hideSpotSaveCount = old->hideSpotSaveCount;
-    for (int i = 0; i < 6; i++) cur->hideSpotSave[i] = old->hideSpotSave[i];
-    cur->hiddenInSave = old->hiddenInSave;
-    cur->safeHealLvSave = old->safeHealLvSave;
-    cur->safeChargeLvSave = old->safeChargeLvSave;
-    cur->safeStaminaLvSave = old->safeStaminaLvSave;
-    cur->achFloorsNoLight = old->achFloorsNoLight;
-    cur->achFloorsFlawless = old->achFloorsFlawless;
-    cur->achFloorsPacifist = old->achFloorsPacifist;
-    cur->achFloorsFast = old->achFloorsFast;
-    cur->achMapsExplored = old->achMapsExplored;
-    cur->achFusesRun = old->achFusesRun;
-    cur->achLocksOpened = old->achLocksOpened;
-    cur->achHideCount = old->achHideCount;
-    cur->achTotalThrown = old->achTotalThrown;
-    cur->achCrankSecondsTotal = old->achCrankSecondsTotal;
-    cur->achLowSanitySeconds = old->achLowSanitySeconds;
-    cur->bankGoldSave = old->bankGoldSave;
-    cur->bankHistMaxSave = old->bankHistMaxSave;
-    cur->bankCarryPctSave = old->bankCarryPctSave;
-    cur->carryGoldSave = old->carryGoldSave;
-    cur->runPrincipalSave = old->carryGoldSave;   /* v25 新增字段，用本金兜底 */
-    cur->musicVolume = volumeF;                   /* v27 字段：老档沿用音效音量 */
+    return 1;
+}
+
+/* 迁移之后，"当前布局里有多少字节是有效的" */
+static size_t LegacyV28ValidBytes(size_t oldSize) {
+    size_t contOff   = offsetof(SaveBlob, cont);
+    size_t oldContSz = (size_t)LEGACY_CONTAINER_BYTES * MAX_CONTAINERS;
+    size_t newContSz = sizeof(Container) * MAX_CONTAINERS;
+    size_t oldTailOff = contOff + oldContSz;
+    size_t newTailOff = contOff + newContSz;
+    size_t tail = (oldSize > oldTailOff) ? (oldSize - oldTailOff) : 0;
+    size_t v = newTailOff + tail;
+    if (v > sizeof(SaveBlob)) v = sizeof(SaveBlob);
+    return v;
 }
 
 typedef char legacySave24_must_fit[(sizeof(LegacySaveV24) <= sizeof(SaveBlob)) ? 1 : -1];
@@ -994,14 +1005,21 @@ int LoadSettings(void) {
     FindNewestSaveSlot();
     /* 按文件的**实际字节数**读，比 sizeof(SaveBlob) 短的就是老存档 */
     long fs = -1;
+    /* P0-1：老档的 Container 布局不同（v28 及更早是 32 字节，
+       现在是 40），必须在**原始字节**上重排。
+       所以记住是哪个文件读成功的，迁移时再读一次它的原始字节。 */
+    char usedPath[MAX_PATH];
+    usedPath[0] = 0;
     for (int i = 0; i < SAVE_CAND_COUNT && fs < 0; i++) {
         const char* cand = SavePathCand(i, p, sizeof(p));
         fs = ReadSaveFile(cand, &g_save);
+        if (fs > 0) { snprintf(usedPath, sizeof(usedPath), "%s", cand); }
         if (fs <= 0) {
             /* v2.2：主档读不出来就试 .bak —— 原来只写不读，等于白备份 */
             char bak[MAX_PATH];
             snprintf(bak, sizeof(bak), "%s.bak", cand);
             fs = ReadSaveFile(bak, &g_save);
+            if (fs > 0) { snprintf(usedPath, sizeof(usedPath), "%s", bak); }
         }
     }
     if (fs <= 0) {
@@ -1019,11 +1037,15 @@ int LoadSettings(void) {
         for (int i = 1; i < SAVE_CAND_COUNT; i++) {
             const char* c2 = SavePathCand(i, p, sizeof(p));
             long f2 = ReadSaveFile(c2, &g_save);
-            if (f2 > 0 && g_save.magic == SAVE_MAGIC) { fs = f2; break; }
+            if (f2 > 0 && g_save.magic == SAVE_MAGIC) {
+                fs = f2; snprintf(usedPath, sizeof(usedPath), "%s", c2); break;
+            }
             char b2[MAX_PATH];
             snprintf(b2, sizeof(b2), "%s.bak", c2);
             f2 = ReadSaveFile(b2, &g_save);
-            if (f2 > 0 && g_save.magic == SAVE_MAGIC) { fs = f2; break; }
+            if (f2 > 0 && g_save.magic == SAVE_MAGIC) {
+                fs = f2; snprintf(usedPath, sizeof(usedPath), "%s", b2); break;
+            }
         }
         if (g_save.magic != SAVE_MAGIC) return 0;
         fileSize = (size_t)fs;
@@ -1059,19 +1081,44 @@ int LoadSettings(void) {
     /* v24（2.3.3 及更早）的布局和现在不同：成就 40→32、技能树 20→26、
        还删了 pendingShards。只在版本号和文件长度都精确匹配时迁移，
        对不上就继续走“归档不解释”的安全路径。 */
-    if (g_save.version == 24 && fileSize == sizeof(LegacySaveV24)) {
-        LegacySaveV24 old;
-        memcpy(&old, &g_save, sizeof(old));
-        MigrateV24(&g_save, &old);
-        fileSize = sizeof(SaveBlob);
+    /* 2026-11-06（P0-1）：**v24 的迁移本身是坏的，先停用**。
+       LegacySaveV24 定义时用的是**新版** Container（40 字节），
+       所以 `fileSize == sizeof(LegacySaveV24)` 对真实的 v24 文件
+       永远不成立；即使凑巧成立，那段 memcpy 也会把 cont[] 之后
+       整段读错。与其用错误的迁移静默毁档，不如归档不解释 ——
+       数据还在盘上（.v24.bak），可以人工回滚。 */
+    if (g_save.version == 24) {
+        (void)sizeof(LegacySaveV24);   /* 结构保留，仅为文档与 static assert */
     }
     /* v25 / v26 / v27：新字段都追加在结构末尾，前缀可以直接读。
        v25 缺 runPrincipalSave，用本局本金兜底（和原来的迁移一致）；
        v28 新增的 Dynamic Res / 通关记录由下面的 has*Field 判断补默认值。 */
     if (g_save.version == 25 || g_save.version == 26 ||
         g_save.version == 27 || g_save.version == 28) {
-        g_save.version = SAVE_VERSION;
-        if (g_save.runPrincipalSave == 0) g_save.runPrincipalSave = g_save.carryGoldSave;
+        /* ================================================================
+         * P0-1：**这里是真正的修复点**
+         * ----------------------------------------------------------------
+         * 旧代码只是把 version 改成 SAVE_VERSION 就放行 —— 但老文件里的
+         * Container 是 32 字节，`cont[8]` 之后的每一字节都错位 64。
+         * 现在重新读原始字节，按老布局重排。
+         * ================================================================ */
+        unsigned char* raw = (unsigned char*)malloc(sizeof(SaveBlob) + 4096);
+        int migrated = 0;
+        if (raw && usedPath[0]) {
+            long rn = ReadWholeFile(usedPath, raw, sizeof(SaveBlob) + 4096);
+            if (rn > 0) migrated = LoadLegacyV28(raw, (size_t)rn, &g_save);
+            if (migrated) fileSize = LegacyV28ValidBytes((size_t)rn);
+        }
+        if (raw) free(raw);
+        if (!migrated) {
+            /* 重排失败：不解释，走下面的归档路径 */
+            g_save.version = 0;
+        } else {
+            if (fileSize < sizeof(g_save))
+                memset((char*)&g_save + fileSize, 0, sizeof(g_save) - fileSize);
+            g_save.version = SAVE_VERSION;
+            if (g_save.runPrincipalSave == 0) g_save.runPrincipalSave = g_save.carryGoldSave;
+        }
     }
     if (g_save.version != SAVE_VERSION) {
         char oldp[MAX_PATH], arc[MAX_PATH + 24];   /* v3.0：留 ".v%d.bak" 的位置 */
