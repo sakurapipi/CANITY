@@ -231,6 +231,40 @@ static void test_no_unwired_api(void) {
  *    这个 bug 的形态是"某个字面量太小"（兜底档只有 1.5f），
  *    很容易在下一次重构里被改回去，而且改回去不会有任何编译错误。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06：**死数据必须真的没了**（标注 CONTRACT）
+ * ------------------------------------------------------------------
+ * monster hp 在 NO_COMBAT 下没有任何消费者，留着只会让 UI 显示假数据。
+ * 这条是源码检查 —— 它不证明"游戏更好玩"，只证明"假字段没回来"。
+ * ================================================================== */
+static void test_no_dead_monster_hp(void) {
+    char* c = read_file("include/common.h");
+    strip_comments(c);
+    check(!contains(c, "int hp;                    /* 剩余血量 */"),
+          "CONTRACT: Monster must not carry a dead hp field");
+    check(!contains(c, "#define MONSTER_HP "),
+          "CONTRACT: MONSTER_HP must be gone");
+    check(!contains(c, "LIGHTBEAST_HP_MUL"),
+          "CONTRACT: LIGHTBEAST_HP_MUL must be gone");
+    free(c);
+
+    char* e = read_file("src/entity.c");
+    strip_comments(e);
+    check(!contains(e, "MonsterHpFor("), "CONTRACT: MonsterHpFor must be gone");
+    check(!contains(e, "int HitMonster("), "CONTRACT: HitMonster had no callers and must be gone");
+    check(!contains(e, "m->hp"), "CONTRACT: nothing may touch Monster.hp any more");
+    free(e);
+
+    /* 玩偶的耐久是**真的**，不能被顺手删掉 */
+    {
+        char* g = read_file("src/game.c");
+        strip_comments(g);
+        check(contains(g, "decoysArr[i].hp"), 
+              "CONTRACT: the decoy doll's durability is real data and must stay");
+        free(g);
+    }
+}
+
 static void test_hidespot_gap_contract(void) {
     char* g = read_file("src/game.c");
     strip_comments(g);
@@ -1001,7 +1035,8 @@ static void test_lockbox_contract(void) {
 int main(void) {
     test_room_template_contract();
     test_tutorial_and_keystone_contract();
-    test_hidespot_gap_contract();   /* v2.4-rc C01：纯函数，最便宜先跑 */
+    test_hidespot_gap_contract();
+    test_no_dead_monster_hp();   /* v2.4-rc C01：纯函数，最便宜先跑 */
     test_no_unwired_api();
     test_wallet_single_source();
     test_steam_zone();

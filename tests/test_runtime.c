@@ -235,6 +235,45 @@ static void test_wallet_save(void) {
  * 这条用例**故意写一个坏档**，然后断言读回来的是"关"而不是"垃圾值"。
  * 没有夹取的话第一条就会红。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06：**平衡验收的机器判据**
+ * ------------------------------------------------------------------
+ * 平衡方案第 5 节有四条验收指标，其中两条是纯数值、可以断言：
+ *   · 每层金币收入落在目标区间
+ *   · 技能表在改价之后仍然自洽
+ *
+ * 为什么写成测试：这两条以前靠"感觉差不多"判断，于是每次调数值
+ * 都没人知道有没有调过头。写成区间断言后，把数值推出区间会**编译期就红**。
+ *
+ * ⚠️ 区间来自平衡方案的**推算**，不是实测。
+ *    实机对不上时，先改区间再改数值 —— 别反过来。
+ * ================================================================== */
+static void test_balance_targets(void) {
+    extern float GoldSearchAt(int level);
+    extern float GoldBreakerAt(int level);
+    extern float GoldExitAt(int level);
+    extern int SkillsSelfTest(void);
+
+    /* ---- 单箱金币：A-1 之后是 6 + 1.1L ---- */
+    {
+        float g1 = GoldSearchAt(1);
+        float g8 = GoldSearchAt(8);
+        CHECK(g1 > 6.5f && g1 < 8.0f, "per-crate gold at level 1 must be about 7 (A-1 target)");
+        CHECK(g8 > 13.0f && g8 < 17.0f, "per-crate gold at level 8 must be about 15 (A-1 target)");
+    }
+
+    /* ---- 整层收入：10 个箱子 + 配电箱 + 出口 ---- */
+    {
+        float floor1 = 10.0f * GoldSearchAt(1) + GoldBreakerAt(1) + GoldExitAt(1);
+        CHECK(floor1 > 130.0f && floor1 < 230.0f,
+              "level-1 income per floor must land in the target band");
+    }
+
+    /* ---- 技能表改价之后必须仍然自洽（总价 == SKILL_TOTAL_COST） ---- */
+    CHECK(SkillsSelfTest() == 0,
+          "the skill table must still self-check after the A-2 price bump");
+}
+
 static void test_load_clamps_flags(void) {
     extern int dailyMode, campaignMode, campaignStage, bestiarySeen;
 
@@ -1814,6 +1853,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

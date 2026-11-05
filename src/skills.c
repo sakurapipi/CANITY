@@ -22,33 +22,33 @@
  *     这样技能树里画出来的竖线才有真实含义（不是你随便点，是真的有路）。 */
 const SkillDef skillDefs[] = {
     /* ---- 列 0：静（噪声的时与地） ---- */
-    {"LIGHT STEP",   "Walking noise reduced 35% per rank",                          0, 3, {1000,2000,3000},       0, -1, 0},   /* v3.0 退役：纯属性，感知不到 */
-    {"QUIET LID",    "Searching makes NO noise at max rank", 0, 3, {1000,2000,3000}, 0, 0, 0},
-    {"GHOST STEP",   "Silent footsteps while light is off", 0, 3, {1000,2000,3000}, 0, SK_SEARCHNOISE, 0},
-    {"DECOY",        "G: throw a stone (8s cd), noise 14", 0, 1, {3500,0,0},  1, SK_GHOSTSTEP, 0},
+    {"LIGHT STEP",   "Walking noise reduced 35% per rank",                          0, 3, {1300,2600,3900},       0, -1, 0},   /* v3.0 退役：纯属性，感知不到 */
+    {"QUIET LID",    "Searching makes NO noise at max rank", 0, 3, {1300,2600,3900}, 0, 0, 0},
+    {"GHOST STEP",   "Silent footsteps while light is off", 0, 3, {1300,2600,3900}, 0, SK_SEARCHNOISE, 0},
+    {"DECOY",        "G: throw a stone (8s cd), noise 14", 0, 1, {4500,0,0},  1, SK_GHOSTSTEP, 0},
     /* ---- 列 1：筹（风险与经济） ---- */
-    {"SIPHON",       "Crates yield +25% gold per rank",                          1, 3, {1000,2000,3000},       0, -1, 0},   /* v3.0 退役 */
-    {"CRANK WALK",   "Crank while walking (move -40%, noise x2)", 1, 3, {1000,2000,3000}, 0, 4, 0},
-    {"REST",         "Safe house rest restores +30 sanity",                          1, 3, {1000,2000,3000},       0, SK_CRANK, 0},   /* v3.0 退役 */
-    {"METABOLISM",   "Sanity loss burns battery (1:3)",    1, 1, {3500,0,0}, 0, SK_CRANK, 0},
+    {"SIPHON",       "Crates yield +25% gold per rank",                          1, 3, {1300,2600,3900},       0, -1, 0},   /* v3.0 退役 */
+    {"CRANK WALK",   "Crank while walking (move -40%, noise x2)", 1, 3, {1300,2600,3900}, 0, 4, 0},
+    {"REST",         "Safe house rest restores +30 sanity",                          1, 3, {1300,2600,3900},       0, SK_CRANK, 0},   /* v3.0 退役 */
+    {"METABOLISM",   "Sanity loss burns battery (1:3)",    1, 1, {4500,0,0}, 0, SK_CRANK, 0},
     /* ---- 列 2：隐（藏匿与脱身） ----
        v3.0：整列重做。原来 4 个节点全是伤害（HEAVY HAND / STAGGER /
        TYPE WORK / RELOAD RHYTHM），无战斗后完全无效。
        换成逃生玩法的核心：怎么躲、怎么脱身。 */
-    {"BREATH",       "Hunters reach the locker but never open it", 2, 3, {1000,2000,3000}, 0, -1, 0},
-    {"STILL FACE",   "Standing still makes you invisible to sound",                          2, 3, {1000,2000,3000},       0, SK_BREATH, 0},   /* v3.0 退役：和 HOLD BREATH 重叠 */
-    {"SLIP AWAY",    "Vanish after 2s out of sight (was 3s)", 2, 3, {1000,2000,3000}, 0, SK_BREATH, 0},
-    {"PLAY DEAD",    "Once per run: escape a grab",        2, 1, {3500,0,0},  1, SK_SLIP, 0},
+    {"BREATH",       "Hunters reach the locker but never open it", 2, 3, {1300,2600,3900}, 0, -1, 0},
+    {"STILL FACE",   "Standing still makes you invisible to sound",                          2, 3, {1300,2600,3900},       0, SK_BREATH, 0},   /* v3.0 退役：和 HOLD BREATH 重叠 */
+    {"SLIP AWAY",    "Vanish after 2s out of sight (was 3s)", 2, 3, {1300,2600,3900}, 0, SK_BREATH, 0},
+    {"PLAY DEAD",    "Once per run: escape a grab",        2, 1, {4500,0,0},  1, SK_SLIP, 0},
     /* ---- 列 3：途（整局形状） ---- */
-    {"CARTO", "Reveal safe house + breaker at start", 3, 2, {1500,3000,0}, 0, -1, 0},
-    {"BREAKER", "Locked crates open 40% faster",                        3, 3, {1000,2000,3000},       0, SK_CARTO, 0},   /* v3.0 退役 */
-    {"FUSE SMITH",   "Fuse need -1 (min 2)",               3, 3, {1000,2000,3000}, 0, SK_CARTO, 0},
-    {"SHORTCUT",     "Skip one non-boss level per run",    3, 1, {3500,0,0}, 0, SK_FUSE_LESS, 0},
+    {"CARTO", "Reveal safe house + breaker at start", 3, 2, {2000,3900,0}, 0, -1, 0},
+    {"BREAKER", "Locked crates open 40% faster",                        3, 3, {1300,2600,3900},       0, SK_CARTO, 0},   /* v3.0 退役 */
+    {"FUSE SMITH",   "Fuse need -1 (min 2)",               3, 3, {1300,2600,3900}, 0, SK_CARTO, 0},
+    {"SHORTCUT",     "Skip one non-boss level per run",    3, 1, {4500,0,0}, 0, SK_FUSE_LESS, 0},
     /* ---- 第 5 行：跨支 keystone（全局只持有一个） ---- */
-    {"SILENT RUN",   "Sprint makes no noise (stamina -30%)", 0, 1, {3000,0,0},  2, 3, 1},
-    {"GREED",   "Gold x1.5, gold threat tier +2", 1, 1, {3000,0,0},       0, 7, 1},   /* v3.0 退役 */
-    {"SECOND WIND",  "Sprint 3s after empty stamina, healing -50%", 2, 1, {3000,0,0},       0, 11, 1},   /* v3.0 退役：PLAY DEAD 覆盖 */
-    {"LIGHTLESS",      "No flashlight; quieter movement (-25%)", 3, 1, {3000,0,0},       0, 15, 1},   /* v3.0 退役 */
+    {"SILENT RUN",   "Sprint makes no noise (stamina -30%)", 0, 1, {3900,0,0},  2, 3, 1},
+    {"GREED",   "Gold x1.5, gold threat tier +2", 1, 1, {3900,0,0},       0, 7, 1},   /* v3.0 退役 */
+    {"SECOND WIND",  "Sprint 3s after empty stamina, healing -50%", 2, 1, {3900,0,0},       0, 11, 1},   /* v3.0 退役：PLAY DEAD 覆盖 */
+    {"LIGHTLESS",      "No flashlight; quieter movement (-25%)", 3, 1, {3900,0,0},       0, 15, 1},   /* v3.0 退役 */
 
     /* ==================================================================
      * v7 第 58 轮：**补回被 git checkout 冲掉的 6 个节点**
@@ -67,10 +67,10 @@ const SkillDef skillDefs[] = {
     {"SHORTCUT JR",   "Fuse need -1 (minimum 2)",5, 1, {2500,0,0},    0, SK_CARTO,     0},
     {"NIGHT WALKER",  "Light on drains 25% slower",               5, 1, {2500,0,0},    0, SK_GHOSTSTEP, 0},
     {"ORIGIN",        "The center. Light this to unlock the net.",5, 1, {0,0,0},       0, -1,           0},
-    {"GREEDY HAND", "Gold +20% per rank, THREAT +1 per rank", 4, 3, {1000,1500,2250},0,-1,0},
-    {"GOLD SCENT", "Noise -10% per rank while carrying gold", 4, 3, {1000,1500,2250},0,SK_GREEDHAND,0},
-    {"GAMBLER", "10% per rank chance for double crate gold", 4, 3, {1000,1500,2250},0,SK_GOLDSCENT,0},
-    {"DESPERATE", "Below 30 sanity: move +4% per rank", 4, 3, {1000,1500,2250},0,SK_GAMBLER,0},
+    {"GREEDY HAND", "Gold +20% per rank, THREAT +1 per rank", 4, 3, {1300,2000,2250},0,-1,0},
+    {"GOLD SCENT", "Noise -10% per rank while carrying gold", 4, 3, {1300,2000,2250},0,SK_GREEDHAND,0},
+    {"GAMBLER", "10% per rank chance for double crate gold", 4, 3, {1300,2000,2250},0,SK_GOLDSCENT,0},
+    {"DESPERATE", "Below 30 sanity: move +4% per rank", 4, 3, {1300,2000,2250},0,SK_GAMBLER,0},
 };
 
 typedef char skillDefs_count_check[(sizeof(skillDefs)/sizeof(skillDefs[0]) == SKILL_COUNT) ? 1 : -1];

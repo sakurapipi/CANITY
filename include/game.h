@@ -245,7 +245,6 @@ void OpenSkillPick(void);
 void OpenRelicPick(void);   /* v2.0 遗物三选一 */
 extern int pickMode;
 extern int bossLevel;      /* 1 = 本层是 Boss 层 */
-extern int bossMaxHp;      /* Boss 满血（HUD 条用） */
 extern int bossDefeated;
 extern int dailyMode;      /* v2.0：每日挑战 */
 extern int dailySeed;

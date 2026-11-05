@@ -377,7 +377,7 @@ int skillPickSel = 0;
 int pickMode = 0;
 static int pendingSkillDraft=0;      /* v2.0：0 = 局内技能，1 = 遗物 */
 int bossLevel = 0;     /* v2.1：本层是否 Boss 层 */
-int bossMaxHp = 1;
+/* 2026-11-06：bossMaxHp 删除（BOSS 已不存在，没有任何读者） */
 int bossDefeated = 0;
 /* 2026-11-05：**totalKills / killsWrench / killsBottle / floorKills 已删除** ——
    NO_COMBAT 之后本作没有任何击杀手段（ApplyDamage 只做噪音 + 硬直），
@@ -1225,7 +1225,6 @@ static void BuildTrainingArena(void) {
     monster.y = (float)(MAP_HEIGHT / 2) + 0.5f;
     monster.active = 1;
     monster.state = 2;
-    monster.hp = 9999;
     monster.stun = 0.0f;
     monster.speed = 0.0f;          /* 标本：完全不动 */
 
@@ -1233,7 +1232,6 @@ static void BuildTrainingArena(void) {
     monster.y = (float)(MAP_HEIGHT / 2) + 0.5f;
     monster.active = 1;
     monster.state = 2;
-    monster.hp = 9999;
     monster.stun = 0.0f;
     monster.speed = 0.0f;          /* 标靶：不动 */
     { monster2.active = 0; monster3.active = 0; }   /* 新局清掉第 2、3 只听声鬼 */
@@ -2805,7 +2803,19 @@ float ExtractDepthMul(int level);
      第 24 层  一层 447
    配合银行倍数，深层一局的收益是浅层的 4~6 倍。 */
 float EndlessDepthBonus(int level);
-float GoldSearchAt(int level)  { return ( 8.0f + 1.5f * (float)level) * EndlessDepthBonus(level); }
+/* ==================================================================
+ * 2026-11-06（A-1 单箱金币回调）
+ * ------------------------------------------------------------------
+ * 局内箱子从 6~8 涨到 8~12（+43%），而单箱金币没变
+ * → 每层搜刮收入从 63 涨到 90，整体金币 +35~40%。
+ *
+ * 这里把单箱收益按同比例压回去：8+1.5L -> 6+1.1L
+ *   第 1 层  9 -> 7   （×1.43 箱子 ≈ 10，净 +11%）
+ *   第 8 层 20 -> 15  （净 +5%）
+ *   第16 层 32 -> 24  （净 +6%）
+ * 净通胀压到 +5~11%，几乎无感；价格表一个都没动。
+ * ================================================================ */
+float GoldSearchAt(int level)  { return ( 6.0f + 1.1f * (float)level) * EndlessDepthBonus(level); }
 float GoldBreakerAt(int level) { return (25.0f + 3.0f * (float)level) * EndlessDepthBonus(level); }
 float GoldExitAt(int level)    { return (30.0f + 6.0f * (float)level) * EndlessDepthBonus(level); }
 
@@ -4902,7 +4912,6 @@ void Update(float dt) {
         stamina = StaminaMax();
         monster.active = 1;
         monster.state = 2;              /* 原地不动，当标本 */
-        monster.hp = 9999;
         monster.stun = 0.0f;
         if (trainingDpsTimer > 0.0f) trainingDpsTimer -= dt;
         else trainingDps = 0;

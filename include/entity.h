@@ -9,7 +9,6 @@
 #include "common.h"
 
 /* ---- 玩家（位置 / 朝向 / 相机平面） ---- */
-int MonsterHpFor(int level);      /* v2.1 按层算怪的血量 */
 extern float posX, posY;
 extern float dirX, dirY;
 extern float planeX, planeY;
@@ -73,7 +72,6 @@ void MakeNoise(float x, float y, float radius);
 extern float noiseDisplay;        /* v3.0：HUD 噪音条 0..1 */
 extern float noiseDisplayTimer;
 extern float noiseSrcX, noiseSrcY;
-int HitMonster(Monster* m, int dmg);
 int ApplyDamage(Monster* m, int base, int type, float sx, float sy);
 
 

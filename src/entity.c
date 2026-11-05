@@ -287,31 +287,11 @@ void SpawnMonster(void) {
     monster.hitCooldown = HitCooldownFor(currentLevel);
     monster.growlTimer = 3.0f;
     /* v2.1：Boss 层把寻声鬼强化成 Boss（8 倍血、更大只、更慢） */
-    extern int bossLevel, bossMaxHp;
-    monster.hp = MonsterHpFor(currentLevel);
-    /* v2.0：战役每关加码 —— 原来 5 关全都用第 1 层数值，没有任何递进 */
-    {
-        extern int campaignMode, campaignStage;
-        if (campaignMode && campaignStage > 0)
-            monster.hp = (int)((float)monster.hp * (1.0f + 0.28f * (float)campaignStage) + 0.5f);
-    }
-    if (bossLevel) {
-        /* v2.0：3 个 Boss 各走一条路线 —— 第 6 层「快」、12 层「厚」、18 层「全能」。
-           原来三个 Boss 都是同一只怪 ×8 血 ×0.72 速，玩家完全分不出来。 */
-        int lv = currentLevel;
-        if (lv <= 6)        { monster.hp *= 6;    monster.speed *= 1.10f; }   /* 快攻 */
-        else if (lv <= 12)  { monster.hp *= 6;    monster.speed *= 0.62f; }   /* v2.2：10→6（符印原来打不完） */   /* 厚甲 */
-        else                { monster.hp *= 5.5f; monster.speed *= 0.95f; }  /* v2.2：9→5.5 */   /* 全能 */
-        bossMaxHp = monster.hp;
-        /* v2.2：Boss 原来三抗全同 → 符印（理智）和信号枪（电量）
-           在 12/18 层算术上打不死（要 216/264 点，上限 100）。
-           给法术和金币各 -30% 抗性（弱点），让三把武器都能通。 */
-        monster.resist[DT_SLASH] = -30;
-        monster.resist[DT_SHARD] = -30;
-        monster.resist[DT_BLUNT] = 10;
-    } else {
-        bossMaxHp = monster.hp;
-    }
+    /* 2026-11-06：hp 与 boss 血量倍率整体删除（NO_COMBAT 下全是死数据）。
+       BOSS 早已删除，bossLevel 恒为 0，那段 if 从来不跑。 */
+    /* 2026-11-06：战役的 +28%/关**只加血量**，而血量已经删除 ——
+       所以这一段整体去掉。战役的强度递进改由速度/刷怪节奏承担
+       （见 MonsterSpeedFor 与 HUNTER_SPAWN_*_T）。 */
     /* v1.15：护甲 0；抗玻璃（它是被瓶子砸醒的），弱钝击 */
     monster.armor = 0;
     monster.resist[DT_SLASH] = 0;
@@ -561,7 +541,6 @@ void SpawnLightBeast(void) {
     lightBeast.wanderTimer = 1.5f;
     lightBeast.hitCooldown = HitCooldownFor(currentLevel);
     lightBeast.growlTimer = 3.0f;
-    lightBeast.hp = (int)((float)MonsterHpFor(currentLevel) * LIGHTBEAST_HP_MUL);
     /* v1.15：有甲、抗刀、怕钝击 */
     lightBeast.armor = 1;
     lightBeast.resist[DT_SLASH] = 20;
@@ -730,7 +709,6 @@ void SpawnParasite(void) {
     parasite.attached = 0;
     parasite.ramp = 0.0f;
     parasite.attachTimer = 0.0f;
-    parasite.hp = 1;
     parasite.stun = 0.0f;
 
     /* 起点：玩家正前方 4~6 格，随机偏一点 */
@@ -937,7 +915,11 @@ float HunterHearMul(void) {
 }
 
 /* 第 3 只的移动速度倍率（长得最瘦、跑得最快） */
-#define HUNTER3_SPEED_MUL   1.45f
+/* 2026-11-06（A-5）：1.45 -> 1.30。
+   基础速度上限提到 2.10 之后，1.45 倍会顶到 3.05 ——
+   比玩家冲刺还快，那是"瞬移"投诉的来源。1.30 × 2.10 = 2.73，
+   仍然追得上冲刺前的走位，但追不上冲刺。 */
+#define HUNTER3_SPEED_MUL   1.30f
 /* 第 3 只的追击时长倍率（是另外两只的两倍） */
 #define HUNTER3_CHASE_MUL   2.0f
 /* 第 2 只撞到玩家挂的减速 */
@@ -1618,11 +1600,6 @@ extern int g_dmgIgnoreArmor;   /* v1.16：1 = 本次伤害无视护甲（酸瓶�
    武器满蓄力 59/39/72 → 开局 1~2 击，第 10 层 3~6 击，
    熟练度（+24%）和配件（×1.5）第一次有了可观察的效果。 */
 
-int MonsterHpFor(int level) {
-    if (level < 1) level = 1;
-    return MONSTER_HP + MONSTER_HP_STEP * (level - 1);
-}
-
 #if NO_COMBAT
 /* v3.0 逃生试炼：**攻击不再造成伤害**。
    打中怪物只制造噪音（把附近的追捕者引过来）+ 短暂硬直。
@@ -1642,32 +1619,6 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
    因为条件编译永远不参与编译。留着只会让人以为战斗系统还在 —— 
    谁哪天把 NO_COMBAT 翻成 0，那套逻辑会突然复活，而 UI 和平衡全按「打不死」写的。 */
 #endif  /* NO_COMBAT */
-
-int HitMonster(Monster* m, int dmg) {
-    if (!m->active) return 0;
-    if (m->stun > 0.0f) return 0;    /* 已经在硬直里，不重复结算 */
-
-    /* 跳脸虫不在这条路径上 —— 它是屏幕空间的 QTE 事件，
-       不在世界里，也没有实体可以砸。 */
-
-    m->hp -= dmg;
-    m->hitCooldown = 0.0f;           /* 硬直期间不该抓人 */
-
-    if (m->hp <= 0) {
-        /* 血量耗尽：直接驱离（重新生成到别处），而不是留在原地 */
-        if (m == &monster) SpawnMonster();
-        else SpawnLightBeast();
-        /* 2026-11-05：bottlesKilled 已删除 —— NO_COMBAT 下 m->hp 永远打不光，
-           这个分支是编译死代码（保留结构，去掉无意义的计数）。 */
-    } else {
-        KnockbackMonster(m);
-    }
-    PlaySfx(SFX_GLASS, 0.9f);
-    if (!RunBottleSilent())          /* v1.8：静默瓶规则可免除这次暴露 */
-        MakeNoise(posX, posY, 9.0f);   /* v2.2：打怪发声应当暴露玩家，而不是让怪自己失忆 */ /* 砸怪的代价：暴露自己的位置 */
-    return 1;
-}
-
 
 /* ================================================================== */
 /* v1.8 偷电怪：不造成直接伤害，只悄悄抽电；只有手电照到才可见          */

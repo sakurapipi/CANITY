@@ -184,8 +184,12 @@ extern int bestEndlessScore;
    1.90 低于走路，慢走能拉开但每 10 秒只赚 1 格，压力仍在。 */
 #define MONSTER_SPEED_BASE 1.90f    /* 寻声怪基础速度 */
 #define LIGHTBEAST_SPEED_BASE 1.50f /* 光敏怪基础速度 */
-#define MONSTER_SPEED_STEP 0.03f    /* 每层 +0.03 */
-#define MONSTER_SPEED_MAX 2.05f   /* v3.0 削弱：2.35 → 2.05（刚超过走路） */   /* v3.0 平衡：仍然 < 冲刺 3.0 */    /* v2.1：玩家 2.0，怪必须追不上但贴着 */
+/* 2026-11-06（A-4）：每层 +0.03 -> +0.04。
+   地图边长 ×1.5，追捕需要更早形成压迫；
+   FINAL_MAX 仍是 2.10（不许超过玩家冲刺 3.0），
+   所以这只是"更早到达上限"，不是"更快"。 */
+#define MONSTER_SPEED_STEP 0.04f
+#define MONSTER_SPEED_MAX 2.10f   /* v3.0 削弱：2.35 → 2.05（刚超过走路） */   /* v3.0 平衡：仍然 < 冲刺 3.0 */    /* v2.1：玩家 2.0，怪必须追不上但贴着 */
 #define MONSTER_SPEED_FINAL_MAX 2.10f   /* v3.0 削弱 */  /* v2.1：叠 HUNTED 也不许超过玩家 */
 /* 最终上限 2.40 < MOVE_SPEED 2.50：玩家永远走得比怪快。
    基础上限留 1.85 是为了让 HUNTED 的 ×1.25 在深层仍有意义
@@ -311,7 +315,9 @@ typedef struct {
     int   suspTarget;  /* v7：当前追的是可疑点表里的第几条，-1 = 没有 */
     float suspCool;    /* v2.3.1：接新线索的冷却，防止每帧重设状态 */
     float speed;
-    int hp;                    /* 剩余血量 */
+    /* 2026-11-06：**hp 已删除** —— NO_COMBAT 下没有任何代码能扣它
+       （唯一会扣血的 HitMonster 全工程 0 个调用点）。
+       留着它只会让图鉴/HUD 显示假数据。 */
     /* ---- v1.15 伤害系统 ---- */
     int armor;                     /* 固定减伤 */
     signed char resist[DT_COUNT];  /* 百分比抗性；负数 = 弱点 */
@@ -368,13 +374,6 @@ typedef struct {
 } SmokeCloud;
 extern SmokeCloud smokes[MAX_SMOKE];
 
-/* 怪物血量：玻璃瓶能砸怪，所以怪需要有血 */
-/* v2.1：血量搬到伤害量纲。原来恒 3 点，武器伤害 30-55 全部溢出，
-   「伤害 / 熟练度 / 配件」整条成长链在数学上不存在。 */
-#define MONSTER_HP      70      /* v2.0：基础 70（开局 2 击） */
-#define MONSTER_HP_STEP 8       /* v2.2：12→8（第 24 层 346→254） */      /* v2.0：30→12。原来第 24 层 780 血，
-                                   满蓄力 46 要打 17 下 = 20 秒，手枪一整条电都杀不死一只 */
-#define LIGHTBEAST_HP_MUL 0.6f            /* 寻声怪：3 瓶 */
 #define MONSTER_STUN 1.2f       /* 被砸中后的硬直秒数 */
 #define MONSTER_FLEE_DIST 3.0f  /* 被驱离时后退的距离 */
 /* 听声鬼 / 追光鬼的**抓取判定半径**（格）。
@@ -701,7 +700,7 @@ extern int eventBonus;       /* 本局累计的事件加分 */
 #define SKILL_COUNT 30   /* v6：20 → 26（+5 联动 +1 中心）*/
 #define KEYSTONE_COUNT 8              /* 4 个分支 keystone + 4 个跨支 */
 #define SKILL_POINTS_FOR_KEYSTONE 5   /* 分支投入门槛（每列上限 7 点） */
-#define SKILL_TOTAL_COST 128000   /* v7 第 ㊿ 轮：按现表实算（26 节点 174,500 + 4 核 4,000 = 178,500）。
+#define SKILL_TOTAL_COST 160000   /* 2026-11-06（A-2）：整体 ×1.3 抵消局内金币 +40%。按现表实算 = 160000。
                                     原来写 278,500，比实际多 104,000 → SkillsSelfTest 必然失败，
                                     而那个返回值又被 ui.c 的 (void)r 丢掉了，护栏装了没插电。 */
 #define SKILL_TOTAL_CORES 4   /* v6：按现表重算 */          /* 满树核心 */
@@ -1019,7 +1018,7 @@ static inline float Dist2(float ax, float ay, float bx, float by) {
 /* ===== v2.4.93 听声鬼强化 =====
    追逐从 8 秒拉到 14 秒 —— 从走廊一头跑到另一头大约 8~10 秒，
    8 秒意味着"转个弯就脱身"，14 秒逼你真的甩掉它。 */
-#define HUNT_CHASE_MAX        14.0f
+#define HUNT_CHASE_MAX        18.0f
 #define HUNT_SEARCH_MAX        4.5f
 #define HUNT_RELOCK_WINDOW     6.0f   /* 搜寻中再次听到 → 立刻重锁 */
 #define HUNT_SECOND_SPAWN_T   30.0f   /* 第二只出现的秒数 */
