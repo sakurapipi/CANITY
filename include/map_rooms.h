@@ -28,6 +28,9 @@ int RoomCount(void);
 #define MAX_ROOM_PROPS 16
 #define ROOMPROP_SHELF   0
 #define ROOMPROP_CONSOLE 1
+/* C：**木箱堆** —— 复用现有的 SPR_PROP_CRATE，零新美术。
+   作用是让房间不只有货架：仓储室该有箱子堆，锅炉房也该有杂物。 */
+#define ROOMPROP_CRATES  2
 
 typedef struct {
     float x, y;

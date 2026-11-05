@@ -485,7 +485,8 @@ static float SpriteShade(float ty, float minK) {
     return k;
 }
 
-void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float lightK);   /* v2.1 */
+void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float lightK);
+void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, float lightK);   /* v2.1 */
 
 /* ==================================================================
  * 2026-11-06（v2.4-rc P1）：**lift 改成 baseZ**
@@ -650,16 +651,39 @@ void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float 
     DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
 
     /* ==================================================================
-     * P1：**按内容包围盒还原宽高比**
+     * 2026-11-06：**老物件保持原尺寸**
      * ------------------------------------------------------------------
-     * 画布固定 128x128，但每张图真正有像素的只有一块。
-     * 原来一律按正方形绘制 → 窄高的货架被横向拉宽、矮扁的控制台被拉高，
-     * 而且画布底部的留白让物件看起来悬空。
+     * 上一轮我给 Sprite 加了内容包围盒，并把包围盒高度映射成 halfH ——
+     * 结果箱子/垃圾桶等老物件的视觉尺寸放大了约 2.7 倍
+     * （它们的艺术只占画布的 37%，而 halfH 原来是按画布给的）。
+     * 用户反馈：「箱子模型过大，隐藏点模型过大」。
      *
-     * 现在：把包围盒的高度映射到投影高度 h，
-     * 再把包围盒的底边对齐到 s.y1（地面），其余按同一比例缩放。
-     * 包围盒无效（全透明）时退回原来的正方形绘制。
+     * 这里恢复原有语义：**halfH 是画布高度**，按正方形绘制。
+     * 需要"按艺术高度"精确控制的新物件（房间家具）走 DrawBakedPropArt。
      * ================================================================ */
+    {
+        int x = (s.x0 + s.x1) / 2 - size / 2;
+        int y = s.y1 - size;
+        DrawSprite(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty);
+        return;
+    }
+}
+
+/* 按**内容包围盒**绘制的版本：halfH 是艺术本身的高度，
+   底边对齐地面，宽度按包围盒宽高比还原。
+   房间家具（货架/控制台）用它 —— 它们的体积需要精确控制。 */
+void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, float lightK) {
+    SpriteBox s = ProjectSprite(wx, wy, baseZ, halfH);
+    if (!s.ok) return;
+    if (s.ty < 0.55f) return;
+    int w = s.x1 - s.x0, h = s.y1 - s.y0;
+    if (w < 2 || h < 2) return;
+    int size = h;
+
+    float light = SpriteShade(s.ty, 0.12f) * PropProximityLight(wx, wy);
+    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
+
+    /* 把包围盒高度映射到投影高度，底边对齐地面 */
     Sprite* sp = SpriteGet(spr);
     int bw = 0, bh = 0;
     if (sp) { bw = sp->bx1 - sp->bx0 + 1; bh = sp->by1 - sp->by0 + 1; }
@@ -2731,15 +2755,38 @@ void RenderSprites(void) {
                 extern int RoomPropLayers(int, PropLayer*, int);
                 PropLayer lp[PROP_MAX_LAYERS];
                 int ln = RoomPropLayers(roomProps[ri].kind, lp, PROP_MAX_LAYERS);
+                /* ================================================================
+                 * 2026-11-06（**B：层数多导致路过掉帧**）
+                 * ----------------------------------------------------------------
+                 * 一个货架 4 层，每层都是一次带 z-test 的大面积像素 blit。
+                 * 走过架子时 4 层同时占满屏幕，代价是单图的 4 倍。
+                 *
+                 * 远处根本看不出层间视差（角度变化太小），
+                 * 所以按距离降级：>7 格只画框架（1 层），>3.5 格画 2 层。
+                 * 近处才画满 —— 视差本来也只在近处有意义。
+                 * ================================================================ */
+                {
+                    float ddx = roomProps[ri].x - posX;
+                    float ddy = roomProps[ri].y - posY;
+                    float d2 = ddx * ddx + ddy * ddy;
+                    if (d2 > 49.0f)       ln = 1;      /* > 7 格 */
+                    else if (d2 > 12.25f) ln = (ln < 2) ? ln : 2;   /* > 3.5 格 */
+                }
                 int isConsole = (roomProps[ri].kind == ROOMPROP_CONSOLE);
+                int isCrates  = (roomProps[ri].kind == ROOMPROP_CRATES);
                 for (int L2 = 0; L2 < ln; L2++) {
                     /* 层表里 spr 是**层内索引**：0 = 主体，1 = 附加层。
                        在这里映射到真正的精灵 id —— 层表本身不依赖渲染层。 */
-                    int sid = (lp[L2].spr == 0)
-                                ? (isConsole ? SPR_PROP_CONSOLE_BASE : SPR_PROP_SHELF_FRAME)
-                                : (isConsole ? SPR_PROP_CONSOLE_PANEL : SPR_PROP_SHELF_BOARD);
-                    DrawBakedProp(sid, roomProps[ri].x, roomProps[ri].y,
-                                  lp[L2].baseZ, lp[L2].halfH, 1.0f);
+                    int sid;
+                    if (isCrates) {
+                        sid = SPR_PROP_CRATE;
+                    } else if (isConsole) {
+                        sid = (lp[L2].spr == 0) ? SPR_PROP_CONSOLE_BASE : SPR_PROP_CONSOLE_PANEL;
+                    } else {
+                        sid = (lp[L2].spr == 0) ? SPR_PROP_SHELF_FRAME : SPR_PROP_SHELF_BOARD;
+                    }
+                    DrawBakedPropArt(sid, roomProps[ri].x, roomProps[ri].y,
+                                     lp[L2].baseZ, lp[L2].halfH, 1.0f);
                 }
             }
             break;

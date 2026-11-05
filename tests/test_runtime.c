@@ -902,9 +902,22 @@ static void test_room_props(void) {
         for (int i = 0; i < roomPropCount; i++) {
             if (!roomProps[i].active) continue;
             if (roomProps[i].kind != ROOMPROP_SHELF &&
-                roomProps[i].kind != ROOMPROP_CONSOLE) kindOk = 0;
+                roomProps[i].kind != ROOMPROP_CONSOLE &&
+                roomProps[i].kind != ROOMPROP_CRATES) kindOk = 0;   /* C：木箱堆 */
         }
         CHECK(kindOk, "every room prop must have a known kind");
+    }
+
+    /* C：房间不能只有货架一种东西 —— 木箱堆必须真的出现过 */
+    {
+        int sawCrates = 0, sawOther = 0;
+        for (int i = 0; i < roomPropCount; i++) {
+            if (!roomProps[i].active) continue;
+            if (roomProps[i].kind == ROOMPROP_CRATES) sawCrates = 1;
+            else sawOther = 1;
+        }
+        CHECK(sawCrates, "rooms must contain crate stacks, not only shelves");
+        CHECK(sawOther, "rooms must still contain their feature furniture");
     }
 
     /* 再生成一次，家具表必须被清空重来，不能累加 */

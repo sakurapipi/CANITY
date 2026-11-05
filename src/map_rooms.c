@@ -128,6 +128,13 @@ int RoomPropLayers(int kind, PropLayer* out, int maxOut) {
         out[1].baseZ = 0.34f; out[1].halfH = 0.28f; out[1].spr = 1;    /* 斜面板 */
         return 2;
     }
+    if (kind == ROOMPROP_CRATES) {
+        /* 木箱堆：两层箱子叠起来，层间留空隙 → 有视差、也读作"堆" */
+        if (maxOut < 2) return 0;
+        out[0].baseZ = 0.00f; out[0].halfH = 0.26f; out[0].spr = 0;
+        out[1].baseZ = 0.26f; out[1].halfH = 0.22f; out[1].spr = 1;
+        return 2;
+    }
     return 0;
 }
 
@@ -158,10 +165,13 @@ static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
     if (!t) return;
     int innerX = fx + ROOM_BORDER;
     int innerY = fy + ROOM_BORDER;
-    int want = 2 + (int)(rand() % 2);          /* 每间 2~3 件 */
+    int want = 3 + (int)(rand() % 2);          /* 每间 3~4 件（含木箱堆） */
     int placed = 0;
 
     int propKind = (t->featureId == ROOM_FEATURE_POWER) ? ROOMPROP_CONSOLE : ROOMPROP_SHELF;
+    /* C：再放 1~2 个木箱堆 —— 房间不能只有货架一种东西。
+       它们走同一套"放一件→验连通→不行就撤"的流程。 */
+    int crates = 1 + (int)(rand() % 2);
 
     /* 沿房间内圈一圈走，优先靠墙的格子 */
     for (int pass = 0; pass < 2 && placed < want; pass++) {
@@ -184,10 +194,12 @@ static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
                 }
                 if (taken) continue;
 
-                if (!RoomPropAdd((float)cx + 0.5f, (float)cy + 0.5f, propKind)) continue;
+                int kind2 = (crates > 0) ? ROOMPROP_CRATES : propKind;
+                if (!RoomPropAdd((float)cx + 0.5f, (float)cy + 0.5f, kind2)) continue;
                 /* P2：**放完立刻验连通**。堵死就撤掉这一件。
                    宁可这间少一件家具，也不能让玩家进不去或出不来。 */
                 if (!RoomReachable()) { RoomPropRemoveLast(); continue; }
+                if (kind2 == ROOMPROP_CRATES) crates--;
                 placed++;
             }
         }
