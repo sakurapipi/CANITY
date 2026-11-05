@@ -262,6 +262,32 @@ int SteamZoneCloudDownload(const char* name, void* buf, int bufSize) {
 #endif
 }
 
+/* ==================================================================
+ * 2026-11-06（v2.4-alpha R7）：**只读的大小查询**
+ * ------------------------------------------------------------------
+ * SteamZoneCloudDownload 内部早就在调 GetFileSize，只是不外露。
+ * 云同步要「不假设远端长度等于本地」，就需要单独拿到这个数。
+ * 这里不造第二套传输 API，只是把已有的大小读出来。
+ *
+ * 上限用 STEAM_CLOUD_MAX_BYTES（预算，不是产品承诺）：
+ * 超过就当读不出来 —— 总比 malloc 一个荒唐的大小好。
+ * ================================================================== */
+#define STEAM_CLOUD_MAX_BYTES  (1024 * 1024)
+
+int SteamZoneCloudGetSize(const char* name) {
+    if (!s_ready || !name || !name[0]) return 0;
+#if CANITY_STEAM
+    void* rs = p_SteamRemoteStorage ? p_SteamRemoteStorage() : NULL;
+    if (!rs) return 0;
+    int sz = p_ISteamRemoteStorage_GetFileSize(rs, name);
+    if (sz <= 0 || sz > STEAM_CLOUD_MAX_BYTES) return 0;
+    return sz;
+#else
+    (void)name;
+    return 0;
+#endif
+}
+
 int SteamZoneCloudExists(const char* name) {
     if (!s_ready || !name) return 0;
 #if CANITY_STEAM
@@ -366,36 +392,93 @@ typedef SaveEnvelope SteamCloudHead;
 #define STEAM_CLOUD_MAGIC SAVE_ENVELOPE_MAGIC
 #define fnv1a(p, n)       SaveFnv1a((p), (n))
 
-int SteamZoneCloudSync(const char* name, void* localBuf, int bufSize) {
-    if (!s_ready || !name || !localBuf || bufSize <= (int)sizeof(SteamCloudHead)) {
-        return STEAM_SYNC_ERROR;
-    }
+/* ==================================================================
+ * 2026-11-06（v2.4-alpha R8）：**纯判定**
+ * ------------------------------------------------------------------
+ * 从 SteamZoneCloudSync 里拆出来的原因只有一个：**要能单测**。
+ * 之前的逻辑依赖 s_ready，没有 Steam 客户端就整段 no-op，
+ * 于是"长度不同的合法存档不会判损坏"这条根本没法验证 ——
+ * 只能靠读代码，那正是审查反复警告的"假绿"。
+ *
+ * 这里只做字节层面的判断，不传输、不落盘、不看 Steam 状态。
+ * ================================================================== */
+int SteamZoneCloudDecide(const void* local, int localLen,
+                         const void* remote, int remoteLen,
+                         int* outLen) {
+    if (!local || !remote) return STEAM_SYNC_ERROR;
+    if (localLen <= (int)sizeof(SteamCloudHead)) return STEAM_SYNC_ERROR;
+    if (remoteLen <= (int)sizeof(SteamCloudHead)) return STEAM_SYNC_ERROR;
 
-    int payload = bufSize - (int)sizeof(SteamCloudHead);
-    unsigned char* localPayload = (unsigned char*)localBuf + sizeof(SteamCloudHead);
-    unsigned int localSum = fnv1a(localPayload, payload);
+    const SteamCloudHead* lh = (const SteamCloudHead*)local;
+    SteamCloudHead ch;
+    memcpy(&ch, remote, sizeof(ch));
+
+    int localPayload  = localLen  - (int)sizeof(SteamCloudHead);
+    int remotePayload = remoteLen - (int)sizeof(SteamCloudHead);
+
+    /* 本地自己必须自洽 */
+    if (lh->magic != STEAM_CLOUD_MAGIC || lh->payload != localPayload) return STEAM_SYNC_ERROR;
+    if (lh->sum != fnv1a((const unsigned char*)local + sizeof(SteamCloudHead), localPayload))
+        return STEAM_SYNC_ERROR;
+
+    /* 远端按**自己的**长度独立校验 —— 长度不同不是损坏证据 */
+    if (ch.magic != STEAM_CLOUD_MAGIC || ch.payload != remotePayload) return STEAM_SYNC_ERROR;
+    if (ch.version != lh->version) return STEAM_SYNC_ERROR;
+    if (ch.sum != fnv1a((const unsigned char*)remote + sizeof(SteamCloudHead), remotePayload))
+        return STEAM_SYNC_ERROR;
+
+    /* 内容一致（长度可以不同：同内容必然同长，这里仍两边都比一次） */
+    if (ch.sum == lh->sum && remotePayload == localPayload) return STEAM_SYNC_SAMECL;
+
+    /* stamp 只到秒：同秒不同内容 = 无法裁决 */
+    if (ch.stamp == lh->stamp) return STEAM_SYNC_CONFLICT;
+
+    if (ch.stamp > lh->stamp) {
+        if (outLen) *outLen = remoteLen;
+        return STEAM_SYNC_CLOUDWIN;
+    }
+    return STEAM_SYNC_LOCALWIN;
+}
+
+int SteamZoneCloudSync(const char* name, void* localBuf, int* bufSize) {
+    if (!s_ready || !name || !localBuf || !bufSize) return STEAM_SYNC_ERROR;
+    int cap = *bufSize;
+    if (cap <= (int)sizeof(SteamCloudHead)) return STEAM_SYNC_ERROR;
 
     /* ① 云端没有 → 上传 */
     if (!SteamZoneCloudExists(name)) {
-        return SteamZoneCloudUpload(name, localBuf, bufSize)
+        return SteamZoneCloudUpload(name, localBuf, cap)
              ? STEAM_SYNC_NOCLOUD : STEAM_SYNC_ERROR;
     }
 
-    unsigned char* remote=(unsigned char*)malloc((size_t)bufSize);
-    if(!remote) return STEAM_SYNC_ERROR;
-    int got=SteamZoneCloudDownload(name,remote,bufSize);
-    if(got!=bufSize) {free(remote);return STEAM_SYNC_ERROR;}
-    SteamCloudHead ch; memcpy(&ch,remote,sizeof(ch));
-    SteamCloudHead* lh=(SteamCloudHead*)localBuf;
-    if(ch.magic!=STEAM_CLOUD_MAGIC || ch.version!=lh->version || ch.payload!=payload ||
-       ch.sum!=fnv1a(remote+sizeof(ch),payload)) {free(remote);return STEAM_SYNC_ERROR;}
-    if(ch.sum==localSum) {free(remote);return STEAM_SYNC_SAMECL;}
-    if(ch.stamp>lh->stamp) {memcpy(localBuf,remote,(size_t)bufSize);free(remote);return STEAM_SYNC_CLOUDWIN;}
+    /* ② 取**远端自己的长度**，不假设等于本地 */
+    int rsize = SteamZoneCloudGetSize(name);
+    if (rsize <= (int)sizeof(SteamCloudHead)) return STEAM_SYNC_ERROR;
+
+    unsigned char* remote = (unsigned char*)malloc((size_t)rsize);
+    if (!remote) return STEAM_SYNC_ERROR;
+    int got = SteamZoneCloudDownload(name, remote, rsize);
+    if (got != rsize) { free(remote); return STEAM_SYNC_ERROR; }
+
+    /* ③ 判定（纯函数，已被 test_runtime 单测） */
+    int winLen = 0;
+    int verdict = SteamZoneCloudDecide(localBuf, cap, remote, rsize, &winLen);
+
+    if (verdict == STEAM_SYNC_CLOUDWIN) {
+        if (winLen <= 0 || winLen > cap) { free(remote); return STEAM_SYNC_CONFLICT; }
+        memcpy(localBuf, remote, (size_t)winLen);
+        *bufSize = winLen;
+        free(remote);
+        return STEAM_SYNC_CLOUDWIN;
+    }
+
     free(remote);
 
-    /* ⑤ 本地更新 → 上传 */
-    return SteamZoneCloudUpload(name, localBuf, bufSize)
-         ? STEAM_SYNC_LOCALWIN : STEAM_SYNC_ERROR;
+    if (verdict == STEAM_SYNC_LOCALWIN) {
+        return SteamZoneCloudUpload(name, localBuf, cap)
+             ? STEAM_SYNC_LOCALWIN : STEAM_SYNC_ERROR;
+    }
+    return verdict;
 }
 
 /* ---- 统计 ---- */

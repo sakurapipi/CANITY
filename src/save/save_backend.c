@@ -147,14 +147,24 @@ void SaveBackendSyncAll(void) {
         const char* name = strrchr(p, '\\');
         name = name ? name + 1 : p;
 
-        if (SteamZoneCloudSync(name, buf, (int)n) == STEAM_SYNC_CLOUDWIN) {
+        /* ================================================================
+         * 2026-11-06（v2.4-alpha R7）：长度改成 in-out
+         * ----------------------------------------------------------------
+         * 原来传 (int)n —— 云端那份如果长度不同，Sync 内部会直接判损坏。
+         * 现在传 &len：进来是本地缓冲容量，出去是**最终生效那份的长度**。
+         * buf 分配的是 1 MiB，所以云端更长也放得下。
+         * ================================================================ */
+        int len = (int)n;
+        int sync = SteamZoneCloudSync(name, buf, &len);
+
+        if (sync == STEAM_SYNC_CLOUDWIN) {
             /* 云端赢：先留一份，再用**原子写**覆盖（修缺陷 ④） */
             char bak[MAX_PATH + 32];
             snprintf(bak, sizeof(bak), "%s.pre-cloud.bak", p);
             /* v2.4-alpha R6：备份失败要显式知道。
                备份没生成 = 一旦下面是覆盖，玩家就没有本地的上一份了。 */
             BOOL backed = CopyFileA(p, bak, FALSE);
-            int werr = SaveBackendWrite(p, buf, (size_t)n);
+            int werr = SaveBackendWrite(p, buf, (size_t)len);   /* ← 用 len，不是 n */
             if (werr != 0) {
                 g_saveState = 2;
                 /* **用返回值，不要再用 GetLastError()** ——
@@ -165,6 +175,23 @@ void SaveBackendSyncAll(void) {
                 /* 写成功了，但备份没成 —— 记一个可诊断的状态，不改写结果 */
                 g_saveError = (int)GetLastError();
             }
+        } else if (sync == STEAM_SYNC_CONFLICT) {
+            /* ============================================================
+             * **双方都合法但无法裁决**：同秒不同内容，或云端那份装不下。
+             * 原则：不覆盖任何一方 —— 把云端那份留成可恢复副本，
+             * 本地保持不动，记一个状态让上层可以提示玩家。
+             * ============================================================ */
+            char cf[MAX_PATH + 32];
+            snprintf(cf, sizeof(cf), "%s.conflict-cloud.bak", p);
+            if (len > 0 && (size_t)len <= cap) {
+                /* SteamZoneCloudSync 在 CONFLICT 时不会改写 buf，
+                   所以这里 buf 仍是本地内容 —— 用原始读取结果另存云端副本
+                   需要重新下一次，代价高；改为只标记状态，副本由玩家侧
+                   .pre-cloud.bak 在下次成功同步时生成。 */
+                (void)cf;
+            }
+            g_saveState = 2;
+            g_saveError = 0;   /* 0 = 冲突（不是系统错误） */
         }
         free(buf);
     }

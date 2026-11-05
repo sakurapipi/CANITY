@@ -9,6 +9,8 @@
 #include "campaign.h"
 #include "achievements.h"
 #include "save.h"
+#include "save_format.h"   /* R8: SaveEnvelope / SaveEnvelopeSeal */
+#include "steam_zone.h"    /* R8: SteamZoneCloudDecide / STEAM_SYNC_* */
 #include "wallet.h"
 #include "threat.h"
 #include "ui.h"
@@ -423,6 +425,86 @@ static void test_floor_resets_hunters(void) {
  * R6 改的是 SaveBackendWrite 的错误传播。这里验证它真的会返回非 0，
  * 而不是吞掉失败谎报成功 —— 存档层最危险的失败模式就是这一种。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4-alpha R8）：**长度不同的合法存档不算损坏**
+ * ------------------------------------------------------------------
+ * 这是 N1 的正面证据。旧实现用本地长度去要求云端，
+ * 只要两份 payload 长度不同就 STEAM_SYNC_ERROR ——
+ * 而拆块（SC_SETTINGS / SC_WORLD）必然改变长度。
+ *
+ * 用 SteamZoneCloudDecide（纯函数）测，不需要 Steam 客户端。
+ * 注意：这**不等于** Steam 真机通过 —— 传输层仍是 UNKNOWN。
+ * ================================================================== */
+static void test_cloud_decide_length(void) {
+    extern int SteamZoneCloudDecide(const void*, int, const void*, int, int*);
+
+    unsigned char A[512], B[512];
+    SaveEnvelope h;
+    const unsigned char payA[16] = { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16 };
+    const unsigned char payB[40] = { 9,9,9,9 };     /* 更长的 payload */
+
+    /* A：短的那份 */
+    memcpy(A + sizeof(h), payA, sizeof(payA));
+    SaveEnvelopeSeal(&h, A + sizeof(h), (int)sizeof(payA), 1000u);
+    memcpy(A, &h, sizeof(h));
+    int lenA = (int)sizeof(h) + (int)sizeof(payA);
+
+    /* B：长的那份，stamp 更新 */
+    memcpy(B + sizeof(h), payB, sizeof(payB));
+    SaveEnvelopeSeal(&h, B + sizeof(h), (int)sizeof(payB), 2000u);
+    memcpy(B, &h, sizeof(h));
+    int lenB = (int)sizeof(h) + (int)sizeof(payB);
+
+    int win = 0;
+
+    /* ① 内容相同 → SAMECL（自身对比） */
+    CHECK(SteamZoneCloudDecide(A, lenA, A, lenA, &win) == STEAM_SYNC_SAMECL,
+          "identical local/remote must be SAMECL");
+
+    /* ② 长度不同 + 云端更新 → CLOUDWIN，且 out 长度是**远端**的 */
+    win = 0;
+    CHECK(SteamZoneCloudDecide(A, lenA, B, lenB, &win) == STEAM_SYNC_CLOUDWIN,
+          "different length must not be treated as corruption (cloud newer)");
+    CHECK(win == lenB, "CLOUDWIN must report the remote length, not the local one");
+
+    /* ③ 长度不同 + 本地更新 → LOCALWIN（不覆盖云端） */
+    win = 0;
+    CHECK(SteamZoneCloudDecide(B, lenB, A, lenA, &win) == STEAM_SYNC_LOCALWIN,
+          "different length must not be treated as corruption (local newer)");
+
+    /* ④ 同 stamp 不同内容 → CONFLICT，不裁决 */
+    {
+        unsigned char C[512];
+        memcpy(C + sizeof(h), payB, sizeof(payB));
+        SaveEnvelopeSeal(&h, C + sizeof(h), (int)sizeof(payB), 1000u);   /* 同 A 的 stamp */
+        memcpy(C, &h, sizeof(h));
+        int lenC = (int)sizeof(h) + (int)sizeof(payB);
+        CHECK(SteamZoneCloudDecide(A, lenA, C, lenC, &win) == STEAM_SYNC_CONFLICT,
+              "same timestamp with different content must be reported as CONFLICT");
+    }
+
+    /* ⑤ 远端被篡改一个字节 → ERROR（校验和抓得住） */
+    {
+        unsigned char D[512];
+        memcpy(D, B, (size_t)lenB);
+        D[sizeof(h) + 5] ^= 0xFF;
+        CHECK(SteamZoneCloudDecide(A, lenA, D, lenB, &win) == STEAM_SYNC_ERROR,
+              "a corrupted remote payload must be rejected");
+    }
+
+    /* ⑥ 远端长度字段与真实长度不符 → ERROR */
+    {
+        unsigned char E[512];
+        memcpy(E, B, (size_t)lenB);
+        SaveEnvelope bad;
+        memcpy(&bad, E, sizeof(bad));
+        bad.payload = 7;                 /* 谎报 */
+        memcpy(E, &bad, sizeof(bad));
+        CHECK(SteamZoneCloudDecide(A, lenA, E, lenB, &win) == STEAM_SYNC_ERROR,
+              "a remote header lying about its payload size must be rejected");
+    }
+}
+
 static void test_save_backend_errors(void) {
     extern int SaveBackendWrite(const char*, const void*, size_t);
     unsigned char buf[32];
@@ -504,6 +586,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

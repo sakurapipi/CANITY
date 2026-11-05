@@ -78,6 +78,11 @@ int SteamZoneCloudUpload(const char* name, const void* data, int bytes);
 /* 从 Steam 云读一个文件。buf 大小不够会失败。
    返回实际读到的字节数；0 = 没有这个文件 / 失败。 */
 int SteamZoneCloudDownload(const char* name, void* buf, int bufSize);
+/* 2026-11-06（R7）：**只读的大小查询**。
+   SteamZoneCloudDownload 内部已经调过 GetFileSize，只是不外露；
+   云同步要在「不假设等于本地长度」的前提下分配缓冲，就需要这个。
+   不新增第二套传输 API —— 只是把已有的大小读出来。 */
+int SteamZoneCloudGetSize(const char* name);
 
 /* 云端有没有这个文件 */
 int SteamZoneCloudExists(const char* name);
@@ -118,13 +123,34 @@ enum {
     STEAM_SYNC_SAMECL   = 1,   /* 两边一致，什么都没做 */
     STEAM_SYNC_CLOUDWIN = 2,   /* 云端更新 → 已写进 localBuf，调用方负责备份 */
     STEAM_SYNC_LOCALWIN = 3,   /* 本地更新 → 已上传 */
-    STEAM_SYNC_ERROR    = 4    /* 出错，调用方按本地继续 */
+    STEAM_SYNC_ERROR    = 4,   /* 出错，调用方按本地继续 */
+    /* 2026-11-06（v2.4-alpha R7）：**双方都合法但无法裁决**。
+       典型：stamp 相同（只到秒）而内容不同；或云端那份比本地缓冲还大。
+       处理原则：不覆盖任何一方，由调用方保留两份副本并提示玩家。 */
+    STEAM_SYNC_CONFLICT = 5
 };
 
 /* 带冲突判定的云同步。
    localBuf 既是输入也是输出：CLOUDWIN 时它会被云端内容覆盖。
    返回上面那个 enum。 */
-int SteamZoneCloudSync(const char* name, void* localBuf, int bufSize);
+/* 2026-11-06（R7）：**长度改成 in/out**。
+   原来用本地 bufSize 去要求云端，长度不同就直接判损坏 ——
+   一旦开始拆块（SC_SETTINGS / SC_WORLD），payload 长度必然变化，
+   云同步会全线报错。
+   现在：*bufSize 进来是本地缓冲容量，出去是**最终生效那份的长度**。
+   返回 STEAM_SYNC_CLOUDWIN 时，localBuf 里是新内容且 *bufSize 已更新。 */
+/* 2026-11-06（v2.4-alpha R8）：**纯判定层**，不碰 Steam。
+   把「两份合法存档怎么比」从传输里拆出来，才能在没有 Steam 客户端的
+   环境里单元测试。返回 STEAM_SYNC_*：
+     SAMECL / CLOUDWIN / LOCALWIN / CONFLICT / ERROR
+   返回 CLOUDWIN 时 *outLen = 远端那份的长度（可能不等于 localLen）。
+   返回其它值时 *outLen 不动。
+   注意：**"云端不存在" 不在这里判定** —— 那是传输层的事。 */
+int SteamZoneCloudDecide(const void* local, int localLen,
+                         const void* remote, int remoteLen,
+                         int* outLen);
+
+int SteamZoneCloudSync(const char* name, void* localBuf, int* bufSize);
 
 /* ---- 统计（Steamworks Stats）---- */
 
