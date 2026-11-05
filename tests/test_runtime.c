@@ -620,6 +620,51 @@ static void test_global_balance_invariants(void) {
  *   · 唯一的机会窗必须在 0.5 秒以内（人类反应约 0.25s，0.42s 刚够）
  * 以后谁把窗口调宽，这里会立刻红。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户实测两次）：**相位投掷物必须能被选中**
+ * ------------------------------------------------------------------
+ * 同一个错误我犯了三次：
+ *   ① HUD 名字表只写了 6 项 → 界面上看不到
+ *   ② 有货判定表只写了 6 项 → 滚轮跳过
+ *   ③ 手持模型表只写了 6 项 → 拿在手上是错的模型
+ * 原因都是"扩了 ITEM_SLOT_COUNT，却只改了想得起来的那几处"。
+ *
+ * 这条测试从**行为**上钉住：只剩相位投掷物时，选择器必须能落过去。
+ * ================================================================== */
+static void test_phase_slots_selectable(void) {
+    extern int throwSelected;
+    extern int phaseBeacons, phaseAnchors;
+    extern int flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
+    extern void EnsureThrowSelectedValid(void);
+
+    int sf = flares, sb = bottles, ss = smokeBombs, sg = gluePots, se = echoBolts, sd = decoys;
+    int sSel = throwSelected;
+
+    /* ---- 只有信标：选择器必须落到槽 6 ---- */
+    flares = bottles = smokeBombs = gluePots = echoBolts = decoys = 0;
+    phaseBeacons = 3; phaseAnchors = 0;
+    throwSelected = 0;
+    EnsureThrowSelectedValid();
+    CHECK(throwSelected == 6,
+          "with only beacons left the selector must land on slot 6 (BEACON)");
+
+    /* ---- 只有锚：槽 7 ---- */
+    phaseBeacons = 0; phaseAnchors = 2;
+    throwSelected = 0;
+    EnsureThrowSelectedValid();
+    CHECK(throwSelected == 7,
+          "with only anchors left the selector must land on slot 7 (ANCHOR)");
+
+    /* ---- 六种旧物品都为空时，不能把选择器卡在 0 ---- */
+    phaseBeacons = 0; phaseAnchors = 0;
+    throwSelected = 0;
+    EnsureThrowSelectedValid();
+    CHECK(throwSelected == 0, "with nothing at all the selector falls back to slot 0");
+
+    flares = sf; bottles = sb; smokeBombs = ss; gluePots = sg; echoBolts = se; decoys = sd;
+    throwSelected = sSel;
+}
+
 static void test_facehugger_is_brutal(void) {
     float total = JUMPER_APPROACH_TIME + JUMPER_DODGE_WINDOW;
     CHECK(total < 1.0f,
@@ -3000,6 +3045,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_facehugger_is_brutal();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

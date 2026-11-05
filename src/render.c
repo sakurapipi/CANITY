@@ -3788,11 +3788,12 @@ static void DrawViewModel(void) {
     /* 左手：托着当前选中的投掷物 */
     {
         extern int flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
+        extern int phaseBeacons, phaseAnchors;   /* 2026-11-06 相位投掷物 */
         /* v6 **槽位表必须和 ITEM_SLOT_COUNT(6) 一致** ——
            原来用旧的 8 个变量初始化 6 元素数组：多出初值被丢弃，
            索引整体错位（槽 2..5 读到砖头/酸液/燃烧瓶等已删除物品）。 */
         int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs,
-                                        gluePots, echoBolts, decoys };
+                                        gluePots, echoBolts, decoys, phaseBeacons, phaseAnchors };
         int sel = throwSelected;
         if (sel >= 0 && sel < ITEM_SLOT_COUNT && counts[sel] > 0) {
             /* v2.9：按报告重算 —— 原来 100px 大、落进枪模框内、亮度 0.55，
@@ -3815,7 +3816,9 @@ static void DrawViewModel(void) {
                现在用显式表，每个槽位拿到对的模型。 */
             static const int slotSpr[ITEM_SLOT_COUNT] = {
                 SPR_ITEM_FLARE, SPR_ITEM_SLING, SPR_ITEM_SMOKE,
-                SPR_ITEM_GLUE,  SPR_ITEM_ECHO,  SPR_ITEM_DECOY
+                SPR_ITEM_GLUE,  SPR_ITEM_ECHO,  SPR_ITEM_DECOY,
+                /* 2026-11-06：两个相位投掷物直接复用手持模型 */
+                SPR_PHASE_HAND, SPR_PHASE_HAND
             };
             DrawSprite(slotSpr[sel], ix, iy - isize, isize, isize,
                        0.92f, 1.0f, 0, 0.0f);

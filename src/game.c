@@ -532,7 +532,7 @@ int ActionIsDown(int act) { return IsActionDown((ActionId)act); }
    玩家滚轮/按键切到空槽时不需要自己再切回来。 */
 int itemHasStock(void) {
     /* v3.3 槽位：0 光球 / 1 投石 / 2 烟雾 / 3 胶水 / 4 回声 / 5 诱饵 */
-    int c[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
+    int c[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys, phaseBeacons, phaseAnchors };
     if (throwSelected < 0 || throwSelected >= ITEM_SLOT_COUNT) return 0;
     return c[throwSelected] > 0;
 }
@@ -7958,7 +7958,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                          * 现在直接跳到**下一个有货的槽**，空槽整个跳过。
                          * ============================================================ */
                         int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs,
-                                                        gluePots, echoBolts, decoys };
+                                             gluePots, echoBolts, decoys, phaseBeacons, phaseAnchors };
                         int moved = 0;
                         for (int step = 0; step < ITEM_SLOT_COUNT; step++) {
                             throwSelected = (throwSelected + dir + ITEM_SLOT_COUNT) % ITEM_SLOT_COUNT;
