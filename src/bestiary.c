@@ -11,6 +11,7 @@
  */
 #include "common.h"
 #include "bestiary.h"
+#include "entity.h"
 
 int bestiarySel = 0;
 int bestiarySeen = 0;
@@ -25,7 +26,11 @@ static float bstSpeedHunter(void) { return monster.speed; }
 static float bstHearHunter(void)  { return 8.0f; }
 static float bstChaseHunter(void) { return 14.0f; }
 
-static float bstSpeedLight(void) { extern Monster lightBeast; return lightBeast.speed; }
+/* 2026-11-06：追光怪变成数组（lightBeasts[]），旧名字是宏指向 [0]。
+   这里原来在函数体里写了 `extern Monster lightBeast;`，
+   宏展开后变成 `extern Monster lightBeasts[0];` —— 非法声明。
+   改成直接用 entity.h 里的声明即可。 */
+static float bstSpeedLight(void) { return lightBeast.speed; }
 static float bstHearLight(void)  { return 0.0f; }
 static float bstChaseLight(void) { return 10.0f; }
 

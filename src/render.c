@@ -983,7 +983,10 @@ static void DrawLeechSprite(int idx) {
         if (wrote && s.ty < zBuffer[x]) zBuffer[x] = s.ty;
     }
 }
-static void DrawLightBeastSprite(void) { DrawBeastSprite(&lightBeast, 0x00c8f0ffu, SPR_MON_LIGHT); }
+/* 2026-11-06：追光怪两只。DrawBeastSprite 本来就是参数化的，
+   所以这里只需要各自传自己的实体。 */
+static void DrawLightBeastSprite(void)  { DrawBeastSprite(&lightBeast,  0x00c8f0ffu, SPR_MON_LIGHT); }
+static void DrawLightBeastSprite2(void) { DrawBeastSprite(&lightBeast2, 0x00c8f0ffu, SPR_MON_LIGHT); }
 
 /* 跳脸虫的脸：预渲染成一张 128x128 的纹理，每帧只做采样 + 缩放。
    逐像素现画的话，800x600 实测 11ms/帧 —— QTE 是实时反应，
@@ -2705,7 +2708,16 @@ void RenderSprites(void) {
             n++;
         }
     }
-    /* v1.8 偷电怪 */
+
+    /* 2026-11-06：第二只追光怪 */
+    if (lightBeast2.active) {
+        if (n < MAX_SPRITES) {
+            list[n].d2 = Dist2(lightBeast2.x, lightBeast2.y, posX, posY);
+            list[n].kind = 5;          /* 同一种精灵 */
+            list[n].idx = 1;           /* idx=1 = 第二只（case 5 里按 idx 分流） */
+            n++;
+        }
+    }    /* v1.8 偷电怪 */
     for (int i = 0; i < LEECH_MAX; i++) {
         if (!leeches[i].active) continue;
         if (n >= MAX_SPRITES) break;
@@ -2785,7 +2797,10 @@ void RenderSprites(void) {
             case 14: DrawMonster3Sprite(); break;   /* 第三只听声鬼 */
             case 15: DrawMimicSprite(list[i].idx); break;   /* 2026-11-05 宝箱怪 */
         case 9: DrawLeechSprite(list[i].idx); break;
-            case 5: DrawLightBeastSprite(); break;
+            case 5:
+                if (list[i].idx == 1) DrawLightBeastSprite2();
+                else                  DrawLightBeastSprite();
+                break;
             case 6: DrawFlareSprite(list[i].idx); break;
             case 8: DrawShotSprite(list[i].idx); break;
             case 10: DrawSlashSprite(); break;

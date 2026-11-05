@@ -78,7 +78,7 @@ void ClearFx(void) {
     }
 }
 Monster monHunters[MON_HUNTER_MAX];   /* 听声鬼：0=第一只 1=第二只 2=第三只 */
-Monster lightBeast;      /* 只看光 */
+Monster lightBeasts[LIGHTBEAST_MAX];   /* 只看光（2026-11-06：两只） */
 Monster parasite;   /* 复用 Monster 结构体（只需要位置和几个状态字段） */
 
 /* QTE 运行时状态 */
@@ -442,7 +442,6 @@ void MakeNoise(float x, float y, float radius) {
 #endif
 
     {
-        extern Monster lightBeast;
         /* 追光怪仍然直接通知（它不吃"声音"这套逻辑，它只认光） */
         /* 原来写的是 { &lightBeast, &lightBeast } 而循环只跑 1 次 ——
            数组第二个元素从来没被用过，属历史残留，直接收成一个。 */
@@ -526,27 +525,28 @@ void MakeNoise(float x, float y, float radius) {
 }
 
 
-void SpawnLightBeast(void) {
+/* 2026-11-06：参数化成"生成到指定那只"，供 SpawnLightBeast / SpawnLightBeast2 复用 */
+static void SpawnOneLightBeast(Monster* L) {
     /* 注意：不要整体拷贝 monster —— 那会把寻声怪的旧路径、旧命中冷却
        一并带过来，光敏怪会开局就沿着别人的路走、还带着别人的无敌时间。
        这里只借用它的类型，清干净状态再重置。 */
-    memset(&lightBeast, 0, sizeof(lightBeast));
-    lightBeast.active = 1;
-    lightBeast.state = 0;
-    lightBeast.speed = MonsterSpeedFor(currentLevel, LIGHTBEAST_SPEED_BASE, modSpeedMul);
-    lightBeast.pathLen = 0;
-    lightBeast.pathIdx = 0;
-    lightBeast.repath = 0.0f;
-    lightBeast.stateTimer = 0.0f;
-    lightBeast.wanderTimer = 1.5f;
-    lightBeast.hitCooldown = HitCooldownFor(currentLevel);
-    lightBeast.growlTimer = 3.0f;
+    memset(L, 0, sizeof(lightBeast));
+    L->active = 1;
+    L->state = 0;
+    L->speed = MonsterSpeedFor(currentLevel, LIGHTBEAST_SPEED_BASE, modSpeedMul);
+    L->pathLen = 0;
+    L->pathIdx = 0;
+    L->repath = 0.0f;
+    L->stateTimer = 0.0f;
+    L->wanderTimer = 1.5f;
+    L->hitCooldown = HitCooldownFor(currentLevel);
+    L->growlTimer = 3.0f;
     /* v1.15：有甲、抗刀、怕钝击 */
-    lightBeast.armor = 1;
-    lightBeast.resist[DT_SLASH] = 20;
-    lightBeast.resist[DT_BLUNT] = -20;
-    lightBeast.resist[DT_SHARD] = 0;
-    lightBeast.stun = 0.0f;
+    L->armor = 1;
+    L->resist[DT_SLASH] = 20;
+    L->resist[DT_BLUNT] = -20;
+    L->resist[DT_SHARD] = 0;
+    L->stun = 0.0f;
     for (int t = 0; t < 512; t++) {
         int x = 1 + rand() % (MAP_WIDTH - 2);
         int y = 1 + rand() % (MAP_HEIGHT - 2);
@@ -554,98 +554,103 @@ void SpawnLightBeast(void) {
         if (Dist2(x + 0.5f, y + 0.5f, posX, posY) < 144.0f) continue;
         if (monster.active && Dist2(x + 0.5f, y + 0.5f, monster.x, monster.y) < 4.0f) continue;
         if (!SpotClear(x + 0.5f, y + 0.5f, 1.4f, 4, -1)) continue;
-        lightBeast.x = x + 0.5f;
-        lightBeast.y = y + 0.5f;
+        L->x = x + 0.5f;
+        L->y = y + 0.5f;
         return;
     }
-    lightBeast.x = exitX;
-    lightBeast.y = exitY;
+    L->x = exitX;
+    L->y = exitY;
 }
 
-void UpdateLightBeast(float dt) {
+void SpawnLightBeast(void)  { SpawnOneLightBeast(&lightBeasts[0]); }
+void SpawnLightBeast2(void) { SpawnOneLightBeast(&lightBeasts[1]); }
+
+/* 2026-11-06：参数化成"更新指定那只"。
+   照抄听声鬼 UpdateOneHunter(Monster* M, float dt) 的做法。 */
+static void UpdateOneLightBeast(Monster* L, float dt) {
     /* v3.0：**光敏怪也要更新朝向和步频** ——
        原来它从不更新 facing/walkPhase，画出来永远是朝 +X、双腿不动。 */
     {
-        float ldx = lightBeast.x - lightBeast.prevX;
-        float ldy = lightBeast.y - lightBeast.prevY;
+        float ldx = L->x - L->prevX;
+        float ldy = L->y - L->prevY;
         float ld2 = ldx * ldx + ldy * ldy;
         if (ld2 > 1e-8f) {
-            lightBeast.facing = atan2f(ldy, ldx);
-            lightBeast.walkPhase += sqrtf(ld2) * 3.5f;
-            if (lightBeast.walkPhase > 1000.0f) lightBeast.walkPhase -= 1000.0f;
+            L->facing = atan2f(ldy, ldx);
+            L->walkPhase += sqrtf(ld2) * 3.5f;
+            if (L->walkPhase > 1000.0f) L->walkPhase -= 1000.0f;
         }
-        lightBeast.prevX = lightBeast.x;
-        lightBeast.prevY = lightBeast.y;
+        L->prevX = L->x;
+        L->prevY = L->y;
     }
 
-    if (!lightBeast.active) return;
+    if (!L->active) return;
 
     /* 硬直：被玻璃瓶砸中后短暂不能动 */
-    if (lightBeast.stun > 0.0f) {
-        lightBeast.stun -= dt;
-        if (lightBeast.stun < 0.0f) lightBeast.stun = 0.0f;
+    if (L->stun > 0.0f) {
+        L->stun -= dt;
+        if (L->stun < 0.0f) L->stun = 0.0f;
         return;
     }
 
     /* 目标：看得见的玩家（手电开着）优先，其次是地上的荧光棒 */
     float tx = 0.0f, ty = 0.0f;
     int has = 0;
-    if (flashlightOn && battery > 0.0f && Dist2(posX, posY, lightBeast.x, lightBeast.y) < 256.0f &&
-        HasLOS(lightBeast.x, lightBeast.y, posX, posY)) {
+    if (flashlightOn && battery > 0.0f && Dist2(posX, posY, L->x, L->y) < 256.0f &&
+        HasLOS(L->x, L->y, posX, posY)) {
         tx = posX; ty = posY; has = 1;
     } else {
         for (int i = 0; i < MAX_THROWN; i++) {
             if (!thrown[i].active || thrown[i].type != 0) continue;
-            if (Dist2(thrown[i].x, thrown[i].y, lightBeast.x, lightBeast.y) < 256.0f &&
-                HasLOS(lightBeast.x, lightBeast.y, thrown[i].x, thrown[i].y)) {
+            if (Dist2(thrown[i].x, thrown[i].y, L->x, L->y) < 256.0f &&
+                HasLOS(L->x, L->y, thrown[i].x, thrown[i].y)) {
                 tx = thrown[i].x; ty = thrown[i].y; has = 1; break;
             }
         }
     }
 
     if (has) {
-        lightBeast.state = 1;
-        lightBeast.tx = tx; lightBeast.ty = ty;
-        lightBeast.repath -= dt;
-        if (lightBeast.repath <= 0.0f) {
-            lightBeast.repath = 0.35f;
-            MonPathFor(&lightBeast, (int)lightBeast.x, (int)lightBeast.y, (int)tx, (int)ty);
+        L->state = 1;
+        L->tx = tx; L->ty = ty;
+        L->repath -= dt;
+        if (L->repath <= 0.0f) {
+            L->repath = 0.35f;
+            MonPathFor(&lightBeast, (int)L->x, (int)L->y, (int)tx, (int)ty);
         }
-    } else if (lightBeast.state == 1) {
-        lightBeast.state = 0;
-        lightBeast.wanderTimer = 0.0f;
-        lightBeast.pathLen = 0;
+    } else if (L->state == 1) {
+        L->state = 0;
+        L->wanderTimer = 0.0f;
+        L->pathLen = 0;
     } else {
-        lightBeast.wanderTimer -= dt;
-        if (lightBeast.wanderTimer <= 0.0f && lightBeast.pathLen == 0) {
-            lightBeast.wanderTimer = 2.0f;
-            int cx = (int)lightBeast.x, cy = (int)lightBeast.y;
+        L->wanderTimer -= dt;
+        if (L->wanderTimer <= 0.0f && L->pathLen == 0) {
+            L->wanderTimer = 2.0f;
+            int cx = (int)L->x, cy = (int)L->y;
             int nx = cx + (rand() % 9) - 4, ny = cy + (rand() % 9) - 4;
             if (nx > 0 && ny > 0 && nx < MAP_WIDTH - 1 && ny < MAP_HEIGHT - 1 && !worldMap[ny][nx])
                 MonPathFor(&lightBeast, cx, cy, nx, ny);
         }
     }
 
-    if (lightBeast.pathIdx < lightBeast.pathLen) {
-        float px = lightBeast.path[lightBeast.pathIdx][0] + 0.5f;
-        float py = lightBeast.path[lightBeast.pathIdx][1] + 0.5f;
-        float dx = px - lightBeast.x, dy = py - lightBeast.y;
+    if (L->pathIdx < L->pathLen) {
+        float px = L->path[L->pathIdx][0] + 0.5f;
+        float py = L->path[L->pathIdx][1] + 0.5f;
+        float dx = px - L->x, dy = py - L->y;
         float d = sqrtf(dx * dx + dy * dy);
-        if (d < 0.12f) lightBeast.pathIdx++;
+        if (d < 0.12f) L->pathIdx++;
         else {
             /* v3.3：追光鬼同样会被胶水减速 */
-    float step = lightBeast.speed * dt * (InGlue(lightBeast.x, lightBeast.y) ? GLUE_MONSTER_MUL : 1.0f);
+    float step = L->speed * dt * (InGlue(L->x, L->y) ? GLUE_MONSTER_MUL : 1.0f);
             if (step > d) step = d;
-            lightBeast.x += dx / d * step;
-            lightBeast.y += dy / d * step;
+            L->x += dx / d * step;
+            L->y += dy / d * step;
         }
     }
 
-    float pd2 = Dist2(lightBeast.x, lightBeast.y, posX, posY);
+    float pd2 = Dist2(L->x, L->y, posX, posY);
     /* v3.3：诱饵同样能替玩家挡追光鬼这一下 */
-    if (lightBeast.hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R && DecoyIntercept()) {
-        lightBeast.hitCooldown = HIT_COOLDOWN_BASE;
-    } else if (lightBeast.hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R) {
+    if (L->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R && DecoyIntercept()) {
+        L->hitCooldown = HIT_COOLDOWN_BASE;
+    } else if (L->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R) {
             if (hiddenIn < 0) {   /* v3.0：藏起来抓不到 */
         sanity -= 14.0f;
             }
@@ -655,9 +660,9 @@ void UpdateLightBeast(float dt) {
         tookDamage = 1;
         healFlash = 0.16f;
         if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
-        SpawnLightBeast();
+        SpawnOneLightBeast(L);
     }
-    if (lightBeast.hitCooldown > 0.0f) lightBeast.hitCooldown -= dt;
+    if (L->hitCooldown > 0.0f) L->hitCooldown -= dt;
 }
 
 /* ------------------------------------------------------------------ */
@@ -703,6 +708,9 @@ static void JumperKeyHit(void) {
 
 /* 生成跳脸虫：放在玩家视野前方一段距离，
    然后它会「弹」到玩家脸上。 */
+void UpdateLightBeast(float dt)  { UpdateOneLightBeast(&lightBeasts[0], dt); }
+void UpdateLightBeast2(float dt) { UpdateOneLightBeast(&lightBeasts[1], dt); }
+
 void SpawnParasite(void) {
     memset(&parasite, 0, sizeof(parasite));
     parasite.active = 1;

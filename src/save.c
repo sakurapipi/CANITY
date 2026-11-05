@@ -1639,6 +1639,7 @@ void ContinueRun(void) {
     GenerateThemeTextures(themeId);   /* 主题变了，墙面/地板贴图要跟着重建 */
     SpawnMonster();
     SpawnLightBeast();
+    SpawnLightBeast2();   /* 2026-11-06：追光怪两只 */
     isEndlessRun = g_save.isEndlessRunSaved;  /* 恢复无尽模式标记 */
     /* 读档不重掷跳脸虫：本关不会突然蹦出来。
        触发器留成 -1，等下一层进关时再掷。 */

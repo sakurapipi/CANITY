@@ -25,7 +25,18 @@ extern float staminaIdle;
    听声鬼现在是一个数组（monHunters[MON_HUNTER_MAX]），
    monster / monster2 / monster3 是它的别名，定义在 common.h。
    数组实体本身也在 common.h 里 extern 了，这里不再重复声明。 */
-extern Monster lightBeast;      /* 只看光 */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**追光怪 +1 只**
+ * ------------------------------------------------------------------
+ * 照抄听声鬼的既有做法（`monHunters[]` + `#define monster monHunters[0]`）：
+ *   实体变成数组，旧的单数名字保留成宏指向 [0]，
+ *   于是原有 132 处引用**一行都不用改**。
+ * 第二只通过 lightBeast2 / UpdateLightBeast2 访问。
+ * ================================================================ */
+#define LIGHTBEAST_MAX 2
+extern Monster lightBeasts[LIGHTBEAST_MAX];
+#define lightBeast  lightBeasts[0]
+#define lightBeast2 lightBeasts[1]
 void UpdateMonster2(float dt);
 void UpdateMonster3(float dt);
 extern Monster parasite;        /* 寄生怪 / 跳脸虫共用（只用位置和几个状态字段） */
@@ -53,7 +64,9 @@ void ClearFx(void);
 void SpawnMonster(void);
 void UpdateMonster(float dt);
 void SpawnLightBeast(void);
+void SpawnLightBeast2(void);   /* 第二只（2026-11-06） */
 void UpdateLightBeast(float dt);
+void UpdateLightBeast2(float dt);   /* 第二只（2026-11-06） */
 void SpawnParasite(void);
 
 /* ==================================================================

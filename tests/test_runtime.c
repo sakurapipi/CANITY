@@ -404,6 +404,45 @@ static void test_hatch_screenshot(void) {
  * 做法：对每一种，构造一扇门 → 满足门槛 → 开门 → 断言**可观测的状态变化**。
  * 不看 pickupMsg，只认数值/数组。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**追光怪两只**
+ * ------------------------------------------------------------------
+ * 改造用的是听声鬼的既有做法：实体变数组 + 旧名字保留成宏。
+ * 这种改法最怕"数组建了但只生成/更新/绘制第一只" ——
+ * 编译、跑起来都不报错，只是第二只永远不存在。
+ * 所以这里直接断言：生成之后两只都是 active，且位置不同。
+ * ================================================================== */
+static void test_two_light_beasts(void) {
+    extern Monster lightBeasts[LIGHTBEAST_MAX];
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    CHECK(lightBeasts[0].active == 1, "the first light beast must spawn");
+    CHECK(lightBeasts[1].active == 1, "the SECOND light beast must spawn too");
+
+    /* 两只必须站在不同位置，否则等于只有一只 */
+    {
+        float dx = lightBeasts[0].x - lightBeasts[1].x;
+        float dy = lightBeasts[0].y - lightBeasts[1].y;
+        CHECK(dx * dx + dy * dy > 0.25f,
+              "the two light beasts must spawn at different spots");
+    }
+
+    /* 两只都必须在可站立的格子上 */
+    {
+        extern int Blocked(float, float);
+        CHECK(!Blocked(lightBeasts[0].x, lightBeasts[0].y),
+              "the first light beast must not spawn inside geometry");
+        CHECK(!Blocked(lightBeasts[1].x, lightBeasts[1].y),
+              "the second light beast must not spawn inside geometry");
+    }
+
+    /* 速度必须是新的 1.8 基准（不再是 1.5） */
+    CHECK(lightBeasts[0].speed > 1.5f,
+          "light beast speed must reflect the 1.2x bump (base 1.80)");
+}
+
 static void test_all_hatch_effects(void) {
     extern Hatch hatches[MAX_HATCHES];
     extern int hatchCount;
@@ -504,25 +543,39 @@ static void test_all_hatch_effects(void) {
     /* ---- ⑥ 砖墙：拆墙（墙的数量必须变少）---- */
     {
         extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
-        int wallsBefore = 0, wallsAfter = 0;
-        for (int y = 0; y < MAP_HEIGHT; y++)
-            for (int x = 0; x < MAP_WIDTH; x++)
-                if (worldMap[y][x]) wallsBefore++;
+        /* ================================================================
+         * **显式布置**，不依赖生成出来的地图。
+         * 上一版靠"地图中间一定有墙"，多生成一只追光怪改变了随机序列，
+         * 中间恰好没有可砸的墙 —— 测试就红了。
+         * 这种"依赖具体地图"的断言是脆的：它测的不是逻辑，是地形。
+         * ================================================================ */
+        int hx = MAP_WIDTH / 2, hy = MAP_HEIGHT / 2;
+        /* 门所在格与"墙/墙后空地"三格，手工摆好 */
+        int savedCell[3];
+        savedCell[0] = worldMap[hy][hx];
+        savedCell[1] = worldMap[hy][hx + 1];
+        savedCell[2] = worldMap[hy][hx + 2];
+        worldMap[hy][hx] = 0;          /* 门站得住 */
+        worldMap[hy][hx + 1] = 1;      /* 要砸的墙 */
+        worldMap[hy][hx + 2] = 0;      /* 墙后是空地（否则不该砸） */
 
         HatchReset();
-        /* 放在地图中间，四周一定有墙可砸 */
-        HatchAdd((float)(MAP_WIDTH / 2) + 0.5f, (float)(MAP_HEIGHT / 2) + 0.5f, HATCH_BRICK, 0);
+        HatchAdd((float)hx + 0.5f, (float)hy + 0.5f, HATCH_BRICK, 0);
         stamina = 100.0f;
         HatchSetState(0, HATCH_OPENING);
         HatchTick(HATCH_OPEN_SECONDS + 0.02f);
         CHECK(hatches[0].state == HATCH_FIRED, "BRICK hatch must fire");
 
-        for (int y = 0; y < MAP_HEIGHT; y++)
-            for (int x = 0; x < MAP_WIDTH; x++)
-                if (worldMap[y][x]) wallsAfter++;
-        CHECK(wallsAfter < wallsBefore,
-              "BRICK must carve away at least one wall");
+        CHECK(worldMap[hy][hx + 1] == 0,
+              "BRICK must carve the wall that has open space behind it");
+        CHECK(worldMap[hy][hx + 2] == 0,
+              "BRICK must not fill anything in");
         CHECK(stamina < 76.0f, "BRICK must cost stamina");
+
+        /* 还原地形，别污染后面的用例 */
+        worldMap[hy][hx] = savedCell[0];
+        worldMap[hy][hx + 1] = savedCell[1];
+        worldMap[hy][hx + 2] = savedCell[2];
     }
 
     /* ---- ⑦ 锅炉房：崩塌（走黑屏流程，计次 +1）---- */
@@ -2453,6 +2506,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

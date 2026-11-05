@@ -1260,7 +1260,9 @@ static void BuildTrainingArena(void) {
     monster.speed = 0.0f;          /* 标靶：不动 */
     { monster2.active = 0; monster3.active = 0; }   /* 新局清掉第 2、3 只听声鬼 */
 
-    lightBeast.active = 0;
+    /* 2026-11-06：追光怪现在是两只，复位必须两只都清 */
+    lightBeasts[0].active = 0;
+    lightBeasts[1].active = 0;
     parasite.active = 0;
     for (int i = 0; i < LEECH_MAX; i++) leeches[i].active = 0;
 
@@ -1967,7 +1969,6 @@ void HatchFireEffect(int idx) {
             if (monHunters[i].active) monHunters[i].stun = 20.0f;
         }
         {
-            extern Monster lightBeast;
             if (lightBeast.active) lightBeast.stun = 20.0f;
         }
         pickupMsg = (g_lang == LANG_ZH) ? "它开始进食了…20 秒" : "IT IS FEEDING... 20 SECONDS";
@@ -3007,7 +3008,9 @@ void GenerateLevel(void) {
         }
         { extern void ResetSecondSpawn(void); ResetSecondSpawn(); }
     }
+    /* 2026-11-06：用户要求追光怪 +1 只 */
     SpawnLightBeast();
+    SpawnLightBeast2();
     /* v1.8 偷电怪：第 3 层起出现。主线每层 1 只；无尽每 5 层 +1，最多 3 只。 */
     ResetLeeches();
     if (currentLevel >= LEECH_MIN_LEVEL) {
@@ -3640,7 +3643,6 @@ void EchoMarksReset(void) {
 
 /* 在 (sx,sy) 周围 rad 格内记录所有怪物 */
 void EchoMarksScan(float sx, float sy, float rad) {
-    extern Monster lightBeast;
     extern int   CollectorActive(void), ScavengerActive(void), WardenActive(void);
     extern float CollectorX(void), CollectorY(void);
     extern float ScavengerX(void), ScavengerY(void);
@@ -3806,7 +3808,8 @@ static void WrenchApplyHit(float power) {
      * 位掩码：1=第1只 2=追光鬼 8=第2只 16=第3只
      * （4 留给清道夫，别动）
      * ============================================================ */
-    Monster* targets[4] = { &monster, &lightBeast, &monster2, &monster3 };
+    /* 2026-11-06：追光怪 +1 只，击退目标从 4 个扩到 5 个 */
+    Monster* targets[5] = { &monster, &lightBeast, &monster2, &monster3, &lightBeast2 };
     static const unsigned int tbits[4] = { 1u, 2u, 8u, 16u };
     for(int ti=0;ti<4;++ti) { Monster* target=targets[ti];
     if (target->active && !(wrenchHitMask&tbits[ti])) {
@@ -5604,6 +5607,7 @@ void Update(float dt) {
     { extern void UpdateMonster3(float); UpdateMonster3(dt); }   /* v2.4.12 第二只 */
     { extern void FlankUpdate(float); FlankUpdate(dt); }   /* v2.4.95 包夹（必须在 AI 之后，否则目标被覆盖） */
     UpdateLightBeast(dt);
+        { extern void UpdateLightBeast2(float); UpdateLightBeast2(dt); }   /* 第二只 */
     UpdateParasite(dt);
     UpdateLeech(dt);
 
