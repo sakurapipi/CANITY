@@ -4,6 +4,8 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "cell_meta.h"
+#include "map_rooms.h"
 #include "sound_event.h"
 #include "state.h"
 #include "economy.h"
@@ -1749,6 +1751,27 @@ void GenerateLevel(void) {
             for (int ox = 0; ox < 2; ox++)
                 worldMap[ry + oy][rx + ox] = 0;
     }
+
+    /* ==================================================================
+     * 2026-11-06（v2.4-rc C3）：**主题房间**
+     * ------------------------------------------------------------------
+     * 放在上面那 5 个 2x2 小房间**之后**：
+     *   · 开关关闭时，上面那段代码一字未改 → 地图与 v2.4-beta **逐位相同**
+     *   · 房间随后覆盖上去，所以房间里的柱子不会被 blob 打穿
+     *
+     * 放不下就跳过（GenerateThemeRooms 内部处理），
+     * 绝不因为房间放不下让整层生成失败。
+     * ================================================================ */
+#if CANITY_ROOMS
+    CellMetaReset();
+    {
+        extern int GenerateThemeRooms(int);
+        int want = 1 + (rand() % 2);      /* 1~2 个 */
+        (void)GenerateThemeRooms(want);
+    }
+#else
+    CellMetaReset();
+#endif
 
     /* DARK 词条（手电起始电量低）的处理放在掷出词条之后 ——
        原来它写在掷词条之前，用的是**上一层**的 levelMod，

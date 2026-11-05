@@ -49,6 +49,14 @@
    默认 1。 */
 #ifndef CANITY_SOUND_PROP
 #define CANITY_SOUND_PROP 1
+
+/* v2.4-rc C3：**主题房间**
+   置 1 = 生成时放置 1~2 个主题房间（旧 2x2 小房间照旧保留作兜底）。
+   置 0 = 完全不碰地图 —— 与 v2.4-beta 逐位相同，用于二分定位回归。
+   默认 1。 */
+#ifndef CANITY_ROOMS
+#define CANITY_ROOMS 1
+#endif
 #endif
 #endif
 /* 用 -DCANITY_SOUND_EVENT=0 可以编译出"旧路径"版本，便于二分定位。 */

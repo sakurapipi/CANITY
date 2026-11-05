@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "cell_meta.h"
 #include "render.h"
 #include "suspicion.h"
 #include "art.h"
@@ -3105,6 +3106,27 @@ static void RenderWallBand(int x0, int x1) {
                           + fl * 150.0f + torch * (float)themeLitG) * smokeDim);
         int addB = (int)((cone * reach * (float)(themeLitB + 24) * 0.42f + fog * (float)themeAmbB
                           + fl * 78.0f  + torch * (float)themeLitB) * smokeDim);
+
+        /* ==================================================================
+         * 2026-11-06（v2.4-rc C4）：**主题房间的补光色**
+         * ------------------------------------------------------------------
+         * 计划里明确"不做第二套纹理集"（双倍纹理常驻内存），
+         * 所以房间的辨识度靠**墙面补光**表现：
+         *   同一张贴图，但这个房间的光偏冷/偏橙/偏紫。
+         *
+         * 成本：**每列一次**（不是每像素），普通区直接返回 0 跳过。
+         * 这也是为什么不做地板 —— 地板是逐像素的，加查表会掉帧。
+         * ================================================================ */
+        {
+            extern int CellTintRGB(int, int, int*, int*, int*);
+            int tr = 0, tg = 0, tb = 0;
+            if (CellTintRGB(mapX, mapY, &tr, &tg, &tb)) {
+                float k = smokeDim;          /* 浓烟里补光同样被压 */
+                addR += (int)(tr * k);
+                addG += (int)(tg * k);
+                addB += (int)(tb * k);
+            }
+        }
         int k8 = (int)(lit * 256.0f);
         if (k8 < 0) k8 = 0;
         else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;

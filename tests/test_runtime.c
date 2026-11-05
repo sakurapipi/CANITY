@@ -14,6 +14,8 @@
 #include "sound_event.h"   /* B01: SoundEmit / SoundKind */
 #include "audio.h"          /* B02: AudioComputeGains */
 #include "sound_propagation.h"  /* B03: SoundReach */
+#include "map_rooms.h"        /* C3: GenerateThemeRooms */
+#include "cell_meta.h"        /* C2: cellMeta / CellTintFor */
 #include "wallet.h"
 #include "threat.h"
 #include "ui.h"
@@ -508,6 +510,130 @@ static void test_floor_resets_hunters(void) {
  *
  * 这组断言把这个结论钉住，防止以后有人把 strength/maxListen 的关系改乱。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4-rc C3）：**主题房间真的放进了地图，而且没犯规**
+ * ------------------------------------------------------------------
+ * 直接调 GenerateThemeRooms（它只依赖 worldMap / exitX / exitY），
+ * 不跑完整的 GenerateLevel —— 那会牵动纹理生成和怪物刷新，
+ * 在单元测试里既慢又危险。
+ *
+ * 造一张全墙地图：房间是唯一的空地来源，于是"放没放进去"
+ * 可以直接从 worldMap 看，不用猜。
+ * ================================================================== */
+static void test_theme_rooms_placement(void) {
+    extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+    extern float exitX, exitY;
+    static int saved[MAP_HEIGHT][MAP_WIDTH];
+    float savedExitX = exitX, savedExitY = exitY;
+
+    memcpy(saved, worldMap, sizeof(saved));
+
+    for (int y = 0; y < MAP_HEIGHT; y++)
+        for (int x = 0; x < MAP_WIDTH; x++)
+            worldMap[y][x] = 1;
+
+    exitX = 20.5f; exitY = 20.5f;
+    CellMetaReset();
+
+    srand(12345u);
+    int placed = GenerateThemeRooms(2);
+
+    CHECK(placed >= 1, "at least one theme room must be placed on an empty 24x24 map");
+    CHECK(placed <= 2, "GenerateThemeRooms must not exceed the requested count");
+    CHECK(RoomCount() == placed, "RoomCount must match what was actually placed");
+
+    /* ---- ① 外墙一格都不许动 ---- */
+    {
+        int wallOk = 1;
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            if (worldMap[0][x] == 0) wallOk = 0;
+            if (worldMap[MAP_HEIGHT - 1][x] == 0) wallOk = 0;
+        }
+        for (int y = 0; y < MAP_HEIGHT; y++) {
+            if (worldMap[y][0] == 0) wallOk = 0;
+            if (worldMap[y][MAP_WIDTH - 1] == 0) wallOk = 0;
+        }
+        CHECK(wallOk, "theme rooms must never breach the outer wall");
+    }
+
+    /* ---- ② 出生区 1..3 不许被房间占用 ---- */
+    {
+        int spawnClean = 1;
+        for (int y = 1; y <= 3; y++)
+            for (int x = 1; x <= 3; x++)
+                if (cellMeta[y][x].roomId != 0) spawnClean = 0;
+        CHECK(spawnClean, "theme rooms must not cover the spawn area");
+    }
+
+    /* ---- ③ 出口 3 格内不许被房间占用 ---- */
+    {
+        int exitClean = 1;
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++) {
+                if (cellMeta[y][x].roomId == 0) continue;
+                float ddx = (float)x - exitX, ddy = (float)y - exitY;
+                if (ddx * ddx + ddy * ddy < 9.0f) exitClean = 0;
+            }
+        CHECK(exitClean, "theme rooms must keep 3 tiles clear of the exit");
+    }
+
+    /* ---- ④ 房间彼此不重叠（相邻格不允许出现两个不同 roomId） ---- */
+    {
+        int overlap = 0;
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++) {
+                if (cellMeta[y][x].roomId == 0) continue;
+                static const int ddx2[4] = { 1, -1, 0, 0 };
+                static const int ddy2[4] = { 0, 0, 1, -1 };
+                for (int k = 0; k < 4; k++) {
+                    int nx = x + ddx2[k], ny = y + ddy2[k];
+                    if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+                    unsigned char a = cellMeta[y][x].roomId;
+                    unsigned char b = cellMeta[ny][nx].roomId;
+                    if (b != 0 && b != a) overlap = 1;
+                }
+            }
+        CHECK(!overlap, "two theme rooms must not touch each other");
+    }
+
+    /* ---- ⑤ 房间格子的 themeId 必须是真实主题 ---- */
+    {
+        int themeOk = 1, roomCells = 0;
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++) {
+                if (cellMeta[y][x].roomId == 0) continue;
+                roomCells++;
+                if (cellMeta[y][x].themeId >= THEME_COUNT) themeOk = 0;
+            }
+        CHECK(roomCells > 0, "placed rooms must actually claim some cells");
+        CHECK(themeOk, "every room cell must carry a real theme id");
+    }
+
+    /* ---- ⑥ 房间的空地必须真的在 worldMap 里被挖开 ---- */
+    {
+        int carved = 0;
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++)
+                if (cellMeta[y][x].roomId != 0 && worldMap[y][x] == 0) carved++;
+        CHECK(carved > 0, "room floor must actually be carved into worldMap");
+    }
+
+    /* ---- ⑦ 普通区恒为 0 tint（让 render 走原路径、零成本） ---- */
+    {
+        int normalTintZero = 1;
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++) {
+                if (cellMeta[y][x].roomId != 0) continue;
+                if (CellTintFor(x, y) != 0) normalTintZero = 0;
+            }
+        CHECK(normalTintZero, "cells outside rooms must have zero tint");
+    }
+
+    CellMetaReset();
+    memcpy(worldMap, saved, sizeof(saved));
+    exitX = savedExitX; exitY = savedExitY;
+}
+
 static void test_stone_hearing_range(void) {
     extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
     static int saved[MAP_HEIGHT][MAP_WIDTH];
@@ -1214,6 +1340,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
