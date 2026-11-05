@@ -230,7 +230,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 41   /* 2026-11-06：删掉调试行 -1 */   /* 2026-11-06：+1（调试生成） */   /* 2026-11-06：+2（相位放置 / 相位传送） */   /* v8：SFX / Music 音量拆成两项 */
+#define SETTING_COUNT 40   /* 2026-11-06：删掉 C 放置行 -1 */   /* 2026-11-06：删掉调试行 -1 */   /* 2026-11-06：+1（调试生成） */   /* 2026-11-06：+2（相位放置 / 相位传送） */   /* v8：SFX / Music 音量拆成两项 */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 
@@ -697,7 +697,10 @@ typedef struct { float x, y; int active; } Breaker;
  *   6 相位信标 PHASE BEACON  投出去落地 → 成为回溯点；按 Q 传送回去
  *   7 相位锚   PHASE ANCHOR  投出去落地 → **立刻**把玩家拉过去
  * ================================================================ */
-#define ITEM_SLOT_COUNT 8
+/* 2026-11-06（用户要求）：只留一个相位装置。
+   原来做了两个（信标 + 锚），用户说"把那个传送的小图也删掉，只留一个信标"。
+   现在 7 槽：6 个旧物品 + 1 个相位信标。 */
+#define ITEM_SLOT_COUNT 7
 
 /* ---- v3.3 投掷物重做：粘胶区域 + 回声扫描 ----
    胶水：落地生成一滩，半径 2.5 格、持续 6 秒、区域内移速 -80%
@@ -999,7 +1002,6 @@ typedef enum {
     ACT_SWING,             /* v1.8 绣刀挥砍（默认 Q） */
     ACT_DECOY,             /* v1.8 投石（默认 G） */
     ACT_DROP_GOLD,         /* v7 丢钱袋（默认 K，按住弹滑条） */
-    ACT_PHASE_PLACE,       /* 2026-11-06 相位信标：放置（默认 C） */
     ACT_PHASE_TELE,        /* 2026-11-06 相位信标：传送（默认 Q） */
     ACT_COUNT
 } ActionId;
@@ -1033,7 +1035,7 @@ typedef char binding_slots_must_leave_room[(ACT_COUNT + 1 <= BINDING_SLOTS) ? 1 
     [ACT_MENU_CONFIRM] = VK_RETURN, [ACT_MENU_CANCEL] = VK_ESCAPE, \
     [ACT_DODGE] = VK_SPACE, \
     [ACT_SWING] = 'V', [ACT_DECOY] = 'G', \
-    [ACT_PHASE_PLACE] = 'C', [ACT_PHASE_TELE] = 'Q', \
+    [ACT_PHASE_TELE] = 'Q', \
     [ACT_DROP_GOLD] = 'K', \
 }
 

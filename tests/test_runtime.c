@@ -686,7 +686,7 @@ static void test_phase_landing_near_wall(void) {
 
 static void test_phase_slots_selectable(void) {
     extern int throwSelected;
-    extern int phaseBeacons, phaseAnchors;
+    extern int phaseBeacons;
     extern int flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
     extern void EnsureThrowSelectedValid(void);
 
@@ -695,21 +695,14 @@ static void test_phase_slots_selectable(void) {
 
     /* ---- 只有信标：选择器必须落到槽 6 ---- */
     flares = bottles = smokeBombs = gluePots = echoBolts = decoys = 0;
-    phaseBeacons = 3; phaseAnchors = 0;
+    phaseBeacons = 3;
     throwSelected = 0;
     EnsureThrowSelectedValid();
     CHECK(throwSelected == 6,
           "with only beacons left the selector must land on slot 6 (BEACON)");
 
-    /* ---- 只有锚：槽 7 ---- */
-    phaseBeacons = 0; phaseAnchors = 2;
-    throwSelected = 0;
-    EnsureThrowSelectedValid();
-    CHECK(throwSelected == 7,
-          "with only anchors left the selector must land on slot 7 (ANCHOR)");
-
     /* ---- 六种旧物品都为空时，不能把选择器卡在 0 ---- */
-    phaseBeacons = 0; phaseAnchors = 0;
+    phaseBeacons = 0;
     throwSelected = 0;
     EnsureThrowSelectedValid();
     CHECK(throwSelected == 0, "with nothing at all the selector falls back to slot 0");

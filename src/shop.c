@@ -48,8 +48,7 @@ static const int kItemPrice[SHOP_ITEM_KINDS] = {
     120,   /* 5 DECOY   诱饵 */
     60,    /* 6 BATTERY 电池 */
     70,    /* 7 MEDKIT  药包 */
-    0,     /* 8 PHASE BEACON 相位信标 —— 百分比价 */
-    0      /* 9 PHASE ANCHOR 相位锚   —— 百分比价 */
+    0      /* 8 PHASE BEACON 相位信标 —— 百分比价 */
 };
 
 /* ==================================================================
@@ -103,7 +102,7 @@ int ShopPriceAt(int row) {
      * （shopOffer[row]，0..SHOP_ITEM_KINDS-1）。相位信标是种类 8，
      * 放守卫后面会被直接返回 0（第一次就是这么红的）。
      * ================================================================ */
-    if (row == 8 || row == 9) {
+    if (row == 8) {
         /* ==================================================================
          * 2026-11-06 修正（用户：价格过于昂贵，应该是逐渐增加的百分比）
          * ------------------------------------------------------------------
@@ -216,7 +215,6 @@ void ShopOpen(int level) {
         int n = 0;
         for (int i = 0; i < SHOP_ITEM_KINDS - 1; i++) pool[n++] = i;
         if (level >= 3 && (rand() % 100) < 25) pool[n++] = 8;
-        if (level >= 3 && (rand() % 100) < 25) pool[n++] = 9;
         for (int k = 0; k < SHOP_OFFERS; k++) {
             int pick = rand() % n;
             int kind = pool[pick];
@@ -618,11 +616,6 @@ void ShopActivate(void) {
                     extern int phaseBeacons;
                     if (phaseBeacons < BottleCap()) phaseBeacons++;
                     pickupMsg = Tr("+1 PHASE BEACON", "+1 相位信标");
-                } break;
-        case 9: {
-                    extern int phaseAnchors;
-                    if (phaseAnchors < BottleCap()) phaseAnchors++;
-                    pickupMsg = Tr("+1 PHASE ANCHOR", "+1 相位锚");
                 } break;
         default: sanity += 25.0f; if (sanity > SanityMax()) sanity = SanityMax();
                 pickupMsg = Tr("+25 SANITY", "+25 理智"); break;

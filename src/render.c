@@ -3743,26 +3743,9 @@ static void DrawViewModel(void) {
     int py = cy - size;
     DrawSprite(sid, px, py, size, size, light, 1.0f, 0, 0.0f);
 
-    /* ==================================================================
-     * 2026-11-06（用户要求）：**相位信标的手持模型**
-     * ------------------------------------------------------------------
-     * 用户原话：「相位装置的建模，还有手持建模也没有做」。
-     * 画在画面**左下角**（扳手在右下），左右对称，不抢视线。
-     * 剩余次数用顶端两颗点的亮度表示：剩 2 次全亮，剩 1 次只亮一颗。
-     * ================================================================== */
-    {
-        extern int phaseOwned, phaseCharges, phasePlaced;
-        if (phaseOwned && phaseCharges > 0) {
-            int hsize = (int)((float)renderH * 0.30f);
-            if (hsize < 48) hsize = 48;
-            int hx = (int)((float)renderW * 0.10f);
-            int hy = (int)((float)renderH * 0.99f + lift * 0.6f);
-            /* 该画几颗充能点：靠亮度区分，1 次时压暗一半 */
-            float hl = (phaseCharges >= 2) ? 0.95f : 0.62f;
-            DrawSprite(SPR_PHASE_HAND, hx - hsize / 2, hy - hsize, hsize, hsize,
-                       hl, 1.0f, 0, 0.0f);
-        }
-    }
+    /* 2026-11-06（用户要求）：**手持小图删掉**。
+       用户原话：「把那个叫什么传送的那个小图也给删掉，然后就留一个信标」。
+       现在只在世界里放信标模型 + 按 Q 传送，不再有屏幕左下角的手持图。 */
 
     /* 开火瞬间在武器前端补一团光 */
     /* 2026-11-05：**没有枪了** —— 枪口闪光永远不画（原来按 curWeapon 判，
@@ -3788,12 +3771,12 @@ static void DrawViewModel(void) {
     /* 左手：托着当前选中的投掷物 */
     {
         extern int flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
-        extern int phaseBeacons, phaseAnchors;   /* 2026-11-06 相位投掷物 */
+        extern int phaseBeacons;   /* 2026-11-06 相位投掷物 */
         /* v6 **槽位表必须和 ITEM_SLOT_COUNT(6) 一致** ——
            原来用旧的 8 个变量初始化 6 元素数组：多出初值被丢弃，
            索引整体错位（槽 2..5 读到砖头/酸液/燃烧瓶等已删除物品）。 */
         int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs,
-                                        gluePots, echoBolts, decoys, phaseBeacons, phaseAnchors };
+                                        gluePots, echoBolts, decoys, phaseBeacons };
         int sel = throwSelected;
         if (sel >= 0 && sel < ITEM_SLOT_COUNT && counts[sel] > 0) {
             /* v2.9：按报告重算 —— 原来 100px 大、落进枪模框内、亮度 0.55，
@@ -3817,8 +3800,7 @@ static void DrawViewModel(void) {
             static const int slotSpr[ITEM_SLOT_COUNT] = {
                 SPR_ITEM_FLARE, SPR_ITEM_SLING, SPR_ITEM_SMOKE,
                 SPR_ITEM_GLUE,  SPR_ITEM_ECHO,  SPR_ITEM_DECOY,
-                /* 2026-11-06：两个相位投掷物直接复用手持模型 */
-                SPR_PHASE_HAND, SPR_PHASE_HAND
+                SPR_PHASE_HAND   /* 相位信标：复用手持模型 */
             };
             DrawSprite(slotSpr[sel], ix, iy - isize, isize, isize,
                        0.92f, 1.0f, 0, 0.0f);

@@ -33,7 +33,7 @@
    见 ShopPriceAt()。 */
 /* 2026-11-06：9 -> 10。8 = 相位信标（投掷物），9 = 相位锚（投掷物）。
    两者都按"当前携带金币的百分比"定价，随层数递增。 */
-#define SHOP_ITEM_KINDS 10
+#define SHOP_ITEM_KINDS 9
 #define SHOP_COOLDOWN_ROWS 8
 
 #define SAFEHOUSE_PAGES 5   /* v3.0：+ 强化 */

@@ -3903,10 +3903,10 @@ void DrawHUD(void) {
      * ================================================================ */
     static const char* slotName[ITEM_SLOT_COUNT] = {
         "FLARE", "SLING", "SMOKE", "GLUE", "ECHO", "DECOY",
-        "BEACON", "ANCHOR" };
+        "BEACON" };
     static const char* slotNameZh[ITEM_SLOT_COUNT] = {
         "光球", "投石", "烟雾", "胶水", "回声", "诱饵",
-        "相位信标", "相位锚" };
+        "相位信标" };
 
         static float scroll = 0.0f;
         static double lastT = 0.0;
@@ -3917,9 +3917,9 @@ void DrawHUD(void) {
         lastT = nowT;
         {
             /* v1.17：只给"有货的槽位"排序号，空槽不参与滚动 */
-                extern int phaseBeacons, phaseAnchors;
+                extern int phaseBeacons;
                 int cArr[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts,
-                                             decoys, phaseBeacons, phaseAnchors };;
+                                             decoys, phaseBeacons };;
             int selVis = 0;
             for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
                 if (cArr[i] <= 0) continue;
@@ -3935,8 +3935,8 @@ void DrawHUD(void) {
     counts[2] = smokeBombs;
     counts[3] = gluePots;
     counts[4] = echoBolts;
-    { extern int phaseBeacons, phaseAnchors;
-      counts[5] = decoys; counts[6] = phaseBeacons; counts[7] = phaseAnchors; }
+    { extern int phaseBeacons;
+      counts[5] = decoys; counts[6] = phaseBeacons; }
     counts[5] = decoys;
 
         /* v3.3 **判据要覆盖全部 6 个槽位** ——
