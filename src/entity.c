@@ -1062,6 +1062,45 @@ void TickSecondSpawn(float dt) {
 /* 前向声明：UpdateMonster2 里命中玩家后要把怪推开（定义在本文件后面） */
 static void KnockbackMonster(Monster* m);
 
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B04）：**以记忆点为锚的定向搜查**
+ * ------------------------------------------------------------------
+ * 和 MonsterWanderFor 的区别：
+ *   MonsterWanderFor 在**当前位置**周围 ±4 格随机挑
+ *   → 每次新挑都可能越飘越远，读起来像"随便逛逛"
+ *
+ *   MonsterSearchAround 在**记忆点**周围 1.5~4.4 格的环上挑
+ *   → 目标始终围绕"它最后察觉你的地方"，读起来像"在找你"
+ *
+ * 角度由 memAge 驱动，所以连续几次搜查会绕环分散开，
+ * 而不是反复扑同一条边。
+ * ================================================================ */
+void MonsterSearchAround(Monster* m, float cx, float cy) {
+    if (!m) return;
+
+    int tick = (int)(m->memAge * 4.0f);
+    unsigned int base = (unsigned int)(tick * 7 + 3);
+
+    for (int k = 0; k < 12; k++) {
+        float ang = (float)((base + (unsigned int)k * 29u) % 360u) * 0.01745329f;
+        float rad = 1.5f + (float)((base + (unsigned int)k * 11u) % 30u) * 0.1f;
+        float nx = cx + cosf(ang) * rad;
+        float ny = cy + sinf(ang) * rad;
+
+        if (nx < 1.5f || ny < 1.5f) continue;
+        if (nx > MAP_WIDTH - 1.5f || ny > MAP_HEIGHT - 1.5f) continue;
+        if (worldMap[(int)ny][(int)nx]) continue;
+        if (MonPathFor(m, (int)m->x, (int)m->y, (int)nx, (int)ny) > 0) {
+            m->tx = nx;
+            m->ty = ny;
+            return;
+        }
+    }
+    /* 环上都不通 → 退回原来的行为（至少别站着） */
+    MonsterWanderFor(m);
+}
+
+
 static void UpdateOneHunter(Monster* M, float dt) {
     /* ===== v2.4.14 **怪物扑到玩偶上** =====
        用户反馈：怪贴到玩偶上之后「不消失、没有实际反应、直接走开了」。
@@ -1287,6 +1326,11 @@ static void UpdateOneHunter(Monster* M, float dt) {
                     pickupMsg = "ESCAPED  +GOLD";
                     pickupMsgTimer = 1.2f;
                 }          /* 到了声源，原地搜一圈 */
+            /* B04：把"它最后察觉你的地方"锁成搜查锚点。
+               没有这一步，memX/memY 一直是 0 —— 它会跑去地图左上角搜。 */
+            M->memX = M->tx;
+            M->memY = M->ty;
+            M->memAge = 0.0f;
             M->stateTimer = 3.5f;
             M->pathLen = 0;
             M->pathIdx = 0;
@@ -1322,6 +1366,11 @@ static void UpdateOneHunter(Monster* M, float dt) {
 
             M->state = 2;              /* 搜寻（会走开） */
             M->stateTimer = 6.0f;
+            /* B04：撤退之前先记住"最后一次看到你"的位置。
+               撤退目标（背离 10 格）会走远，但记忆锚留在原地。 */
+            M->memX = M->tx;
+            M->memY = M->ty;
+            M->memAge = 0.0f;
             M->tx = rx;
             M->ty = ry;
             M->huntTimer = 0.0f;
@@ -1329,14 +1378,16 @@ static void UpdateOneHunter(Monster* M, float dt) {
             M->pathLen = 0;
             M->pathIdx = 0;
         }
-} else if (M->state == 2) {
+    } else if (M->state == 2) {
         M->stateTimer -= dt;
+        M->memAge += dt;
         if (M->pathLen == 0 || M->pathIdx >= M->pathLen) {
             if (M->stateTimer <= 0.0f) {
                 M->state = 0;
                 M->wanderTimer = 0.5f;
             } else {
-                MonsterWanderFor(M);
+                /* v2.4-beta B04：绕**记忆点**定向搜查，不再随机漫游 */
+                MonsterSearchAround(M, M->memX, M->memY);
             }
         }
     } else {

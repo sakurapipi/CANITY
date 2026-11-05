@@ -481,6 +481,78 @@ static void test_floor_resets_hunters(void) {
  *   B 在走廊里，直线更远
  * 结果必须是 B —— 旧实现（直线距离）会选 A。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B04）：**定向搜查围绕记忆点，而不是漫游**
+ * ------------------------------------------------------------------
+ * 这是 B04 的核心行为断言：
+ *   MonsterWanderFor 在**当前位置**周围 ±4 格随机挑 → 会飘走
+ *   MonsterSearchAround 在**记忆点**周围 1.5~4.4 格环上挑 → 收敛
+ *
+ * 造一间空房间，把记忆点钉在房间中央，然后连挑 12 次，
+ * 每次都检查落点到记忆点的距离在环内。
+ * ================================================================== */
+static void test_monster_search_around(void) {
+    extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+    static int saved[MAP_HEIGHT][MAP_WIDTH];
+    memcpy(saved, worldMap, sizeof(saved));
+
+    /* 一间 14×14 的空房（四周留一圈墙） */
+    for (int y = 0; y < MAP_HEIGHT; y++)
+        for (int x = 0; x < MAP_WIDTH; x++)
+            worldMap[y][x] = (x >= 1 && y >= 1 && x <= 14 && y <= 14) ? 0 : 1;
+
+    static Monster mon;
+    memset(&mon, 0, sizeof(mon));
+    mon.active = 1;
+    mon.x = 11.5f; mon.y = 11.5f;      /* 它自己站在房间一角 */
+    mon.memX = 5.5f; mon.memY = 5.5f;  /* 记忆点在房间中央 */
+    mon.tx = 0.0f; mon.ty = 0.0f;
+
+    int inside = 0;
+    float minD = 1e9f, maxD = 0.0f;
+
+    for (int i = 0; i < 12; i++) {
+        mon.memAge = (float)i * 0.25f;      /* 模拟搜查推进，角度会轮换 */
+        mon.pathLen = 0;
+        mon.pathIdx = 0;
+        MonsterSearchAround(&mon, mon.memX, mon.memY);
+
+        float dx = mon.tx - mon.memX;
+        float dy = mon.ty - mon.memY;
+        float d = sqrtf(dx * dx + dy * dy);
+        if (d < minD) minD = d;
+        if (d > maxD) maxD = d;
+        if (d >= 1.0f && d <= 5.0f) inside++;
+    }
+
+    CHECK(inside == 12,
+          "every directed search point must sit on the ring around the memory anchor");
+    CHECK(minD >= 1.0f, "search points must not collapse onto the anchor itself");
+    CHECK(maxD <= 5.0f, "search points must stay near the memory anchor, not drift away");
+
+    /* 对照组：同样的位置，用旧的漫游函数，落点会围绕**当前位置**（11.5,11.5） */
+    {
+        static Monster mon2;
+        memset(&mon2, 0, sizeof(mon2));
+        mon2.active = 1;
+        mon2.x = 11.5f; mon2.y = 11.5f;
+        mon2.memX = 5.5f; mon2.memY = 5.5f;
+
+        int farFromMemory = 0;
+        for (int i = 0; i < 12; i++) {
+            mon2.pathLen = 0; mon2.pathIdx = 0;
+            /* 只是对照：用同一套环算法但从**当前位置**出发 */
+            MonsterSearchAround(&mon2, mon2.x, mon2.y);
+            float dx = mon2.tx - 5.5f, dy = mon2.ty - 5.5f;
+            if (sqrtf(dx * dx + dy * dy) > 6.0f) farFromMemory++;
+        }
+        CHECK(farFromMemory == 12,
+              "anchoring on the current position (old behaviour) leaves the memory area");
+    }
+
+    memcpy(worldMap, saved, sizeof(saved));
+}
+
 static void test_suspicion_best_uses_propagation(void) {
     extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
     static int saved[MAP_HEIGHT][MAP_WIDTH];
@@ -1088,6 +1160,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

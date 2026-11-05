@@ -56,6 +56,15 @@ void UpdateMonster(float dt);
 void SpawnLightBeast(void);
 void UpdateLightBeast(float dt);
 void SpawnParasite(void);
+
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B04）：**以记忆点为锚的定向搜查**
+ * ------------------------------------------------------------------
+ * 在 (cx,cy) 周围 1.5~4.4 格的环上挑一个走得通的点，写进 m->tx/ty。
+ * 角度由 m->memAge 驱动，所以连续几次搜查会绕环分散开。
+ * 环上都不通时退回 MonsterWanderFor。
+ * ================================================================== */
+void MonsterSearchAround(Monster* m, float cx, float cy);
 void UpdateParasite(float dt);
 
 /* ---- 感知 / 受击 ---- */
