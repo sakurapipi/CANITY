@@ -278,12 +278,17 @@ float SkillStunAdd(void) {
 int SkillBatteryAdd(void) {                 /* SIPHON    +25/级（原 +20） */
     return 25 * skillRank[SK_BATTERY];
 }
-float SkillSpeedAdd(void) {                 /* LIGHT STEP +6%/级 */
+float SkillSpeedAdd(void) {
+    /* 2026-11-06（用户要求"技能树做点数值微调，机制不要改"）：
+       QUITE STEP +2%/级 -> +3%/级；深层还 +4%（濒死加成保持不变）。
+       地图变大之后移动距离变长，+2% 几乎感觉不到。 */
     extern float sanity;
-    return 0.02f*(float)skillRank[SK_QUIET]+(sanity<30.0f ? 0.04f*skillRank[SK_DESPERATE] : 0.0f);
+    return 0.03f*(float)skillRank[SK_QUIET]+(sanity<30.0f ? 0.04f*skillRank[SK_DESPERATE] : 0.0f);
 }
-float SkillQuietMul(void) {                 /* QUIET LID  -15%/级 */
-    return 1.0f - 0.15f * (float)skillRank[SK_SEARCHNOISE];
+float SkillQuietMul(void) {
+    /* 2026-11-06：翻箱噪音 -15%/级 -> -18%/级。
+       地图变大后搜刮次数变多，噪音惩罚的绝对量也变大了。 */
+    return 1.0f - 0.18f * (float)skillRank[SK_SEARCHNOISE];
 }
 
 /* ===== v3.4 新增的三个机制查询（方案 v5 §4.2 局外树）===== */
@@ -313,8 +318,11 @@ int SkillGhostSilent(void) {
 int SkillCartoMaxed(void) {
     return (skillRank[SK_CARTO] >= 2) ? 1 : 0;
 }
-float SkillEcoMul(void) {                   /* GHOST STEP -12%/级 */
-    return (1.0f-0.10f*(float)skillRank[SK_GHOSTSTEP])*(SkillOwned(SK_NIGHTWALKER)?0.75f:1.0f);
+float SkillEcoMul(void) {
+    /* 2026-11-06：省电 -10%/级 -> -12%/级。
+       手电上限涨到 150 之后，每 1% 的绝对值也变大了，
+       这里只补一点点，避免夜行者那条 -25% 叠加后过于强势。 */
+    return (1.0f-0.12f*(float)skillRank[SK_GHOSTSTEP])*(SkillOwned(SK_NIGHTWALKER)?0.75f:1.0f);
 }
 float SkillCalmMul(void) {                  /* REST       -10%/级 */
     return 1.0f - 0.10f * (float)skillRank[SK_REST];

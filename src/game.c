@@ -2142,6 +2142,23 @@ void GenerateLevel(void) {
     hideSpotCount = 0;
     {
         /* ==================================================================
+         * 2026-11-06（用户要求）：**隐藏点之间必须有最小间距**
+         * ------------------------------------------------------------------
+         * 「你要有一个隐藏点的距离设置，一定区域之内不能出现两个隐藏点，
+         *   不然没什么用。」
+         *
+         * 原来第一轮只要求 2 格、兜底更是只有 1.2 格 ——
+         * 同一段走廊里能出两三个桶，等于一段路给三次免死，
+         * 而地图另一头一个都没有。
+         *
+         * 现在硬性要求：
+         *   第一轮 7 格   （主约束）
+         *   第二轮 5 格   （兜底放宽，但绝不低于它）
+         * 宁可少放一个，也不要在同一片区域堆两个。
+         * ================================================================ */
+        const float HIDESPOT_MIN_GAP2      = 49.0f;   /* 7 格 */
+        const float HIDESPOT_MIN_GAP2_RELAX = 25.0f;  /* 5 格（兜底下限） */
+        /* ==================================================================
          * 2026-11-06（用户要求）：藏身点"稍微增加一点，随层数逐渐减少"
          * ------------------------------------------------------------------
          * 原来是 2~3 个、与层数无关。地图 36x36 之后一层要跑更久，
@@ -2167,7 +2184,7 @@ void GenerateLevel(void) {
             if (!SpotClear(hx2, hy2, 1.4f, 1, -1)) continue;
             int bad = 0;
             for (int k = 0; k < hideSpotCount; k++)
-                if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < 4.0f) { bad = 1; break; }
+                if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < HIDESPOT_MIN_GAP2) { bad = 1; break; }
             if (bad) continue;
             hideSpots[hideSpotCount].x = hx2;
             hideSpots[hideSpotCount].y = hy2;
@@ -2185,7 +2202,7 @@ void GenerateLevel(void) {
             if (Dist2(hx2, hy2, exitX, exitY) < 6.0f) continue;
             int bad = 0;
             for (int k = 0; k < hideSpotCount; k++)
-                if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < 1.5f) { bad = 1; break; }
+                if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < HIDESPOT_MIN_GAP2_RELAX) { bad = 1; break; }
             if (bad) continue;
             /* 兜底也不能压在箱子/配电箱上，否则垃圾桶会被道具盖住，
                玩家只看到 HIDE 提示却找不到桶。 */

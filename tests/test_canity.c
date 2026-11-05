@@ -220,6 +220,33 @@ static void test_no_unwired_api(void) {
  *   编译通过、自检通过、功能是死的。
  *   静态契约能挡住这一类回退。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06：**隐藏点最小间距**（标注 CONTRACT）
+ * ------------------------------------------------------------------
+ * ⚠️ 这是源码字符串检查，不是行为测试 ——
+ *    隐藏点的放置写在 GenerateLevel 内部，没法在单测里直接调用。
+ *    真正的验证是在游戏里看"同一片区域会不会出现两个桶"。
+ *
+ * 为什么还是要有它：
+ *    这个 bug 的形态是"某个字面量太小"（兜底档只有 1.5f），
+ *    很容易在下一次重构里被改回去，而且改回去不会有任何编译错误。
+ * ================================================================== */
+static void test_hidespot_gap_contract(void) {
+    char* g = read_file("src/game.c");
+    strip_comments(g);
+
+    check(contains(g, "HIDESPOT_MIN_GAP2"),
+          "CONTRACT: hide spots must have a named minimum gap (not a bare literal)");
+    check(contains(g, "HIDESPOT_MIN_GAP2_RELAX"),
+          "CONTRACT: the fallback round must also respect a floor, not just 'not a wall'");
+    /* 老的兜底间距是 1.5f —— 那等于"几乎不限"，必须消失 */
+    check(!contains(g, "hideSpots[k].y) < 1.5f"),
+          "CONTRACT: the old 1.5-tile fallback gap must be gone");
+    check(!contains(g, "hideSpots[k].y) < 4.0f"),
+          "CONTRACT: the old 2-tile primary gap must be gone");
+    free(g);
+}
+
 static void test_tutorial_and_keystone_contract(void) {
     char* src = read_file("src/game.c");
     strip_comments(src);
@@ -973,7 +1000,8 @@ static void test_lockbox_contract(void) {
 
 int main(void) {
     test_room_template_contract();
-    test_tutorial_and_keystone_contract();   /* v2.4-rc C01：纯函数，最便宜先跑 */
+    test_tutorial_and_keystone_contract();
+    test_hidespot_gap_contract();   /* v2.4-rc C01：纯函数，最便宜先跑 */
     test_no_unwired_api();
     test_wallet_single_source();
     test_steam_zone();
