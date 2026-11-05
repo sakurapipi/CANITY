@@ -436,6 +436,11 @@ static long ReadSaveFile(const char* path, SaveBlob* out) {
 /* 仅测试用：复位"只读"标志。
    生产路径里它由 ExtractSaveFile 每次读档重算；
    测试里没有真实读档，所以需要一个显式复位入口。 */
+/* 仅测试用：读回"最近一次载入的 blob"。
+   LoadSettings 填的就是它；运行时的 worldMap 要到 ContinueRun 才灌回，
+   所以验证迁移结果必须看这份数据。 */
+const SaveBlob* SaveTestBlob(void) { return &g_save; }
+
 void SaveTestClearReadOnly(void) {
     s_saveReadOnly = 0;
     SaveCarryClear();
@@ -913,66 +918,128 @@ typedef struct {
    · 技能树前 20 项按位置保留（新树 20..29 级从 0 开始）；
    · 其余大厅进度、金币、银行、遗物、藏身点原样带走。 */
 /* ==================================================================
- * 2026-11-06（**P0-1 存档布局错位**）：v28 及更早的 Container 是 32 字节
+ * 2026-11-06：**通用老存档重排**
  * ------------------------------------------------------------------
- * 现象：读 v27 老档，图鉴变成 104857600、电量 153.95、每日模式变成 -1、
- *       地图和箱子全乱。
+ * 两次布局变更叠在一起，所以做成一个参数化函数：
+ *   v25 ~ v28 : Container 32 字节、地图 24x24
+ *   v29 ~ v30 : Container 40 字节、地图 24x24
+ *   v31       : Container 40 字节、地图 36x36   ← 当前
  *
- * 根因：v29 给 Container 加了 mimicShell / mimicHost 两个 int
- *       （32 → 40 字节），而 `Container cont[8]` 在 SaveBlob 的**中间**、
- *       就在 worldMap **前面**。于是 worldMap 之后的所有字段
- *       整体**提前 64 字节**。
- *       "新增字段永远追加在末尾"这条前提只对**顶层**字段成立，
- *       对嵌套结构不成立 —— 这就是这次的教训。
+ * 只靠 memcpy 是**不行**的，三处都要重排：
+ *   ① cont[]     —— 每条 32 -> 40 字节（v29 加了 mimicShell/mimicHost）
+ *   ② worldMap   —— 24 宽 -> 36 宽，**行宽变了，必须逐格重排**
+ *   ③ explored   —— 同上
+ *   后面跟着的尾部（flares 之后）整体后移。
  *
- * 为什么不能整份 memcpy：老文件里的 cont[] 是 8 条 32 字节记录，
- * 新结构要 8 条 40 字节。所以必须在**原始字节**上重排：
- *   ① 前缀（到 cont 之前）布局相同 → 直接拷
- *   ② cont[] 逐字段展开，新增的两个字段补 0
- *   ③ 尾部从"老 cont 结束"搬到"新 cont 结束"，等价于整体后移 64 字节
+ * 为什么第 ② 步不能 memcpy：老档是 y*24+x 的行主序，
+ * 新结构是 y*36+x。直接拷会把第 1 行的后半截读成第 0 行的一部分。
  *
- * 返回 1 = 成功；0 = 文件太小/明显不对，调用方按"归档不解释"处理。
+ * 返回 1 = 成功；0 = 参数不合理或文件太小。
  * ================================================================ */
-#define LEGACY_CONTAINER_BYTES 32      /* x,y + active,searched,content,locked,lockType,lockCode */
-#define LEGACY_CONTAINER_INTS  6
+#define LEGACY_CONTAINER_BYTES 32      /* v28 及以前的 Container 大小 */
+#define LEGACY_MAP_W 24
+#define LEGACY_MAP_H 24
 
 typedef char container_must_be_40[(sizeof(Container) == 40) ? 1 : -1];
+typedef char map_must_be_at_least_24[((MAP_WIDTH >= 24) && (MAP_HEIGHT >= 24)) ? 1 : -1];
 
-static int LoadLegacyV28(const unsigned char* src, size_t size, SaveBlob* out) {
+/* 计算"老布局"各段的偏移与长度。返回 0 = 不合理。 */
+static int LegacySpan(int containerBytes, int mapW, int mapH,
+                      size_t* preLen, size_t* oldContSz, size_t* oldMapSz,
+                      size_t* oldExplSz, size_t* oldTailOff) {
+    if (containerBytes != 32 && containerBytes != (int)sizeof(Container)) return 0;
+    if (mapW <= 0 || mapH <= 0 || mapW > MAP_WIDTH || mapH > MAP_HEIGHT) return 0;
+
+    size_t pre = offsetof(SaveBlob, cont);
+    size_t contSz = (size_t)containerBytes * MAX_CONTAINERS;
+    size_t mapSz  = (size_t)mapW * (size_t)mapH * sizeof(int);
+    size_t explSz = mapSz;
+
+    if (preLen)     *preLen = pre;
+    if (oldContSz)  *oldContSz = contSz;
+    if (oldMapSz)   *oldMapSz = mapSz;
+    if (oldExplSz)  *oldExplSz = explSz;
+    if (oldTailOff) *oldTailOff = pre + contSz + mapSz + explSz;
+    return 1;
+}
+
+static int LoadLegacyBlob(const unsigned char* src, size_t size,
+                          int containerBytes, int mapW, int mapH, SaveBlob* out) {
+    size_t preLen = 0, oldContSz = 0, oldMapSz = 0, oldExplSz = 0, oldTailOff = 0;
     if (!src || !out || size < 16) return 0;
-
-    size_t contOff   = offsetof(SaveBlob, cont);
-    size_t oldContSz = (size_t)LEGACY_CONTAINER_BYTES * MAX_CONTAINERS;   /* 256 */
-    size_t newContSz = sizeof(Container) * MAX_CONTAINERS;                /* 320 */
-    if (newContSz <= oldContSz) return 0;                                 /* 布局没变，别乱动 */
+    if (!LegacySpan(containerBytes, mapW, mapH,
+                    &preLen, &oldContSz, &oldMapSz, &oldExplSz, &oldTailOff)) return 0;
 
     memset(out, 0, sizeof(*out));
 
-    /* ---- ① 前缀：cont 之前布局完全相同 ---- */
-    size_t pre = (contOff < size) ? contOff : size;
-    memcpy(out, src, pre);
+    /* ---- ① 前缀（cont 之前两种布局完全相同） ---- */
+    memcpy(out, src, (preLen < size) ? preLen : size);
 
     /* ---- ② cont[] 逐字段展开 ---- */
-    for (int i = 0; i < MAX_CONTAINERS; i++) {
-        size_t off = contOff + (size_t)i * LEGACY_CONTAINER_BYTES;
-        if (off + LEGACY_CONTAINER_BYTES > size) break;      /* 文件更短：其余留 0 */
-        const unsigned char* p = src + off;
-        memcpy(&out->cont[i].x,        p + 0,  sizeof(float));
-        memcpy(&out->cont[i].y,        p + 4,  sizeof(float));
-        memcpy(&out->cont[i].active,   p + 8,  sizeof(int));
-        memcpy(&out->cont[i].searched, p + 12, sizeof(int));
-        memcpy(&out->cont[i].content,  p + 16, sizeof(int));
-        memcpy(&out->cont[i].locked,   p + 20, sizeof(int));
-        memcpy(&out->cont[i].lockType, p + 24, sizeof(int));
-        memcpy(&out->cont[i].lockCode, p + 28, sizeof(int));
-        out->cont[i].mimicShell = 0;      /* v29 新增，老档没有 */
-        out->cont[i].mimicHost  = 0;
+    {
+        size_t off = preLen;
+        for (int i = 0; i < MAX_CONTAINERS; i++) {
+            if (off + (size_t)containerBytes > size) break;
+            const unsigned char* p = src + off;
+            if (containerBytes == (int)sizeof(Container)) {
+                memcpy(&out->cont[i], p, sizeof(Container));
+            } else {
+                memcpy(&out->cont[i].x,        p + 0,  sizeof(float));
+                memcpy(&out->cont[i].y,        p + 4,  sizeof(float));
+                memcpy(&out->cont[i].active,   p + 8,  sizeof(int));
+                memcpy(&out->cont[i].searched, p + 12, sizeof(int));
+                memcpy(&out->cont[i].content,  p + 16, sizeof(int));
+                memcpy(&out->cont[i].locked,   p + 20, sizeof(int));
+                memcpy(&out->cont[i].lockType, p + 24, sizeof(int));
+                memcpy(&out->cont[i].lockCode, p + 28, sizeof(int));
+                out->cont[i].mimicShell = 0;
+                out->cont[i].mimicHost  = 0;
+            }
+            off += (size_t)containerBytes;
+        }
     }
 
-    /* ---- ③ 尾部整体后移 64 字节 ---- */
+    /* ---- ③ worldMap：24 宽 -> 36 宽，逐格重排 ---- */
     {
-        size_t oldTailOff = contOff + oldContSz;
-        size_t newTailOff = contOff + newContSz;
+        size_t oldMapOff = preLen + oldContSz;
+        size_t newMapOff = offsetof(SaveBlob, worldMap);
+        if (oldMapOff != newMapOff && oldMapSz != 0) {
+            /* 偏移不同也没关系：我们从 src 的 oldMapOff 读、写到结构里的 worldMap */
+        }
+        for (int y = 0; y < mapH; y++) {
+            for (int x = 0; x < mapW; x++) {
+                size_t o = oldMapOff + ((size_t)y * (size_t)mapW + (size_t)x) * sizeof(int);
+                if (o + sizeof(int) > size) continue;
+                int v = 0;
+                memcpy(&v, src + o, sizeof(int));
+                out->worldMap[y][x] = v;
+            }
+        }
+        /* 新地图多出来的区域：一律当作**墙** —— 老档没有那些格子，
+           给 0 会造出一片穿越地图边界的空地。 */
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++) {
+                if (x < mapW && y < mapH) continue;
+                out->worldMap[y][x] = 1;
+            }
+    }
+
+    /* ---- ④ explored：同样逐格重排，多出来的留 0（未探索） ---- */
+    {
+        size_t oldExplOff = preLen + oldContSz + oldMapSz;
+        for (int y = 0; y < mapH; y++)
+            for (int x = 0; x < mapW; x++) {
+                size_t o = oldExplOff + ((size_t)y * (size_t)mapW + (size_t)x) * sizeof(int);
+                if (o + sizeof(int) > size) continue;
+                int v = 0;
+                memcpy(&v, src + o, sizeof(int));
+                out->explored[y][x] = v;
+            }
+    }
+
+    /* ---- ⑤ 尾部整体后移 ---- */
+    {
+        size_t newTailOff = offsetof(SaveBlob, flares);
         if (size > oldTailOff) {
             size_t n = size - oldTailOff;
             size_t cap = sizeof(SaveBlob) - newTailOff;
@@ -984,12 +1051,10 @@ static int LoadLegacyV28(const unsigned char* src, size_t size, SaveBlob* out) {
 }
 
 /* 迁移之后，"当前布局里有多少字节是有效的" */
-static size_t LegacyV28ValidBytes(size_t oldSize) {
-    size_t contOff   = offsetof(SaveBlob, cont);
-    size_t oldContSz = (size_t)LEGACY_CONTAINER_BYTES * MAX_CONTAINERS;
-    size_t newContSz = sizeof(Container) * MAX_CONTAINERS;
-    size_t oldTailOff = contOff + oldContSz;
-    size_t newTailOff = contOff + newContSz;
+static size_t LegacyValidBytes(size_t oldSize, int containerBytes, int mapW, int mapH) {
+    size_t oldTailOff = 0;
+    if (!LegacySpan(containerBytes, mapW, mapH, NULL, NULL, NULL, NULL, &oldTailOff)) return 0;
+    size_t newTailOff = offsetof(SaveBlob, flares);
     size_t tail = (oldSize > oldTailOff) ? (oldSize - oldTailOff) : 0;
     size_t v = newTailOff + tail;
     if (v > sizeof(SaveBlob)) v = sizeof(SaveBlob);
@@ -1093,8 +1158,17 @@ int LoadSettings(void) {
     /* v25 / v26 / v27：新字段都追加在结构末尾，前缀可以直接读。
        v25 缺 runPrincipalSave，用本局本金兜底（和原来的迁移一致）；
        v28 新增的 Dynamic Res / 通关记录由下面的 has*Field 判断补默认值。 */
-    if (g_save.version == 25 || g_save.version == 26 ||
-        g_save.version == 27 || g_save.version == 28) {
+    /* ==================================================================
+     * 2026-11-06：v25 ~ v30 都需要**重排**，不只是改版本号
+     * ------------------------------------------------------------------
+     *   v25~v28 : Container 32 字节 + 地图 24x24
+     *   v29~v30 : Container 40 字节 + 地图 24x24
+     *   v31     : Container 40 字节 + 地图 36x36   ← 当前
+     *
+     * 旧代码只把 version 改成 SAVE_VERSION 就放行 —— 那就是 P0-1。
+     * ================================================================ */
+    if (g_save.version >= 25 && g_save.version <= 30) {
+        int legacyCont = (g_save.version <= 28) ? 32 : (int)sizeof(Container);
         /* ================================================================
          * P0-1：**这里是真正的修复点**
          * ----------------------------------------------------------------
@@ -1106,8 +1180,13 @@ int LoadSettings(void) {
         int migrated = 0;
         if (raw && usedPath[0]) {
             long rn = ReadWholeFile(usedPath, raw, sizeof(SaveBlob) + 4096);
-            if (rn > 0) migrated = LoadLegacyV28(raw, (size_t)rn, &g_save);
-            if (migrated) fileSize = LegacyV28ValidBytes((size_t)rn);
+            if (rn > 0) {
+                migrated = LoadLegacyBlob(raw, (size_t)rn, legacyCont,
+                                          LEGACY_MAP_W, LEGACY_MAP_H, &g_save);
+                if (migrated)
+                    fileSize = LegacyValidBytes((size_t)rn, legacyCont,
+                                                LEGACY_MAP_W, LEGACY_MAP_H);
+            }
         }
         if (raw) free(raw);
         if (!migrated) {

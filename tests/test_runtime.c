@@ -106,14 +106,13 @@ static void test_wallet_save(void) {
     /* ==================================================================
      * v25 夹具：**必须是真正的 v25 布局**
      * ------------------------------------------------------------------
-     * 2026-11-06（P0-1）：原来这里直接把"当前 SaveBlob 截断"当成 v25 文件。
-     * 那正是 bug 本身的假设 —— v25 的 Container 是 32 字节，
-     * 现在是 40 字节，cont[8] 之后整段差 64 字节。
-     * 用当前布局写的"假 v25"会让迁移读到错位数据（旧代码就是这么放过的）。
+     * v25 与当前布局有**两处**不同，必须同时还原：
+     *   ① Container 32 字节（现在是 40）—— 差 64 字节
+     *   ② 地图 24x24（现在是 36x36）—— worldMap + explored 差 5760 字节
      *
-     * 现在按**老布局**构造：前缀照抄 → 8 条 32 字节 Container →
-     * cont 之后的字节整体前移 64。这正是 LoadLegacyV28 的逆变换，
-     * 所以这条用例同时验证了"迁移是对的"和"夹具是老的"。
+     * 而且地图那一处**不能整段拷**：老档是 y*24+x 的行主序，
+     * 新结构是 y*36+x，必须逐格重排（这正是 LoadLegacyBlob 做的事）。
+     * 这个夹具是它的逆变换 —— 所以这条用例同时验证方向两边都对。
      * ================================================================ */
     {
         SaveBlob cur;
@@ -124,22 +123,31 @@ static void test_wallet_save(void) {
         cur.bankHistMaxSave = 8000;
         cur.skillRank[1] = 1;
         cur.hasRun = 1;
+        /* 地图里放点可辨认的内容，用来验证"逐格重排"真的对 */
+        cur.worldMap[1][1] = 0;
+        cur.worldMap[5][7] = 0;
+        cur.worldMap[20][18] = 0;
+        cur.worldMap[1][2] = 1;   /* 一格墙：验证"原本是墙的仍然是墙" */
+        cur.explored[3][4] = 1;
 
-        static unsigned char legacy[sizeof(SaveBlob) + 256];
+        static unsigned char legacy[sizeof(SaveBlob) * 2];
         memset(legacy, 0, sizeof(legacy));
 
-        const size_t contOff   = offsetof(SaveBlob, cont);
-        const size_t oldContSz = 32u * MAX_CONTAINERS;
-        const size_t newContSz = sizeof(Container) * MAX_CONTAINERS;
-        const size_t cutOff    = offsetof(SaveBlob, dailyQuestDate);   /* v25 的截断点 */
-        const size_t tailLen   = cutOff - (contOff + newContSz);
+        const size_t contOff    = offsetof(SaveBlob, cont);
+        const size_t oldContSz  = 32u * MAX_CONTAINERS;      /* 256 */
+        const int    oldMapW    = 24, oldMapH = 24;
+        const size_t oldMapSz   = (size_t)oldMapW * oldMapH * sizeof(int);
+        const size_t newTailOff = offsetof(SaveBlob, flares);
+        const size_t cutOff     = offsetof(SaveBlob, dailyQuestDate);
+        size_t w = 0;
 
-        /* ① 前缀（cont 之前两种布局完全相同） */
+        /* ① 前缀（cont 之前完全相同） */
         memcpy(legacy, &cur, contOff);
+        w = contOff;
 
-        /* ② 8 条 32 字节 Container：只抄老版本存在的 6 个 int */
+        /* ② 8 条 32 字节 Container */
         for (int ci = 0; ci < MAX_CONTAINERS; ci++) {
-            unsigned char* dst = legacy + contOff + (size_t)ci * 32u;
+            unsigned char* dst = legacy + w;
             const Container* src = &cur.cont[ci];
             memcpy(dst + 0,  &src->x,        sizeof(float));
             memcpy(dst + 4,  &src->y,        sizeof(float));
@@ -149,29 +157,70 @@ static void test_wallet_save(void) {
             memcpy(dst + 20, &src->locked,   sizeof(int));
             memcpy(dst + 24, &src->lockType, sizeof(int));
             memcpy(dst + 28, &src->lockCode, sizeof(int));
+            w += 32u;
         }
 
-        /* ③ cont 之后的字节整体前移 64 */
-        memcpy(legacy + contOff + oldContSz,
-               (const unsigned char*)&cur + contOff + newContSz, tailLen);
+        /* ③ worldMap 24x24（逐格） */
+        for (int y = 0; y < oldMapH; y++)
+            for (int x = 0; x < oldMapW; x++) {
+                int v = cur.worldMap[y][x];
+                memcpy(legacy + w, &v, sizeof(int));
+                w += sizeof(int);
+            }
+        /* ④ explored 24x24 */
+        for (int y = 0; y < oldMapH; y++)
+            for (int x = 0; x < oldMapW; x++) {
+                int v = cur.explored[y][x];
+                memcpy(legacy + w, &v, sizeof(int));
+                w += sizeof(int);
+            }
+        CHECK(w == contOff + oldContSz + 2 * oldMapSz,
+              "the v25 fixture must lay out exactly like the old struct");
 
-        const size_t legacyLen = contOff + oldContSz + tailLen;
+        /* ⑤ 尾部（flares 之后到 v25 截断点） */
+        {
+            size_t tailLen = cutOff - newTailOff;
+            memcpy(legacy + w, (const unsigned char*)&cur + newTailOff, tailLen);
+            w += tailLen;
+        }
 
         const char* dir = getenv("CANITY_DATA_DIR");
         char path[MAX_PATH];
+        for (int slot = 0; slot < 3; slot++) {
+            char p3[MAX_PATH];
+            snprintf(p3, sizeof(p3), "%s\\canity%d.sav", dir, slot);
+            remove(p3);
+            snprintf(p3, sizeof(p3), "%s\\canity%d.sav.bak", dir, slot);
+            remove(p3);
+        }
         snprintf(path, sizeof(path), "%s\\canity0.sav", dir);
         FILE* f = fopen(path, "wb");
         CHECK(f != NULL, "create isolated v25 fixture");
-        CHECK(fwrite(legacy, 1, legacyLen, f) == legacyLen, "write the whole v25 fixture");
+        CHECK(fwrite(legacy, 1, w, f) == w, "write the whole v25 fixture");
         fclose(f);
 
-        /* 夹具自检：老布局比新布局**短 64 字节**，这是这次 bug 的全部内容 */
-        CHECK(sizeof(SaveBlob) - legacyLen > 0,
+        CHECK(sizeof(SaveBlob) > w,
               "the legacy fixture must be shorter than the current struct");
     }
     CHECK(LoadSettings(), "legacy v25 save must still load");
     CHECK(bankGold == 4567 && skillRank[1] == 1,
           "v25 migration keeps bank and skill progress");
+    /* 地图逐格重排必须对：这三格是空地，其余边缘必须是墙 */
+    {
+        /* 查的是 **g_save**（LoadSettings 填的就是它）——
+           运行时的 worldMap 要到 ContinueRun 才灌回，这里查它会读到旧值。 */
+        const SaveBlob* b = SaveTestBlob();
+        CHECK(b != NULL, "the loaded blob must be readable");
+        if (b) {
+            CHECK(b->worldMap[1][1] == 0, "legacy map cell (1,1) must survive the re-index");
+            CHECK(b->worldMap[5][7] == 0, "legacy map cell (5,7) must survive the re-index");
+            CHECK(b->worldMap[20][18] == 0, "legacy map cell (20,18) must survive the re-index");
+            CHECK(b->worldMap[1][2] == 1,
+                  "cells that were walls in the legacy map must stay walls");
+            CHECK(b->worldMap[MAP_HEIGHT - 1][MAP_WIDTH - 1] == 1,
+                  "the area outside a 24x24 legacy map must be filled with walls");
+        }
+    }
 }
 /* ==================================================================
  * 2026-11-06（v2.4-rc / **P0-2**）：读档必须夹取布尔与枚举

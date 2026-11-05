@@ -27,8 +27,9 @@
 #include <string.h>
 #include <math.h>
 
-#define MAP_WIDTH 24
-#define MAP_HEIGHT 24
+/* 2026-11-06：删掉本文件自己写的 MAP_WIDTH/MAP_HEIGHT ——
+   它会盖住 common.h 的值（24），而世界已经是 36x36，
+   于是这里的边界断言测的是 24 的地图、实现用的是 36 的，结论相反。 */
 #define HIDESPOT_MAX 6
 #define BENCH_COUNT 16
 #define LOCK_TUNE_KNOBS 3
@@ -425,7 +426,8 @@ static void test_save_persist_contract(void) {
      * roomSeed/roomCount 读成 0 —— 当作"无房间层"，不崩、不丢进度。
      * 容器格式（SAVE_CONTAINER_VERSION）**没有变**，仍是 1。
      * ================================================================ */
-    check(contains(saveh, "SAVE_VERSION 30"), "save format must be v30");
+    /* v31：地图 24x24 -> 36x36，worldMap/explored 变大 → 布局又变了一次 */
+    check(contains(saveh, "SAVE_VERSION 31"), "save format must be v31");
     check(contains(saveh, "int roomSeed;"), "v30 must carry the room replay seed");
     check(contains(saveh, "int roomCount;"), "v30 must carry the room count");
     check(contains(savec, "g_lang = (g_save.lang == LANG_ZH)"),
@@ -434,16 +436,23 @@ static void test_save_persist_contract(void) {
           "Dynamic Res is still not written to the save blob");
     check(contains(savec, "g_save.gameClearedSave = gameCleared"),
           "clear record is not written to the save blob");
-    check(contains(savec, "g_save.version == 27"),
-          "v27 saves must migrate by prefix instead of being archived");
+    /* 2026-11-06（P0-1 + 36x36）：**v27/v28 不再是"按前缀读"了**。
+       它们的 Container 是 32 字节、地图是 24x24，而现在是 40 / 36x36，
+       所以必须走 LoadLegacyBlob 重排。这两条断言改成钉住"走重排路径"。 */
+    check(contains(savec, "LoadLegacyBlob"),
+          "legacy saves must go through the field-wise re-layout, not a prefix memcpy");
+    check(contains(savec, "g_save.version >= 25 && g_save.version <= 30"),
+          "v25..v30 must all be handled by the legacy re-layout");
+    check(contains(savec, "LEGACY_MAP_W"),
+          "the 24x24 -> 36x36 map re-index must exist");
     /* 2026-11-05 v29：第 6 条局内强化不能塞进 runUpgSave[5]（它在结构体中间，
        一改就整体错位），必须追加在末尾并单独读。 */
     check(contains(saveh, "runUpgMinimapSave"),
           "minimap upgrade level is not persisted at all");
     check(contains(savec, "RunUpgLoadExtra(g_save.runUpgMinimapSave)"),
           "minimap upgrade level is written but never read back");
-    check(contains(savec, "g_save.version == 28"),
-          "v28 saves must still migrate by prefix (v29 appended a tail field)");
+    check(!contains(savec, "g_save.version == 28"),
+          "v28 must no longer be treated as a plain prefix (its Container is 32 bytes)");
     check(contains(savec, "keepPendingRun"),
           "menu SaveGame can still clobber the pending run with an empty world");
     check(contains(gameh, "int  EndlessUnlocked(void)"),

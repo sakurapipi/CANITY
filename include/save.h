@@ -18,7 +18,7 @@
    —— 参见 LoadSettings 里的迁移逻辑。 */
 /* v28: 末尾追加 Dynamic Res + 通关记录；v25/v26/v27 都按前缀迁移。
    v27 及更早的存档没有这两个字段，读档时按文件长度取默认值。 */
-#define SAVE_VERSION 30   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26/v27 */
+#define SAVE_VERSION 31   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26/v27 */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
@@ -231,7 +231,8 @@ typedef struct {
  * ================================================================ */
 int SaveTestSerialize(const SaveBlob* blob, unsigned char** out);   /* >0 长度，<0 SAVE_ERR_* */
 int SaveTestDeserialize(const void* buf, long n, SaveBlob* out);
-void SaveTestClearReadOnly(void);   /* 仅测试用：复位只读标志 */    /* 1 成功，0 失败（看 g_saveError） */
+void SaveTestClearReadOnly(void);   /* 仅测试用：复位只读标志 */
+const SaveBlob* SaveTestBlob(void);  /* 仅测试用：最近一次载入的 blob */    /* 1 成功，0 失败（看 g_saveError） */
 
 
 /* 写当前进度（游戏中 / 退出时） */

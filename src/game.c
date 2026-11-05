@@ -1800,7 +1800,10 @@ void GenerateLevel(void) {
             if (worldMap[y][x] == 1 &&
                 ((worldMap[y][x - 1] == 0 && worldMap[y][x + 1] == 0) ||
                  (worldMap[y - 1][x] == 0 && worldMap[y + 1][x] == 0))) {
-                if (rand() % 100 < 30) worldMap[y][x] = 0;
+                /* 2026-11-06（D）：30% -> 45%。
+                   用户实测"守门人一条路就能蹲死玩家" —— 树状迷宫的主干太脆。
+                   提高环路打通概率能让任意两点之间有多条走法。 */
+                if (rand() % 100 < 45) worldMap[y][x] = 0;
             }
         }
     }
@@ -1920,6 +1923,39 @@ void GenerateLevel(void) {
             FindFarthestCell(&exitX, &exitY);
         }
     }
+    /* ==================================================================
+     * 2026-11-06（v2.4-rc / D）：**撤离点必须有两条以上通路**
+     * ------------------------------------------------------------------
+     * 现象：撤离点只有一个方向能进，守门人站在那条路上就完全堵死。
+     * 做法：数四邻开口，少于 2 个就打通一堵"背后还有空地"的墙。
+     * 只在可能时才动（找不到就放弃），不会把地图挖乱。
+     * ================================================================ */
+    {
+        int ex = (int)exitX, ey = (int)exitY;
+        if (ex >= 1 && ey >= 1 && ex < MAP_WIDTH - 1 && ey < MAP_HEIGHT - 1 && !worldMap[ey][ex]) {
+            static const int dx4[4] = { 1, -1, 0, 0 };
+            static const int dy4[4] = { 0, 0, 1, -1 };
+            int openN = 0;
+            for (int k = 0; k < 4; k++) {
+                int nx = ex + dx4[k], ny = ey + dy4[k];
+                if (nx < 1 || ny < 1 || nx >= MAP_WIDTH - 1 || ny >= MAP_HEIGHT - 1) continue;
+                if (!worldMap[ny][nx]) openN++;
+            }
+            if (openN < 2) {
+                for (int k = 0; k < 4; k++) {
+                    int wx = ex + dx4[k], wy = ey + dy4[k];
+                    if (wx < 1 || wy < 1 || wx >= MAP_WIDTH - 1 || wy >= MAP_HEIGHT - 1) continue;
+                    if (!worldMap[wy][wx]) continue;              /* 已是通路 */
+                    int bx = wx + dx4[k], by = wy + dy4[k];
+                    if (bx < 1 || by < 1 || bx >= MAP_WIDTH - 1 || by >= MAP_HEIGHT - 1) continue;
+                    if (worldMap[by][bx]) continue;               /* 后面还得是空地 */
+                    worldMap[wy][wx] = 0;                         /* 打通第二条路 */
+                    break;
+                }
+            }
+        }
+    }
+
     breakerOpen = 0;  /* 出口门锁死，需通电开启 */
 
     /* 容器 / 保险丝 / 配电箱 */
