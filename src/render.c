@@ -2799,18 +2799,43 @@ void RenderSprites(void) {
                 if (f < 0) f = 0;
                 if (f > 3) f = 3;
                 int spr = SPR_HATCH_0 + f;
-                /* 七主题共用一套精灵：按房间主题设定 accent 色 */
-                /* 主题色：用 cell_meta 的三通道取色，拼成 0xRRGGBB */
-                unsigned int acc = 0x00FFFFFFu;
-                {
-                    unsigned int rr = (unsigned int)CellThemeTintR(hatches[hi].themeId);
-                    unsigned int gg = (unsigned int)CellThemeTintG(hatches[hi].themeId);
-                    unsigned int bb = (unsigned int)CellThemeTintB(hatches[hi].themeId);
-                    acc = (rr << 16) | (gg << 8) | bb;
-                }
-                SpriteAccentSet(acc);
                 DrawBakedPropArt(spr, hatches[hi].x, hatches[hi].y, 0.0f, 0.72f, 1.0f);
-                SpriteAccentClear();
+
+                /* ================================================================
+                 * 2026-11-06（第 8 轮）：**主题指示灯改由渲染器直接画**
+                 * ----------------------------------------------------------------
+                 * 原来灯是烘进精灵的三块洋红 key，靠 SpriteAccentSet 换色。
+                 * 两个问题：
+                 *   ① 传给 accent 的是 cell_meta 的**墙面混色权重**（12~34/255），
+                 *      那根本不是颜料，换上去只会变黑；
+                 *   ② 128 画布 + 双线性放大之后几乎没有纯洋红像素，
+                 *      判据匹配不上，灯就一直是洋红色。
+                 * 现在：精灵里不画灯，这里按投影框在门框顶部点三颗。
+                 * ================================================================ */
+                {
+                    /* 门框顶部三颗指示灯。用与精灵同一套投影，所以会跟着透视缩。
+                       ProjectSprite 就是本文件的静态函数，直接调。 */
+                    SpriteBox sb = ProjectSprite(hatches[hi].x, hatches[hi].y, 0.0f, 0.72f);
+                    if (sb.ok) {
+                        int boxH = sb.y1 - sb.y0;
+                        int boxW = sb.x1 - sb.x0;
+                        if (boxH > 8 && boxW > 8) {
+                            unsigned int lamp = HatchLampRGB(hatches[hi].themeId);
+                            /* 灯的亮度跟手电走：暗场里也该有一点自发光感 */
+                            float litK = SpriteShade(sb.ty, 0.12f);
+                            if (litK < 0.45f) litK = 0.45f;   /* 指示灯自己发亮 */
+                            int ly = sb.y0 + boxH / 12;
+                            int lr = boxH / 50;  if (lr < 1) lr = 1;   /* 灯要小，别抢门 */
+                            int lw = lr * 2 + 1;
+                            for (int k = 0; k < 3; k++) {
+                                int lx = sb.x0 + boxW * (3 + k * 4) / 12;
+                                for (int dy = 0; dy < lw; dy++)
+                                    for (int dx = 0; dx < lw; dx++)
+                                        PutPixelBlend(lx + dx, ly + dy, lamp, litK);
+                            }
+                        }
+                    }
+                }
             }
             break;
         }

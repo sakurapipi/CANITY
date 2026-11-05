@@ -68,6 +68,11 @@ int  HatchKindForTheme(int themeId);
  * 只存"哪个种类已经用掉"，不存坐标 ——
  * 坐标由 roomSeed 确定性重放得出，存了反而可能对不上。
  * ================================================================ */
+/* 七主题的**指示灯颜色**。
+   注意不能复用 cell_meta 的 kRoomTintRGB —— 那是一组 12~34 的
+   **墙面混色权重**，拿它当颜料只会得到近黑色。 */
+unsigned int HatchLampRGB(int themeId);
+
 int  HatchUsedMask(void);                    /* 收集当前已用种类 -> 位掩码 */
 void HatchApplyUsedMask(int mask);           /* 读档后把对应种类标成已用 */
 
