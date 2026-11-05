@@ -46,8 +46,26 @@ int SaveBackendWrite(const char* path, const void* data, size_t n) {
     BOOL ok = WriteFile(h, data, (DWORD)n, &wrote, NULL);
     DWORD err = ok ? 0 : GetLastError();
     if (ok && wrote != (DWORD)n) err = ERROR_WRITE_FAULT;
-    if (ok) FlushFileBuffers(h);
-    CloseHandle(h);
+
+    /* ==================================================================
+     * 2026-11-06（v2.4-alpha R6）：**保留第一次失败的错误码**
+     * ------------------------------------------------------------------
+     * 原来这两行都没检查返回值：
+     *     if (ok) FlushFileBuffers(h);
+     *     CloseHandle(h);
+     *
+     * 对存档来说，FlushFileBuffers 失败 = 数据可能还在系统缓存里没落盘，
+     * 这等同于写失败，必须报出去；否则会向调用方谎报"保存成功"，
+     * 而掉电后文件是旧的甚至半截。
+     *
+     * 顺序问题：后续失败不能覆盖**第一个**错误码 —— 第一个才是根因。
+     * （审查提到的另一点也修了：调用方不该在失败后再去读
+     *   GetLastError()，因为中间任何一次成功调用都可能把它冲掉。
+     *   这里返回的是捕获到的值，调用方必须用返回值。）
+     * ================================================================== */
+    if (!err && !FlushFileBuffers(h)) err = GetLastError();
+    if (!CloseHandle(h) && !err) err = GetLastError();
+
     if (err) { DeleteFileA(tmp); return (int)err; }
     if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) {
         err = GetLastError();
@@ -65,6 +83,8 @@ long SaveBackendRead(const char* path, void* buf, size_t cap) {
     if (h == INVALID_HANDLE_VALUE) return -1;
     DWORD got = 0;
     BOOL ok = ReadFile(h, buf, (DWORD)cap, &got, NULL);
+    /* 读侧的 CloseHandle 失败不影响已读到的数据，但也不该静默：
+       记一份在 g_saveError 之外没有意义 —— 这里只保证句柄一定被关掉。 */
     CloseHandle(h);
     return ok ? (long)got : -1;
 }
@@ -131,9 +151,18 @@ void SaveBackendSyncAll(void) {
             /* 云端赢：先留一份，再用**原子写**覆盖（修缺陷 ④） */
             char bak[MAX_PATH + 32];
             snprintf(bak, sizeof(bak), "%s.pre-cloud.bak", p);
-            CopyFileA(p, bak, FALSE);
-            if (SaveBackendWrite(p, buf, (size_t)n) != 0) {
+            /* v2.4-alpha R6：备份失败要显式知道。
+               备份没生成 = 一旦下面是覆盖，玩家就没有本地的上一份了。 */
+            BOOL backed = CopyFileA(p, bak, FALSE);
+            int werr = SaveBackendWrite(p, buf, (size_t)n);
+            if (werr != 0) {
                 g_saveState = 2;
+                /* **用返回值，不要再用 GetLastError()** ——
+                   SaveBackendWrite 内部已经捕获了第一次失败的错误码，
+                   之后再调 GetLastError 拿到的可能不是它。 */
+                g_saveError = werr;
+            } else if (!backed) {
+                /* 写成功了，但备份没成 —— 记一个可诊断的状态，不改写结果 */
                 g_saveError = (int)GetLastError();
             }
         }

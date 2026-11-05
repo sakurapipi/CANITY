@@ -417,6 +417,35 @@ static void test_floor_resets_hunters(void) {
  * 它钉住「一次破锁 = 一个可疑点」这条不变量，
  * 等 v2.4-beta 的 SoundEvent 把强度与类别分开之后，它会真正开始起作用。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06：**写盘失败的负路径**
+ * ------------------------------------------------------------------
+ * R6 改的是 SaveBackendWrite 的错误传播。这里验证它真的会返回非 0，
+ * 而不是吞掉失败谎报成功 —— 存档层最危险的失败模式就是这一种。
+ * ================================================================== */
+static void test_save_backend_errors(void) {
+    extern int SaveBackendWrite(const char*, const void*, size_t);
+    unsigned char buf[32];
+    memset(buf, 0x5A, sizeof(buf));
+
+    CHECK(SaveBackendWrite(NULL, buf, sizeof(buf)) != 0,
+          "SaveBackendWrite must reject a NULL path");
+    CHECK(SaveBackendWrite("", buf, sizeof(buf)) != 0,
+          "SaveBackendWrite must reject an empty path");
+
+    /* 目录不存在 → CreateFile 失败 → 必须返回系统错误码，不能返回 0 */
+    {
+        const char* dir = getenv("CANITY_DATA_DIR");
+        CHECK(dir != NULL, "CANITY_DATA_DIR must be set");
+        if (dir) {
+            char bad[MAX_PATH];
+            snprintf(bad, sizeof(bad), "%s\\__no_such_dir__\\x.sav", dir);
+            CHECK(SaveBackendWrite(bad, buf, sizeof(buf)) != 0,
+                  "SaveBackendWrite must fail when the directory does not exist");
+        }
+    }
+}
+
 static void test_stone_break_single_event(void) {
     extern void ThrowItem(int, float);
     extern void UpdateShots(float);
@@ -475,6 +504,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
