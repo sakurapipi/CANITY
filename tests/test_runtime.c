@@ -473,6 +473,71 @@ static void test_floor_resets_hunters(void) {
  * 坐标约定：玩家朝向 (dirX,dirY)，右向量 = (-dirY, dirX)。
  * ================================================================== */
 /* ==================================================================
+ * 2026-11-06（v2.4-beta B03）：**隔墙的线索不会被听声鬼选中**
+ * ------------------------------------------------------------------
+ * 这是 B03 接进玩法后的行为断言（不是纯数学）。
+ * 造一个小地图，放两个可疑点：
+ *   A 在墙后，直线更近
+ *   B 在走廊里，直线更远
+ * 结果必须是 B —— 旧实现（直线距离）会选 A。
+ * ================================================================== */
+static void test_suspicion_best_uses_propagation(void) {
+    extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+    static int saved[MAP_HEIGHT][MAP_WIDTH];
+    memcpy(saved, worldMap, sizeof(saved));
+
+    for (int y = 0; y < MAP_HEIGHT; y++)
+        for (int x = 0; x < MAP_WIDTH; x++)
+            worldMap[y][x] = 1;
+
+    /* 一条东西向走廊 y=5 */
+    for (int x = 2; x <= 14; x++) worldMap[5][x] = 0;
+    /* 走廊北侧（y=4 是墙）。A 点放在 y=3 的一条孤立小通道里，
+       直线离听者只有 2 格，但要绕到 x=14 再绕回来才能到。 */
+    for (int x = 12; x <= 14; x++) worldMap[3][x] = 0;
+    worldMap[4][14] = 0;
+
+    SuspicionReset();
+    SoundPropReset();
+
+    /* 听者在 (3.5, 5.5) */
+    /* A：墙后，直线 ≈ 2.2 格 */
+    SuspicionAdd(4.5f, 3.5f, 60.0f, 4.0f, 8.0f, SUSP_SEARCH);
+    /* B：走廊里，直线 6 格 */
+    SuspicionAdd(9.5f, 5.5f, 60.0f, 4.0f, 8.0f, SUSP_SEARCH);
+
+    /* 旧行为：直线距离，A 更近 → 选 A */
+    {
+        int idxPlain = SuspicionBest(3.5f, 5.5f, 0.9f);
+        CHECK(idxPlain >= 0, "plain SuspicionBest must find something");
+        CHECK(susp[idxPlain].y < 4.5f,
+              "the plain scorer picks the straight-line-nearest point (behind the wall)");
+    }
+
+    /* 新行为：声学传播 → 必须选走廊里的 B */
+    {
+        float reach = 0.0f;
+        int idx = SuspicionBestReach(3.5f, 5.5f, 0.9f, 22.0f, &reach);
+        CHECK(idx >= 0, "SuspicionBestReach must find a point");
+        CHECK(susp[idx].y > 4.5f,
+              "with propagation the corridor point must win over the one behind the wall");
+        CHECK(reach > 0.0f && reach <= 1.0f, "reach must be a 0..1 factor");
+    }
+
+    /* 墙后那一点的可达度必须显著低于走廊里同距离的点 */
+    {
+        float behind = SoundReach(3.5f, 5.5f, 4.5f, 3.5f, 22.0f);
+        float open   = SoundReach(3.5f, 5.5f, 4.5f, 5.5f, 22.0f);
+        CHECK(behind < open * 0.8f,
+              "a point behind a wall must be markedly weaker than the same distance in the open");
+    }
+
+    SuspicionReset();
+    SoundPropReset();
+    memcpy(worldMap, saved, sizeof(saved));
+}
+
+/* ==================================================================
  * 2026-11-06（v2.4-beta B03）：**声学传播 —— 隔墙必须变弱**
  * ------------------------------------------------------------------
  * 这一组自己搭一个小地图，不依赖 GenerateLevel 的随机布局。
@@ -1023,6 +1088,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

@@ -41,6 +41,15 @@
    默认 1；兼容期两者的换算是一一对应的，所以输出逐位相同。 */
 #ifndef CANITY_SOUND_EVENT
 #define CANITY_SOUND_EVENT 1
+
+/* v2.4-beta B03：**声学传播**
+   置 1 = 听声鬼挑可疑点时，距离用"沿路径的步数"，
+          强度乘上"从它出发的可达度" → 隔墙的脚步声会低于阈值。
+   置 0 = 回到直线距离（旧行为），用于新旧对比试玩。
+   默认 1。 */
+#ifndef CANITY_SOUND_PROP
+#define CANITY_SOUND_PROP 1
+#endif
 #endif
 /* 用 -DCANITY_SOUND_EVENT=0 可以编译出"旧路径"版本，便于二分定位。 */
 

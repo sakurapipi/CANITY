@@ -15,6 +15,7 @@
  * 加新怪时只需要写「它读哪种 source」，不用碰 MakeNoise。
  */
 #include "state.h"   /* v8: 走统一的全局状态入口 */
+#include "sound_propagation.h"
 #include "common.h"
 #include "suspicion.h"
 
@@ -99,6 +100,55 @@ int SuspicionBest(float fromX, float fromY, float distPenalty) {
 }
 
 /* 某个位置的探索点被「消费」了（怪到了，或玩家把它打散） */
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B03）：带声学传播的挑点
+ * ------------------------------------------------------------------
+ * 和 SuspicionBest 的差别：
+ *   · 距离 = 沿可通行路径的步数（BFS），不是直线
+ *   · 强度 = strength × SoundReach(...)（隔墙会掉下来）
+ *
+ * 为什么要乘而不只是换距离：
+ *   只换距离的话，绕墙的点"看起来更远"，但仍可能因为强度高被选中；
+ *   乘上可达度之后，隔墙的脚步声**真的低于阈值** —— 玩家会明显感到
+ *   "它没听见"。这正是 B03 想要的效果。
+ *
+ * 成本：每次调用一次 BFS（576 格）。调用点有 suspCool 节流，
+ *   不会出现 120Hz 每帧跑 8 次的情况。
+ * ================================================================ */
+int SuspicionBestReach(float fromX, float fromY, float distPenalty,
+                       float maxListen, float* outReach) {
+    if (outReach) *outReach = 0.0f;
+    if (maxListen <= 0.01f) return -1;
+
+    SoundPropBuild(fromX, fromY);
+
+    int best = -1;
+    float bestScore = 0.0f;
+    float bestReach = 0.0f;
+
+    for (int i = 0; i < SUSP_MAX; i++) {
+        if (susp[i].strength <= 0.0f) continue;
+
+        float reach = SoundReach(fromX, fromY, susp[i].x, susp[i].y, maxListen);
+        if (reach <= 0.0f) continue;                 /* 根本传不过来 */
+
+        /* 距离用路径步数；不可达时用一个大数把它压下去 */
+        int steps = SoundPropCostAt(susp[i].x, susp[i].y);
+        float d = (steps == PROP_UNREACHABLE) ? 9999.0f : (float)steps;
+
+        float score = susp[i].strength * reach - d * distPenalty;
+        if (score > bestScore) {
+            bestScore = score;
+            best = i;
+            bestReach = reach;
+        }
+    }
+
+    if (best >= 0 && outReach) *outReach = bestReach;
+    return best;
+}
+
+
 void SuspicionConsume(int idx) {
     if (idx < 0 || idx >= SUSP_MAX) return;
     susp[idx].strength = 0.0f;

@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "sound_propagation.h"
 #include "sound_event.h"
 #include "music.h"
 #include "entity.h"
@@ -1147,7 +1148,15 @@ static void UpdateOneHunter(Monster* M, float dt) {
         if (M->suspCool > 0.0f) {
             M->suspCool -= dt;
         } else {
+#if CANITY_SOUND_PROP
+            /* v2.4-beta B03：隔墙的线索有效强度会掉下来。
+               距离也用路径步数，所以"绕一大圈"的点不会被选中。 */
+            float reach = 0.0f;
+            int idx = SuspicionBestReach(M->x, M->y, 0.9f, 22.0f, &reach);
+#else
             int idx = SuspicionBest(M->x, M->y, 0.9f);
+            float reach = 1.0f;
+#endif
             /* ============================================================
              * 修：**阈值原来是 28，比几乎所有噪音源都高 → 等于没有耳朵**
              * ------------------------------------------------------------
@@ -1174,7 +1183,9 @@ static void UpdateOneHunter(Monster* M, float dt) {
              * 这才是「第一只听力最好」，而且第 3 只靠速度而不是耳朵。
              * ============================================================ */
             float need = 15.0f / HunterHearMulAt(HunterIndex(M));
-            if (idx >= 0 && susp[idx].strength > need) {
+            /* B03：比较的是**有效强度**（强度 × 可达度），不是原始强度 */
+            float effStrength = (idx >= 0) ? susp[idx].strength * reach : 0.0f;
+            if (idx >= 0 && effStrength > need) {
                 M->state = 1;
                 M->tx = susp[idx].x;
                 M->ty = susp[idx].y;
@@ -1185,6 +1196,12 @@ static void UpdateOneHunter(Monster* M, float dt) {
                 M->suspCool = 1.5f;
             } else {
                 M->suspTarget = -1;
+                /* B03：每次挑点要跑一次 BFS。没选中时给 0.2 秒冷却，
+                   把"每帧 8 次 BFS"降到 4Hz —— 和审查建议的低频感知一致。
+                   代价是反应最多慢 0.2 秒，属于可接受范围。 */
+#if CANITY_SOUND_PROP
+                M->suspCool = 0.2f;
+#endif
             }
         }
     }
