@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "sound_event.h"
 #include "music.h"
 #include "entity.h"
 /* v6：威胁值接口 */
@@ -420,6 +421,34 @@ void MakeNoise(float x, float y, float radius) {
        谁后写谁赢。玩偶的叫声刚设好就被玩家自己的脚步顶掉，
        这就是「发出声音的玩偶吸引不了听声怪」的根源。
        现在改成写表：多个噪音源共存，怪物自己挑最强的那个。 */
+#if CANITY_SOUND_EVENT
+    /* ==================================================================
+     * 2026-11-06（v2.4-beta B01）：**改成提交一个声音事件**
+     * ------------------------------------------------------------------
+     * 旧写法用半径同时决定强度和类别：
+     *     st  = radius * 2.6
+     *     src = (radius <= 14) ? SUSP_WALK : SUSP_SEARCH   ← 类别被半径绑死
+     * 于是把破门石的 20 调到 14，它会从"敲击"变成"脚步"，
+     * 寿命从 6 秒砍到 3 秒 —— 那不是调数值，是换了东西。
+     *
+     * 现在类别由 kind 决定，强度单独给。兼容期用一段**等价换算**：
+     *     radius <= 14 → SK_WALK，否则 SK_SEARCH
+     *     strength = min(radius * 2.6, 100)
+     * 数值和旧算法一模一样，所以行为逐位不变。
+     * 新代码（破门石 / 诱饵 / 回声弹）直接用显式 kind，不再走这一段。
+     * ================================================================== */
+    {
+        SoundEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.kind  = (radius <= 14.0f) ? SK_WALK : SK_SEARCH;
+        ev.x = x; ev.y = y;
+        ev.strength = radius * 2.6f;          /* 半径 14 → 36；半径 20 → 52 */
+        ev.maxRadius = radius;
+        ev.eventId = 0u;                      /* MakeNoise 不做同帧去重 */
+        ev.sourceEntityId = -1;
+        SoundEmit(&ev);
+    }
+#else
     {
         float st = radius * 2.6f;              /* 半径 14 → 36；半径 20 → 52 */
         if (st > 100.0f) st = 100.0f;
@@ -429,6 +458,7 @@ void MakeNoise(float x, float y, float radius) {
         float ttlS = (srcS == SUSP_WALK) ? 3.0f : 6.0f;
         SuspicionAdd(x, y, st, decS, ttlS, srcS);
     }
+#endif
 
     {
         extern Monster lightBeast;

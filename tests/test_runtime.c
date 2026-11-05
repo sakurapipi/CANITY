@@ -11,6 +11,7 @@
 #include "save.h"
 #include "save_format.h"   /* R8: SaveEnvelope / SaveEnvelopeSeal */
 #include "steam_zone.h"    /* R8: SteamZoneCloudDecide / STEAM_SYNC_* */
+#include "sound_event.h"   /* B01: SoundEmit / SoundKind */
 #include "wallet.h"
 #include "threat.h"
 #include "ui.h"
@@ -451,6 +452,115 @@ static void test_floor_resets_hunters(void) {
  *   ⑤ 解析新字节：0x7777 必须还在，且**逐字节相同**
  *   ⑥ 已知块的 lang 必须是新值
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B01）：**声音事件中心**
+ * ------------------------------------------------------------------
+ * 这一组钉两件事：
+ *   ① 类别由 kind 决定，**不由半径决定** —— 这是 B01 存在的全部理由。
+ *      同一个 kind 换不同 maxRadius，落到可疑点表的 source/ttl 必须不变。
+ *   ② 同帧同 eventId 只结算一次（一次物理事件 = 一个逻辑事件），
+ *      但 eventId == 0 时不去重（真实的连续脚步不能被合并）。
+ * ================================================================== */
+static void test_sound_event_center(void) {
+    SoundEvent ev;
+
+    /* ---- ① 类别由 kind 决定，与半径无关 ---- */
+    {
+        /* 同一 kind、三个不同半径：ttl / decay / susSource 必须一致 */
+        float ttls[3];
+        float decs[3];
+        int   srcs[3];
+        static const float radii[3] = { 4.0f, 14.0f, 26.0f };
+
+        for (int i = 0; i < 3; i++) {
+            memset(&ev, 0, sizeof(ev));
+            ev.kind = SK_IMPACT;
+            ev.x = 10.0f; ev.y = 10.0f;
+            ev.strength = 52.0f;
+            ev.maxRadius = radii[i];
+            ev.eventId = 0u;
+            SuspicionReset();
+            CHECK(SoundEmit(&ev) == 1, "SK_IMPACT must emit");
+
+            /* 从可疑点表里读实际落下的 ttl / decay / source */
+            int found = -1;
+            for (int k = 0; k < SUSP_MAX; k++) {
+                if (susp[k].strength > 0.0f) { found = k; break; }
+            }
+            CHECK(found >= 0, "emitted event must land in the suspicion table");
+            ttls[i] = susp[found].ttl;
+            decs[i] = susp[found].decay;
+            srcs[i] = susp[found].source;
+        }
+        CHECK(ttls[0] == ttls[1] && ttls[1] == ttls[2],
+              "ttl must come from kind, not from maxRadius");
+        CHECK(decs[0] == decs[1] && decs[1] == decs[2],
+              "decay must come from kind, not from maxRadius");
+        CHECK(srcs[0] == srcs[1] && srcs[1] == srcs[2],
+              "suspicion source must come from kind, not from maxRadius");
+        CHECK(srcs[0] == SUSP_SEARCH, "SK_IMPACT must map to SUSP_SEARCH");
+
+        /* SK_WALK 与 SK_IMPACT 必须真的不同（否则这套分类没意义） */
+        CHECK(SoundKindTtl(SK_WALK) < SoundKindTtl(SK_IMPACT),
+              "SK_WALK must have a shorter ttl than SK_IMPACT");
+        CHECK(SoundKindDecay(SK_WALK) > SoundKindDecay(SK_IMPACT),
+              "SK_WALK must decay faster than SK_IMPACT");
+        CHECK(SoundKindSusSource(SK_VOICE) == SUSP_DECOY,
+              "SK_VOICE must map to SUSP_DECOY");
+    }
+
+    /* ---- ② 同帧同 eventId 去重 ---- */
+    {
+        SoundEventResetStats();
+        memset(&ev, 0, sizeof(ev));
+        ev.kind = SK_IMPACT;
+        ev.x = 10.0f; ev.y = 10.0f;
+        ev.strength = 52.0f;
+        ev.eventId = 0xBEEFu;
+
+        SuspicionReset();
+        CHECK(SoundEmit(&ev) == 1,  "first emit with an eventId must land");
+        CHECK(SoundEmit(&ev) == 0,  "the same eventId in the same frame must be deduped");
+        CHECK(SoundEventTotalDeduped() == 1, "dedupe counter must record it");
+
+        /* 换一帧 → 同一个 eventId 又可以了 */
+        SoundEventTick();
+        CHECK(SoundEmit(&ev) == 1, "after a tick the same eventId is allowed again");
+    }
+
+    /* ---- ③ eventId == 0 不去重 ---- */
+    {
+        SoundEventResetStats();
+        memset(&ev, 0, sizeof(ev));
+        ev.kind = SK_WALK;
+        ev.x = 5.0f; ev.y = 5.0f;
+        ev.strength = 20.0f;
+        ev.eventId = 0u;
+        SuspicionReset();
+        CHECK(SoundEmit(&ev) == 1, "eventId 0 emit #1 must land");
+        CHECK(SoundEmit(&ev) == 1, "eventId 0 must NOT be deduped (real repeated steps)");
+    }
+
+    /* ---- ④ 数值夹取与非法输入 ---- */
+    {
+        memset(&ev, 0, sizeof(ev));
+        ev.kind = SK_IMPACT;
+        ev.x = 3.0f; ev.y = 3.0f;
+        ev.strength = 999.0f;            /* 会被夹到 100 */
+        SoundEventResetStats();
+        CHECK(SoundEmit(&ev) == 1, "over-strength event must still emit");
+        CHECK(SoundEventLastStrength() <= 100.0f,
+              "strength must be clamped to 100");
+
+        ev.x = 0.0f / 0.0f;              /* NaN 坐标 */
+        CHECK(SoundEmit(&ev) == 0, "NaN coordinates must be rejected");
+    }
+
+    SoundEventTick();
+    SoundEventResetStats();
+    SuspicionReset();
+}
+
 static void test_save_unknown_chunk_roundtrip(void) {
     extern int SaveTestSerialize(const SaveBlob*, unsigned char**);
     extern int SaveTestDeserialize(const void*, long, SaveBlob*);
@@ -722,6 +832,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

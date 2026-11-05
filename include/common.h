@@ -35,6 +35,15 @@
    置 0 = 回到旧的战斗版本。 */
 #define NO_COMBAT 1
 
+/* v2.4-beta B01：**声音事件中心**
+   置 1 = MakeNoise 走 SoundEmit（类别由 kind 决定，不由半径决定）。
+   置 0 = 回到旧的「半径 <=14 判类别」写法，用于二分定位回归。
+   默认 1；兼容期两者的换算是一一对应的，所以输出逐位相同。 */
+#ifndef CANITY_SOUND_EVENT
+#define CANITY_SOUND_EVENT 1
+#endif
+/* 用 -DCANITY_SOUND_EVENT=0 可以编译出"旧路径"版本，便于二分定位。 */
+
 #define CANITY_VERSION_STR "2.4-alpha"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */

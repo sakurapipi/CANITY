@@ -3100,6 +3100,9 @@ void Update(float dt) {
     /* v7：可疑点表每帧衰减 / 过期 */
     { extern float gameTime; gameTime += dt; }   /* v2.4.3 全局秒表 */
     SuspicionTick(dt);
+    /* v2.4-beta B01：清掉"本帧已见的 eventId"去重表。
+       放在 Update 的帧首，和 DailyTick 同一处 —— 两者都是"每帧一次"的簿记。 */
+    { extern void SoundEventTick(void); SoundEventTick(); }
     DailyTick();   /* Calendar rollover also applies while in menus. */
     if(currentState==STATE_PLAYING && exitChoiceOpen && !keyPressed['1'] && !keyPressed['2']) return;
     if(currentState==STATE_PLAYING && !trainingMode) {
