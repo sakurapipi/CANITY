@@ -293,6 +293,24 @@ static int RoomReachable(void) {
             if (PropBlocksAt(x, y)) continue;
             if (!seen[y][x]) return 0;         /* 有房间地板走不到 = 封死 */
         }
+
+    /* ==================================================================
+     * 2026-11-06（v2.4-rc）：**出口也必须还走得到**
+     * ------------------------------------------------------------------
+     * 1000 种子洪泛里还剩 0.7% 的层报 "exit unreachable"。
+     * 原因不在房间内部 —— 房间自己是通的 ——
+     * 而是房间的**围墙 + 家具**把通往出口的那条走廊切断了。
+     *
+     * 所以放房间时要把"出口从出生点可达"也当成约束：
+     * 一堵新墙如果切断了唯一的通路，这个位置就不许放。
+     * ================================================================== */
+    {
+        extern float exitX, exitY;
+        int ex = (int)exitX, ey = (int)exitY;
+        if (ex >= 0 && ey >= 0 && ex < MAP_WIDTH && ey < MAP_HEIGHT) {
+            if (!worldMap[ey][ex] && !seen[ey][ex]) return 0;
+        }
+    }
     return 1;
 }
 
@@ -490,6 +508,22 @@ static void RoomDumpIfRequested(int placed) {
     DWORD written = 0;
     WriteFile(h, buf, (DWORD)n, &written, NULL);
     CloseHandle(h);
+}
+
+int roomSeedUsed = 0;
+
+/* ==================================================================
+ * 重放：读档后用保存的种子把房间重建出来。
+ * ------------------------------------------------------------------
+ * 前提：worldMap 已经从存档恢复（房间的墙本来就在里面），
+ * 且 exitX/exitY 也已经恢复 —— 房间放置会读它们做保留区判断。
+ * 重放会重写同样的墙/地面（幂等），并重建 cellMeta 与 roomProps。
+ * ================================================================ */
+int RoomReplay(int seed, int wantCount) {
+    if (wantCount <= 0) { roomSeedUsed = 0; RoomPropReset(); return 0; }
+    roomSeedUsed = seed;
+    srand((unsigned)seed);
+    return GenerateThemeRooms(wantCount);
 }
 
 int RoomCount(void) { return roomCount; }

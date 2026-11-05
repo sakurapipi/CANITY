@@ -338,6 +338,15 @@ static int SaveFileBytes(const SaveBlob* blob, unsigned char** out) {
    失败时把具体原因写进 g_saveError。 */
 static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelope) {
     if (isEnvelope) *isEnvelope = 0;
+    /* ==================================================================
+     * 2026-11-06（v2.4-rc）：**每次读档都重新判定只读**
+     * ------------------------------------------------------------------
+     * 原来 s_saveReadOnly 一旦被置 1 就**再也不会清零** ——
+     * 玩家只要遇到过一次结构异常的存档，这台机器上就再也存不了档
+     * （所有写入都返回 SAVE_ERR_DUP_CHUNK）。
+     * 这个标志描述的是"当前载入的这份存档可疑"，所以每次读档都要重算。
+     * ================================================================ */
+    s_saveReadOnly = 0;
     if (!buf || n <= 0 || !out) return 0;
 
     const unsigned char* p = (const unsigned char*)buf;
@@ -424,6 +433,14 @@ static long ReadSaveFile(const char* path, SaveBlob* out) {
  * 存在意义：让 test_runtime 能用**真正的**捕获/重建逻辑做往返测试，
  * 而不是另写一份测试专用的序列化（那样测不到实际代码）。
  * ================================================================ */
+/* 仅测试用：复位"只读"标志。
+   生产路径里它由 ExtractSaveFile 每次读档重算；
+   测试里没有真实读档，所以需要一个显式复位入口。 */
+void SaveTestClearReadOnly(void) {
+    s_saveReadOnly = 0;
+    SaveCarryClear();
+}
+
 int SaveTestSerialize(const SaveBlob* blob, unsigned char** out) {
     return SaveFileBytes(blob, out);
 }
@@ -605,6 +622,10 @@ void SaveGame(void) {
     g_save.nContainers = containerCount;
     for (int i = 0; i < MAX_CONTAINERS; i++) g_save.cont[i] = containers[i];
     memcpy(g_save.worldMap, worldMap, sizeof(worldMap));
+    /* v2.4-rc：房间重放种子也进档 */
+    { extern int roomSeedUsed; extern int RoomCount(void);
+      g_save.roomSeed = roomSeedUsed;
+      g_save.roomCount = RoomCount(); }
     memcpy(g_save.explored, explored, sizeof(explored));
 
     /* v6 新增字段 */
@@ -1352,6 +1373,17 @@ void ContinueRun(void) {
     if (containerCount > MAX_CONTAINERS) containerCount = MAX_CONTAINERS;
     for (int i = 0; i < MAX_CONTAINERS; i++) containers[i] = g_save.cont[i];
     memcpy(worldMap, g_save.worldMap, sizeof(worldMap));
+    /* ==================================================================
+     * v2.4-rc：**读档后重建房间**
+     * ------------------------------------------------------------------
+     * worldMap 已经恢复，房间的墙本来就在里面；但 cellMeta（色调/声学）
+     * 和 roomProps（家具 + 碰撞）是运行时数据，必须用保存的种子重放。
+     * roomSeed == 0（v29 老档）→ 当作"无房间层"，什么都不做。
+     * ================================================================== */
+    { extern int RoomReplay(int, int);
+      if (g_save.roomSeed != 0 && g_save.roomCount > 0)
+          (void)RoomReplay(g_save.roomSeed, g_save.roomCount);
+      else { extern void CellMetaReset(void); CellMetaReset(); } }
     memcpy(explored, g_save.explored, sizeof(explored));
 
     /* v4 新增：安全屋 / 投掷物 / 词条 / 主题 */

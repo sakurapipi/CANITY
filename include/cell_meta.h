@@ -61,6 +61,12 @@ unsigned char CellTintFor(int cx, int cy);
    不改纹理集，所以不需要第二套贴图，也不吃额外纹理内存。 */
 int CellTintRGB(int cx, int cy, int* r, int* g, int* b);
 
+/* 按主题编号直接取补光色（R/G/B 三个通道，0..255）。
+   给逐像素的地板循环用 —— 那条路径上不能有函数调用开销。 */
+int CellThemeTintR(int themeId);
+int CellThemeTintG(int themeId);
+int CellThemeTintB(int themeId);
+
 /* 声学用：这一格属于哪种地面。 */
 int CellAcousticAt(float x, float y);
 

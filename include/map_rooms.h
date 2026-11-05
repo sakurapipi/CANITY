@@ -73,4 +73,16 @@ int RoomPropLayers(int kind, PropLayer* out, int maxOut);
    不需要初始化渲染器（精灵在测试环境里是空指针）。 */
 int RoomPropLayerSprite(int kind, int layerIndex);
 
+/* ==================================================================
+ * v2.4-rc：**房间阶段的随机种子**
+ * ------------------------------------------------------------------
+ * 生成时由 game.c 在调用 GenerateThemeRooms 之前写进来；
+ * 读档后用它重放一次，重建 cellMeta 与 roomProps。
+ * 0 表示"这层没有房间"。
+ * ================================================================== */
+extern int roomSeedUsed;
+
+/* 用指定种子重放房间放置（读档路径）。返回实际放下的房间数。 */
+int RoomReplay(int seed, int wantCount);
+
 #endif /* CANITY_MAP_ROOMS_H */

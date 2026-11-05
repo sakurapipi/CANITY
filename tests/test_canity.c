@@ -365,7 +365,17 @@ static void test_save_persist_contract(void) {
     const char* gameh = read_file("include/game.h");
     const char* uic   = read_file("src/ui.c");
 
-    check(contains(saveh, "SAVE_VERSION 29"), "save format must be v29");
+    /* ==================================================================
+     * 2026-11-06（v2.4-rc）：**v29 -> v30**
+     * ------------------------------------------------------------------
+     * 只追加了两个 int（roomSeed / roomCount），全部在结构体**末尾**，
+     * 所以 v29 的老档按"文件比结构短"走现有前缀迁移路径，
+     * roomSeed/roomCount 读成 0 —— 当作"无房间层"，不崩、不丢进度。
+     * 容器格式（SAVE_CONTAINER_VERSION）**没有变**，仍是 1。
+     * ================================================================ */
+    check(contains(saveh, "SAVE_VERSION 30"), "save format must be v30");
+    check(contains(saveh, "int roomSeed;"), "v30 must carry the room replay seed");
+    check(contains(saveh, "int roomCount;"), "v30 must carry the room count");
     check(contains(savec, "g_lang = (g_save.lang == LANG_ZH)"),
           "language is saved but never restored at startup");
     check(contains(savec, "s->dynamicRes = dynamicRes"),

@@ -18,7 +18,7 @@
    —— 参见 LoadSettings 里的迁移逻辑。 */
 /* v28: 末尾追加 Dynamic Res + 通关记录；v25/v26/v27 都按前缀迁移。
    v27 及更早的存档没有这两个字段，读档时按文件长度取默认值。 */
-#define SAVE_VERSION 29   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26/v27 */
+#define SAVE_VERSION 30   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26/v27 */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
@@ -201,6 +201,22 @@ typedef struct {
        一改就把后面所有字段整体挪 4 字节，v28 的旧档会全部错位。
        所以新字段只能追加在末尾，读档时单独调用 RunUpgLoadExtra()。 */
     int runUpgMinimapSave;
+    /* ==================================================================
+     * 2026-11-06（v2.4-rc）：**主题房间的重放种子**
+     * ------------------------------------------------------------------
+     * 房间是"刻进 worldMap"的，而 worldMap 本来就存在档里，
+     * 所以房间的**墙**不需要额外保存。
+     * 但 cellMeta（色调/声学）和 roomProps（家具 + 碰撞）是运行时数据 ——
+     * 读档后必须重建，否则每一层重新载入都会变回"没有房间"。
+     *
+     * 做法：生成时把房间阶段的随机种子记下来，
+     * 读档后用同一个种子在已恢复的 worldMap 上**重放一次**房间放置。
+     * 房间放置是确定性纯函数（只吃 worldMap + 种子），所以结果一致。
+     *
+     * 老档（v29）里这两个字段读成 0 → 当作"无房间层"，不崩、不丢进度。
+     * ================================================================== */
+    int roomSeed;      /* 房间阶段的随机种子；0 = 这层没有房间 */
+    int roomCount;     /* 本层房间数 */
 } SaveBlob;
 
 /* ==================================================================
@@ -214,7 +230,8 @@ typedef struct {
  * 生产代码不应调用它们 —— 正式写盘走 SaveGame / SaveSettingsOnly。
  * ================================================================ */
 int SaveTestSerialize(const SaveBlob* blob, unsigned char** out);   /* >0 长度，<0 SAVE_ERR_* */
-int SaveTestDeserialize(const void* buf, long n, SaveBlob* out);    /* 1 成功，0 失败（看 g_saveError） */
+int SaveTestDeserialize(const void* buf, long n, SaveBlob* out);
+void SaveTestClearReadOnly(void);   /* 仅测试用：复位只读标志 */    /* 1 成功，0 失败（看 g_saveError） */
 
 
 /* 写当前进度（游戏中 / 退出时） */

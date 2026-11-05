@@ -1778,7 +1778,12 @@ void GenerateLevel(void) {
     CellMetaReset();
     {
         extern int GenerateThemeRooms(int);
+        extern int roomSeedUsed;
         int want = 1 + (rand() % 2);      /* 1~2 个 */
+        /* v2.4-rc：记下这一阶段的种子。读档后用它重放，
+           否则每层重新载入都会丢掉房间的色调、家具和碰撞。 */
+        roomSeedUsed = (int)(rand() & 0x7FFFFFFF);
+        srand((unsigned)roomSeedUsed);
         (void)GenerateThemeRooms(want);
     }
 #else
@@ -1801,30 +1806,49 @@ void GenerateLevel(void) {
     /* 生成迷宫时保证出生点右侧有通路 */
     worldMap[1][2] = 0; worldMap[1][3] = 0;  /* 确保右侧有路 */
     FindFarthestCell(&exitX, &exitY);   /* v2.1：离出生点最远的空格 */
-    /* ================================================================
-     * v6 战役第 3/5 关：出口改成**离配电箱最远的格**
-     * ================================================================
-     * 原来的写法是"再找一次最远格取更远的那个" —— 但那个函数是确定性的，
-     * 两次结果一模一样，等于什么都没做。
+
+    /* ==================================================================
+     * 2026-11-06（v2.4-rc）：**容器候选必须从出生点可达**
+     * ------------------------------------------------------------------
+     * 1000 种子洪泛发现：DFS 迷宫 + 5 个随机 2x2 空地会造出
+     * 与出生点**不连通**的孤立空间，平均占 1.96% 的可通行格。
      *
-     * 正确语义：通电之后，出口在**图纸的另一头**。
-     * 你必须从配电箱横穿整张图才能出去。
+     * 而下面这段候选列表原来是"所有空地" —— 于是保险丝/配电箱
+     * 有概率被放进孤岛里，整层直接不可通关。
+     * 这是**真正的死局来源**，比"出口选错"隐蔽得多。
+     *
+     * 现在先做一次从出生点出发的 BFS，只把可达格收进候选。
      * ================================================================ */
+    static int reach[MAP_HEIGHT][MAP_WIDTH];
     {
-        extern float CampaignExitDistNow(void);
-        extern Breaker breaker;
-        if (CampaignExitDistNow() > 1.01f) {
-            int bx = (int)breaker.x, by = (int)breaker.y;
-            FindFarthestFromCell(bx, by, &exitX, &exitY);
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++) reach[y][x] = 0;
+        int rqx[MAP_WIDTH * MAP_HEIGHT], rqy[MAP_WIDTH * MAP_HEIGHT];
+        int rh = 0, rt = 0;
+        if (worldMap[1][1] == 0) { reach[1][1] = 1; rqx[rt] = 1; rqy[rt] = 1; rt++; }
+        while (rh < rt) {
+            int cx = rqx[rh], cy = rqy[rh]; rh++;
+            static const int ddx[4] = { 1, -1, 0, 0 };
+            static const int ddy[4] = { 0, 0, 1, -1 };
+            for (int k = 0; k < 4; k++) {
+                int nx = cx + ddx[k], ny = cy + ddy[k];
+                if (nx < 1 || nx >= MAP_WIDTH - 1 || ny < 1 || ny >= MAP_HEIGHT - 1) continue;
+                if (worldMap[ny][nx]) continue;
+                { extern int PropBlocksAt(int, int); if (PropBlocksAt(nx, ny)) continue; }
+                if (reach[ny][nx]) continue;
+                reach[ny][nx] = 1;
+                rqx[rt] = nx; rqy[rt] = ny; rt++;
+            }
         }
     }
 
-    /* 收集空地用于放置容器/配电箱/安全屋（排除出生区和出口周围） */
+    /* 收集空地用于放置容器/配电箱/安全屋（排除出生区、出口周围、不可达区） */
     static int cells[MAP_WIDTH * MAP_HEIGHT][2];
     int emptyCount = 0;
     for (int y = 1; y < MAP_HEIGHT - 1; y++) {
         for (int x = 1; x < MAP_WIDTH - 1; x++) {
-            if (worldMap[y][x] == 0 && Dist2((float)x, (float)y, 1.5f, 1.5f) > 16.0f) {
+            if (worldMap[y][x] == 0 && reach[y][x] &&
+                Dist2((float)x, (float)y, 1.5f, 1.5f) > 16.0f) {
                 cells[emptyCount][0] = x;
                 cells[emptyCount][1] = y;
                 emptyCount++;
@@ -1832,7 +1856,20 @@ void GenerateLevel(void) {
         }
     }
 
-    FindFarthestCell(&exitX, &exitY);   /* v2.1：同上 */
+    /* ==================================================================
+     * 2026-11-06（v2.4-rc P-6）：**这里原来是无条件覆盖**
+     * ------------------------------------------------------------------
+     * 旧代码在这一行又跑了一次 FindFarthestCell，把上面刚算好的
+     * 战役出口**直接盖掉** —— 那个分支等于从来没生效过。
+     * 现在只在"不是战役 3/5 关"时兜底：那两关的出口挪到配电箱
+     * 定稿之后再算，那时 breaker.x/y 才是本层的真实位置。
+     * ================================================================ */
+    {
+        extern float CampaignExitDistNow(void);
+        if (!(CampaignExitDistNow() > 1.01f)) {
+            FindFarthestCell(&exitX, &exitY);
+        }
+    }
     breakerOpen = 0;  /* 出口门锁死，需通电开启 */
 
     /* 容器 / 保险丝 / 配电箱 */
@@ -2186,6 +2223,24 @@ void GenerateLevel(void) {
                 else             containers[k].content = 0;   /* 空       25% */
             }
         }
+
+    /* ==================================================================
+     * 2026-11-06（v2.4-rc P-6）：**战役第 3/5 关的出口在这里才算**
+     * ------------------------------------------------------------------
+     * 旧版本在生成早期就读 breaker.x/y 求"离配电箱最远的格"，
+     * 但配电箱要到本段之后才真正放置 —— 读到的是**上一层**的位置；
+     * 之后还有一处无条件覆盖，于是这个设计从来没有生效过。
+     *
+     * 现在挪到配电箱定稿之后：breaker.x/y 是本层真实位置，
+     * "通电之后出口在图纸另一头"这个语义才成立。
+     * ================================================================ */
+    {
+        extern float CampaignExitDistNow(void);
+        if (CampaignExitDistNow() > 1.01f && breaker.active) {
+            FindFarthestFromCell((int)breaker.x, (int)breaker.y, &exitX, &exitY);
+        }
+    }
+
 
         {
         int nt = rand() % THEME_ENABLED;

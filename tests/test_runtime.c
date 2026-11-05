@@ -683,6 +683,46 @@ static void test_theme_rooms_placement(void) {
  *   · 家具一定落在**房间内部**的地板格上
  *   · 家具不会压在墙上，也不会跑到房间外
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4-rc）：**房间种子必须活着穿过存档往返**
+ * ------------------------------------------------------------------
+ * 这是 v30 的唯一新增字段。读档后要靠它重放房间（重建色调/家具/碰撞），
+ * 所以它丢了这个版本就等于什么都没做。
+ *
+ * 用 SaveTestSerialize / SaveTestDeserialize（真实序列化路径），
+ * 不做文件 IO —— 文件那一层已经有别的用例覆盖。
+ * ================================================================== */
+static void test_room_seed_roundtrip(void) {
+    extern int SaveTestSerialize(const SaveBlob*, unsigned char**);
+    extern int SaveTestDeserialize(const void*, long, SaveBlob*);
+    /* 上一个用例（重复 ID）会把"只读"标志置起来，
+       那是"拒绝覆盖可疑存档"的保护。测试里没有真实读档来复位，
+       所以这里显式清一次 —— 不为了测试去改生产语义。 */
+    { extern void SaveTestClearReadOnly(void); SaveTestClearReadOnly(); }
+
+    static SaveBlob a;
+    memset(&a, 0, sizeof(a));
+    a.magic = SAVE_MAGIC;
+    a.version = SAVE_VERSION;
+    a.roomSeed = 0x1234ABCD;
+    a.roomCount = 2;
+
+    unsigned char* out = NULL;
+    int n = SaveTestSerialize(&a, &out);
+    CHECK(n > 0 && out != NULL, "serialising a blob with room fields must succeed");
+
+    if (n > 0 && out) {
+        static SaveBlob b;
+        memset(&b, 0, sizeof(b));
+        CHECK(SaveTestDeserialize(out, n, &b) != 0, "the serialised blob must load back");
+        CHECK(b.roomSeed == 0x1234ABCD, "roomSeed must survive a save/load round trip");
+        CHECK(b.roomCount == 2, "roomCount must survive a save/load round trip");
+        /* 版本号也要对上，否则前缀迁移会误判 */
+        CHECK(b.version == SAVE_VERSION, "version must survive the round trip");
+        free(out);
+    }
+}
+
 static void test_room_props(void) {
     extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
     extern float exitX, exitY;
@@ -1526,6 +1566,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_prop_layers();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

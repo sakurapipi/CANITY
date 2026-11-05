@@ -29,7 +29,7 @@
 #include <stdint.h>   /* uint32_t：程序化配乐用（规则：系统头只在本文件出现） */
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 30         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_NUM 31         /* 整数版本，进存档做记录 */
 /* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
    置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
    置 0 = 回到旧的战斗版本。 */
@@ -61,7 +61,7 @@
 #endif
 /* 用 -DCANITY_SOUND_EVENT=0 可以编译出"旧路径"版本，便于二分定位。 */
 
-#define CANITY_VERSION_STR "2.4-beta"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_STR "2.4-rc"      /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {

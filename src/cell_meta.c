@@ -75,6 +75,21 @@ static const unsigned char kRoomTintRGB[THEME_COUNT][3] = {
     { 32, 12, 24 }    /* 6 血肉洞窟 紫红 */
 };
 
+/* 逐像素路径上不能走函数调用（地板循环每帧几十万次），
+   所以把主题色拆成三个内联查询，让 render 直接取。 */
+int CellThemeTintR(int themeId) {
+    if (themeId < 0 || themeId >= THEME_COUNT) themeId = 0;
+    return kRoomTintRGB[themeId][0];
+}
+int CellThemeTintG(int themeId) {
+    if (themeId < 0 || themeId >= THEME_COUNT) themeId = 0;
+    return kRoomTintRGB[themeId][1];
+}
+int CellThemeTintB(int themeId) {
+    if (themeId < 0 || themeId >= THEME_COUNT) themeId = 0;
+    return kRoomTintRGB[themeId][2];
+}
+
 int CellTintRGB(int cx, int cy, int* r, int* g, int* b) {
     const CellMeta* m = CellMetaAt(cx, cy);
     if (!m || m->roomId == 0) return 0;
