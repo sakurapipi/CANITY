@@ -402,9 +402,79 @@ static void test_floor_resets_hunters(void) {
           "30s into the new floor only one hunter exists");
 }
 
+/* ==================================================================
+ * 2026-11-06：**破门石一次撞击只结算一次逻辑噪音**
+ * ------------------------------------------------------------------
+ * 背景：`throwing.c` 里破锁会先 `MakeNoise(20)`，然后落地/撞墙分支
+ * 又各来一次 `MakeNoise(15)` —— 同一块石头报两次。
+ *
+ * 实测修正（重要）：`suspicion.c` 的 `SuspicionAdd` 会把
+ * **同源且 2 格内**的点合并（取更高强度/更长寿命），
+ * 而 20 和 15 都 > 14 阈值，同属 `SUSP_SEARCH` ——
+ * 所以这两次在当前实现里本来就会并成一个点，**玩家感觉不到差别**。
+ *
+ * 因此这个测试是**回归守卫**，不是"修复前失败"的证明：
+ * 它钉住「一次破锁 = 一个可疑点」这条不变量，
+ * 等 v2.4-beta 的 SoundEvent 把强度与类别分开之后，它会真正开始起作用。
+ * ================================================================== */
+static void test_stone_break_single_event(void) {
+    extern void ThrowItem(int, float);
+    extern void UpdateShots(float);
+    extern float posX, posY, dirX, dirY;
+    extern Container containers[MAX_CONTAINERS];
+    extern int containerCount;
+
+    /* 找一个确定空着的角落，不依赖 GenerateLevel 的具体布局 */
+    posX = 12.0f; posY = 12.0f;
+    dirX = 1.0f;  dirY = 0.0f;
+
+    /* 沿 +X 摆几个上锁的箱子：不管瓶子飞多远，落点 2.5 格内必有一个 */
+    int savedCount = containerCount;
+    containerCount = 0;
+    for (int i = 0; i < MAX_CONTAINERS; i++) {
+        containers[i].active = 0;
+        containers[i].locked = 0;
+        containers[i].mimicHost = 0;
+        containers[i].mimicShell = 0;
+        containers[i].searched = 0;
+        containers[i].content = 0;
+    }
+    {
+        static const float dist[6] = { 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f };
+        for (int i = 0; i < 6 && i < MAX_CONTAINERS; i++) {
+            containers[i].x = posX + dist[i];
+            containers[i].y = posY;
+            containers[i].active = 1;
+            containers[i].locked = 1;
+            containers[i].lockType = 1;
+            containers[i].lockCode = 0;
+        }
+        containerCount = 6;
+    }
+
+    SuspicionReset();
+    ThrowItem(1, 0.10f);                    /* kind 1 = 投石/破门石 */
+
+    /* 固定步进 2.5 秒：比任何一次抛掷的滞空时间都长 */
+    for (int f = 0; f < 300; f++) UpdateShots(1.0f / 120.0f);
+
+    int unlocked = 0;
+    for (int i = 0; i < containerCount; i++) {
+        if (containers[i].active && !containers[i].locked) unlocked++;
+    }
+    CHECK(unlocked >= 1, "a sling landing near a locked crate must break exactly one lock");
+    CHECK(SuspicionActiveCount() == 1,
+          "one breaking throw must leave exactly one suspicion point");
+
+    /* 复原，别影响后面的用例 */
+    for (int i = 0; i < MAX_CONTAINERS; i++) containers[i].active = 0;
+    containerCount = savedCount;
+    SuspicionReset();
+}
+
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

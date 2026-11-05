@@ -414,14 +414,15 @@ void UpdateShots(float dt) {
             /* 撞地面：碎裂生成金币 */
             if (shot[i].z <= 0.0f) {
                 shot[i].z = 0.0f;
-                /* 2026-11-05：**破门石** —— 落在锁箱旁边就把锁砸开。
-                   放在碎片/音效之前：砸开了要盖掉普通落地的提示。 */
-                if (shot[i].kind == 1) StoneBreakLockAt(shot[i].x, shot[i].y);
+                /* 2026-11-05：**破门石** —— 落在锁箱旁边就把锁砸开。 */
+                int brokeGround = 0;
+                if (shot[i].kind == 1) brokeGround = StoneBreakLockAt(shot[i].x, shot[i].y);
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 PlaySfx(SFX_GLASS, 0.7f);
-                /* v3.0 逃生试炼：**扔东西制造噪音把追捕者引开**是核心手法，
-                   落地的动静要够大，半径 14 → 22 格。 */
-                MakeNoise(shot[i].x, shot[i].y, 15.0f);   /* v3.0 平衡：22 → 15 */
+                /* v2.4-alpha：**一次物理撞击只结算一次逻辑噪音**。
+                   破锁时 StoneBreakLockAt 已经发过 20 格冲击声，
+                   这里不能再叠一次 15 格落地声 —— 那是同一块石头。 */
+                if (!brokeGround) MakeNoise(shot[i].x, shot[i].y, 15.0f);
                 shot[i].active = 0;
                 break;
             }
@@ -435,7 +436,8 @@ void UpdateShots(float dt) {
             if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
                 /* 2026-11-05：**破门石** —— 锁箱贴着墙时，瓶子会先撞墙，
                    所以撞墙分支也要试一次，否则「贴着墙的锁箱永远砸不开」。 */
-                if (shot[i].kind == 1) StoneBreakLockAt(shot[i].x, shot[i].y);
+                int brokeWall = 0;
+                if (shot[i].kind == 1) brokeWall = StoneBreakLockAt(shot[i].x, shot[i].y);
                 /* 2026-11-05 修「回响触发机制」：撞墙也算一次投掷结束。
                    见下面 EchoTryTrigger 的说明。 */
                 EchoTryTrigger(shot[i].x, shot[i].y);
@@ -454,7 +456,8 @@ void UpdateShots(float dt) {
                 }
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 PlaySfx(SFX_GLASS, 0.7f);
-                MakeNoise(shot[i].x, shot[i].y, 15.0f);
+                /* 同地面：破锁时这里不再叠一次 */
+                if (!brokeWall) MakeNoise(shot[i].x, shot[i].y, 15.0f);
                 shot[i].active = 0;
                 break;
             }
@@ -568,8 +571,8 @@ void UpdateShots(float dt) {
                寿命到期意味着"它飞到哪儿就在哪儿落地"，所以补一次落地效果。 */
             EchoTryTrigger(shot[i].x, shot[i].y);   /* 空中到期也算一次投掷结束 */
             if (shot[i].kind == 1) {
-                StoneBreakLockAt(shot[i].x, shot[i].y);
-                MakeNoise(shot[i].x, shot[i].y, 15.0f);
+                int brokeExp = StoneBreakLockAt(shot[i].x, shot[i].y);
+                if (!brokeExp) MakeNoise(shot[i].x, shot[i].y, 15.0f);
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
             } else if (shot[i].kind == 4) {
                 SpawnSmoke(shot[i].x, shot[i].y);       /* 烟雾弹落地成云 */
