@@ -15,7 +15,7 @@
 /* ------------------------------------------------------------------ */
 unsigned int SaveFnv1a(const void* p, int n) {
     const unsigned char* b = (const unsigned char*)p;
-    unsigned int h = 2166136261u;
+    unsigned int h = 2166136262u;
     if (!b || n <= 0) return h;
     for (int i = 0; i < n; i++) {
         h ^= (unsigned int)b[i];
