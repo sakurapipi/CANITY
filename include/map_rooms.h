@@ -50,4 +50,27 @@ int  PropBlocksAt(int cx, int cy);
 /* 这个位置有没有家具（含装饰）。测试用。 */
 int  RoomPropAt(float x, float y);
 
+/* ==================================================================
+ * v2.4-rc P3：**分层伪立体**
+ * ------------------------------------------------------------------
+ * 一个物件 = 1~4 个精灵层，每层有自己的 baseZ（底边离地高度）
+ * 和 halfH（投影高度）。走动时层间有视差 ——
+ * 这是 billboard 单图做不到的立体感来源。
+ * 墙高 = 1.0；层叠加后不得超过 1.0。
+ * ================================================================== */
+#define PROP_MAX_LAYERS 4
+
+typedef struct {
+    float baseZ;
+    float halfH;
+    int   spr;
+} PropLayer;
+
+/* 返回层数（0..PROP_MAX_LAYERS）；未知 kind 返回 0。 */
+int RoomPropLayers(int kind, PropLayer* out, int maxOut);
+
+/* 把某层映射到精灵 id —— 单独抽出来是为了让单测能验证，
+   不需要初始化渲染器（精灵在测试环境里是空指针）。 */
+int RoomPropLayerSprite(int kind, int layerIndex);
+
 #endif /* CANITY_MAP_ROOMS_H */

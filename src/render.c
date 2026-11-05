@@ -2724,14 +2724,23 @@ void RenderSprites(void) {
             case 8: DrawShotSprite(list[i].idx); break;
             case 10: DrawSlashSprite(); break;
             case 12: DrawHideSpotSprite(list[i].idx); break;   /* v3.0 藏身点 */
-        case 16: {   /* v2.4-rc：房间家具 */
+        case 16: {   /* v2.4-rc P3：房间家具（分层伪立体） */
             extern RoomProp roomProps[MAX_ROOM_PROPS];
             int ri = list[i].idx;
             if (ri >= 0 && ri < MAX_ROOM_PROPS && roomProps[ri].active) {
-                    if (roomProps[ri].kind == ROOMPROP_CONSOLE)
-                    DrawBakedProp(SPR_PROP_CONSOLE, roomProps[ri].x, roomProps[ri].y, 0.0f, 0.62f, 1.0f);
-                else
-                    DrawBakedProp(SPR_PROP_SHELF, roomProps[ri].x, roomProps[ri].y, 0.0f, 0.62f, 1.0f);
+                extern int RoomPropLayers(int, PropLayer*, int);
+                PropLayer lp[PROP_MAX_LAYERS];
+                int ln = RoomPropLayers(roomProps[ri].kind, lp, PROP_MAX_LAYERS);
+                int isConsole = (roomProps[ri].kind == ROOMPROP_CONSOLE);
+                for (int L2 = 0; L2 < ln; L2++) {
+                    /* 层表里 spr 是**层内索引**：0 = 主体，1 = 附加层。
+                       在这里映射到真正的精灵 id —— 层表本身不依赖渲染层。 */
+                    int sid = (lp[L2].spr == 0)
+                                ? (isConsole ? SPR_PROP_CONSOLE_BASE : SPR_PROP_SHELF_FRAME)
+                                : (isConsole ? SPR_PROP_CONSOLE_PANEL : SPR_PROP_SHELF_BOARD);
+                    DrawBakedProp(sid, roomProps[ri].x, roomProps[ri].y,
+                                  lp[L2].baseZ, lp[L2].halfH, 1.0f);
+                }
             }
             break;
         }

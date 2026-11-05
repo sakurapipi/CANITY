@@ -103,6 +103,41 @@ int PropBlocksAt(int cx, int cy) {
     return 0;
 }
 
+/* ==================================================================
+ * v2.4-rc P3：层表
+ * ------------------------------------------------------------------
+ * 货架：框架(0) + 三层板(1/2/3)，层间留真实空隙 ——
+ *       走动时底板与顶板相对屏幕的位移不同，眼睛会读成立体。
+ * 控制台：柜体(0) + 抬起的斜面板(1)。
+ * ================================================================ */
+int RoomPropLayers(int kind, PropLayer* out, int maxOut) {
+    if (!out || maxOut <= 0) return 0;
+
+    if (kind == ROOMPROP_SHELF) {
+        if (maxOut < 4) return 0;
+        float bh = 0.085f;
+        out[0].baseZ = 0.00f; out[0].halfH = 0.62f;  out[0].spr = 0;   /* 框架 */
+        out[1].baseZ = 0.05f; out[1].halfH = bh;     out[1].spr = 1;   /* 底板 */
+        out[2].baseZ = 0.29f; out[2].halfH = bh;     out[2].spr = 1;   /* 中板 */
+        out[3].baseZ = 0.53f; out[3].halfH = bh;     out[3].spr = 1;   /* 顶板 */
+        return 4;
+    }
+    if (kind == ROOMPROP_CONSOLE) {
+        if (maxOut < 2) return 0;
+        out[0].baseZ = 0.00f; out[0].halfH = 0.34f; out[0].spr = 0;    /* 柜体 */
+        out[1].baseZ = 0.34f; out[1].halfH = 0.28f; out[1].spr = 1;    /* 斜面板 */
+        return 2;
+    }
+    return 0;
+}
+
+int RoomPropLayerSprite(int kind, int layerIndex) {
+    PropLayer lp[PROP_MAX_LAYERS];
+    int n = RoomPropLayers(kind, lp, PROP_MAX_LAYERS);
+    if (layerIndex < 0 || layerIndex >= n) return -1;
+    return lp[layerIndex].spr;
+}
+
 int RoomPropAt(float x, float y) {
     int cx = (int)floorf(x), cy = (int)floorf(y);
     for (int i = 0; i < roomPropCount; i++) {

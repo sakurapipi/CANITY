@@ -747,6 +747,79 @@ static void test_room_props(void) {
 }
 
 
+/* ==================================================================
+ * 2026-11-06（v2.4-rc P3）：**分层伪立体的层表**
+ * ------------------------------------------------------------------
+ * 这一组是纯几何/纯数据，不需要渲染器：
+ *   · 货架 4 层、控制台 2 层
+ *   · 每层的 baseZ + halfH 不得超过墙高 1.0（否则穿天花板）
+ *   · 层与层之间必须留空隙（否则叠起来就是一张图，没有视差）
+ *   · 未知 kind 返回 0 层，不能越界
+ * ================================================================== */
+static void test_prop_layers(void) {
+    PropLayer lp[PROP_MAX_LAYERS];
+
+    /* ---- ① 货架 4 层 ---- */
+    {
+        int n = RoomPropLayers(ROOMPROP_SHELF, lp, PROP_MAX_LAYERS);
+        CHECK(n == 4, "shelf must be 4 layers (frame + 3 boards)");
+
+        for (int i = 0; i < n; i++) {
+            CHECK(lp[i].halfH > 0.0f, "every layer must have a positive height");
+            CHECK(lp[i].baseZ + lp[i].halfH <= 1.001f,
+                  "no layer may pierce the ceiling (baseZ + halfH <= 1.0)");
+        }
+
+        /* 第 0 层是**框架**，贯穿整个物件高度；第 1~3 层是横板，落在框架里面。
+           所以"留空隙"这条只对板与板之间成立。 */
+        float frameTop = lp[0].baseZ + lp[0].halfH;
+        for (int i = 1; i < n; i++) {
+            CHECK(lp[i].baseZ + lp[i].halfH <= frameTop + 0.001f,
+                  "shelf boards must sit inside the frame");
+        }
+        /* 板与板之间必须有明显空隙，否则叠起来就是一块实心板，没有视差 */
+        for (int i = 2; i < n; i++) {
+            float gap = lp[i].baseZ - (lp[i - 1].baseZ + lp[i - 1].halfH);
+            CHECK(gap > 0.1f, "consecutive shelf boards must leave a visible gap");
+        }
+        CHECK(lp[3].baseZ - (lp[1].baseZ + lp[1].halfH) > 0.2f,
+              "bottom and top boards must be far apart");
+    }
+
+    /* ---- ② 控制台 2 层，面板在柜体之上 ---- */
+    {
+        int n = RoomPropLayers(ROOMPROP_CONSOLE, lp, PROP_MAX_LAYERS);
+        CHECK(n == 2, "console must be 2 layers (body + panel)");
+        CHECK(lp[1].baseZ >= lp[0].baseZ + lp[0].halfH - 0.001f,
+              "the console panel must start where the body ends");
+        CHECK(lp[0].baseZ + lp[0].halfH <= 1.001f, "console body must stay under the ceiling");
+        CHECK(lp[1].baseZ + lp[1].halfH <= 1.001f, "console panel must stay under the ceiling");
+    }
+
+    /* ---- ③ 未知 kind：0 层，不越界 ---- */
+    {
+        CHECK(RoomPropLayers(999, lp, PROP_MAX_LAYERS) == 0,
+              "an unknown prop kind must produce zero layers");
+        CHECK(RoomPropLayers(ROOMPROP_SHELF, NULL, PROP_MAX_LAYERS) == 0,
+              "NULL layer output must be rejected");
+        CHECK(RoomPropLayers(ROOMPROP_SHELF, lp, 1) == 0,
+              "not enough layer slots must fail cleanly instead of overflowing");
+    }
+
+    /* ---- ④ 层内索引 → 精灵索引映射不越界 ---- */
+    {
+        for (int k = 0; k <= 1; k++) {
+            int n = RoomPropLayers(k, lp, PROP_MAX_LAYERS);
+            CHECK(RoomPropLayerSprite(k, -1) == -1, "negative layer index must return -1");
+            CHECK(RoomPropLayerSprite(k, n) == -1, "out-of-range layer index must return -1");
+            for (int i = 0; i < n; i++) {
+                int sid = RoomPropLayerSprite(k, i);
+                CHECK(sid == 0 || sid == 1, "layer sprite index must be 0 (body) or 1 (extra)");
+            }
+        }
+    }
+}
+
 static void test_stone_hearing_range(void) {
     extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
     static int saved[MAP_HEIGHT][MAP_WIDTH];
@@ -1453,6 +1526,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_prop_layers();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

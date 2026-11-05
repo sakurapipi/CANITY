@@ -1545,6 +1545,57 @@ static void BakeProp(int id, int kind) {
         cvBevel(c - 52, top + 32, c + 52, baseY - 4, 3.0f, 0.42f);
         cvSpeckle((int)c, (int)(baseY - 40), 48, 26, 0x00000000u, 0.3f);
 
+    } else if (kind == 10) {    /* 货架框架：两根立柱 + 侧梁（不含横板） */
+        float px0 = c - 44, px1 = c + 44;
+        float top = baseY - 132;
+        /* 侧梁（把两根柱子连起来，剪影更稳） */
+        cvLine(px0, top, px1, top, 7.0f, 0x00382A1Cu, 1.0f);
+        cvLine(px0, top - 3, px1, top - 3, 3.0f, 0x00806A46u, 0.85f);
+        /* 两根立柱 */
+        cvLine(px0, top, px0, baseY, 9.0f, 0x00403020u, 1.0f);
+        cvLine(px1, top, px1, baseY, 9.0f, 0x00403020u, 1.0f);
+        cvLine(px0 - 2, top, px0 - 2, baseY, 3.0f, 0x00705A3Eu, 0.85f);
+        cvLine(px1 - 2, top, px1 - 2, baseY, 3.0f, 0x00705A3Eu, 0.85f);
+        cvSpeckle((int)c, (int)(top + 66), 50, 30, 0x00100800u, 0.30f);
+
+    } else if (kind == 11) {    /* 货架横板：单层 */
+        /* 单独一层，高度只占画布下面一小条 —— 这样 baseZ 叠起来时
+           层与层之间会留出真实空隙，走动时能看见视差。 */
+        float px0 = c - 51, px1 = c + 51;
+        float sy = baseY - 6;
+        cvLine(px0, sy, px1, sy, 11.0f, 0x00281E14u, 1.0f);
+        cvLine(px0, sy - 4, px1, sy - 4, 4.0f, 0x00907A54u, 0.95f);
+        cvLine(px0, sy + 5, px1, sy + 5, 2.0f, 0x00000000u, 0.45f);
+        /* 板上放点东西：位置随机性由 draw 时的层高区分，这里只画一块 */
+        cvPolyGrad((float[]){ px0 + 10, sy - 20, px0 + 34, sy - 20, px0 + 34, sy - 4, px0 + 10, sy - 4 },
+                   4, 0x00806640u, 0x00402E1Au, 1.0f);
+        cvBevel(px0 + 10, sy - 20, px0 + 34, sy - 4, 2.5f, 0.40f);
+
+    } else if (kind == 12) {    /* 控制台柜体（不含面板） */
+        float top = baseY - 70;
+        float b[8] = { c - 58, top, c + 58, top, c + 58, baseY, c - 58, baseY };
+        cvPoly(b, 4, 0x0008080Cu, 1.0f);
+        float b2[8] = { c - 52, top + 5, c + 52, top + 5, c + 52, baseY - 4, c - 52, baseY - 4 };
+        cvPolyGrad(b2, 4, 0x00505C66u, 0x00141A20u, 1.0f);
+        cvLine(c, top + 12, c, baseY - 6, 2.0f, 0x00000000u, 0.5f);
+        cvLine(c - 10, top + 34, c + 10, top + 34, 3.0f, 0x00A8B4C0u, 0.5f);
+        cvBevel(c - 52, top + 5, c + 52, baseY - 4, 3.0f, 0.42f);
+
+    } else if (kind == 13) {    /* 控制台斜面板 + 指示灯 */
+        float top = baseY - 118;
+        /* 梯形面板（上窄下宽 = 朝观察者倾） */
+        float pn[8] = { c - 58, top + 26, c + 58, top + 26, c + 44, top, c - 44, top };
+        cvPoly(pn, 4, 0x000A0E12u, 1.0f);
+        float pn2[8] = { c - 52, top + 23, c + 52, top + 23, c + 40, top + 4, c - 40, top + 4 };
+        cvPolyGrad(pn2, 4, 0x00768290u, 0x00303840u, 1.0f);
+        /* 三颗灯 */
+        cvEllipse(c - 26, top + 14, 5.0f, 4.2f, 0x00FFB030u, 0.95f);
+        cvEllipse(c - 6,  top + 13, 5.0f, 4.2f, 0x0040E060u, 0.90f);
+        cvEllipse(c + 14, top + 14, 5.0f, 4.2f, 0x00E03818u, 0.90f);
+        cvEllipse(c - 26, top + 14, 6.6f, 5.6f, 0x00181C20u, 0.55f);
+        cvEllipse(c - 6,  top + 13, 6.6f, 5.6f, 0x00181C20u, 0.55f);
+        cvEllipse(c + 14, top + 14, 6.6f, 5.6f, 0x00181C20u, 0.55f);
+
     } else if (kind == 1) {     /* 配电箱（v2.4.7 重新建模） */
         /* 按 art_direction.h 重设计：
              地标 ① 顶部两根**瓷瓶 + 垂下的导线**（剪影上凸出柜体上沿）
@@ -1933,6 +1984,10 @@ void SpritesInit(void) {
     BakeProp(SPR_PROP_CRATE_MIMIC, 7);   /* 2026-11-05 宝箱怪伪装态 */
     BakeProp(SPR_PROP_SHELF, 8);          /* v2.4-rc 房间家具 */
     BakeProp(SPR_PROP_CONSOLE, 9);
+    BakeProp(SPR_PROP_SHELF_FRAME, 10);   /* v2.4-rc P3 分层 */
+    BakeProp(SPR_PROP_SHELF_BOARD, 11);
+    BakeProp(SPR_PROP_CONSOLE_BASE, 12);
+    BakeProp(SPR_PROP_CONSOLE_PANEL, 13);
     BakeUiPanel(SPR_UI_PANEL, 0);
     BakeUiPanel(SPR_UI_PANEL_HOT, 1);
     BakeUiCursor();
