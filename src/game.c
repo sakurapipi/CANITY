@@ -1865,9 +1865,10 @@ int HatchGateCheck(int idx, char* why, int cap) {
         return 1;
     }
     case HATCH_STORAGE: {
-        if (carryGold < 150) {
+        if (carryGold < HATCH_STORAGE_COST) {
             if (why) snprintf(why, (size_t)cap,
-                (g_lang == LANG_ZH) ? "买断整仓需要 150 金（你有 %d）" : "NEED 150 GOLD (YOU HAVE %d)", carryGold);
+                (g_lang == LANG_ZH) ? "买断整仓需要 %d 金（你有 %d）" : "NEED %d GOLD (YOU HAVE %d)",
+                HATCH_STORAGE_COST, carryGold);
             return 0;
         }
         return 1;
@@ -1942,7 +1943,7 @@ void HatchFireEffect(int idx) {
         break;
 
     case HATCH_STORAGE:
-        if (!WalletSpendRun(150)) return;
+        if (!WalletSpendRun(HATCH_STORAGE_COST)) return;
         {
             int refilled = 0;
             for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++) {

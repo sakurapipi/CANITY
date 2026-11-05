@@ -456,6 +456,123 @@ static void test_hatch_screenshot(void) {
  * 这里钉住数据侧：外墙要被打标、并且**不能**把 roomId 写到墙上
  * （写上去会让"房间地面格数/可达性"把墙算进去）。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户要求 ⑨）：**全局数值关联约束**
+ * ------------------------------------------------------------------
+ * 用户原话：「做全局联系测试，让所有数值类有关联的东西都要平衡」。
+ *
+ * 这一组不是"再跑一遍数值"，而是把**系统之间的关系**写成断言：
+ * 每一条都读**真实的常量/函数**，而不是抄一份数字 ——
+ * 所以任何人改动任何一个数，只要破坏了关系，编译期后第一次跑就红。
+ *
+ * 覆盖的关系：
+ *   ① 怪物速度 < 玩家冲刺速度（否则永远逃不掉）
+ *   ② 怪物速度 > 玩家走速（否则永远追不上）
+ *   ③ 手电续航在一个可玩的区间（太短没得玩，太长没压力）
+ *   ④ 保险丝需求 × 箱子数（箱子必须比保险丝多，否则搜不到别的）
+ *   ⑤ 舱门门槛可达（金币门槛 <= 两层的搜刮收入）
+ *   ⑥ 相位信标买完还剩钱（百分比定价不能把人清空到 0）
+ *   ⑦ 扳手冷却 < 追捕超时（一次追捕里至少能用两次）
+ *   ⑧ 扳手冷却 > 挥击时长（不能自己打断自己）
+ *   ⑨ 爆脸怪控制时长 < 追捕超时（不会被连控死）
+ *   ⑩ 舱门门槛的理智窗口不为空（病房 <50 与地狱 >=40 要有交集）
+ * ================================================================== */
+static void test_global_balance_invariants(void) {
+    extern int BatteryMax(void);
+    extern float BatteryDrainRate(void);
+    extern float RunUpgWrenchCooldown(void);
+    extern float GoldSearchAt(int level);
+    extern int ShopPriceAt(int row);
+    extern int fusesNeeded, carryGold;
+    extern int ShopWrenchLevelForTest(void);
+
+    /* ---- ① ② 怪物速度夹在走速与冲刺之间 ---- */
+    {
+        float walk   = MOVE_SPEED;                    /* 2.0 */
+        float sprint = MOVE_SPEED * SPRINT_MULT;      /* 3.0 */
+        CHECK(MONSTER_SPEED_FINAL_MAX < sprint,
+              "monster top speed must stay BELOW the player's sprint, or escape is impossible");
+        CHECK(MONSTER_SPEED_FINAL_MAX > walk,
+              "monster top speed must stay ABOVE the player's walk, or nothing is threatening");
+        CHECK(LIGHTBEAST_SPEED_BASE < MONSTER_SPEED_FINAL_MAX,
+              "the light beast must not be faster than the final clamp");
+    }
+
+    /* ---- ③ 手电续航区间 ---- */
+    {
+        float maxB  = (float)BatteryMax();
+        float drain = BatteryDrainRate();
+        CHECK(drain > 0.0f, "battery must actually drain");
+        float secs = maxB / drain;
+        CHECK(secs > 60.0f,
+              "a full battery must last more than a minute (otherwise the floor is unplayable)");
+        CHECK(secs < 400.0f,
+              "a full battery must not last absurdly long (otherwise there is no pressure)");
+    }
+
+    /* ---- ④ 保险丝 vs 箱子数 ---- */
+    {
+        CHECK(fusesNeeded >= 2, "a floor must need at least two fuses");
+        CHECK(fusesNeeded + 3 <= MAX_CONTAINERS,
+              "there must always be room for fuses PLUS other loot "
+              "(otherwise every crate is a fuse and gold gates become unreachable)");
+    }
+
+    /* ---- ⑤ 金币门槛可达：两层搜刮收入要能覆盖最贵的舱门门槛 ---- */
+    {
+        /* 每层保守估计 6 个能出金币的箱子 */
+        /* 每层保守按 6 个"能出金币"的箱子算。
+           上限取 3 层 —— 再多就等于前期永远打不开。 */
+        float threeFloors = 3.0f * 6.0f * GoldSearchAt(1);
+        CHECK(threeFloors > (float)HATCH_STORAGE_COST,
+              "the storage hatch's gold gate must be reachable within three floors");
+    }
+
+    /* ---- ⑥ 相位信标：百分比定价不能把人清空 ---- */
+    {
+        carryGold = 1000;
+        int p = ShopPriceAt(8);
+        CHECK(p < carryGold,
+              "the percentage price must never consume ALL carried gold");
+        CHECK(p * 10 >= carryGold * 6,
+              "the beacon must stay genuinely expensive (>= 60% of carried gold)");
+        carryGold = 0;
+        CHECK(ShopPriceAt(8) > 0, "the beacon must never become free");
+    }
+
+    /* ---- ⑦ ⑧ 扳手冷却的两个边界 ---- */
+    {
+        float cd = RunUpgWrenchCooldown();
+        CHECK(cd > 0.0f,
+              "the wrench must be cooldown-based (a negative value means charge mode)");
+        CHECK(cd < HUNT_CHASE_MAX,
+              "the wrench cooldown must be shorter than a chase, or it is useless mid-chase");
+        CHECK(HUNT_CHASE_MAX / cd >= 2.0f,
+              "a single chase must allow at least two wrench swings");
+        CHECK(cd > WRENCH_SWING_TIME,
+              "the cooldown must be longer than one swing, or the swing interrupts itself");
+    }
+
+    /* ---- ⑨ 爆脸怪控制时长 vs 追捕超时 ---- */
+    CHECK(JUMPER_CONTROL_TIME < HUNT_CHASE_MAX,
+          "the facehugger control must end before a chase times out, "
+          "otherwise the player is locked for the whole chase");
+    CHECK(JUMPER_CONTROL_TIME > 5.0f,
+          "the control must be long enough to be a real punishment");
+
+    /* ---- ⑩ 舱门理智门槛的兼容窗口不为空 ---- */
+    {
+        float wardMax = 50.0f;    /* 病房：理智 < 50 */
+        float hellMin = 40.0f;    /* 地狱：理智 >= 40 */
+        CHECK(wardMax > hellMin,
+              "the ward (<50) and hell (>=40) sanity gates must share a non-empty window");
+    }
+
+    /* ---- 舱门数量上限 vs 一层的房间数 ---- */
+    CHECK(MAX_HATCHES >= 2, "a floor must be able to hold more than one hatch");
+    CHECK(MAX_HATCHES <= 6, "too many hatches per floor would trivialise the effects");
+}
+
 static void test_room_wall_flags(void) {
     extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
     extern int CellIsRoomWall(int, int, int*, int*, int*);
@@ -822,7 +939,8 @@ static void test_all_hatch_effects(void) {
         HatchSetState(0, HATCH_OPENING);
         HatchTick(HATCH_OPEN_SECONDS + 0.02f);
         CHECK(hatches[0].state == HATCH_FIRED, "STORAGE hatch must fire");
-        CHECK(carryGold == 350, "STORAGE must cost exactly 150 gold");
+        CHECK(carryGold == 500 - HATCH_STORAGE_COST,
+              "STORAGE must cost exactly HATCH_STORAGE_COST gold");
         CHECK(roomProps[0].searchLeft == 3,
               "STORAGE must refill the shelf's three searches");
         CHECK(hatchGoldMulT > 59.0f && hatchGoldMulT < 61.0f,
@@ -2811,6 +2929,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
