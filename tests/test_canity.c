@@ -53,6 +53,25 @@ static char* read_file(const char* path) {
     if (fread(text, 1, (size_t)size, f) != (size_t)size) fail(path);
     text[size] = '\0';
     fclose(f);
+    /* ==================================================================
+     * 2026-11-06：**把 CRLF 归一化成 LF**。
+     * ------------------------------------------------------------------
+     * 这个文件里的检查大部分是在源码里找多行片段（needle 里带 '\n'）。
+     * 本机工作区是 LF，但 GitHub 的 Windows runner 检出时
+     * core.autocrlf=true 会转成 CRLF —— 于是同一份测试
+     * 本地绿、CI 红（实测：mimic spawn must run BEFORE ApplyLockboxes）。
+     *
+     * 在两处一起修：这里做归一化（对所有 source 断言一劳永逸），
+     * 另外新增 .gitattributes 固定文本文件为 LF（治本）。
+     * ================================================================ */
+    {
+        char* w = text;
+        for (char* r = text; *r; ++r) {
+            if (*r == '\r') continue;
+            *w++ = *r;
+        }
+        *w = '\0';
+    }
     return text;
 }
 
