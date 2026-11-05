@@ -3167,14 +3167,35 @@ void GenerateLevel(void) {
     /* 跳脸虫：第 3 层起按概率出现，不是每关必出 ——
        稀有才有惊吓感。触发时机也随机（进关 8~20 秒后），
        不然一进关就跳出来太突兀。 */
-    if (currentLevel >= JUMPER_MIN_LEVEL && rand() % 100 < JUMPER_APPEAR_CHANCE) {
-        jumperTrigger = 8.0f + (float)(rand() % 13);   /* 8~20 秒 */
-    } else {
-        jumperTrigger = -1.0f;
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**一局总量受控**
+     * ------------------------------------------------------------------
+     * 用户原话：「刷新频率为一局只有上限 4 只，随着层数增加上限 4 只」。
+     *
+     * 旧逻辑是"每层 35% 概率出 1 只"，一局打 10 层可能遇 3~4 次，
+     * 而且完全随机 —— 有的局一次没有，有的局连着来。
+     *
+     * 新逻辑：把**一局的总量**当预算来花。
+     *   本局上限 = min(4, 1 + 层数/2)
+     *     第 3 层 → 2 只，第 5 层 → 3 只，第 7 层起 → 4 只
+     *   已经出过的数量达到上限 → 本层不再安排
+     * ================================================================ */
+    {
+        int cap = 1 + currentLevel / 2;
+        if (cap > JUMPER_MAX_PER_RUN) cap = JUMPER_MAX_PER_RUN;
+        extern int jumperSpawnedRun;
+        if (currentLevel >= JUMPER_MIN_LEVEL && jumperSpawnedRun < cap) {
+            jumperTrigger = 8.0f + (float)(rand() % 13);
+        } else {
+            jumperTrigger = -1.0f;
+        }
     }
     jumperPhase = JMP_IDLE;
     jumperTimer = 0.0f;
     parasite.active = 0;
+    /* 2026-11-06：一局的总量预算与控制计时由 StartGame 负责清零 */
+    { extern int jumperSpawnedRun; extern float jumperControlT;
+      jumperSpawnedRun = 0; jumperControlT = 0.0f; }
     for (int i = 0; i < MAX_THROWN; i++) thrown[i].active = 0;
 
     /* ===== v6 **删除旧安全区** =====
@@ -4736,6 +4757,15 @@ void Update(float dt) {
     }
     int inF = IsActionDown(ACT_MOVE_FWD) - IsActionDown(ACT_MOVE_BACK);
     int inS = IsActionDown(ACT_MOVE_RIGHT) - IsActionDown(ACT_MOVE_LEFT);
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**被爆脸怪抓住后 10 秒动不了**
+     * 在读完输入之后直接清零，比在每个调用点加判断安全 ——
+     * 后面还有冲刺/贴墙滑动等多条路径，漏一处就能溜。
+     * ================================================================ */
+    {
+        extern float jumperControlT;
+        if (jumperControlT > 0.0f) { inF = 0; inS = 0; }
+    }
     /* v3.0：藏在柜子里不能动（但可以转头偷看） */
     if (hiddenIn >= 0) { inF = 0; inS = 0; }
     int moving = (inF != 0 || inS != 0);

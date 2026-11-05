@@ -45,7 +45,10 @@ extern Monster parasite;        /* 寄生怪 / 跳脸虫共用（只用位置和
 extern int jumperPhase;
 extern float jumperTimer;       /* 当前阶段的倒计时 */
 extern int jumperQteKey;        /* 阶段二要按的键编号 */
-extern int jumperResolved;      /* 本次事件是否已结算（防止重复结算） */
+extern int jumperResolved;
+/* 2026-11-06：一局累计出过几只 / 失败后的控制计时 */
+extern int   jumperSpawnedRun;
+extern float jumperControlT;      /* 本次事件是否已结算（防止重复结算） */
 extern float jumperTrigger;     /* 本关什么时候触发（秒）；<0 = 本关不出现 */
 
 /* ---- v1.8 偷电怪 ---- */

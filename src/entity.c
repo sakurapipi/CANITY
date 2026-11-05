@@ -86,6 +86,10 @@ int jumperPhase = JMP_IDLE;
 float jumperTimer = 0.0f;     /* 当前阶段的倒计时 */
 int jumperQteKey = 0;         /* 阶段二要按的键编号 */
 int jumperResolved = 0;       /* 本次事件是否已结算（防止重复结算） */
+/* 2026-11-06（用户要求）：一局累计出过几只（上限 JUMPER_MAX_PER_RUN）
+   与失败后的"控制玩家"计时。 */
+int   jumperSpawnedRun = 0;
+float jumperControlT   = 0.0f;
 float jumperTrigger = -1.0f;  /* 本关什么时候触发（秒）；<0 = 本关不出现 */
 float battery = 100.0f;          /* 0..100 */
 int flashlightOn = 1;
@@ -669,16 +673,59 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
 /* 跳脸虫（Face Jumper）—— QTE 怪                                      */
 /* ------------------------------------------------------------------ */
 
-/* 失败惩罚：扣理智 + 短时 debuff */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**失败 = 控制玩家 10 秒 + 召唤附近所有怪物**
+ * ------------------------------------------------------------------
+ * 旧的惩罚是"扣理智 + 致盲 + 减速 3 秒"，玩家自己还能跑，
+ * 读起来像"挨了一下"。
+ *
+ * 新惩罚按用户原话：
+ *   · 控制玩家 10 秒（输入被锁，动不了）
+ *   · 召唤附近一定半径内的所有怪物扑过来
+ * 前者让玩家真的"没反应过来就完了"，后者把单点惩罚变成围杀。
+ *
+ * 注意：**不是**直接把怪瞬移到脸上 —— 那样一眼假。
+ * 是让它们进入"记忆点 = 玩家当前位置"的追捕状态，
+ * 于是它们会顺着真实寻路跑过来。
+ * ================================================================ */
 static void JumperFail(void) {
+    extern int g_lang;
+    extern float pickupMsgTimer;
+    extern const char* pickupMsg;
     sanity -= JUMPER_FAIL_SANITY;
     if (sanity < 0.0f) sanity = 0.0f;
     extern int tookDamage;
     { extern int floorTookDamage; floorTookDamage = 1; }
-        tookDamage = 1;
+    tookDamage = 1;
+
     ApplyFx(FX_BLIND, JUMPER_FAIL_FX_POWER, JUMPER_FAIL_FX_TIME);
-    ApplyFx(FX_SLOW, JUMPER_FAIL_FX_POWER, JUMPER_FAIL_FX_TIME);
     healFlash = 0.25f;
+
+    /* ① 控制玩家 */
+    jumperControlT = JUMPER_CONTROL_TIME;
+
+    /* ② 召唤附近所有怪物：把它们的记忆点设到玩家身上并进入追捕态 */
+    {
+        int summoned = 0;
+        for (int i = 0; i < MON_HUNTER_MAX; i++) {
+            Monster* M = &monHunters[i];
+            if (!M->active) continue;
+            if (Dist2(M->x, M->y, posX, posY) >
+                JUMPER_CONTROL_RADIUS * JUMPER_CONTROL_RADIUS) continue;
+            M->memX = posX; M->memY = posY;
+            M->memAge = 0.0f;
+            M->state = 1;                 /* 追捕 */
+            M->stateTimer = 12.0f;
+            M->pathLen = 0; M->pathIdx = 0;
+            M->repath = 0.0f;
+            summoned++;
+        }
+        if (summoned > 0) {
+            pickupMsg = (g_lang == 1) ? "它们都听见了！" : "THEY ALL HEARD THAT!";
+            pickupMsgTimer = 2.2f;
+        }
+    }
+
     if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
 }
 
@@ -712,6 +759,9 @@ void UpdateLightBeast(float dt)  { UpdateOneLightBeast(&lightBeasts[0], dt); }
 void UpdateLightBeast2(float dt) { UpdateOneLightBeast(&lightBeasts[1], dt); }
 
 void SpawnParasite(void) {
+    extern int g_lang;
+    extern float pickupMsgTimer;
+    extern const char* pickupMsg;
     memset(&parasite, 0, sizeof(parasite));
     parasite.active = 1;
     parasite.attached = 0;
@@ -730,14 +780,62 @@ void SpawnParasite(void) {
         parasite.y = posY + dirY * 3.0f;
     }
 
-    jumperPhase = JMP_APPROACH;
-    jumperTimer = JUMPER_APPROACH_TIME;
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**先笑一声，再躲进角落**
+     * ------------------------------------------------------------------
+     * 旧行为是"生成在正前方 4~6 格，1.1 秒后直接扑脸" ——
+     * 玩家没有任何准备时间，读起来像凭空跳脸。
+     *
+     * 新行为：
+     *   ① 生成时笑一声（声音是唯一的预警）
+     *   ② 进入 JMP_LURK，自己躲到**离玩家最远**的那个角落蹲着
+     *   ③ 玩家靠近到 JUMPER_LURK_TRIGGER_R 才扑
+     * 于是它变成"你知道它在附近、但不知道具体在哪"的威胁。
+     * ================================================================ */
+    jumperPhase = JMP_LURK;
+    jumperTimer = 0.0f;
     jumperResolved = 0;
     jumperQteKey = rand() % JMP_KEY_COUNT;
-    if (!monsterMuted) PlaySfx(SFX_SCREAM, 0.35f);
+    jumperSpawnedRun++;
+
+    if (!monsterMuted) {
+        PlaySfx(SFX_SCREAM, 0.55f);
+        pickupMsg = (g_lang == 1) ? "你听到一阵笑声……" : "YOU HEAR LAUGHTER...";
+        pickupMsgTimer = 2.2f;
+    }
+
+    /* 挑一个角落蹲着：四个象限各找几个候选，取离玩家最远的那个 */
+    {
+        int bestX = (int)parasite.x, bestY = (int)parasite.y;
+        float bestD = -1.0f;
+        for (int q = 0; q < 4; q++) {
+            int qx = (q & 1) ? MAP_WIDTH - 3 : 2;
+            int qy = (q & 2) ? MAP_HEIGHT - 3 : 2;
+            for (int t = 0; t < 24; t++) {
+                int cx = qx + (rand() % 7) - 3;
+                int cy = qy + (rand() % 7) - 3;
+                if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) continue;
+                if (worldMap[cy][cx]) continue;
+                float d = Dist2((float)cx + 0.5f, (float)cy + 0.5f, posX, posY);
+                if (d > bestD) { bestD = d; bestX = cx; bestY = cy; }
+            }
+        }
+        parasite.x = (float)bestX + 0.5f;
+        parasite.y = (float)bestY + 0.5f;
+    }
 }
 
+/* 2026-11-06 仅测试用：JumperFail 是 static，测试无法直接触发。
+   加一个钩子，让"失败惩罚"能被断言（沿用 SaveTestBlob 的先例）。 */
+void JumperDebugFail(void) { JumperFail(); }
+
 void UpdateParasite(float dt) {
+    /* 2026-11-06：失败后的控制计时（玩家动不了的那 10 秒） */
+    if (jumperControlT > 0.0f) {
+        jumperControlT -= dt;
+        if (jumperControlT < 0.0f) jumperControlT = 0.0f;
+    }
+
     /* 还没到触发时机 */
     if (jumperTrigger >= 0.0f && jumperPhase == JMP_IDLE) {
         jumperTrigger -= dt;
@@ -749,6 +847,17 @@ void UpdateParasite(float dt) {
     if (!parasite.active) return;
 
     switch (jumperPhase) {
+    /* 2026-11-06：**蹲角落等待** —— 玩家靠近才扑，不主动追 */
+    case JMP_LURK: {
+        float d2 = Dist2(parasite.x, parasite.y, posX, posY);
+        if (d2 < JUMPER_LURK_TRIGGER_R * JUMPER_LURK_TRIGGER_R && hiddenIn < 0) {
+            jumperPhase = JMP_APPROACH;
+            jumperTimer = JUMPER_APPROACH_TIME;
+            if (!monsterMuted) PlaySfx(SFX_SCREAM, 0.9f);
+        }
+        break;
+    }
+
     case JMP_APPROACH: {
         /* 从远处弹到玩家脸上：位置插值，尺寸也会变大（更吓人） */
         jumperTimer -= dt;

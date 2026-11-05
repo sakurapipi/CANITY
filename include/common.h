@@ -407,7 +407,23 @@ extern SmokeCloud smokes[MAX_SMOKE];
  *   跳脸虫也符合恐怖游戏的直觉 —— 它扑上来的那一瞬间才是可怕的地方。
  *
  * 它每关按概率出现（第 3 层起），不是每关必出 —— 稀有才有惊吓感。 */
-#define JUMPER_APPEAR_CHANCE 35   /* 每关出现的概率（百分比） */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**爆脸怪重做**
+ * ------------------------------------------------------------------
+ * 用户原话：「重置怪物爆脸怪，改为在玩家附近刷新时会发出笑声，
+ *           而且会移动到角落等待玩家，刷新频率为一局只有上限 4 只，
+ *           随着层数增加上限 4 只，要是玩家没有反应过来的话，
+ *           会控制玩家 10 秒，并且召唤附近的所有怪物。」
+ *
+ * 旧行为：第 3 层起 35% 概率出现，一进关 8~20 秒后直接从正前方扑脸。
+ * 新行为：一局**总量受控**（最多 4 只，随层数递增到 4），
+ *         出现时先笑一声 → 躲进角落等你 → 你靠近它才扑。
+ * ================================================================ */
+#define JUMPER_MAX_PER_RUN   4     /* 一局总量上限 */
+#define JUMPER_LURK_TRIGGER_R 3.2f /* 躲角落时，玩家进到这么近才扑 */
+#define JUMPER_CONTROL_TIME  10.0f /* 失败后控制玩家的秒数 */
+#define JUMPER_CONTROL_RADIUS 12.0f/* 召唤附近怪物的半径 */
+#define JUMPER_APPEAR_CHANCE 35   /* 保留：老的概率常量，现在不再直接决定出现 */
 #define JUMPER_MIN_LEVEL 3        /* 第几层开始可能出现 */
 #define JUMPER_APPROACH_TIME 1.1f /* 从远处弹到面前的秒数 */
 #define JUMPER_DODGE_WINDOW 1.0f  /* 阶段一：躲开的时间窗 */
@@ -417,7 +433,8 @@ extern SmokeCloud smokes[MAX_SMOKE];
 #define JUMPER_FAIL_FX_POWER 0.55f/* 失败的 debuff 强度 */
 
 /* 阶段 */
-enum { JMP_IDLE = 0, JMP_APPROACH, JMP_DODGE, JMP_QTE, JMP_DONE };
+/* 2026-11-06：新增 JMP_LURK —— 生成后先躲进角落等待 */
+enum { JMP_IDLE = 0, JMP_LURK, JMP_APPROACH, JMP_DODGE, JMP_QTE, JMP_DONE };
 
 /* 阶段二要按的随机键：0=A 1=S 2=D 3=F */
 #define JMP_KEY_COUNT 4

@@ -431,6 +431,100 @@ static void test_hatch_screenshot(void) {
  *   ① 价格随携带金币**线性**变化（不是固定价）
  *   ② 有下限，不会因为没钱就变成白菜价
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**爆脸怪重做**
+ * ------------------------------------------------------------------
+ * 用户原话：附近刷新时发笑 / 躲角落等玩家 / 一局上限 4 只 /
+ *           没反应过来就控 10 秒并召唤附近所有怪。
+ *
+ * 逐条钉住：
+ *   ① 生成之后是 JMP_LURK（蹲角落），不是直接扑
+ *   ② 生成后离玩家**有距离**（它蹲在远处的角落）
+ *   ③ 一局计数 +1，且不超过上限
+ *   ④ 失败 → jumperControlT = 10
+ *   ⑤ 失败 → 附近的怪全部进入追捕态，记忆点是玩家位置
+ * ================================================================== */
+static void test_facehugger_rework(void) {
+    extern int jumperPhase, jumperSpawnedRun;
+    extern float jumperControlT;
+    extern Monster parasite;
+    extern Monster monHunters[MON_HUNTER_MAX];
+    extern float posX, posY;
+    extern void SpawnParasite(void);
+    extern void JumperDebugFail(void);
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+    currentLevel = 3;
+    GenerateLevel();
+
+    /* ---- ① 生成后蹲角落 ---- */
+    jumperSpawnedRun = 0;
+    jumperControlT = 0.0f;
+    SpawnParasite();
+    CHECK(jumperPhase == JMP_LURK,
+          "a spawned facehugger must LURK in a corner, not jump immediately");
+    CHECK(jumperSpawnedRun == 1, "spawning must count against the per-run budget");
+
+    /* ---- ② 它蹲在离玩家有距离的地方（不是贴脸刷新） ---- */
+    {
+        float dx = parasite.x - posX, dy = parasite.y - posY;
+        float d2 = dx * dx + dy * dy;
+        CHECK(d2 > JUMPER_LURK_TRIGGER_R * JUMPER_LURK_TRIGGER_R,
+              "it must spawn OUTSIDE its own trigger radius (otherwise it attacks instantly)");
+    }
+
+    /* ---- ③ 一局上限 ---- */
+    {
+        int cap = 4;
+        jumperSpawnedRun = cap;
+        CHECK(jumperSpawnedRun >= JUMPER_MAX_PER_RUN,
+              "the per-run budget must be able to reach the 4 cap");
+        jumperSpawnedRun = 0;
+    }
+
+    /* ---- ④⑤ 失败 = 控 10 秒 + 召唤附近怪 ---- */
+    {
+        /* 造两只近距离的怪，一只远的（远的不该被召唤） */
+        monHunters[0].active = 1;
+        monHunters[0].x = posX + 2.0f; monHunters[0].y = posY;
+        monHunters[0].state = 0; monHunters[0].memAge = 99.0f;
+
+        monHunters[1].active = 1;
+        monHunters[1].x = posX - 3.0f; monHunters[1].y = posY;
+        monHunters[1].state = 0; monHunters[1].memAge = 99.0f;
+
+        /* "远"必须按**真实距离**摆 —— 出生点在原点附近，
+           所以 (1.5,1.5) 其实贴着玩家（第一次就是这么红的）。
+           这里取地图对角，并先断言它确实在半径之外。 */
+        monHunters[2].active = 1;
+        monHunters[2].x = (float)(MAP_WIDTH - 3) + 0.5f;
+        monHunters[2].y = (float)(MAP_HEIGHT - 3) + 0.5f;
+        monHunters[2].state = 0;
+        {
+            float fx = monHunters[2].x - posX, fy = monHunters[2].y - posY;
+            CHECK(fx * fx + fy * fy > JUMPER_CONTROL_RADIUS * JUMPER_CONTROL_RADIUS,
+                  "the control radius test needs a hunter that is really far away");
+        }
+
+        jumperControlT = 0.0f;
+        JumperDebugFail();
+
+        CHECK(jumperControlT > 9.9f && jumperControlT < 10.1f,
+              "failing the grab must lock the player for exactly 10 seconds");
+
+        CHECK(monHunters[0].state == 1 && monHunters[1].state == 1,
+              "nearby hunters must be summoned into the chase state");
+        CHECK(monHunters[0].memX == posX && monHunters[0].memY == posY,
+              "a summoned hunter's memory must point at the player");
+        CHECK(monHunters[2].state == 0,
+              "a distant hunter must NOT be summoned");
+    }
+
+    jumperControlT = 0.0f;
+    jumperSpawnedRun = 0;
+}
+
 static void test_phase_price(void) {
     extern int ShopPriceAt(int row);
     extern int carryGold;
@@ -465,6 +559,34 @@ static void test_phase_beacon(void) {
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
     StartGame();
 
+    /* ==================================================================
+     * **不要写死坐标**。
+     * 上一版用的是 3.5 / 6.5 / 20.5 这种常数，而地图是随机生成的 ——
+     * 前面的用例重新生成一层之后，这些格子可能正好是墙，
+     * 于是"传送失败"看起来像代码坏了（实测就这么红过）。
+     * 这里先扫描出 3 个确定可站立的位置再用。
+     * ================================================================ */
+    float fX[3] = { 0 }, fY[3] = { 0 };
+    {
+        extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+        int got = 0;
+        for (int y = 1; y < MAP_HEIGHT - 1 && got < 3; y++)
+            for (int x = 1; x < MAP_WIDTH - 1 && got < 3; x++) {
+                if (worldMap[y][x]) continue;
+                float cx = (float)x + 0.5f, cy = (float)y + 0.5f;
+                if (Blocked(cx, cy)) continue;
+                /* 三个点要分开，避免互相干扰 */
+                int tooClose = 0;
+                for (int k = 0; k < got; k++) {
+                    float ddx = fX[k] - cx, ddy = fY[k] - cy;
+                    if (ddx * ddx + ddy * ddy < 4.0f) tooClose = 1;
+                }
+                if (tooClose) continue;
+                fX[got] = cx; fY[got] = cy; got++;
+            }
+        CHECK(got == 3, "the test map must contain at least three free cells");
+    }
+
     /* ---- 初始状态：没有装置 ---- */
     PhaseReset();
     CHECK(phaseOwned == 0, "phase beacon must start not owned");
@@ -481,27 +603,27 @@ static void test_phase_beacon(void) {
     CHECK(phaseCharges == 2, "a failed teleport must not consume a charge");
 
     /* ---- 放置：一次，且只能有一个 ---- */
-    posX = 3.5f; posY = 3.5f;
+    posX = fX[0]; posY = fY[0];
     CHECK(PhaseTryPlace() == 1, "placing on a walkable cell must succeed");
     CHECK(phasePlaced == 1, "the beacon must be marked as on the field");
-    CHECK(phaseX == 3.5f && phaseY == 3.5f, "the beacon must record the exact spot");
+    CHECK(phaseX == fX[0] && phaseY == fY[0], "the beacon must record the exact spot");
 
-    posX = 6.5f; posY = 6.5f;
+    posX = fX[1]; posY = fY[1];
     PhaseTryPlace();
-    CHECK(phaseX == 6.5f && phaseY == 6.5f,
+    CHECK(phaseX == fX[1] && phaseY == fY[1],
           "placing again must MOVE the same beacon, never stack a second one");
 
     /* ---- 传送：回到信标，消耗 1 次 ---- */
-    posX = 20.5f; posY = 20.5f;
+    posX = fX[2]; posY = fY[2];
     CHECK(PhaseTryTeleport() == 1, "teleporting to a placed beacon must succeed");
-    CHECK(posX == 6.5f && posY == 6.5f, "teleport must put the player on the beacon");
+    CHECK(posX == fX[1] && posY == fY[1], "teleport must put the player on the beacon");
     CHECK(phaseCharges == 1, "one teleport consumes exactly one charge");
     CHECK(phasePlaced == 0, "the beacon is consumed by the teleport");
 
     /* ---- 第二次：再放一次再传一次，用完消失 ---- */
-    posX = 9.5f; posY = 9.5f;
+    posX = fX[0]; posY = fY[0];
     PhaseTryPlace();
-    posX = 20.5f;
+    posX = fX[2];
     CHECK(PhaseTryTeleport() == 1, "the second teleport must still work");
     CHECK(phaseCharges == 0, "charges must be exhausted after two teleports");
     CHECK(phaseOwned == 0, "with no charges left the device must disappear");
@@ -509,7 +631,7 @@ static void test_phase_beacon(void) {
 
     /* ---- 目标格被占：拒绝，不能把玩家塞进墙里 ---- */
     PhaseGive();
-    posX = 4.5f; posY = 4.5f;
+    posX = fX[0]; posY = fY[0];
     PhaseTryPlace();
     {
         extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
@@ -520,7 +642,7 @@ static void test_phase_beacon(void) {
            然后断言"被拒绝之后坐标一分没动"。
            不要断言 `!Blocked(posX,posY)` —— 那假定了 20.5,20.5 是空地，
            而地图是随机生成的，这个假定不成立（第一次就红在这）。 */
-        posX = 4.5f; posY = 4.5f;
+        posX = fX[2]; posY = fY[2];
         {
             float keepX = posX, keepY = posY;
             CHECK(PhaseTryTeleport() == 0,
@@ -2628,6 +2750,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
