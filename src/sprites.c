@@ -1451,6 +1451,120 @@ static void cvRecess(float x0, float y0, float x1, float y1,
     cvLine(x1 - inset, y0 + inset, x1 - inset, y1 - inset, t, 0x00000000u, strength * 0.5f);
 }
 
+/* ==================================================================
+ * 舱门（2026-11-06）—— 两扇对开，4 帧
+ * ------------------------------------------------------------------
+ * 为什么是"两扇对开"而不是"推开门"：
+ *   精灵永远正对镜头，没有透视。绕铰链旋转做不出来，
+ *   两扇向两侧滑开是唯一在正面视角下能读成"门开了"的做法。
+ *
+ * 审美法则逐条落实（art_direction.h 第 171-181 行）：
+ *   ② 5 段明暗   门框竖向切 5 段，不是 3 段
+ *   ③ AO         门板与门框相接处压暗；与地面相接压暗
+ *   ④ 负空间     门板与门框之间留 1px 真透明；中缝留 1px
+ *   ⑤ 缝线虚线   铆钉用 x += 3 的短划线，不用实线
+ *   ⑥ 边缘光     左上轮廓提亮 1px
+ *
+ * 七主题共用：门框上的主题色条画成**洋红 key**，
+ * 绘制前用 SpriteAccentSet 换色（引擎已有的机制，不新增 28 张图）。
+ * ================================================================ */
+static void BakeHatch(int id, int frame) {
+    cvClear();
+    float c = CANVAS_W * 0.5f;
+    float baseY = 244.0f;
+
+    const float fx0 = c - 54.0f, fx1 = c + 54.0f;   /* 门框外沿 */
+    const float fy0 = baseY - 118.0f, fy1 = baseY;  /* 门框内沿 */
+    const float fr  = 9.0f;                          /* 门框厚度 */
+    const float ix0 = fx0 + fr, ix1 = fx1 - fr;
+    const float iy0 = fy0 + fr, iy1 = fy1;
+
+    /* ---- ① 门后：全黑（开门后看到的洞） ---- */
+    {
+        float hole[8] = { ix0, iy0, ix1, iy0, ix1, iy1, ix0, iy1 };
+        cvPoly(hole, 4, 0x00000000u, 1.0f);
+    }
+
+    /* ---- ② 门框：5 段明暗 ---- */
+    {
+        float framePts[8] = { fx0, fy0, fx1, fy0, fx1, fy1, fx0, fy1 };
+        cvPolyGrad(framePts, 4, 0x006A6660u, 0x002A2826u, 1.0f);
+        for (int k = 1; k <= 4; k++) {
+            float y = fy0 + (fy1 - fy0) * (float)k / 5.0f;
+            cvLine(fx0, y, fx1, y, 1.0f, 0x00000000u, 0.16f);       /* 分段缝 */
+            cvLine(fx0, y + 1, fx1, y + 1, 1.0f, 0x00888078u, 0.10f); /* 缝上的高光 */
+        }
+        /* ⑥ 边缘光：左上 */
+        cvLine(fx0, fy0, fx1, fy0, 2.0f, 0x00B0ACA4u, 0.85f);
+        cvLine(fx0, fy0, fx0, fy1, 2.0f, 0x00908C84u, 0.60f);
+        /* 阴影侧：右下（替代整圈黑描边） */
+        cvLine(fx1, fy0, fx1, fy1, 2.0f, 0x00000000u, 0.55f);
+        cvLine(fx0, fy1, fx1, fy1, 2.0f, 0x00000000u, 0.60f);
+    }
+
+    /* ---- ③ 两扇门板：向外滑开 ---- */
+    {
+        float open = (float)frame / 3.0f;              /* 0, 1/3, 2/3, 1 */
+        float innerW = ix1 - ix0;
+        float halfW = innerW * 0.5f;
+        float slide = halfW * open;
+
+        /* 左扇：从 ix0 往左滑；右扇：从 ix1 往右滑 */
+        float lx0 = ix0 - slide, lx1 = ix0 + halfW - 1.0f - slide;
+        float rx0 = ix0 + halfW + 1.0f + slide, rx1 = ix1 + slide;
+
+        /* 裁到门框外，否则门板会画到框外去 */
+        if (lx0 < fx0 - 2.0f) lx0 = fx0 - 2.0f;
+        if (rx1 > fx1 + 2.0f) rx1 = fx1 + 2.0f;
+
+        for (int side = 0; side < 2; side++) {
+            float x0 = side ? rx0 : lx0;
+            float x1 = side ? rx1 : lx1;
+            if (x1 - x0 < 2.0f) continue;
+
+            float pts[8] = { x0, iy0, x1, iy0, x1, iy1, x0, iy1 };
+            cvPolyGrad(pts, 4, 0x0078746Cu, 0x00383430u, 1.0f);
+
+            /* 5 段明暗 */
+            for (int k = 1; k <= 4; k++) {
+                float y = iy0 + (iy1 - iy0) * (float)k / 5.0f;
+                cvLine(x0 + 1, y, x1 - 1, y, 1.0f, 0x00000000u, 0.14f);
+                cvLine(x0 + 1, y + 1, x1 - 1, y + 1, 1.0f, 0x009A968E, 0.09f);
+            }
+            /* ⑥ 每扇门自己的左上边缘光 */
+            cvLine(x0, iy0, x1, iy0, 1.5f, 0x00A8A49Cu, 0.70f);
+            cvLine(x0, iy0, x0, iy1, 1.5f, 0x0088847Cu, 0.50f);
+
+            /* ⑤ 铆钉：虚线（x += 3），不用实线 */
+            for (float ry = iy0 + 8.0f; ry < iy1 - 6.0f; ry += 13.0f) {
+                for (float rx = x0 + 5.0f; rx < x1 - 4.0f; rx += 3.0f) {
+                    cvLine(rx, ry, rx + 1.0f, ry, 1.0f, 0x00D8D4CCu, 0.30f);
+                }
+            }
+            /* ③ AO：门板底部与地面相接压暗 */
+            cvLine(x0, iy1 - 2.0f, x1, iy1 - 2.0f, 3.0f, 0x00000000u, 0.28f);
+        }
+
+        /* ④ 负空间：中缝留 1px 真透明（frame 0 时两扇之间有缝） */
+        if (frame == 0) {
+            cvLine(c, iy0, c, iy1, 1.5f, 0x00000000u, 1.0f);
+        }
+    }
+
+    /* ---- ④ 门框上的主题色条：洋红 key，按房间主题换色 ---- */
+    {
+        /* 左右各一条竖条 + 顶部一条横条 */
+        cvLine(fx0 + 2.0f, fy0 + 12.0f, fx0 + 2.0f, fy1 - 10.0f, 3.0f, 0x00FF00FFu, 1.0f);
+        cvLine(fx1 - 2.0f, fy0 + 12.0f, fx1 - 2.0f, fy1 - 10.0f, 3.0f, 0x00FF00FFu, 1.0f);
+        cvLine(fx0 + 12.0f, fy0 + 3.0f, fx1 - 12.0f, fy0 + 3.0f, 3.0f, 0x00FF00FFu, 1.0f);
+    }
+
+    /* ---- ⑤ 门框底部 AO ---- */
+    cvLine(fx0, fy1 - 2.0f, fx1, fy1 - 2.0f, 4.0f, 0x00000000u, 0.35f);
+
+    cvFinish(&g_sprites[id]);
+}
+
 static void BakeProp(int id, int kind) {
     cvClear();
     float c = CANVAS_W * 0.5f;
@@ -1899,11 +2013,24 @@ void SpritesInit(void) {
     BakeMonster(SPR_MON_ECHO, 10, 0);
     BakeMonster(SPR_MON_MIMIC, 13, 0);   /* 2026-11-05 宝箱怪现形态 */
     /* v2.4.84 调试导出 */
+    /* 2026-11-06：舱门样张导出（CANITY_DUMP=hatch）。
+       用法与下面的 CANITY_DUMP 一致：烘完直接写 PPM 并退出。 */
+    if (getenv("CANITY_DUMP_HATCH")) {
+        SpriteDumpPPM(SPR_HATCH_0, "dump_hatch0.ppm");
+        SpriteDumpPPM(SPR_HATCH_1, "dump_hatch1.ppm");
+        SpriteDumpPPM(SPR_HATCH_2, "dump_hatch2.ppm");
+        SpriteDumpPPM(SPR_HATCH_3, "dump_hatch3.ppm");
+        exit(0);
+    }
     if (getenv("CANITY_DUMP")) {
         SpriteDumpPPM(SPR_MON_SPIDER,  "dump_warden_patrol.ppm");
         SpriteDumpPPM(SPR_MON_LEECH_W, "dump_warden_chase.ppm");
         exit(0);   /* 导完直接退出，方便脚本调用 */
     }   /* v2.4.2: 槽位复用 -> 回声标记 */
+    BakeHatch(SPR_HATCH_0, 0);
+    BakeHatch(SPR_HATCH_1, 1);
+    BakeHatch(SPR_HATCH_2, 2);
+    BakeHatch(SPR_HATCH_3, 3);
     BakeProp(SPR_PROP_CRATE, 0);
     BakeProp(SPR_PROP_BREAKER, 1);
     BakeProp(SPR_PROP_EXIT, 2);
@@ -2192,6 +2319,14 @@ void DrawSpriteSubZ(int id, int sx, int sy, int sw, int sh,
                            (p01 & 0xFF) * (float)(p01 >> 24) * w01 +
                            (p11 & 0xFF) * (float)(p11 >> 24) * w11) / aw);
 
+            /* 2026-11-06：**局部换色**（七主题共用一套舱门靠它）。
+               判据与 DrawSpriteTint 完全一致：只替换接近洋红 key 的像素，
+               其余（金属、门板、阴影）保持原样。 */
+            if (g_accentOn && r > 150 && b > 150 && g < 110) {
+                r = (int)((g_accentCol >> 16) & 0xFF);
+                g = (int)((g_accentCol >> 8) & 0xFF);
+                b = (int)(g_accentCol & 0xFF);
+            }
             r = (r * lr) >> 8; g = (g * lr) >> 8; b = (b * lr) >> 8;
             PutPixelBlend(px, py, (unsigned int)((r << 16) | (g << 8) | b), a * alpha);
         }

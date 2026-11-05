@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "hatch.h"
 #include "map_rooms.h"
 #include "art_direction.h"
 #include "achievements.h"
@@ -4517,10 +4518,20 @@ void DrawHUD(void) {
 
     /* 交互提示 + 长按进度 */
     if (hoverKind != 0) {
-        char pbuf[64];
+        char pbuf[192];   /* 2026-11-06：舱门门槛文案最长（含数字）要 96 字节，64 会溢出 */
         /* v2.7：提示要用当前绑定，改过键之后写死 E 就是骗人 */
         if (hoverKind == 1)
             sprintf(pbuf, "HOLD %s  SEARCH", VkName(g_bindings[ACT_INTERACT]));
+        else if (hoverKind == 4) {
+            /* AD-46：舱门提示**独占一行**，不和时间/搜索提示抢坐标 */
+            extern const char* HatchTitle(int idx);
+            char why[96];
+            extern int HatchGateCheck(int idx, char* why, int cap);
+            if (HatchGateCheck(hoverIndex, why, (int)sizeof(why)))
+                sprintf(pbuf, "HOLD %s  %s", VkName(g_bindings[ACT_INTERACT]), HatchTitle(hoverIndex));
+            else
+                sprintf(pbuf, "%s  -  %s", HatchTitle(hoverIndex), why);
+        }
         else if (hoverKind == 3) {
             /* 2026-11-06：家具可以搜（货架 3 次 / 木箱堆 2 次 / 控制台 2 次）。
                提示里带上还剩几次 —— 否则玩家不知道"还能不能翻"。 */
@@ -4539,7 +4550,7 @@ void DrawHUD(void) {
         int px = (winW - tw) / 2;
         /* 2026-11-05：原来和「拾取 / 藏身」提示同在 winH-150，会叠字。
            往上挪一行，进度条跟着走。 */
-        int py = winH - UIS(182);
+        int py = winH - UIS(hoverKind == 4 ? 214 : 182);
         DrawTextWin(px, py, pbuf, (hoverKind == 2 && fusesHeld < fusesNeeded) ? 0x00C05050u : 0x00E8E8E8u);
 
         int barW = UIS(240), barH = UIS(8);

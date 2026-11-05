@@ -98,6 +98,11 @@ enum {
     SPR_UI_PANEL_HOT,  /* 同上，聚焦态（边框泛琥珀） */
     SPR_UI_CURSOR,     /* 三角选择光标 */
     SPR_UI_ROW,        /* 行底纹（选中） */
+    /* 2026-11-06：舱门 4 帧（两扇对开，七主题靠 accent 换色共用一套） */
+    SPR_HATCH_0,       /* 全闭 */
+    SPR_HATCH_1,       /* 开 1/3 */
+    SPR_HATCH_2,       /* 开 2/3 */
+    SPR_HATCH_3,       /* 全开 */
     SPR_COUNT
 };
 

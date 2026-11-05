@@ -417,6 +417,20 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
     }
 
     FurnishRoom(t, fx, fy);
+
+    /* ==================================================================
+     * 2026-11-06：**舱门** —— 一个房间一扇，门就是主题控制器
+     * ------------------------------------------------------------------
+     * 选位：优先房间内部的**角落**（同时在两条边上），
+     * 这样门不挡过道；找不到角落就退到任意贴墙格。
+     * 门本身**不参与碰撞**（blocks = 0）：
+     * 它是"装置"，不是障碍物 —— 挡路会让房间变窄，和上一轮
+     * "家具不要堵路"的教训是同一条。
+     * ================================================================ */
+    {
+        extern int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId);
+        HatchPlaceInRoom(fx + ROOM_BORDER, fy + ROOM_BORDER, t->w, t->h, t->themeId);
+    }
     return 1;
 }
 

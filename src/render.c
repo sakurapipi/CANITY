@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "hatch.h"
 #include "map_rooms.h"
 #include "cell_meta.h"
 #include "render.h"
@@ -2623,6 +2624,17 @@ void RenderSprites(void) {
             n++;
         }
     }
+    /* 2026-11-06：舱门也走同一个渲染列表（共享深度排序与光照） */
+    {
+        for (int i = 0; i < hatchCount && i < MAX_HATCHES; i++) {
+            if (!hatches[i].active) continue;
+            if (n >= MAX_SPRITES) break;
+            list[n].d2 = Dist2(hatches[i].x, hatches[i].y, posX, posY);
+            list[n].kind = 17;
+            list[n].idx = i;
+            n++;
+        }
+    }
     if (breaker.active) {
         if (n < MAX_SPRITES) {
             list[n].d2 = Dist2(breaker.x, breaker.y, posX, posY);
@@ -2757,6 +2769,30 @@ void RenderSprites(void) {
             case 8: DrawShotSprite(list[i].idx); break;
             case 10: DrawSlashSprite(); break;
             case 12: DrawHideSpotSprite(list[i].idx); break;   /* v3.0 藏身点 */
+        case 17: {   /* 2026-11-06：舱门（两扇对开，4 帧） */
+            int hi = list[i].idx;
+            if (hi >= 0 && hi < MAX_HATCHES && hatches[hi].active) {
+                /* 帧号由开门进度决定；SEALED=0，OPEN/FIRED=3 */
+                float o = HatchOpen01(hi);
+                int f = (int)(o * 3.0f + 0.5f);
+                if (f < 0) f = 0;
+                if (f > 3) f = 3;
+                int spr = SPR_HATCH_0 + f;
+                /* 七主题共用一套精灵：按房间主题设定 accent 色 */
+                /* 主题色：用 cell_meta 的三通道取色，拼成 0xRRGGBB */
+                unsigned int acc = 0x00FFFFFFu;
+                {
+                    unsigned int rr = (unsigned int)CellThemeTintR(hatches[hi].themeId);
+                    unsigned int gg = (unsigned int)CellThemeTintG(hatches[hi].themeId);
+                    unsigned int bb = (unsigned int)CellThemeTintB(hatches[hi].themeId);
+                    acc = (rr << 16) | (gg << 8) | bb;
+                }
+                SpriteAccentSet(acc);
+                DrawBakedPropArt(spr, hatches[hi].x, hatches[hi].y, 0.0f, 0.72f, 1.0f);
+                SpriteAccentClear();
+            }
+            break;
+        }
         case 16: {   /* v2.4-rc P3：房间家具（分层伪立体） */
             extern RoomProp roomProps[MAX_ROOM_PROPS];
             int ri = list[i].idx;

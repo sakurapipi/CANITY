@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "hatch.h"
 #include "cell_meta.h"
 #include "map_rooms.h"
 #include "sound_event.h"
@@ -1717,7 +1718,286 @@ static void ApplyLockboxes(void) {
     }
 }
 
+/* ==================================================================
+ * 2026-11-06：舱门放置（一个房间一扇）
+ * ------------------------------------------------------------------
+ * 是 game.c 的函数而不是 map_rooms.c 的，因为要写 hatch 表，
+ * 而 hatch 表在 hatch.c；map_rooms 只负责"告诉我房间在哪"。
+ * ================================================================ */
+/* ==================================================================
+ * 2026-11-06：舱门的**运行时状态**与效果
+ * ------------------------------------------------------------------
+ * 所有计时器都是"秒"，每帧递减。集中放这里，方便一眼看完。
+ * ================================================================ */
+float hatchLightsT   = 0.0f;   /* 供电室：全灯清雾剩余秒数 */
+float hatchGoldMulT  = 0.0f;   /* 仓储室：金币 x1.5 剩余秒数 */
+float hatchBloodT    = 0.0f;   /* 病房  ：血迹追踪剩余秒数 */
+float hatchSpeedT    = 0.0f;   /* 地狱  ：移速 +25% 剩余秒数 */
+int   hatchCollapseRequest = 0;/* 锅炉房：请求崩塌重掷（由黑屏流程消费） */
+
+/* A-9 2026-11-06：舱门的标题（提示行用） */
+const char* HatchTitle(int idx) {
+    if (idx < 0 || idx >= hatchCount) return "";
+    switch (hatches[idx].kind) {
+    case HATCH_BOILER:  return (g_lang == LANG_ZH) ? "总闸" : "MASTER VALVE";
+    case HATCH_STORAGE: return (g_lang == LANG_ZH) ? "仓门" : "STORAGE LOCK";
+    case HATCH_POWER:   return (g_lang == LANG_ZH) ? "总闸" : "MAIN BREAKER";
+    case HATCH_WARD:    return (g_lang == LANG_ZH) ? "医疗台" : "MED BAY";
+    case HATCH_BRICK:   return (g_lang == LANG_ZH) ? "破墙锤" : "SLEDGE";
+    case HATCH_HELL:    return (g_lang == LANG_ZH) ? "祭坛" : "ALTAR";
+    case HATCH_FLESH:   return (g_lang == LANG_ZH) ? "肉堆" : "FLESH PILE";
+    default: return "";
+    }
+}
+
+/* ==================================================================
+ * 门槛判定 —— 用户要求：「特殊事件一定要有门槛」
+ * ------------------------------------------------------------------
+ * 返回值：1 = 可以开；0 = 不行，why 里写清**具体缺什么**。
+ * 文案必须给数字（"你有 87 金"），不能只说"条件不足"。
+ * ================================================================ */
+int HatchGateCheck(int idx, char* why, int cap) {
+    if (idx < 0 || idx >= hatchCount) return 0;
+    const Hatch* h = &hatches[idx];
+    if (why && cap > 0) why[0] = 0;
+
+    switch (h->kind) {
+    case HATCH_BOILER: {
+        /* 门槛：本房家具全部搜空 + 手上 >=1 根保险丝 */
+        int left = 0;
+        for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++)
+            if (roomProps[i].active && roomProps[i].searchLeft > 0) left++;
+        if (left > 0) {
+            if (why) snprintf(why, (size_t)cap,
+                (g_lang == LANG_ZH) ? "先把这间房搜空（还剩 %d 件）" : "SEARCH OUT THIS ROOM (%d LEFT)", left);
+            return 0;
+        }
+        if (fusesHeld < 1) {
+            if (why) snprintf(why, (size_t)cap,
+                (g_lang == LANG_ZH) ? "需要 1 根保险丝" : "NEED 1 FUSE");
+            return 0;
+        }
+        return 1;
+    }
+    case HATCH_STORAGE: {
+        if (carryGold < 150) {
+            if (why) snprintf(why, (size_t)cap,
+                (g_lang == LANG_ZH) ? "买断整仓需要 150 金（你有 %d）" : "NEED 150 GOLD (YOU HAVE %d)", carryGold);
+            return 0;
+        }
+        return 1;
+    }
+    case HATCH_POWER: {
+        if (fusesHeld < 2 && battery < 60.0f) {
+            if (why) snprintf(why, (size_t)cap,
+                (g_lang == LANG_ZH) ? "需要 2 根保险丝，或电量 >= 60（现在 %.0f）"
+                                    : "NEED 2 FUSES OR 60%% BATTERY (NOW %.0f)", battery);
+            return 0;
+        }
+        return 1;
+    }
+    case HATCH_WARD: {
+        if (sanity >= 50.0f) {
+            if (why) snprintf(why, (size_t)cap,
+                (g_lang == LANG_ZH) ? "理智还有 %.0f，用不上" : "SANITY %.0f - NOT HURT ENOUGH", sanity);
+            return 0;
+        }
+        return 1;
+    }
+    case HATCH_BRICK: {
+        /* 扳手是蓄力制、没有次数上限，所以门槛换成体力（挥大锤要力气） */
+        if (stamina < 60.0f) {
+            if (why) snprintf(why, (size_t)cap,
+                (g_lang == LANG_ZH) ? "体力不够（%.0f/60）" : "NOT ENOUGH STAMINA (%.0f/60)", stamina);
+            return 0;
+        }
+        return 1;
+    }
+    case HATCH_HELL: {
+        if (carryGold < 100) {
+            if (why) snprintf(why, (size_t)cap,
+                (g_lang == LANG_ZH) ? "献祭需要 100 金（你有 %d）" : "NEED 100 GOLD (YOU HAVE %d)", carryGold);
+            return 0;
+        }
+        if (sanity < 40.0f) {
+            if (why) snprintf(why, (size_t)cap,
+                (g_lang == LANG_ZH) ? "理智太低（%.0f/40）" : "SANITY TOO LOW (%.0f/40)", sanity);
+            return 0;
+        }
+        return 1;
+    }
+    case HATCH_FLESH: {
+        int n = flares + bottles + smokeBombs + gluePots + echoBolts;
+        if (n <= 0) {
+            if (why) snprintf(why, (size_t)cap,
+                (g_lang == LANG_ZH) ? "需要 1 个投掷物" : "NEED 1 THROWABLE");
+            return 0;
+        }
+        return 1;
+    }
+    default:
+        return 0;
+    }
+}
+
+/* ==================================================================
+ * 效果结算 —— 由 HatchTick 在**开门动画播完的那一帧**调用（AD-27）
+ * ================================================================ */
+void HatchFireEffect(int idx) {
+    if (idx < 0 || idx >= hatchCount) return;
+    Hatch* h = &hatches[idx];
+
+    switch (h->kind) {
+    case HATCH_BOILER:
+        /* 崩塌：本层重掷。真正的重掷在下一轮的黑屏流程里消费这个请求。 */
+        hatchCollapseRequest = 1;
+        pickupMsg = (g_lang == LANG_ZH) ? "地面在震动…" : "THE FLOOR IS GIVING WAY...";
+        pickupMsgTimer = 2.0f;
+        MakeNoise(h->x, h->y, 30.0f);
+        break;
+
+    case HATCH_STORAGE:
+        if (!WalletSpendRun(150)) return;
+        {
+            int refilled = 0;
+            for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++) {
+                if (!roomProps[i].active) continue;
+                roomProps[i].searchLeft = (roomProps[i].kind == ROOMPROP_SHELF) ? 3 : 2;
+                roomProps[i].searched = 0;
+                refilled++;
+            }
+            for (int i = 0; i < containerCount && i < MAX_CONTAINERS; i++) {
+                if (!containers[i].active) continue;
+                containers[i].searched = 0;
+                refilled++;
+            }
+            hatchGoldMulT = 60.0f;
+            pickupMsg = (g_lang == LANG_ZH) ? "整仓买断了！60 秒内金币翻倍" : "WHOLE CRATE BOUGHT - 60s GOLD BOOST";
+            pickupMsgTimer = 2.0f;
+            (void)refilled;
+        }
+        MakeNoise(h->x, h->y, 12.0f);
+        break;
+
+    case HATCH_POWER:
+        if (fusesHeld >= 2) fusesHeld -= 2; else battery -= 25.0f;
+        if (battery < 0.0f) battery = 0.0f;
+        hatchLightsT = 20.0f;
+        pickupMsg = (g_lang == LANG_ZH) ? "全厂通电 —— 20 秒" : "POWER ON - 20 SECONDS";
+        pickupMsgTimer = 2.0f;
+        MakeNoise(h->x, h->y, 18.0f);
+        break;
+
+    case HATCH_WARD:
+        sanity += 40.0f;
+        if (sanity > SanityMax()) sanity = SanityMax();
+        stamina = StaminaMax();
+        hatchBloodT = 60.0f;      /* 留下血迹：60 秒内怪能追你 */
+        pickupMsg = (g_lang == LANG_ZH) ? "包扎好了（但留了血迹）" : "PATCHED UP (BUT YOU BLED)";
+        pickupMsgTimer = 2.0f;
+        break;
+
+    case HATCH_BRICK: {
+        stamina -= 25.0f;
+        if (stamina < 0.0f) stamina = 0.0f;
+        /* 在门周围 8 格里挑一堵"背后是空地"的墙打穿 */
+        int ex = (int)h->x, ey = (int)h->y, carved = 0;
+        static const int dx8[8] = { 1, -1, 0, 0, 1, 1, -1, -1 };
+        static const int dy8[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+        for (int k = 0; k < 8 && !carved; k++) {
+            int wx = ex + dx8[k], wy = ey + dy8[k];
+            if (wx < 1 || wy < 1 || wx >= MAP_WIDTH - 1 || wy >= MAP_HEIGHT - 1) continue;
+            if (!worldMap[wy][wx]) continue;                 /* 要墙 */
+            int bx = wx + dx8[k], by = wy + dy8[k];
+            if (bx < 1 || by < 1 || bx >= MAP_WIDTH - 1 || by >= MAP_HEIGHT - 1) continue;
+            if (worldMap[by][bx]) continue;                  /* 墙后要空地 */
+            worldMap[wy][wx] = 0;
+            carved = 1;
+        }
+        pickupMsg = carved
+            ? ((g_lang == LANG_ZH) ? "墙开了！" : "THE WALL GAVE WAY!")
+            : ((g_lang == LANG_ZH) ? "这里砸不开" : "NOTHING GIVES HERE");
+        pickupMsgTimer = 2.0f;
+        MakeNoise(h->x, h->y, 30.0f);
+        break;
+    }
+
+    case HATCH_HELL:
+        if (!WalletSpendRun(100)) return;
+        sanity -= 15.0f;
+        if (sanity < 0.0f) sanity = 0.0f;
+        hatchSpeedT = 30.0f;
+        pickupMsg = (g_lang == LANG_ZH) ? "血祭生效 —— 30 秒" : "THE PACT HOLDS - 30 SECONDS";
+        pickupMsgTimer = 2.0f;
+        MakeNoise(h->x, h->y, 16.0f);
+        break;
+
+    case HATCH_FLESH: {
+        /* 消耗一个投掷物 */
+        if (flares > 0) flares--;
+        else if (bottles > 0) bottles--;
+        else if (smokeBombs > 0) smokeBombs--;
+        else if (gluePots > 0) gluePots--;
+        else if (echoBolts > 0) echoBolts--;
+        /* 全图怪静止 20 秒 —— 复用现成的 stun 字段，不新增 AI 钩子 */
+        for (int i = 0; i < MON_HUNTER_MAX; i++) {
+            extern Monster monHunters[MON_HUNTER_MAX];
+            if (monHunters[i].active) monHunters[i].stun = 20.0f;
+        }
+        {
+            extern Monster lightBeast;
+            if (lightBeast.active) lightBeast.stun = 20.0f;
+        }
+        pickupMsg = (g_lang == LANG_ZH) ? "它开始进食了…20 秒" : "IT IS FEEDING... 20 SECONDS";
+        pickupMsgTimer = 2.0f;
+        break;
+    }
+
+    default:
+        break;
+    }
+    PlaySfx(SFX_POWER, 0.7f);
+}
+
+int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId) {
+    int kind = HatchKindForTheme(themeId);
+    if (kind < 0) return -1;
+
+    /* 第一优先：角落（同时在两条边上），不挡过道 */
+    for (int pass = 0; pass < 2; pass++) {
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int cx = fx + x, cy = fy + y;
+                if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) continue;
+                if (worldMap[cy][cx]) continue;                 /* 要站得住 */
+                int edgeX = (x == 0 || x == w - 1);
+                int edgeY = (y == 0 || y == h - 1);
+                int corner = edgeX && edgeY;
+                int edge = edgeX || edgeY;
+                if (pass == 0 && !corner) continue;             /* 先角落 */
+                if (pass == 1 && (corner || !edge)) continue;   /* 再贴墙 */
+
+                /* 别和家具重叠 */
+                int clash = 0;
+                for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++) {
+                    if (!roomProps[i].active) continue;
+                    if ((int)roomProps[i].x == cx && (int)roomProps[i].y == cy) { clash = 1; break; }
+                }
+                if (clash) continue;
+
+                return HatchAdd((float)cx + 0.5f, (float)cy + 0.5f, kind, themeId);
+            }
+        }
+    }
+    return -1;
+}
+
 void GenerateLevel(void) {
+    /* 2026-11-06：每层重建舱门表与所有舱门计时器 —— 舱门是"本层装置"，
+       不跨层保留（跨层保留要动存档，见后续 SAVE_VERSION 33）。 */
+    HatchReset();
+    hatchLightsT = hatchGoldMulT = hatchBloodT = hatchSpeedT = 0.0f;
+    hatchCollapseRequest = 0;
     BestiaryBeginFloor();
     SuspicionReset();   /* v7：新一层，清空可疑点 */
     {   /* v7：新一层，清空地上的钱袋 */
@@ -3687,6 +3967,15 @@ void Update(float dt) {
      *
      * 优先级：**永远排在容器之后**，家具不许抢箱子的 E。
      * ================================================================ */
+    /* 2026-11-06：舱门（主题控制器）—— **排在最后**，不抢箱子和家具的 E */
+    if (hoverKind == 0) {
+        int hi = HatchNearest(posX, posY, INTERACT_RANGE * INTERACT_RANGE);
+        if (hi >= 0 && hatches[hi].state == HATCH_SEALED) {
+            hoverKind = 4;
+            hoverIndex = hi;
+        }
+    }
+
     if (hoverKind == 0) {
         extern RoomProp roomProps[MAX_ROOM_PROPS];
         extern int roomPropCount;
@@ -4418,7 +4707,7 @@ void Update(float dt) {
      * ================================================================ */
     float sp = MOVE_SPEED * (1.0f + SkillSpeedAdd() + darkAdd + bullAdd) * slowMul * RelicSpeedMul() * glueSelf * dt * BenchMoveMul()
              * RunSpeedMul()
-             * (sprinting ? SPRINT_MULT * (BenchSlide() ? 1.20f : 1.0f) * (1.0f + burstAdd) : 1.0f)   /* v3.4 SLIDE +20% */ * crankMul;
+             * (sprinting ? SPRINT_MULT * (BenchSlide() ? 1.20f : 1.0f) * (1.0f + burstAdd) : 1.0f)   /* v3.4 SLIDE +20% */ * crankMul * (hatchSpeedT > 0.0f ? 1.25f : 1.0f);
     if (sprinting && sp < 2.25f*dt) sp=2.25f*dt;
         { extern float playerMoveSpeedNow; playerMoveSpeedNow = dt>0.0f ? sp/dt : 0.0f; }   /* v8: 守门人据此判断在动/冲刺 */
     float perpX = -dirY, perpY = dirX;      /* 单位侧向，与 FOV 无关 */
@@ -4443,11 +4732,24 @@ void Update(float dt) {
     if (dx != 0.0f && !Blocked(posX + dx, posY)) posX += dx;
     if (dy != 0.0f && !Blocked(posX, posY + dy)) posY += dy;
 
+    /* ==================================================================
+     * 2026-11-06：**舱门推进 + 效果计时器**
+     * ------------------------------------------------------------------
+     * HatchTick 必须每帧跑：它负责推进开门动画，并在动画播完那一帧
+     * 结算效果。漏了它门就永远卡在 OPENING（这类"更新循环漏写"
+     * 在 art_direction.h 里被点名过）。
+     * ================================================================ */
+    HatchTick(dt);
+    if (hatchLightsT > 0.0f) { hatchLightsT -= dt; if (hatchLightsT < 0.0f) hatchLightsT = 0.0f; }
+    if (hatchGoldMulT > 0.0f) { hatchGoldMulT -= dt; if (hatchGoldMulT < 0.0f) hatchGoldMulT = 0.0f; }
+    if (hatchBloodT > 0.0f)   { hatchBloodT -= dt;   if (hatchBloodT < 0.0f) hatchBloodT = 0.0f; }
+    if (hatchSpeedT > 0.0f)   { hatchSpeedT -= dt;   if (hatchSpeedT < 0.0f) hatchSpeedT = 0.0f; }
+
     UpdateExplored();
 
     /* ---------------- 交互：长按 E 搜索容器 / 给配电箱上电 ---------------- */
     if (holdingNow) {
-        if (holdTimer == 0.0f && (hoverKind == 1 || hoverKind == 3)) {
+        if (holdTimer == 0.0f && (hoverKind == 1 || hoverKind == 3 || hoverKind == 4)) {
             /* 开始翻找：发出声音，吸引怪物（压迫感来源）。
                v2.4-rc：家具（货架/木箱堆/控制台）也走这条 ——
                用户实测"搜这种大容器的时候搜索进度条失效、不发声"，
@@ -4473,7 +4775,24 @@ void Update(float dt) {
             /* v3.0：翻完箱也上 0.4 秒封锁 ——
                否则 E 还按着，同一帧/下一帧就会被旁边的藏身点吸进去。 */
             hideBlockTimer = 0.4f;
-            if (hoverKind == 3) {
+            if (hoverKind == 4) {
+                /* ================================================================
+                 * 舱门：门槛判定 → 开门动画
+                 * 效果**不在这里结算** —— 由 HatchTick 在动画播完那一帧调
+                 * HatchFireEffect（AD-27：动画与生效窗口同一时间轴）。
+                 * ================================================================ */
+                char why[96];
+                if (HatchGateCheck(hoverIndex, why, (int)sizeof(why))) {
+                    HatchSetState(hoverIndex, HATCH_OPENING);
+                    pickupMsg = (g_lang == LANG_ZH) ? "舱门开启中…" : "HATCH CYCLING...";
+                    pickupMsgTimer = 1.2f;
+                } else {
+                    pickupMsg = why[0] ? why : ((g_lang == LANG_ZH) ? "条件不满足" : "NOT YET");
+                    pickupMsgTimer = 2.0f;
+                }
+                uiDirty = 1;
+                hoverKind = 0;
+            } else if (hoverKind == 3) {
                 /* ================================================================
                  * 家具搜查结算（长按完成后）
                  * ----------------------------------------------------------------
