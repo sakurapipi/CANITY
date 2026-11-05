@@ -456,7 +456,13 @@ extern SmokeCloud smokes[MAX_SMOKE];
  *   玩家要在窗口内戳满 3 下空格
  *   戳满 = 挣脱；超时 = 失败（控 10 秒 + 召唤）
  * ================================================================ */
-enum { JMP_IDLE = 0, JMP_LURK, JMP_MASH, JMP_APPROACH, JMP_DODGE, JMP_QTE, JMP_DONE };
+/* 2026-11-06（用户第三轮修正）：**加回前摇**
+   上一版是"一帧之内贴脸"，用户实测「一针就撞到我脸上了，太难躲」。
+   现在：触发后先有 JUMPER_TELL_TIME 的预警（虫子在脸前蓄势 + 尖叫），
+   然后才贴脸进入连戳。连戳三下保留。 */
+enum { JMP_IDLE = 0, JMP_LURK, JMP_TELL, JMP_MASH, JMP_APPROACH, JMP_DODGE, JMP_QTE, JMP_DONE };
+
+#define JUMPER_TELL_TIME 0.75f   /* 前摇：看得见它扑过来的时间 */
 
 #define JUMPER_MASH_COUNT   3      /* 要戳几下 */
 #define JUMPER_MASH_WINDOW  1.8f   /* 总共给多久 */

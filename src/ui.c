@@ -3894,9 +3894,19 @@ void DrawHUD(void) {
        加武器只改 ITEM_SLOT_COUNT + 两个数组。 */
     {
         /* v3.3 六个槽位的显示名：光球 / 投石 / 烟雾 / 胶水 / 回声 / 诱饵 */
+    /* ==================================================================
+     * 2026-11-06（用户实测：训练营里找不到相位信标）
+     * ------------------------------------------------------------------
+     * 真因：槽位从 6 扩到 8，但这两张名字表**只写了 6 项** ——
+     * 剩下两项是 NULL，HUD 一画就是空，玩家永远看不到第 7/8 个物品。
+     * 我在扔东西之前根本没想到名字表也要跟着扩。
+     * ================================================================ */
     static const char* slotName[ITEM_SLOT_COUNT] = {
-        "FLARE", "SLING", "SMOKE", "GLUE", "ECHO", "DECOY" };
-    static const char* slotNameZh[ITEM_SLOT_COUNT] = { "光球", "投石", "烟雾", "胶水", "回声", "诱饵" };
+        "FLARE", "SLING", "SMOKE", "GLUE", "ECHO", "DECOY",
+        "BEACON", "ANCHOR" };
+    static const char* slotNameZh[ITEM_SLOT_COUNT] = {
+        "光球", "投石", "烟雾", "胶水", "回声", "诱饵",
+        "相位信标", "相位锚" };
 
         static float scroll = 0.0f;
         static double lastT = 0.0;
@@ -3907,7 +3917,9 @@ void DrawHUD(void) {
         lastT = nowT;
         {
             /* v1.17：只给"有货的槽位"排序号，空槽不参与滚动 */
-                int cArr[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
+                extern int phaseBeacons, phaseAnchors;
+                int cArr[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts,
+                                             decoys, phaseBeacons, phaseAnchors };;
             int selVis = 0;
             for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
                 if (cArr[i] <= 0) continue;
@@ -3923,6 +3935,8 @@ void DrawHUD(void) {
     counts[2] = smokeBombs;
     counts[3] = gluePots;
     counts[4] = echoBolts;
+    { extern int phaseBeacons, phaseAnchors;
+      counts[5] = decoys; counts[6] = phaseBeacons; counts[7] = phaseAnchors; }
     counts[5] = decoys;
 
         /* v3.3 **判据要覆盖全部 6 个槽位** ——

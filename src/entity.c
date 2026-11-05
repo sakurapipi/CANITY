@@ -859,8 +859,32 @@ void UpdateParasite(float dt) {
              * 原来是 JMP_APPROACH 飞 0.3 秒 —— 用户说"有很长的前摇"。
              * 现在一帧之内就到脸上，玩家的反应时间全部花在"戳空格"上。
              * ================================================================ */
-            parasite.x = posX + dirX * 0.75f;
-            parasite.y = posY + dirY * 0.75f;
+            /* 先进前摇：让它从角落里窜到脸前 1.6 格处蓄势，
+               给玩家 0.75 秒看清楚"它要来了"。 */
+            parasite.x = posX + dirX * 1.6f;
+            parasite.y = posY + dirY * 1.6f;
+            jumperPhase = JMP_TELL;
+            jumperTimer = JUMPER_TELL_TIME;
+            if (!monsterMuted) PlaySfx(SFX_SCREAM, 0.85f);
+        }
+        break;
+    }
+
+    /* ==================================================================
+     * 2026-11-06：**前摇** —— 撞脸之前的 0.75 秒预警
+     * 这段时间里它已经从角落窜到脸前 1.6 格并继续逼近，
+     * 玩家能看见、能提前按住空格，但不消耗戳的计数。
+     * ================================================================ */
+    case JMP_TELL: {
+        jumperTimer -= dt;
+        /* 持续向脸逼近：1.6 格 -> 0.75 格 */
+        float t = 1.0f - jumperTimer / JUMPER_TELL_TIME;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+        float d = 1.6f - 0.85f * t;
+        parasite.x = posX + dirX * d;
+        parasite.y = posY + dirY * d;
+        if (jumperTimer <= 0.0f) {
             jumperPhase = JMP_MASH;
             jumperMashLeft = JUMPER_MASH_COUNT;
             jumperMashTimer = JUMPER_MASH_WINDOW;
