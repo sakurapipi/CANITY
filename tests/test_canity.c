@@ -625,6 +625,49 @@ static void test_save_container_contract(void) {
               "truncated payload must be rejected (payload length mismatch)");
     }
 
+    /* ==================================================================
+     * ④a **黄金向量**：校验和算法不能只和自己自洽
+     * ------------------------------------------------------------------
+     * 2026-11-06 实测：把 FNv 的偏移基数 2166136261 改成 ...262，
+     * 整套测试仍然全绿 —— 因为 seal 和 validate 用的是同一个（坏掉的）
+     * 函数，两边互相满意。而现实中这会**把所有老存档判成损坏**。
+     *
+     * 所以必须有对已知输入给出已知值的断言。改坏常数 → 这里立刻红。
+     * ================================================================== */
+    {
+        check(SaveFnv1a("CANITY", 6) == 0xCB74372Bu,
+              "FNV-1a golden vector: 'CANITY' must hash to 0xCB74372B");
+        check(SaveFnv1a("", 0) == 0x811C9DC5u,
+              "FNV-1a golden vector: empty input must be the offset basis");
+        {
+            const unsigned char raw[4] = { 0x00, 0x01, 0x02, 0x03 };
+            check(SaveFnv1a(raw, 4) == 0xC3AA51B1u,
+                  "FNV-1a golden vector: 00 01 02 03 must hash to 0xC3AA51B1");
+        }
+    }
+
+    /* ==================================================================
+     * ④b 容器字节布局：块数写在 offset 4，且总长 = 头 + 块表 + 数据
+     *     这一条抓得住"块数 off-by-one"这类真实缺陷（③ 之外的另一面）。
+     * ================================================================== */
+    {
+        SaveChunkDesc d2[2];
+        const void* body2[2];
+        char p0[5] = { 'A', 'B', 'C', 'D', 'E' };
+        char p1[3] = { 'x', 'y', 'z' };
+        d2[0].id = 0x0101; d2[0].schema = 2; d2[0].size = 5; body2[0] = p0;
+        d2[1].id = 0x0202; d2[1].schema = 3; d2[1].size = 3; body2[1] = p1;
+
+        unsigned char lay[256];
+        int layLen = SaveContainerPack(d2, body2, 2, lay, (int)sizeof(lay), NULL);
+        int wantLen = SAVE_PAYLOAD_HEAD_SIZE + 2 * (int)sizeof(SaveChunkDesc) + 5 + 3;
+        check(layLen == wantLen, "container length must be head + table + data");
+
+        int cntField = 0;
+        memcpy(&cntField, lay + 4, sizeof(cntField));
+        check(cntField == 2, "chunk count must be written at payload offset 4");
+    }
+
     /* ---- ④ 越界块表必须拒绝 ---- */
     {
         unsigned char bad[32];
