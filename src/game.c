@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "map_validator.h"
 #include "hatch.h"
 #include "cell_meta.h"
 #include "map_rooms.h"
@@ -44,6 +45,13 @@
 #include "skills.h"
 #include "bestiary.h"
 #include "score.h"
+
+/* ------------------------------------------------------------------
+ * 2026-11-06：舱门效果与崩塌互相调用，需要前置声明。
+ * 放在所有 include 之后、任何函数之前，避免"定义在使用之后"。
+ * ------------------------------------------------------------------ */
+void GenerateLevel(void);
+void CollapseBegin(void);
 
 /* 文件内前置声明：这两个 static 辅助函数在被调用处之后定义
    （原来集中在 main.c 中部的前置声明块，拆分后只保留模块内部需要的）。 */
@@ -1733,7 +1741,6 @@ float hatchLightsT   = 0.0f;   /* 供电室：全灯清雾剩余秒数 */
 float hatchGoldMulT  = 0.0f;   /* 仓储室：金币 x1.5 剩余秒数 */
 float hatchBloodT    = 0.0f;   /* 病房  ：血迹追踪剩余秒数 */
 float hatchSpeedT    = 0.0f;   /* 地狱  ：移速 +25% 剩余秒数 */
-int   hatchCollapseRequest = 0;/* 锅炉房：请求崩塌重掷（由黑屏流程消费） */
 
 /* A-9 2026-11-06：舱门的标题（提示行用） */
 const char* HatchTitle(int idx) {
@@ -1850,10 +1857,10 @@ void HatchFireEffect(int idx) {
     switch (h->kind) {
     case HATCH_BOILER:
         /* 崩塌：本层重掷。真正的重掷在下一轮的黑屏流程里消费这个请求。 */
-        hatchCollapseRequest = 1;
-        pickupMsg = (g_lang == LANG_ZH) ? "地面在震动…" : "THE FLOOR IS GIVING WAY...";
-        pickupMsgTimer = 2.0f;
+        /* 立刻进入崩塌流程（黑屏 -> 重掷 -> 淡入）。
+           注意：效果是在**开门动画播完那一帧**才调到这里（AD-27）。 */
         MakeNoise(h->x, h->y, 30.0f);
+        CollapseBegin();
         break;
 
     case HATCH_STORAGE:
@@ -1959,7 +1966,156 @@ void HatchFireEffect(int idx) {
     PlaySfx(SFX_POWER, 0.7f);
 }
 
+/* ==================================================================
+ * 2026-11-06：**崩塌**（锅炉房总闸）
+ * ------------------------------------------------------------------
+ * 用户定义：「黑屏 2 秒钟，然后出现到一个崩塌层。」
+ *
+ * 时间轴（总长 2.0 秒）：
+ *   0.0 ~ 0.8   淡出（screenBlackout 0 -> 1）
+ *   0.8         **全黑那一帧**执行重掷（玩家看不到突变）
+ *   0.8 ~ 2.0   淡入（1 -> 0）
+ *
+ * 重掷失败（新层不可通关）→ **回滚到原层**，并提示"这里塌不动"。
+ * 用户明确要求回滚，所以必须先把原层完整快照下来。
+ * ================================================================ */
+int   collapsedLevel   = 0;      /* 本层是否为崩塌层（影响生成参数） */
+/* 2026-11-06：崩塌重掷期间置 1，用来区分"崩塌重掷"与"正常换层" */
+static int s_collapseGen = 0;
+float screenBlackout   = 0.0f;   /* 0 = 无，1 = 全黑 */
+static float collapseT = 0.0f;   /* 崩塌计时 */
+static int   collapseArmed = 0;  /* 1 = 崩塌流程进行中 */
+
+/* 原层快照 —— 只在崩塌开始时写一次，失败时整块还原 */
+typedef struct {
+    int   worldMap[MAP_HEIGHT][MAP_WIDTH];
+    int   explored[MAP_HEIGHT][MAP_WIDTH];
+    CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+    Container containers[MAX_CONTAINERS];
+    int   containerCount;
+    HideSpot hideSpots[HIDESPOT_MAX];
+    int   hideSpotCount;
+    RoomProp roomProps[MAX_ROOM_PROPS];
+    int   roomPropCount;
+    Hatch hatches[MAX_HATCHES];
+    int   hatchCount;
+    Breaker breaker;
+    float exitX, exitY, posX, posY;
+    int   fusesHeld, fusesNeeded, roomCount;
+} CollapseSnapshot;
+
+static CollapseSnapshot* s_collapseSnap = NULL;
+
+static void CollapseSnapshotTake(void) {
+    if (!s_collapseSnap) s_collapseSnap = (CollapseSnapshot*)malloc(sizeof(CollapseSnapshot));
+    if (!s_collapseSnap) return;
+    memcpy(s_collapseSnap->worldMap, worldMap, sizeof(worldMap));
+    memcpy(s_collapseSnap->explored, explored, sizeof(explored));
+    memcpy(s_collapseSnap->cellMeta, cellMeta, sizeof(cellMeta));
+    memcpy(s_collapseSnap->containers, containers, sizeof(containers));
+    memcpy(s_collapseSnap->hideSpots, hideSpots, sizeof(hideSpots));
+    memcpy(s_collapseSnap->roomProps, roomProps, sizeof(roomProps));
+    memcpy(s_collapseSnap->hatches, hatches, sizeof(hatches));
+    s_collapseSnap->containerCount = containerCount;
+    s_collapseSnap->hideSpotCount  = hideSpotCount;
+    s_collapseSnap->roomPropCount  = roomPropCount;
+    s_collapseSnap->hatchCount     = hatchCount;
+    s_collapseSnap->breaker        = breaker;
+    s_collapseSnap->exitX = exitX; s_collapseSnap->exitY = exitY;
+    s_collapseSnap->posX  = posX;  s_collapseSnap->posY  = posY;
+    s_collapseSnap->fusesHeld = fusesHeld;
+    s_collapseSnap->fusesNeeded = fusesNeeded;
+    s_collapseSnap->roomCount = roomCount;
+}
+
+static void CollapseSnapshotRestore(void) {
+    if (!s_collapseSnap) return;
+    memcpy(worldMap, s_collapseSnap->worldMap, sizeof(worldMap));
+    memcpy(explored, s_collapseSnap->explored, sizeof(explored));
+    memcpy(cellMeta, s_collapseSnap->cellMeta, sizeof(cellMeta));
+    memcpy(containers, s_collapseSnap->containers, sizeof(containers));
+    memcpy(hideSpots, s_collapseSnap->hideSpots, sizeof(hideSpots));
+    memcpy(roomProps, s_collapseSnap->roomProps, sizeof(roomProps));
+    memcpy(hatches, s_collapseSnap->hatches, sizeof(hatches));
+    containerCount = s_collapseSnap->containerCount;
+    hideSpotCount  = s_collapseSnap->hideSpotCount;
+    roomPropCount  = s_collapseSnap->roomPropCount;
+    hatchCount     = s_collapseSnap->hatchCount;
+    breaker        = s_collapseSnap->breaker;
+    exitX = s_collapseSnap->exitX; exitY = s_collapseSnap->exitY;
+    posX  = s_collapseSnap->posX;  posY  = s_collapseSnap->posY;
+    fusesHeld = s_collapseSnap->fusesHeld;
+    fusesNeeded = s_collapseSnap->fusesNeeded;
+    roomCount = s_collapseSnap->roomCount;
+}
+
+/* 崩塌层是否可玩 —— 用现成的校验器，不自己写一套判据 */
+static int CollapseLevelPlayable(void) {
+    MapCheck mc;
+    memset(&mc, 0, sizeof(mc));
+    MapValidate(&mc);
+    if (!mc.ok) return 0;
+    if (!mc.exitReachable) return 0;
+    if (!mc.spawnOpen) return 0;
+    if (mc.propsOutsideRoom > 0) return 0;
+    return 1;
+}
+
+void CollapseBegin(void) {
+    collapseArmed = 1;
+    collapseT = 0.0f;
+    screenBlackout = 0.0f;
+}
+
+/* 每帧推进。返回 1 表示"正在崩塌，本帧应吞掉玩家输入"。 */
+int CollapseTick(float dt) {
+    if (!collapseArmed) return 0;
+
+    collapseT += dt;
+
+    if (collapseT < 0.8f) {
+        /* 阶段 A：淡出 */
+        screenBlackout = collapseT / 0.8f;
+        if (screenBlackout > 1.0f) screenBlackout = 1.0f;
+        return 1;
+    }
+
+    /* 全黑这一帧：执行重掷（只做一次） */
+    if (screenBlackout >= 1.0f && collapseT - dt < 0.8f) {
+        CollapseSnapshotTake();
+        collapsedLevel = 1;
+        s_collapseGen = 1;      /* 告诉 GenerateLevel：这一次是崩塌重掷 */
+        GenerateLevel();
+        if (!CollapseLevelPlayable()) {
+            /* ---- 用户要求：失败就回到原来的层 ---- */
+            CollapseSnapshotRestore();
+            collapsedLevel = 0;
+            pickupMsg = (g_lang == LANG_ZH) ? "这里塌不动" : "IT WON'T GIVE WAY";
+            pickupMsgTimer = 2.2f;
+        } else {
+        }
+        /* 重掷会把舱门表清空并重置计时器 —— 这是期望行为，
+           崩塌层不生成舱门（防止连锁刷）。 */
+    }
+
+    if (collapseT >= 2.0f) {
+        collapseArmed = 0;
+        screenBlackout = 0.0f;
+        collapseT = 0.0f;
+        return 0;
+    }
+    /* 阶段 B：淡入 */
+    screenBlackout = 1.0f - (collapseT - 0.8f) / 1.2f;
+    if (screenBlackout < 0.0f) screenBlackout = 0.0f;
+    return 1;
+}
+
+int CollapseBusy(void) { return collapseArmed; }
+
 int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId) {
+    /* 崩塌层**不生成舱门** —— 否则可以在崩塌层里再触发一次崩塌，
+       无限重掷刷金币。这不是防玩家，是防机制本身。 */
+    if (collapsedLevel) return -1;
     int kind = HatchKindForTheme(themeId);
     if (kind < 0) return -1;
 
@@ -1993,11 +2149,23 @@ int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId) {
 }
 
 void GenerateLevel(void) {
+    /* ==================================================================
+     * **崩塌标记的生命周期**
+     * ------------------------------------------------------------------
+     * collapsedLevel 只能在"崩塌重掷"的那一次生成里为 1；
+     * 正常换层必须清掉，否则从崩塌层往下走，后面每一层都还是崩塌层。
+     * 这个 bug 不会编译报错，只会让玩家觉得"怎么一直在塌"。
+     * ================================================================ */
+    {
+        int wasCollapse = s_collapseGen;
+        s_collapseGen = 0;
+        if (!wasCollapse) collapsedLevel = 0;
+    }
+
     /* 2026-11-06：每层重建舱门表与所有舱门计时器 —— 舱门是"本层装置"，
        不跨层保留（跨层保留要动存档，见后续 SAVE_VERSION 33）。 */
     HatchReset();
     hatchLightsT = hatchGoldMulT = hatchBloodT = hatchSpeedT = 0.0f;
-    hatchCollapseRequest = 0;
     BestiaryBeginFloor();
     SuspicionReset();   /* v7：新一层，清空可疑点 */
     {   /* v7：新一层，清空地上的钱袋 */
@@ -2089,7 +2257,8 @@ void GenerateLevel(void) {
                  * 22% 仍然比最初的 30% 更低，但 36x36 的基础骨架更宽，
                  * 绝对环路数依然够"绕开守门人"。
                  * ================================================================ */
-                if (rand() % 100 < 22) worldMap[y][x] = 0;
+                /* 崩塌层把环路打得更碎（8%）：用户要的"有些路会被堵死" */
+                if (rand() % 100 < (collapsedLevel ? 8 : 22)) worldMap[y][x] = 0;
             }
         }
     }
@@ -3095,7 +3264,12 @@ float EndlessDepthBonus(int level);
  *   第16 层 32 -> 24  （净 +6%）
  * 净通胀压到 +5~11%，几乎无感；价格表一个都没动。
  * ================================================================ */
-float GoldSearchAt(int level)  { return ( 6.0f + 1.1f * (float)level) * EndlessDepthBonus(level); }
+float GoldSearchAt(int level)  {
+    /* 2026-11-06：崩塌层金币 x1.8（用户要求"箱子金币概率变高"） */
+    extern int collapsedLevel;
+    float mul = collapsedLevel ? 1.8f : 1.0f;
+    return ( 6.0f + 1.1f * (float)level) * EndlessDepthBonus(level) * mul;
+}
 float GoldBreakerAt(int level) { return (25.0f + 3.0f * (float)level) * EndlessDepthBonus(level); }
 float GoldExitAt(int level)    { return (30.0f + 6.0f * (float)level) * EndlessDepthBonus(level); }
 
@@ -4744,6 +4918,15 @@ void Update(float dt) {
     if (hatchGoldMulT > 0.0f) { hatchGoldMulT -= dt; if (hatchGoldMulT < 0.0f) hatchGoldMulT = 0.0f; }
     if (hatchBloodT > 0.0f)   { hatchBloodT -= dt;   if (hatchBloodT < 0.0f) hatchBloodT = 0.0f; }
     if (hatchSpeedT > 0.0f)   { hatchSpeedT -= dt;   if (hatchSpeedT < 0.0f) hatchSpeedT = 0.0f; }
+
+    /* ==================================================================
+     * 2026-11-06：**崩塌流程**
+     * ------------------------------------------------------------------
+     * 黑屏期间逻辑冻结、输入吞掉（AD-28：模态要有明确的时间与输入边界）。
+     * 注意放在 UpdateExplored 与移动**之前** —— 放在后面的话，
+     * 玩家在黑屏里仍然能走两步，重掷后位置就不可预测了。
+     * ================================================================ */
+    if (CollapseTick(dt)) return;
 
     UpdateExplored();
 

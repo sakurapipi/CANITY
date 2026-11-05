@@ -248,6 +248,37 @@ static void test_wallet_save(void) {
  * ⚠️ 区间来自平衡方案的**推算**，不是实测。
  *    实机对不上时，先改区间再改数值 —— 别反过来。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06：**崩塌层的两个可测性质**
+ * ------------------------------------------------------------------
+ * 只测"纯函数层面成立"的两条：
+ *   ① 崩塌层金币确实变成 1.8 倍
+ *   ② 崩塌层不生成舱门（否则能连锁刷）
+ * 真正的"黑屏 -> 重掷 -> 失败回滚"只能实机看，这里不假装测了。
+ * ================================================================== */
+static void test_collapse_layer_params(void) {
+    extern int collapsedLevel;
+    extern float GoldSearchAt(int level);
+    extern int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId);
+
+    int saveCollapsed = collapsedLevel;
+
+    collapsedLevel = 0;
+    float normal = GoldSearchAt(3);
+    collapsedLevel = 1;
+    float broken = GoldSearchAt(3);
+
+    CHECK(normal > 0.0f, "normal gold must be positive");
+    CHECK(broken > normal * 1.7f && broken < normal * 1.9f,
+          "collapsed layer must pay 1.8x gold (user requirement)");
+
+    /* 崩塌层不生成舱门 —— 传一个合法主题（5 = 锈工厂）也必须被拒 */
+    CHECK(HatchPlaceInRoom(2, 2, 4, 4, 5) == -1,
+          "collapsed layers must not spawn hatches (would allow infinite rerolls)");
+
+    collapsedLevel = saveCollapsed;
+}
+
 static void test_balance_targets(void) {
     extern float GoldSearchAt(int level);
     extern float GoldBreakerAt(int level);
@@ -581,6 +612,19 @@ static void test_hunter_models(void) {
     CHECK(SpriteGet(SPR_MON_HUNTER) != NULL, "hunter 1 sprite exists");
     CHECK(SpriteGet(SPR_MON_HUNTER2) != NULL, "hunter 2 sprite exists");
     CHECK(SpriteGet(SPR_MON_HUNTER3) != NULL, "hunter 3 sprite exists");
+    /* 2026-11-06：舱门 4 帧必须真的烘出来（BakeHatch 漏调会静默得到空图） */
+    CHECK(SpriteGet(SPR_HATCH_0) != NULL, "hatch frame 0 exists");
+    CHECK(SpriteGet(SPR_HATCH_1) != NULL, "hatch frame 1 exists");
+    CHECK(SpriteGet(SPR_HATCH_2) != NULL, "hatch frame 2 exists");
+    CHECK(SpriteGet(SPR_HATCH_3) != NULL, "hatch frame 3 exists");
+    {
+        /* 关门帧必须有实心像素：全空说明 cvFinish 的 bbox 把它裁没了 */
+        int solid0 = 0;
+        Sprite* sp = SpriteGet(SPR_HATCH_0);
+        if (sp) for (int k = 0; k < sp->w * sp->h; k++)
+            if ((sp->px[k] >> 24) > 40) solid0++;
+        CHECK(solid0 > 400, "hatch frame 0 must not bake to an empty sprite");
+    }
 
     static unsigned char m1[32][32], m2[32][32], m3[32][32];
     mask32(SPR_MON_HUNTER, m1);
@@ -1853,6 +1897,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

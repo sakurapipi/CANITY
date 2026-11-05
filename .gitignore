@@ -60,3 +60,6 @@ tools/*
 sdk/
 steam_api64.dll
 steam_api64.lib
+# 精灵样张导出（调试产物，不进版本库）
+dump_*.ppm
+*.ppm

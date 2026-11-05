@@ -3704,6 +3704,35 @@ void Render3D(void) {
     RenderSprites();
     DrawViewModel();                 /* v2.1 第一人称手持模型 */
     if ((vignetteOn && sanity < 50.0f) || healFlash > 0.0f) RunPhase(3);
+
+    /* ==================================================================
+     * 2026-11-06：**崩塌黑屏**（在所有后处理之后、送显之前）
+     * ------------------------------------------------------------------
+     * 直接写 pixels 缓冲而不是逐像素 PutPixelBlend：
+     *   全屏 1280x720 是 92 万像素，PutPixelBlend 每次都要算混合，
+     *   黑屏持续 2 秒（约 120 帧）= 1.1 亿次混合，会掉帧。
+     *   这里只做一次乘算，而且 alpha 为 1 时可以整块清零。
+     * ================================================================== */
+    {
+        extern float screenBlackout;
+        float sb = screenBlackout;
+        if (sb > 0.0f) {
+            if (sb > 1.0f) sb = 1.0f;
+            int k = (int)((1.0f - sb) * 256.0f);   /* 保留比例 */
+            size_t total = (size_t)renderW * (size_t)renderH;
+            if (k <= 0) {
+                memset(pixels, 0, total * sizeof(unsigned int));
+            } else {
+                for (size_t p = 0; p < total; p++) {
+                    unsigned int c = pixels[p];
+                    unsigned int rr = ((c >> 16) & 0xFF) * (unsigned int)k >> 8;
+                    unsigned int gg = ((c >> 8) & 0xFF) * (unsigned int)k >> 8;
+                    unsigned int bb = (c & 0xFF) * (unsigned int)k >> 8;
+                    pixels[p] = (c & 0xFF000000u) | (rr << 16) | (gg << 8) | bb;
+                }
+            }
+        }
+    }
 }
 /* 小地图（在内部渲染分辨率上绘制）
    两种形态：

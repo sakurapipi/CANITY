@@ -2013,15 +2013,6 @@ void SpritesInit(void) {
     BakeMonster(SPR_MON_ECHO, 10, 0);
     BakeMonster(SPR_MON_MIMIC, 13, 0);   /* 2026-11-05 宝箱怪现形态 */
     /* v2.4.84 调试导出 */
-    /* 2026-11-06：舱门样张导出（CANITY_DUMP=hatch）。
-       用法与下面的 CANITY_DUMP 一致：烘完直接写 PPM 并退出。 */
-    if (getenv("CANITY_DUMP_HATCH")) {
-        SpriteDumpPPM(SPR_HATCH_0, "dump_hatch0.ppm");
-        SpriteDumpPPM(SPR_HATCH_1, "dump_hatch1.ppm");
-        SpriteDumpPPM(SPR_HATCH_2, "dump_hatch2.ppm");
-        SpriteDumpPPM(SPR_HATCH_3, "dump_hatch3.ppm");
-        exit(0);
-    }
     if (getenv("CANITY_DUMP")) {
         SpriteDumpPPM(SPR_MON_SPIDER,  "dump_warden_patrol.ppm");
         SpriteDumpPPM(SPR_MON_LEECH_W, "dump_warden_chase.ppm");
