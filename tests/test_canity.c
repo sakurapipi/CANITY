@@ -206,6 +206,58 @@ static void test_no_unwired_api(void) {
     }
 }
 
+/* ==================================================================
+ * 2026-11-06：**教程与天赋的静态契约**（标注 CONTRACT）
+ * ------------------------------------------------------------------
+ * ⚠️ 这一组是**源码字符串检查，不是行为测试**。
+ *    它只能证明"某段代码存在"，不能证明"教程真的走得通"。
+ *    真正的验证是你实际把教程跑一遍。
+ *
+ * 为什么还是要有它：
+ *   这些 bug 全是"代码写了但没接上"的类型 ——
+ *   tutorialKnocked 全工程只有清零、没有置位，
+ *   编译通过、自检通过、功能是死的。
+ *   静态契约能挡住这一类回退。
+ * ================================================================== */
+static void test_tutorial_and_keystone_contract(void) {
+    char* src = read_file("src/game.c");
+    strip_comments(src);
+
+    /* ---- P1-2：tutorialKnocked 必须真的被置 1（原来只有清零） ---- */
+    check(count_contains(src, "tutorialKnocked = 1") >= 1,
+          "CONTRACT: tutorialKnocked must be set somewhere, otherwise TUT_KNOCK can never advance");
+    check(contains(src, "tutorialKnocked || tutorialThrown"),
+          "CONTRACT: TUT_KNOCK must also accept a throw as fallback (training may lack the DECOY keystone)");
+
+    /* ---- P1-3：教程提示不能写反 ---- */
+    check(contains(src, "\"THROW  -  HOLD %s\", VkName(g_bindings[ACT_THROW])"),
+          "CONTRACT: TUT_THROW must hint the real throw action");
+    check(!contains(src, "\"THROW  -  HOLD %s\", VkName(g_bindings[ACT_CANCEL_CHARGE])"),
+          "CONTRACT: TUT_THROW must not hint the cancel-charge action");
+
+    /* ---- P1-4：训练场必须无条件开放 G 键 ---- */
+    check(contains(src, "HasKeystone(SK_DECOY) || trainingMode"),
+          "CONTRACT: training mode must open the decoy key without the keystone");
+
+    /* ---- P1-4：会被外部条件卡死的那两步必须有超时兜底 ---- */
+    check(contains(src, "TUTORIAL_STEP_TIMEOUT"),
+          "CONTRACT: tutorial steps must have a timeout fallback");
+
+    free(src);
+
+    /* ---- P1-1：SK_SALVAGE 不得再出现在"禁灯"判定里 ---- */
+    {
+        char* g = read_file("src/game.c");
+        strip_comments(g);
+        check(!contains(g, "!(DailyForbidLight() || HasKeystone(SK_SALVAGE))"),
+              "CONTRACT: SK_SALVAGE must no longer disable the flashlight permanently");
+        /* 但"开局默认关灯"必须保留 —— 那是这个天赋的真正价值 */
+        check(contains(g, "DailyForbidLight() || HasKeystone(SK_SALVAGE) ? 0 : 1"),
+              "CONTRACT: SK_SALVAGE must still start a run with the light off");
+        free(g);
+    }
+}
+
 static void test_wallet_single_source(void) {
     /* v6 铁律十八：只有一个钱包。
        除了 wallet.c，任何 .c 里不许出现 carryGold -= / bankGold -=。
@@ -907,7 +959,8 @@ static void test_lockbox_contract(void) {
 }
 
 int main(void) {
-    test_room_template_contract();   /* v2.4-rc C01：纯函数，最便宜先跑 */
+    test_room_template_contract();
+    test_tutorial_and_keystone_contract();   /* v2.4-rc C01：纯函数，最便宜先跑 */
     test_no_unwired_api();
     test_wallet_single_source();
     test_steam_zone();

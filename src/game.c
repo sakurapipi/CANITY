@@ -164,6 +164,19 @@ enum {
 };
 static float tutorialTimer = 0.0f;        /* 完成后的回菜单倒计时 */
 static float tutorialActionTimer = 0.0f;  /* 持续动作计时（冲刺/摇电） */
+/* ==================================================================
+ * 2026-11-06（**P1-4 教程死锁的兜底**）
+ * ------------------------------------------------------------------
+ * 有几步的完成条件是**外部状态**决定的：
+ *   TUT_SPRINT —— 每日限制禁跑时，sprinting 被强制清零，永远攒不满
+ *   TUT_LIGHT  —— 禁灯（每日限制）时，玩家根本开不了手电
+ * 任一条成立，教程就会停在那一步，而且玩家没有任何提示。
+ *
+ * 兜底：本步超过 TUTORIAL_STEP_TIMEOUT 秒就放行，并给一句说明。
+ * 教程的目的是把操作教一遍，不是拦住玩家。
+ * ================================================================== */
+#define TUTORIAL_STEP_TIMEOUT 12.0f
+static float tutorialStepTimer = 0.0f;
 static float tutorialStartX = 0.0f, tutorialStartY = 0.0f;
 static float tutorialStartDirX = 1.0f, tutorialStartDirY = 0.0f;
 static int   tutorialLightOff = 0;        /* 手电关过再开 */
@@ -1373,11 +1386,22 @@ const char* TutorialObjective(void) {
     case TUT_CRANK:
         snprintf(buf, sizeof(buf), "CRANK  -  HOLD %s", VkName(g_bindings[ACT_CRANK]));
         break;
+    /* ==================================================================
+     * 2026-11-06（**P1-3 教程按键提示写反**）
+     * ------------------------------------------------------------------
+     * 原来 TUT_THROW 提示 ACT_CANCEL_CHARGE（左键），
+     * 而真正的投掷是 ACT_THROW（右键，见鼠标蓄力那段）；
+     * TUT_KNOCK 提示 ACT_THROW（右键），
+     * 而敲击/放噪音是 ACT_DECOY（G）。
+     * 玩家照着提示按键永远推不动教程。
+     * ================================================================ */
     case TUT_THROW:
-        snprintf(buf, sizeof(buf), "THROW  -  HOLD %s", VkName(g_bindings[ACT_CANCEL_CHARGE]));
+        snprintf(buf, sizeof(buf), "THROW  -  HOLD %s", VkName(g_bindings[ACT_THROW]));
         break;
     case TUT_KNOCK:
-        snprintf(buf, sizeof(buf), "KNOCK  -  HOLD %s", VkName(g_bindings[ACT_THROW]));
+        /* 两个键都写出来：G 是正解，右键也算（见下面的推进条件） */
+        snprintf(buf, sizeof(buf), "MAKE NOISE  -  %s  /  %s",
+                 VkName(g_bindings[ACT_DECOY]), VkName(g_bindings[ACT_THROW]));
         break;
     case TUT_BREAKER:
         snprintf(buf, sizeof(buf), "BREAKER  -  HOLD %s", VkName(g_bindings[ACT_INTERACT]));
@@ -1431,6 +1455,7 @@ static void TutorialAdvance(void) {
     tutorialStep++;
     tutorialTimer = 0.0f;
     tutorialActionTimer = 0.0f;
+    tutorialStepTimer = 0.0f;   /* P1-4：换步就重置超时 */
     tutorialStartX = posX;
     tutorialStartY = posY;
     tutorialStartDirX = dirX;
@@ -1469,6 +1494,9 @@ static void TutorialUpdate(float dt) {
         return;
     }
 
+    /* P1-4：本步计时（用于"外部条件禁止这一步"的超时兜底） */
+    tutorialStepTimer += dt;
+
     switch (tutorialStep) {
     case TUT_MOVE:
         /* 离开起点 1 格就算学会移动 */
@@ -1484,11 +1512,29 @@ static void TutorialUpdate(float dt) {
           if (DailyForbidSprint() && sprinting) sprinting = 0; }
         if (sprinting) tutorialActionTimer += dt;
         else tutorialActionTimer = 0.0f;
-        if (tutorialActionTimer >= 0.5f) TutorialAdvance();
+        if (tutorialActionTimer >= 0.5f) { TutorialAdvance(); break; }
+        /* P1-4：禁跑时永远攒不满 —— 超时放行 */
+        if (tutorialStepTimer >= TUTORIAL_STEP_TIMEOUT) {
+            if (trainingMode) {
+                extern const char* pickupMsg; extern float pickupMsgTimer;
+                pickupMsg = (g_lang == LANG_ZH) ? "本局禁跑，跳过这一步" : "SPRINT IS DISABLED TODAY - SKIPPED";
+                pickupMsgTimer = 2.0f;
+            }
+            TutorialAdvance();
+        }
         break;
     case TUT_LIGHT:
         if (!flashlightOn) tutorialLightOff = 1;
-        if (tutorialLightOff && flashlightOn) TutorialAdvance();
+        if (tutorialLightOff && flashlightOn) { TutorialAdvance(); break; }
+        /* P1-4：禁灯时这一行永远走不到 —— 超时放行 */
+        if (tutorialStepTimer >= TUTORIAL_STEP_TIMEOUT) {
+            if (trainingMode) {
+                extern const char* pickupMsg; extern float pickupMsgTimer;
+                pickupMsg = (g_lang == LANG_ZH) ? "本局禁灯，跳过这一步" : "FLASHLIGHT IS DISABLED TODAY - SKIPPED";
+                pickupMsgTimer = 2.0f;
+            }
+            TutorialAdvance();
+        }
         break;
     case TUT_MAP:
         /* 地图打开时 Update 会提前 return，所以这里不能只看 isMapOpen；
@@ -1508,7 +1554,11 @@ static void TutorialUpdate(float dt) {
         if (tutorialThrown) TutorialAdvance();
         break;
     case TUT_KNOCK:
-        if (tutorialKnocked) TutorialAdvance();
+        /* P1-2：tutorialKnocked 原来**从来没有被置 1**（只有清零），
+           所以这一步必然卡死。现在两处都会置它（见下面），
+           并且**投掷也算制造噪音** —— 训练场不一定授予 G 键需要的
+           DECOY 天赋，不给兜底就会死锁（P1-4）。 */
+        if (tutorialKnocked || tutorialThrown) TutorialAdvance();
         break;
     case TUT_BREAKER:
         if (breakerOpen) TutorialAdvance();
@@ -3201,7 +3251,18 @@ static void WrenchKnockUpdate(float dt) {
    否则玩家可以靠摇电绕过每日限制。 */
 static int FlashlightUseAllowed(void) {
     extern int DailyForbidLight(void);
-    return !(DailyForbidLight() || HasKeystone(SK_SALVAGE));
+    /* ==================================================================
+     * 2026-11-06（**P1-1**）：**SK_SALVAGE 不再永久禁灯**
+     * ------------------------------------------------------------------
+     * 原来这里是 `!(DailyForbidLight() || HasKeystone(SK_SALVAGE))` ——
+     * 于是买过「抢救」的玩家**永远**开不了手电，新开局、教程、
+     * 每日挑战一起被禁，而且没有任何办法关掉。
+     *
+     * 用户拍板的方向：**默认摸黑，但允许主动开**。
+     * 所以这里只剩下"每日限制"这一个真正的禁令；
+     * SALVAGE 的价值改由「开局默认关灯 + 降噪 25%」承担（见 skills.c）。
+     * ================================================================ */
+    return !DailyForbidLight();
 }
 
 /* 2026-11-05：给 HUD 用 —— 玩家是否真的站在门口。
@@ -4074,7 +4135,17 @@ void Update(float dt) {
         s_decoyKeyCd -= dt;
         if (s_decoyKeyCd < 0.0f) s_decoyKeyCd = 0.0f;
     }
-    if (HasKeystone(SK_DECOY) && IsActionPressed(ACT_DECOY)) {
+    /* ==================================================================
+     * 2026-11-06（**P1-4 教程在受限状态下死锁**）
+     * ------------------------------------------------------------------
+     * 原来这里要求 HasKeystone(SK_DECOY) —— 但训练场不授予任何天赋，
+     * 所以教程第 9 步（TUT_KNOCK）教的 G 键**根本没有反应**，
+     * 玩家照做也没用，教程卡死。
+     *
+     * 现在：**训练场里无条件开放 G 键**。
+     * 教程的意义就是把操作教一遍，不能先要求玩家去商店买天赋。
+     * ================================================================ */
+    if ((HasKeystone(SK_DECOY) || trainingMode) && IsActionPressed(ACT_DECOY)) {
         /* ==================================================================
          * 2026-11-05 修「DECOY 超模 / 可以无限使用」
          * ------------------------------------------------------------------
@@ -4101,6 +4172,8 @@ void Update(float dt) {
             decoySelfTimer = DECOY_SELF_TIME;
             s_decoyKeyCd = DECOY_KEY_COOLDOWN;
             PlaySfx(SFX_STEP, 0.7f);
+            /* P1-2：教程「制造噪音」这一步的完成条件 */
+            if (trainingMode) tutorialKnocked = 1;
         }
     }
 
@@ -4550,7 +4623,11 @@ void Update(float dt) {
                     }
                     totalThrown++;   /* v3.3：逃生向成就用（整条链之后加） */
                     throwCd = 0.45f;
-                    if (trainingMode) tutorialThrown = 1;
+                    if (trainingMode) {
+                        tutorialThrown = 1;
+                        /* P1-2：投掷同样是"制造噪音"，让 TUT_KNOCK 也走得了 */
+                        tutorialKnocked = 1;
+                    }
                 } else {
                     pickupMsg = "NO ROOM";
                     pickupMsgTimer = 1.0f;
@@ -7571,13 +7648,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                            「普通关卡被每日任务篡改了标志位」——
                            其实是他自己买的天赋永久禁灯。 */
                         { extern int DailyForbidLight(void);
-                          extern int HasKeystone(int);
+                          /* P1-1：SALVAGE 不再走到这里（它已经不拦开灯了），
+                             所以只剩"每日限制"这一种原因。 */
                           if (DailyForbidLight())
                               pickupMsg = g_lang == LANG_ZH ? "今天不能开手电（每日限制）"
                                                             : "NO FLASHLIGHT TODAY (DAILY RULE)";
-                          else if (HasKeystone(SK_SALVAGE))
-                              pickupMsg = g_lang == LANG_ZH ? "「抢救」天赋让你用不了手电"
-                                                            : "THE SALVAGE KEYSTONE DISABLES IT";
                           else
                               pickupMsg = g_lang == LANG_ZH ? "现在不能开手电" : "CANNOT USE FLASHLIGHT"; }
                         pickupMsgTimer = 1.6f;
