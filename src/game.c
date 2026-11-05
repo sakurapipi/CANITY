@@ -3646,61 +3646,9 @@ void Update(float dt) {
        玩家会以为整片空地都能藏；其实藏身点是一个具体位置。 */
     hideSpotNear = -1;
 
-    /* ==================================================================
-     * 家具搜查（hoverKind == 3）
-     * ------------------------------------------------------------------
-     * 按一次 E 拿一样东西，次数用完就空。三种掉落轮换：
-     *   第 1 次 → 金币
-     *   第 2 次 → 电池（有电上限，满电时给金币）
-     *   第 3 次 → 保险丝（本层还缺才给，否则给金币）
-     * 搜查会发出声音 —— 翻箱本来就应该有代价。
-     * ================================================================== */
-    if (hoverKind == 3) {
-        extern RoomProp roomProps[MAX_ROOM_PROPS];
-        if (hoverIndex >= 0 && hoverIndex < MAX_ROOM_PROPS &&
-            roomProps[hoverIndex].active && roomProps[hoverIndex].searchLeft > 0) {
-            if (IsActionPressed(ACT_INTERACT)) {
-                keyPressed[g_bindings[ACT_INTERACT]] = 0;
-                int n = roomProps[hoverIndex].searched;
-                roomProps[hoverIndex].searched++;
-                roomProps[hoverIndex].searchLeft--;
-
-                int gave = 0;
-                if (n == 1) {
-
-                    if (battery < BatteryMax() - 1.0f) {
-                        battery += 18.0f;
-                        if (battery > BatteryMax()) battery = BatteryMax();
-                        pickupMsg = (g_lang == LANG_ZH) ? "翻到电池 +18" : "FOUND A BATTERY +18";
-                        gave = 1;
-                    }
-                } else if (n == 2) {
-                    if (fusesHeld < fusesNeeded) {
-                        fusesHeld++;
-                        pickupMsg = (g_lang == LANG_ZH) ? "翻到一根保险丝！" : "FOUND A FUSE!";
-                        gave = 1;
-                    }
-                }
-                if (!gave) {
-                    int g = 18 + (int)(rand() % 25);
-                    carryGold += g;
-                    {
-                        static char gb[64];
-                        snprintf(gb, sizeof(gb), (g_lang == LANG_ZH) ? "翻到 %d 金币" : "FOUND %d GOLD", g);
-                        pickupMsg = gb;
-                    }
-                }
-                pickupMsgTimer = 1.6f;
-                uiDirty = 1;
-                /* 翻找有声音：这是"搜得越多越危险"的代价，也和小地图/守护者联动 */
-                MakeNoise(posX, posY, 8.0f);
-                PlaySfx(SFX_SEARCH, 0.7f);
-                if (roomProps[hoverIndex].searchLeft <= 0) hoverKind = 0;
-            }
-        } else {
-            hoverKind = 0;
-        }
-    } else if (hoverKind == 1 && hoverIndex >= 0 && hoverIndex < MAX_CONTAINERS &&
+    /* v3.0：上锁的箱子**按一下 E 就弹锁盘**，不走长按翻箱；
+       没锁的仍然长按搜索。 */
+    if (hoverKind == 1 && hoverIndex >= 0 && hoverIndex < MAX_CONTAINERS &&
         containers[hoverIndex].active && !containers[hoverIndex].searched &&
         containers[hoverIndex].locked && !lockActive) {
         if (IsActionPressed(ACT_INTERACT)) {
@@ -4437,8 +4385,11 @@ void Update(float dt) {
 
     /* ---------------- 交互：长按 E 搜索容器 / 给配电箱上电 ---------------- */
     if (holdingNow) {
-        if (holdTimer == 0.0f && hoverKind == 1) {
-            /* 开始翻箱子：发出声音，吸引怪物（压迫感来源） */
+        if (holdTimer == 0.0f && (hoverKind == 1 || hoverKind == 3)) {
+            /* 开始翻找：发出声音，吸引怪物（压迫感来源）。
+               v2.4-rc：家具（货架/木箱堆/控制台）也走这条 ——
+               用户实测"搜这种大容器的时候搜索进度条失效、不发声"，
+               因为第一版用的是**按一下**而不是**长按**。 */
             PlaySfx(SFX_SEARCH, 0.55f);  /* 专用翻箱声：金属刮擦+木板闷响 */
             MakeNoise(posX, posY, 10.0f * SkillSearchNoiseMul() * BenchSearchQuiet() * RunSearchNoiseMul2());   /* v2.2：FAST SEARCH 的 +10% */  /* 比走路大一点，比跑步小 */
         }
@@ -4460,7 +4411,51 @@ void Update(float dt) {
             /* v3.0：翻完箱也上 0.4 秒封锁 ——
                否则 E 还按着，同一帧/下一帧就会被旁边的藏身点吸进去。 */
             hideBlockTimer = 0.4f;
-            if (hoverKind == 1) {
+            if (hoverKind == 3) {
+                /* ================================================================
+                 * 家具搜查结算（长按完成后）
+                 * ----------------------------------------------------------------
+                 * 用户要求：「收这种大箱子有概率收不出来东西，
+                 *           不然的话奖励太丰厚了。」
+                 * 所以每次有 **35% 空手** —— 大容器给得多，但也要赌。
+                 * ================================================================ */
+                extern RoomProp roomProps[MAX_ROOM_PROPS];
+                if (hoverIndex >= 0 && hoverIndex < MAX_ROOM_PROPS && roomProps[hoverIndex].active) {
+                    RoomProp* rp = &roomProps[hoverIndex];
+                    int n = rp->searched;
+                    rp->searched++;
+                    if (rp->searchLeft > 0) rp->searchLeft--;
+
+                    int empty = (rand() % 100) < 35;
+                    if (empty) {
+                        pickupMsg = (g_lang == LANG_ZH) ? "空的" : "NOTHING HERE";
+                    } else if (n == 1) {
+                        if (battery < (float)BatteryMax() - 1.0f) {
+                            battery += 18.0f;
+                            if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
+                            pickupMsg = (g_lang == LANG_ZH) ? "翻到电池 +18" : "FOUND A BATTERY +18";
+                        } else {
+                            int g2 = 18 + (int)(rand() % 25);
+                            carryGold += g2;
+                            static char gb2[64];
+                            snprintf(gb2, sizeof(gb2), (g_lang == LANG_ZH) ? "翻到 %d 金币" : "FOUND %d GOLD", g2);
+                            pickupMsg = gb2;
+                        }
+                    } else if (n == 2 && fusesHeld < fusesNeeded) {
+                        fusesHeld++;
+                        pickupMsg = (g_lang == LANG_ZH) ? "翻到一根保险丝！" : "FOUND A FUSE!";
+                    } else {
+                        int g2 = 18 + (int)(rand() % 25);
+                        carryGold += g2;
+                        static char gb3[64];
+                        snprintf(gb3, sizeof(gb3), (g_lang == LANG_ZH) ? "翻到 %d 金币" : "FOUND %d GOLD", g2);
+                        pickupMsg = gb3;
+                    }
+                    pickupMsgTimer = 1.6f;
+                    uiDirty = 1;
+                    if (rp->searchLeft <= 0) hoverKind = 0;
+                }
+            } else if (hoverKind == 1) {
                 Container* c = &containers[hoverIndex];
                 c->searched = 1;
         { extern int hideStreak; hideStreak = 0; }   /* v7：搜过箱子，连躲计数清零 */

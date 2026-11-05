@@ -1456,145 +1456,75 @@ static void BakeProp(int id, int kind) {
     float c = CANVAS_W * 0.5f;
     float baseY = 244.0f;
 
-    if (kind == 0) {            /* 箱子：木条 + 铁角 */
-        float b[8] = { c - 46, baseY - 96, c + 46, baseY - 96, c + 46, baseY, c - 46, baseY };
-        cvPoly(b, 4, 0x000A0806u, 1.0f);
-        float b2[8] = { c - 40, baseY - 90, c + 40, baseY - 90, c + 40, baseY - 4, c - 40, baseY - 4 };
-        cvPolyGrad(b2, 4, 0x00906A40u, 0x00402C18u, 1.0f);
-        for (int i = 0; i < 3; i++)
-            cvLine(c - 40, baseY - 74 + (float)i * 26, c + 40, baseY - 74 + (float)i * 26, 3.0f, 0x00301C0Cu, 0.8f);
-        cvLine(c - 40, baseY - 90, c - 40, baseY - 4, 8.0f, 0x00605848u, 1.0f);
-        cvLine(c + 40, baseY - 90, c + 40, baseY - 4, 8.0f, 0x00605848u, 1.0f);
-        cvSpeckle((int)c, (int)baseY - 50, 36, 50, 0x00301808u, 0.4f);
-        /* v2.4.6 斜角：木箱的立体感来自「上沿受光、下沿背光」 */
-        cvBevel(c - 40, baseY - 90, c + 40, baseY - 4, 3.0f, 0.42f);
-        /* 铁角：四角各再点一块高光，让包角读作金属而不是木纹 */
-        cvLine(c - 40, baseY - 90, c - 30, baseY - 90, 4.0f, 0x00A89880u, 0.55f);
-        cvLine(c + 30, baseY - 4, c + 40, baseY - 4, 4.0f, 0x00201810u, 0.6f);
-    } else if (kind == 8) {     /* 货架（v2.4-rc）：三层横板 */
-        /* 填黑测试：两根立柱 + 三层横板 → 剪影是 〓，一眼是货架。
-           横板比立柱略宽，这样剪影的横向条纹更清楚。 */
-        float px0 = c - 44, px1 = c + 44;
-        float top = baseY - 132;
+    if (kind == 0) {            /* 箱子（2026-11-06 按 art_direction.h 重做） */
+        /* ==================================================================
+         * 用户截图：「箱子边框都露出来了……这些东西你都没有按照审美代码。」
+         *
+         * 旧版的问题，逐条对照 art_direction.h 的装饰物件法则：
+         *   ① 整圈 cvPoly 纯黑描边 → 一缩放就成了一圈粗黑框。
+         *      法则要的是**边缘光**（左上 1px 提亮）+ 阴影侧压暗，
+         *      不是把剪影整圈描黑。
+         *   ② 只有 3 条横线 → 法则 ② 明说"3 段像贴纸，5 段才有体积"。
+         *   ③ 铁角画成**通高竖条** → 从正面看就是两根灰框，不是包角。
+         *      包角应该是四条短 L，且和木板之间留 1px 负空间（法则 ④）。
+         *   ④ 木板与地面相接处没有 AO（法则 ③），所以箱子像浮着。
+         * ================================================================== */
+        float bx0 = c - 46, bx1 = c + 46;
+        float by0 = baseY - 92, by1 = baseY;
 
-        /* 背板（先铺，让横板之间有"里面的东西"的感觉） */
-        float bk[8] = { px0 + 4, top + 4, px1 - 4, top + 4, px1 - 4, baseY, px0 + 4, baseY };
-        cvPolyGrad(bk, 4, 0x00201A14u, 0x000C0906u, 1.0f);
-
-        /* 两根立柱 */
-        cvLine(px0, top, px0, baseY, 9.0f, 0x00403020u, 1.0f);
-        cvLine(px1, top, px1, baseY, 9.0f, 0x00403020u, 1.0f);
-        cvLine(px0 - 2, top, px0 - 2, baseY, 3.0f, 0x00705A3Eu, 0.85f);
-        cvLine(px1 - 2, top, px1 - 2, baseY, 3.0f, 0x00705A3Eu, 0.85f);
-
-        /* 三层横板（每层：暗底 + 亮上沿） */
-        for (int k = 0; k < 3; k++) {
-            float sy = top + 20.0f + (float)k * 44.0f;
-            cvLine(px0 - 7, sy, px1 + 7, sy, 9.0f, 0x00281E14u, 1.0f);
-            cvLine(px0 - 7, sy - 3, px1 + 7, sy - 3, 3.5f, 0x00907A54u, 0.9f);
-            /* 板下的阴影，让横板有厚度 */
-            cvLine(px0 - 5, sy + 4, px1 + 5, sy + 4, 2.0f, 0x00000000u, 0.45f);
+        /* ---- ① 体块：5 段明暗 ---- */
+        float body[8] = { bx0, by0, bx1, by0, bx1, by1, bx0, by1 };
+        cvPolyGrad(body, 4, 0x008A6038u, 0x00322012u, 1.0f);
+        for (int k = 1; k <= 4; k++) {
+            float y = by0 + (by1 - by0) * (float)k / 5.0f;
+            /* 分段缝：很淡的一道，不能抢描边的活 */
+            cvLine(bx0 + 2, y, bx1 - 2, y, 1.0f, 0x00000000u, 0.12f);
+            cvLine(bx0 + 2, y + 1, bx1 - 2, y + 1, 1.0f, 0x00B08454u, 0.10f);
         }
 
-        /* 板上零散堆放：两块方箱 + 一只窄罐（用剪影打破对称） */
-        cvPolyGrad((float[]){ px0 + 6, top + 16, px0 + 30, top + 16, px0 + 30, top + 34, px0 + 6, top + 34 },
-                   4, 0x00806640u, 0x00382A18u, 1.0f);
-        cvBevel(px0 + 6, top + 16, px0 + 30, top + 34, 2.5f, 0.40f);
-        cvPolyGrad((float[]){ px1 - 34, top + 58, px1 - 8, top + 58, px1 - 8, top + 80, px1 - 34, top + 80 },
-                   4, 0x00705C3Cu, 0x002E2416u, 1.0f);
-        cvBevel(px1 - 34, top + 58, px1 - 8, top + 80, 2.5f, 0.40f);
-        cvEllipse(px0 + 18, top + 104, 8.0f, 12.0f, 0x004C4438u, 1.0f);
-        cvLine(px0 + 12, top + 104, px0 + 24, top + 104, 1.6f, 0x00A09070u, 0.5f);
+        /* ---- ② 边缘光：左上提亮 1px（暗场里把剪影剥出来） ---- */
+        cvLine(bx0, by0, bx1, by0, 2.0f, 0x00C69C6Au, 0.90f);
+        cvLine(bx0, by0, bx0, by1, 2.0f, 0x009A7850u, 0.65f);
 
-        cvSpeckle((int)c, (int)(top + 70), 52, 40, 0x00100800u, 0.35f);
+        /* ---- ③ 阴影侧：右下压暗（替代整圈黑描边） ---- */
+        cvLine(bx1, by0, bx1, by1, 2.0f, 0x00000000u, 0.55f);
+        cvLine(bx0, by1, bx1, by1, 2.0f, 0x00000000u, 0.65f);
 
-    } else if (kind == 9) {     /* 控制台（v2.4-rc）：矮柜 + 斜面板 */
-        /* 填黑测试：一个宽矮的柜体 + 一条斜上去的面板 + 面板上两颗指示灯
-           → 剪影是"上沿不平的矮箱"，和箱子（平顶方块）区分得开。 */
-        float top = baseY - 96;
+        /* ---- ④ 铁角：四角短 L，和木板之间留 1px 负空间 ---- */
+        {
+            const float bl = 16.0f;      /* 包角边长 */
+            const float th = 5.0f;       /* 包角厚度 */
+            unsigned int ironHi = 0x00A8A090u;
+            unsigned int ironMid = 0x00605A52u;
+            unsigned int gapCol = 0x00000000u;
 
-        /* 柜体 */
-        float b[8] = { c - 58, top + 26, c + 58, top + 26, c + 58, baseY, c - 58, baseY };
-        cvPoly(b, 4, 0x0008080Cu, 1.0f);
-        float b2[8] = { c - 52, top + 32, c + 52, top + 32, c + 52, baseY - 4, c - 52, baseY - 4 };
-        cvPolyGrad(b2, 4, 0x00505C66u, 0x00141A20u, 1.0f);
+            for (int q = 0; q < 4; q++) {
+                int right = (q & 1);
+                int bottom = (q >> 1) & 1;
+                float x = right ? (bx1 - bl) : bx0;
+                float y = bottom ? (by1 - bl) : by0;
 
-        /* 斜面板（往观察者方向倾，靠梯形而不是矩形） */
-        float pn[8] = { c - 58, top + 26, c + 58, top + 26, c + 46, top, c - 46, top };
-        cvPoly(pn, 4, 0x000A0E12u, 1.0f);
-        float pn2[8] = { c - 52, top + 23, c + 52, top + 23, c + 42, top + 4, c - 42, top + 4 };
-        cvPolyGrad(pn2, 4, 0x00768290u, 0x00303840u, 1.0f);
+                /* 负空间：包角与木板之间的一道暗缝（法则 ④） */
+                cvLine(right ? (x - 1) : (x + bl + 1), y, right ? (x - 1) : (x + bl + 1), y + bl,
+                       1.0f, gapCol, 0.45f);
 
-        /* 面板上的三颗指示灯（琥珀/绿/红） */
-        cvEllipse(c - 26, top + 14, 5.0f, 4.2f, 0x00FFB030u, 0.95f);
-        cvEllipse(c - 6,  top + 13, 5.0f, 4.2f, 0x0040E060u, 0.90f);
-        cvEllipse(c + 14, top + 14, 5.0f, 4.2f, 0x00E03818u, 0.90f);
-        /* 灯座 */
-        cvEllipse(c - 26, top + 14, 6.6f, 5.6f, 0x00181C20u, 0.55f);
-        cvEllipse(c - 6,  top + 13, 6.6f, 5.6f, 0x00181C20u, 0.55f);
-        cvEllipse(c + 14, top + 14, 6.6f, 5.6f, 0x00181C20u, 0.55f);
+                /* 水平臂 */
+                cvLine(x, y, x + bl, y, th, ironMid, 1.0f);
+                cvLine(x, y - 1, x + bl, y - 1, 1.5f, ironHi, 0.55f);
+                /* 垂直臂 */
+                cvLine(x, y, x, y + bl, th, ironMid, 1.0f);
+                if (!right) cvLine(x - 1, y, x - 1, y + bl, 1.5f, ironHi, 0.5f);
+                /* 螺丝：一个小亮点，包角才读作"加固件" */
+                cvEllipse(x + (right ? -6.0f : 6.0f), y + (bottom ? -6.0f : 6.0f),
+                          1.8f, 1.8f, 0x00D8D0C0u, 0.85f);
+            }
+        }
 
-        /* 柜门分缝 + 拉手 */
-        cvLine(c, top + 34, c, baseY - 6, 2.0f, 0x00000000u, 0.5f);
-        cvLine(c - 10, top + 62, c + 10, top + 62, 3.0f, 0x00A8B4C0u, 0.5f);
+        /* ---- ⑤ AO：木板与地面相接处压暗（法则 ③） ---- */
+        cvLine(bx0, by1 - 2, bx1, by1 - 2, 4.0f, 0x00000000u, 0.30f);
 
-        /* 右侧垂下来的一束线缆（打破左右对称，剪影更像机器） */
-        cvLine(c + 52, top + 40, c + 62, top + 78, 3.0f, 0x002A2418u, 1.0f);
-        cvLine(c + 62, top + 78, c + 58, baseY - 6, 3.0f, 0x002A2418u, 1.0f);
-
-        cvBevel(c - 52, top + 32, c + 52, baseY - 4, 3.0f, 0.42f);
-        cvSpeckle((int)c, (int)(baseY - 40), 48, 26, 0x00000000u, 0.3f);
-
-    } else if (kind == 10) {    /* 货架框架：两根立柱 + 侧梁（不含横板） */
-        float px0 = c - 44, px1 = c + 44;
-        float top = baseY - 132;
-        /* 侧梁（把两根柱子连起来，剪影更稳） */
-        cvLine(px0, top, px1, top, 7.0f, 0x00382A1Cu, 1.0f);
-        cvLine(px0, top - 3, px1, top - 3, 3.0f, 0x00806A46u, 0.85f);
-        /* 两根立柱 */
-        cvLine(px0, top, px0, baseY, 9.0f, 0x00403020u, 1.0f);
-        cvLine(px1, top, px1, baseY, 9.0f, 0x00403020u, 1.0f);
-        cvLine(px0 - 2, top, px0 - 2, baseY, 3.0f, 0x00705A3Eu, 0.85f);
-        cvLine(px1 - 2, top, px1 - 2, baseY, 3.0f, 0x00705A3Eu, 0.85f);
-        cvSpeckle((int)c, (int)(top + 66), 50, 30, 0x00100800u, 0.30f);
-
-    } else if (kind == 11) {    /* 货架横板：单层 */
-        /* 单独一层，高度只占画布下面一小条 —— 这样 baseZ 叠起来时
-           层与层之间会留出真实空隙，走动时能看见视差。 */
-        float px0 = c - 51, px1 = c + 51;
-        float sy = baseY - 6;
-        cvLine(px0, sy, px1, sy, 11.0f, 0x00281E14u, 1.0f);
-        cvLine(px0, sy - 4, px1, sy - 4, 4.0f, 0x00907A54u, 0.95f);
-        cvLine(px0, sy + 5, px1, sy + 5, 2.0f, 0x00000000u, 0.45f);
-        /* 板上放点东西：位置随机性由 draw 时的层高区分，这里只画一块 */
-        cvPolyGrad((float[]){ px0 + 10, sy - 20, px0 + 34, sy - 20, px0 + 34, sy - 4, px0 + 10, sy - 4 },
-                   4, 0x00806640u, 0x00402E1Au, 1.0f);
-        cvBevel(px0 + 10, sy - 20, px0 + 34, sy - 4, 2.5f, 0.40f);
-
-    } else if (kind == 12) {    /* 控制台柜体（不含面板） */
-        float top = baseY - 70;
-        float b[8] = { c - 58, top, c + 58, top, c + 58, baseY, c - 58, baseY };
-        cvPoly(b, 4, 0x0008080Cu, 1.0f);
-        float b2[8] = { c - 52, top + 5, c + 52, top + 5, c + 52, baseY - 4, c - 52, baseY - 4 };
-        cvPolyGrad(b2, 4, 0x00505C66u, 0x00141A20u, 1.0f);
-        cvLine(c, top + 12, c, baseY - 6, 2.0f, 0x00000000u, 0.5f);
-        cvLine(c - 10, top + 34, c + 10, top + 34, 3.0f, 0x00A8B4C0u, 0.5f);
-        cvBevel(c - 52, top + 5, c + 52, baseY - 4, 3.0f, 0.42f);
-
-    } else if (kind == 13) {    /* 控制台斜面板 + 指示灯 */
-        float top = baseY - 118;
-        /* 梯形面板（上窄下宽 = 朝观察者倾） */
-        float pn[8] = { c - 58, top + 26, c + 58, top + 26, c + 44, top, c - 44, top };
-        cvPoly(pn, 4, 0x000A0E12u, 1.0f);
-        float pn2[8] = { c - 52, top + 23, c + 52, top + 23, c + 40, top + 4, c - 40, top + 4 };
-        cvPolyGrad(pn2, 4, 0x00768290u, 0x00303840u, 1.0f);
-        /* 三颗灯 */
-        cvEllipse(c - 26, top + 14, 5.0f, 4.2f, 0x00FFB030u, 0.95f);
-        cvEllipse(c - 6,  top + 13, 5.0f, 4.2f, 0x0040E060u, 0.90f);
-        cvEllipse(c + 14, top + 14, 5.0f, 4.2f, 0x00E03818u, 0.90f);
-        cvEllipse(c - 26, top + 14, 6.6f, 5.6f, 0x00181C20u, 0.55f);
-        cvEllipse(c - 6,  top + 13, 6.6f, 5.6f, 0x00181C20u, 0.55f);
-        cvEllipse(c + 14, top + 14, 6.6f, 5.6f, 0x00181C20u, 0.55f);
+        /* ---- ⑥ 木纹：稀疏竖条，不做过密噪点 ---- */
+        cvSpeckle((int)c, (int)(baseY - 46), 38, 22, 0x00301808u, 0.28f);
 
     } else if (kind == 1) {     /* 配电箱（v2.4.7 重新建模） */
         /* 按 art_direction.h 重设计：
@@ -2173,18 +2103,31 @@ void DrawSpriteSub(int id, int sx, int sy, int sw, int sh,
     }
 }
 
-/* 带深度测试的子矩形 blit（世界道具用） */
+/* ==================================================================
+ * 带深度测试 + **双线性采样**的子矩形 blit（世界道具用）
+ * ------------------------------------------------------------------
+ * 2026-11-06（第二轮）：第一版用的是**最近邻**采样。
+ * 结果 1 像素的黑描边被放大成 3~4 像素的粗黑框 ——
+ * 用户截图里的「箱子边框都露出来了」就是它。
+ *
+ * 烘焙图是 128x128，贴脸时要放大到 400px 以上；
+ * 最近邻在这种倍率下会把所有细线（描边、铁角、木纹）都变成色块。
+ * 所以这里和 DrawSpriteTint 用**同一套双线性**，
+ * 只是把采样范围限制在艺术包围盒内 —— 既不糊边，也不画透明区。
+ * ================================================================ */
 void DrawSpriteSubZ(int id, int sx, int sy, int sw, int sh,
                     int dx, int dy, int dw, int dh,
                     float light, float alpha, float zDist) {
     if (!g_ready || dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return;
     if (alpha <= 0.003f) return;
     Sprite* s = &g_sprites[id];
+
     int li = (int)(light * (float)(SPR_SHADES - 1) + 0.5f);
     if (li < 0) li = 0;
     if (li >= SPR_SHADES) li = SPR_SHADES - 1;
     int lr = (s->shade[li] >> 16) & 0xFF;
 
+    /* 裁剪到精灵内部 */
     int x0 = sx < 0 ? 0 : sx;
     int y0 = sy < 0 ? 0 : sy;
     int x1 = sx + sw; if (x1 > s->w) x1 = s->w;
@@ -2194,21 +2137,62 @@ void DrawSpriteSubZ(int id, int sx, int sy, int sw, int sh,
     for (int j = 0; j < dh; j++) {
         int py = dy + j;
         if (py < 0 || py >= renderH) continue;
-        int srcY = y0 + (j * sh) / dh;
-        if (srcY >= y1) srcY = y1 - 1;
+
+        /* 目标行 -> 源行（双线性，钳在 [y0, y1-1]） */
+        float v = (float)y0 + (((float)j + 0.5f) / (float)dh) * (float)(y1 - y0) - 0.5f;
+        int ty0 = (int)floorf(v);
+        float fy = v - (float)ty0;
+        int ty1 = ty0 + 1;
+        if (ty0 < y0) ty0 = y0;
+        if (ty0 > y1 - 1) ty0 = y1 - 1;
+        if (ty1 < y0) ty1 = y0;
+        if (ty1 > y1 - 1) ty1 = y1 - 1;
+
+        const unsigned int* row0 = s->px + (size_t)ty0 * s->w;
+        const unsigned int* row1 = s->px + (size_t)ty1 * s->w;
+
         for (int i = 0; i < dw; i++) {
             int px = dx + i;
             if (px < 0 || px >= renderW) continue;
-            /* 深度测试：被墙挡住的像素直接跳过，别做后面的采样 */
-            if (zDist >= zBuffer[px]) continue;   /* 与 DrawSpriteTint 同一判据 */
-            int srcX = x0 + (i * sw) / dw;
-            if (srcX >= x1) srcX = x1 - 1;
-            unsigned int p = s->px[(size_t)srcY * s->w + srcX];
-            float a = (float)(p >> 24) / 255.0f;
+            if (zDist >= zBuffer[px]) continue;      /* 深度测试先做，省掉后面的采样 */
+
+            float u = (float)x0 + (((float)i + 0.5f) / (float)dw) * (float)(x1 - x0) - 0.5f;
+            int tx0 = (int)floorf(u);
+            float fx = u - (float)tx0;
+            int tx1 = tx0 + 1;
+            if (tx0 < x0) tx0 = x0;
+            if (tx0 > x1 - 1) tx0 = x1 - 1;
+            if (tx1 < x0) tx1 = x0;
+            if (tx1 > x1 - 1) tx1 = x1 - 1;
+
+            unsigned int p00 = row0[tx0], p10 = row0[tx1];
+            unsigned int p01 = row1[tx0], p11 = row1[tx1];
+            float w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy);
+            float w01 = (1 - fx) * fy,         w11 = fx * fy;
+
+            float a = ((float)(p00 >> 24) * w00 + (float)(p10 >> 24) * w10 +
+                       (float)(p01 >> 24) * w01 + (float)(p11 >> 24) * w11) / 255.0f;
             if (a < 0.004f) continue;
-            int r = (int)(((p >> 16) & 0xFF) * lr) >> 8;
-            int g = (int)(((p >> 8) & 0xFF) * lr) >> 8;
-            int b = (int)((p & 0xFF) * lr) >> 8;
+
+            /* 注意：**颜色要先按 alpha 加权再归一化**，
+               否则半透明边缘会被黑色拉低 —— 那正是细描边发黑的来源。 */
+            float aw = ((float)(p00 >> 24) * w00 + (float)(p10 >> 24) * w10 +
+                        (float)(p01 >> 24) * w01 + (float)(p11 >> 24) * w11);
+            if (aw < 0.5f) continue;
+            int r = (int)((((p00 >> 16) & 0xFF) * (float)(p00 >> 24) * w00 +
+                           ((p10 >> 16) & 0xFF) * (float)(p10 >> 24) * w10 +
+                           ((p01 >> 16) & 0xFF) * (float)(p01 >> 24) * w01 +
+                           ((p11 >> 16) & 0xFF) * (float)(p11 >> 24) * w11) / aw);
+            int g = (int)((((p00 >> 8) & 0xFF) * (float)(p00 >> 24) * w00 +
+                           ((p10 >> 8) & 0xFF) * (float)(p10 >> 24) * w10 +
+                           ((p01 >> 8) & 0xFF) * (float)(p01 >> 24) * w01 +
+                           ((p11 >> 8) & 0xFF) * (float)(p11 >> 24) * w11) / aw);
+            int b = (int)(((p00 & 0xFF) * (float)(p00 >> 24) * w00 +
+                           (p10 & 0xFF) * (float)(p10 >> 24) * w10 +
+                           (p01 & 0xFF) * (float)(p01 >> 24) * w01 +
+                           (p11 & 0xFF) * (float)(p11 >> 24) * w11) / aw);
+
+            r = (r * lr) >> 8; g = (g * lr) >> 8; b = (b * lr) >> 8;
             PutPixelBlend(px, py, (unsigned int)((r << 16) | (g << 8) | b), a * alpha);
         }
     }
