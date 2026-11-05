@@ -19,6 +19,9 @@
    所以 test_canity 能直接链 src/save/save_container.c 做**真单元测试**
    （见 test_save_container_contract）。 */
 #include "../include/save_format.h"
+/* v2.4-rc：主题房间模板是纯数据 + 纯函数（无 rand / 无 worldMap / 无 Win32），
+   所以能在这里做**真单元测试**，而不是查源码字符串。 */
+#include "../include/room_template.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -570,6 +573,125 @@ static void test_mimic_contract(void) {
  *   ④ 块表声明越界时必须拒绝，不能返回越界指针
  * 另外用源码断言钉住分区规则和「信封优先、裸档回退」的接线。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4-rc C01）：**房间模板的旋转与边界**
+ * ------------------------------------------------------------------
+ * 这些是纯函数，没有任何随机性或全局状态，所以能钉死：
+ *   · 4 种旋转之后，宽高交换正确、tiles 真的转了
+ *   · 转 4 次回到原样（旋转的群性质）
+ *   · 可通行格数在旋转下不变（否则"房间面积"会随朝向变化）
+ *   · 边界检查：贴外墙、越界、负坐标都必须拒绝
+ * ================================================================== */
+static void test_room_template_contract(void) {
+    RoomTemplate rot;
+    int i;
+
+    /* ---- ① 三个模板都存在，尺寸在 6×6 上限内 ---- */
+    for (i = 0; i < ROOM_TEMPLATE_COUNT; i++) {
+        const RoomTemplate* t = RoomTemplateGet(i);
+        check(t != NULL, "every declared room template must exist");
+        if (!t) continue;
+        check(t->id == i, "template id must match its slot");
+        check(t->w >= 2 && t->w <= ROOM_MAX_W, "template width must be 2..ROOM_MAX_W");
+        check(t->h >= 2 && t->h <= ROOM_MAX_H, "template height must be 2..ROOM_MAX_H");
+        check(t->themeId >= 0 && t->themeId < THEME_COUNT,
+              "template themeId must be a real theme");
+        check(RoomTemplateFloorCount(t) > 0,
+              "every template must have walkable floor");
+    }
+    /* 越界 id 必须返回 NULL，不能读到随机内存 */
+    check(RoomTemplateGet(-1) == NULL, "negative template id must return NULL");
+    check(RoomTemplateGet(ROOM_TEMPLATE_COUNT) == NULL, "out-of-range template id must return NULL");
+
+    /* ---- ② 旋转 4 次回到原样 ---- */
+    for (i = 0; i < ROOM_TEMPLATE_COUNT; i++) {
+        const RoomTemplate* base = RoomTemplateGet(i);
+        RoomTemplate a, b;
+        if (!base) continue;
+
+        check(RoomTemplateRotate(i, 4, &a) == 1, "rot 4 must be accepted");
+        check(a.w == base->w && a.h == base->h, "rot 4 must restore the width/height");
+        {
+            int same = 1;
+            for (int y = 0; y < ROOM_MAX_H; y++)
+                for (int x = 0; x < ROOM_MAX_W; x++)
+                    if (a.tiles[y][x] != base->tiles[y][x]) same = 0;
+            check(same, "rot 4 must restore every tile");
+        }
+
+        /* rot 2（180°）宽高**不变**；只有 rot 1 / rot 3（90°/270°）才交换。
+           原来这里写成 rot 2 交换 —— 是我把旋转的群性质记反了。 */
+        check(RoomTemplateRotate(i, 2, &b) == 1, "rot 2 must be accepted");
+        check(b.w == base->w && b.h == base->h, "rot 180 must keep width and height");
+
+        check(RoomTemplateRotate(i, 1, &b) == 1, "rot 1 must be accepted");
+        check(b.w == base->h && b.h == base->w, "rot 90 must swap width and height");
+        check(RoomTemplateRotate(i, 3, &b) == 1, "rot 3 must be accepted");
+        check(b.w == base->h && b.h == base->w, "rot 270 must swap width and height");
+    }
+
+    /* ---- ③ 可通行格数在旋转下不变 ---- */
+    for (i = 0; i < ROOM_TEMPLATE_COUNT; i++) {
+        const RoomTemplate* base = RoomTemplateGet(i);
+        int f0 = RoomTemplateFloorCount(base);
+        if (!base) continue;
+        for (int r = 1; r < 4; r++) {
+            check(RoomTemplateRotate(i, r, &rot) == 1, "rotate must succeed");
+            check(RoomTemplateFloorCount(&rot) == f0,
+                  "rotating must not change the walkable area");
+        }
+    }
+
+    /* ---- ④ 旋转真的转了：锅炉房居中的柱子，转 90/180/270 后位置跟着动 ---- */
+    {
+        const RoomTemplate* t0 = RoomTemplateGet(0);
+        check(t0 != NULL, "template 0 must exist");
+        if (t0) {
+            /* 原图柱子中心在相对坐标 (2,2) 附近；转 180 应该还在中心 */
+            RoomTemplate r180;
+            check(RoomTemplateRotate(0, 2, &r180) == 1, "rot 180 must succeed");
+            int pillars0 = 0, pillars180 = 0;
+            for (int y = 0; y < t0->h; y++)
+                for (int x = 0; x < t0->w; x++)
+                    if (t0->tiles[y][x] == ROOM_TILE_PILLAR) pillars0++;
+            for (int y = 0; y < r180.h; y++)
+                for (int x = 0; x < r180.w; x++)
+                    if (r180.tiles[y][x] == ROOM_TILE_PILLAR) pillars180++;
+            check(pillars0 == pillars180, "rotating must preserve the pillar count");
+        }
+    }
+
+    /* ---- ⑤ 边界：贴外墙 / 越界 / 负坐标 ---- */
+    {
+        const RoomTemplate* t = RoomTemplateGet(0);
+        if (t) {
+            check(RoomTemplateFits(t, 1, 1, 1) == 0,
+                  "a room touching the outer wall must be rejected with margin 1");
+            check(RoomTemplateFits(t, 2, 2, 1) == 1,
+                  "a room inset by 2 must fit");
+            check(RoomTemplateFits(t, -3, 2, 1) == 0,
+                  "negative coordinates must be rejected");
+            check(RoomTemplateFits(t, MAP_WIDTH, 2, 1) == 0,
+                  "off-map x must be rejected");
+            check(RoomTemplateFits(t, 2, MAP_HEIGHT, 1) == 0,
+                  "off-map y must be rejected");
+            /* 右下极限位置 */
+            check(RoomTemplateFits(t, MAP_WIDTH - 2 - t->w, MAP_HEIGHT - 2 - t->h, 1) == 1,
+                  "the bottom-right inset position must fit");
+            check(RoomTemplateFits(t, MAP_WIDTH - 1 - t->w, MAP_HEIGHT - 2 - t->h, 1) == 0,
+                  "overhanging the right edge must be rejected");
+        }
+        check(RoomTemplateFits(NULL, 2, 2, 1) == 0, "NULL template must not fit");
+    }
+
+    /* ---- ⑥ 非法旋转参数按 0 处理，不崩 ---- */
+    {
+        check(RoomTemplateRotate(0, -1, &rot) == 1, "negative rot must be clamped, not crash");
+        check(RoomTemplateRotate(-5, 0, &rot) == 0, "bad id must fail cleanly");
+        check(RoomTemplateRotate(0, 0, NULL) == 0, "NULL output must fail cleanly");
+    }
+}
+
 static void test_save_container_contract(void) {
     /* ---- ① 打包 / 取回 ---- */
     {
@@ -775,6 +897,7 @@ static void test_lockbox_contract(void) {
 }
 
 int main(void) {
+    test_room_template_contract();   /* v2.4-rc C01：纯函数，最便宜先跑 */
     test_no_unwired_api();
     test_wallet_single_source();
     test_steam_zone();

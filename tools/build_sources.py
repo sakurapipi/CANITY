@@ -18,12 +18,18 @@ def game_sources(root):
 
 
 def test_canity_sources(root):
-    """离线自检：纯 C99，只需要 steam_ach + save_container 两个真实实现。"""
+    """离线自检：纯 C99，只链无系统依赖的真实实现。
+
+    v2.4-rc：加入 room_template.c —— 它是纯数据 + 纯函数，
+    没有任何 rand()/worldMap/Win32 依赖，所以能被真正单测
+    （旋转、边界、可通行格数），而不是查源码字符串。
+    """
     root = Path(root)
     return [
         root / 'tests' / 'test_canity.c',
         root / 'src' / 'steam' / 'steam_ach.c',
         root / 'src' / 'save' / 'save_container.c',
+        root / 'src' / 'room_template.c',
     ]
 
 
