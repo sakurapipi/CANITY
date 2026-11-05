@@ -957,6 +957,51 @@ static void test_room_props(void) {
         CHECK(kindOk, "every room prop must have a known kind");
     }
 
+    /* ==================================================================
+     * 2026-11-06：**搜查次数**（精灵数改成 1 张之后的补偿）
+     * ------------------------------------------------------------------
+     * 每个家具只画 1 个精灵，内容量由"能搜几次"承担：
+     *   货架 3 次 / 木箱堆 2 次 / 控制台 2 次
+     * 没有一个家具应该是 0 次（那样它又变成纯装饰）。
+     * ================================================================== */
+    {
+        int bad = 0, zero = 0;
+        for (int i = 0; i < roomPropCount; i++) {
+            if (!roomProps[i].active) continue;
+            int k = roomProps[i].kind;
+            int want = (k == ROOMPROP_SHELF) ? 3 : 2;
+            if (roomProps[i].searchLeft != want) bad++;
+            if (roomProps[i].searchLeft <= 0) zero++;
+        }
+        CHECK(bad == 0, "every prop must start with its intended search count");
+        CHECK(zero == 0, "no prop may start with zero searches (that is pure decoration)");
+    }
+
+    /* ==================================================================
+     * 家具优先放**角落** —— 用户实测"架子和箱子有时候会堵路"。
+     * 角落格同时贴着两条边，放在那里不会把 1 格宽的过道从中间截断。
+     * 允许少数因为角落被占而退到普通贴墙位，所以只要求**大多数**在角落。
+     * ================================================================== */
+    {
+        int total = 0, corners = 0;
+        for (int i = 0; i < roomPropCount; i++) {
+            if (!roomProps[i].active) continue;
+            int cx = (int)roomProps[i].x, cy = (int)roomProps[i].y;
+            if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) continue;
+            total++;
+            /* 角落判据：上下左右里有两面是墙 */
+            int walls = 0;
+            if (worldMap[cy - 1][cx]) walls++;
+            if (worldMap[cy + 1][cx]) walls++;
+            if (worldMap[cy][cx - 1]) walls++;
+            if (worldMap[cy][cx + 1]) walls++;
+            if (walls >= 2) corners++;
+        }
+        CHECK(total > 0, "there must be props to check");
+        CHECK(corners * 2 >= total,
+              "most props must sit in corners (otherwise they cut the aisle in half)");
+    }
+
     /* C：房间不能只有货架一种东西 —— 木箱堆必须真的出现过 */
     {
         int sawCrates = 0, sawOther = 0;

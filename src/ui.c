@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "map_rooms.h"
 #include "art_direction.h"
 #include "achievements.h"
 #include "events.h"
@@ -4520,6 +4521,16 @@ void DrawHUD(void) {
         /* v2.7：提示要用当前绑定，改过键之后写死 E 就是骗人 */
         if (hoverKind == 1)
             sprintf(pbuf, "HOLD %s  SEARCH", VkName(g_bindings[ACT_INTERACT]));
+        else if (hoverKind == 3) {
+            /* 2026-11-06：家具可以搜（货架 3 次 / 木箱堆 2 次 / 控制台 2 次）。
+               提示里带上还剩几次 —— 否则玩家不知道"还能不能翻"。 */
+            extern RoomProp roomProps[MAX_ROOM_PROPS];
+            int left = 0;
+            if (hoverIndex >= 0 && hoverIndex < MAX_ROOM_PROPS)
+                left = roomProps[hoverIndex].searchLeft;
+            sprintf(pbuf, "PRESS %s  SEARCH  (%d LEFT)",
+                    VkName(g_bindings[ACT_INTERACT]), left);
+        }
         else if (fusesHeld >= fusesNeeded)
             sprintf(pbuf, "HOLD %s  POWER ON", VkName(g_bindings[ACT_INTERACT]));
         else sprintf(pbuf, "NEED %d MORE FUSE", fusesNeeded - fusesHeld);

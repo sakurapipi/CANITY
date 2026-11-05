@@ -675,36 +675,45 @@ void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float 
 void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, float lightK) {
     SpriteBox s = ProjectSprite(wx, wy, baseZ, halfH);
     if (!s.ok) return;
+    /* 贴脸不画（和旧路径一致，避免巨型精灵糊屏） */
     if (s.ty < 0.55f) return;
-    int w = s.x1 - s.x0, h = s.y1 - s.y0;
-    if (w < 2 || h < 2) return;
-    int size = h;
+    int boxW = s.x1 - s.x0;
+    int h = s.y1 - s.y0;
+    if (boxW < 2 || h < 2) return;
 
     float light = SpriteShade(s.ty, 0.12f) * PropProximityLight(wx, wy);
-    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
+    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, boxW / 3, s.ty);
 
-    /* 把包围盒高度映射到投影高度，底边对齐地面 */
+    /* ==================================================================
+     * 2026-11-06：**只画艺术包围盒，别画整块画布**
+     * ------------------------------------------------------------------
+     * 上一版把整个 128x128 画布缩放到"包围盒高度 = halfH"，
+     * 于是画布被放大了 SPR_H/bboxH 倍 —— 箱子实测 2.67 倍。
+     * 那 2.67 倍里绝大部分是全透明像素，但每个像素仍要走一遍采样循环。
+     * 这就是用户说的"每次路过都掉帧"。
+     *
+     * 现在直接用带深度测试的子矩形 blit，源矩形就是包围盒本身：
+     *   · 目标高度 = 投影高度
+     *   · 目标宽度 = 投影高度 × 包围盒宽高比
+     *   · 画的像素数从 (2.67×size)² 降到 size² 以内，约 7 倍开销削减
+     * ================================================================ */
     Sprite* sp = SpriteGet(spr);
     int bw = 0, bh = 0;
     if (sp) { bw = sp->bx1 - sp->bx0 + 1; bh = sp->by1 - sp->by0 + 1; }
 
-    if (bw > 0 && bh > 0 && sp) {
-        float scale = (float)size / (float)bh;
-        int canvasW = (int)((float)SPR_W * scale);
-        int canvasH = (int)((float)SPR_H * scale);
-        if (canvasW < 1) canvasW = 1;
-        if (canvasH < 1) canvasH = 1;
-        int bxMid = (sp->bx0 + sp->bx1 + 1) / 2;
-        int x = (s.x0 + s.x1) / 2 - (int)((float)bxMid * scale);
-        int y = s.y1 - (int)((float)(sp->by1 + 1) * scale);
-        DrawSprite(spr, x, y, canvasW, canvasH, light * lightK, 1.0f, 1, s.ty);
+    if (sp && bw > 0 && bh > 0) {
+        int dw = (int)((long)h * bw / bh);
+        if (dw < 1) dw = 1;
+        int dx = (s.x0 + s.x1) / 2 - dw / 2;
+        int dy = s.y1 - h;
+        DrawSpriteSubZ(spr, sp->bx0, sp->by0, bw, bh, dx, dy, dw, h,
+                       light * lightK, 1.0f, s.ty);
     } else {
-        int x = (s.x0 + s.x1) / 2 - size / 2;
-        int y = s.y1 - size;
-        DrawSprite(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty);
+        /* 包围盒无效（全透明）：退回正方形绘制 */
+        int x = (s.x0 + s.x1) / 2 - h / 2;
+        DrawSprite(spr, x, s.y1 - h, h, h, light * lightK, 1.0f, 1, s.ty);
     }
 }
-
 /* v2.1：怪物改用烘焙精灵                                              */
 /*   旧版是一个函数服务两种怪、共享一张剪影，只换眼睛颜色 —— 7 只怪长得   */
 /*   一样。新版每只怪一张 128×128 烘焙图（见 sprites.c 的 BakeMonster）。  */

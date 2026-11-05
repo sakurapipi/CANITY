@@ -178,14 +178,30 @@ static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
        它们走同一套"放一件→验连通→不行就撤"的流程。 */
     int crates = 1 + (int)(rand() % 2);
 
-    /* 沿房间内圈一圈走，优先靠墙的格子 */
-    for (int pass = 0; pass < 2 && placed < want; pass++) {
+    /* ==================================================================
+     * 2026-11-06：**家具只放角落**
+     * ------------------------------------------------------------------
+     * 用户实测：「架子和箱子有时候会堵路，因为它们是实体。」
+     *
+     * 之前 pass 0 是"任意贴墙格" —— 贴着房间一侧墙的中间也会放，
+     * 于是 1 格宽的过道被从中间截断。
+     * 现在按优先级：
+     *   pass 0 = **角落**（同时在两条边上）  ← 最优先，绝不挡路
+     *   pass 1 = 其他贴墙格（角落放不下才退）
+     *   pass 2 = 房间内部（最后兜底，数量也受限）
+     * 而且每放一件都验一次房间连通 + 出口可达，不通就撤。
+     * ================================================================ */
+    for (int pass = 0; pass < 3 && placed < want; pass++) {
+        if (pass == 2 && placed >= 2) break;   /* 内部最多补 2 件，别把房间塞满 */
         for (int y = 0; y < t->h && placed < want; y++) {
             for (int x = 0; x < t->w && placed < want; x++) {
-                /* pass 0 = 只放最外一圈（贴墙），pass 1 = 里面也放 */
-                int edge = (x == 0 || y == 0 || x == t->w - 1 || y == t->h - 1);
-                if (pass == 0 && !edge) continue;
-                if (pass == 1 && edge) continue;
+                int edgeX = (x == 0 || x == t->w - 1);
+                int edgeY = (y == 0 || y == t->h - 1);
+                int edge  = edgeX || edgeY;
+                int corner = edgeX && edgeY;
+                if (pass == 0 && !corner) continue;
+                if (pass == 1 && (corner || !edge)) continue;
+                if (pass == 2 && edge) continue;
 
                 unsigned char tile = t->tiles[y][x];
                 if (tile != ROOM_TILE_FLOOR) continue;

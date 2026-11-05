@@ -422,7 +422,7 @@ static float fireTick[3];
 float leechHintTimer = 0.0f;
 int fusesNeeded = 2;      /* 本关需要几根 */
 int breakerOpen = 0;      /* 配电箱是否已通電 */
-int hoverKind = 0;        /* 0=无 1=容器 2=配电箱 */
+int hoverKind = 0;        /* 0=无 1=容器 2=配电箱 3=家具（货架/木箱堆/控制台） */
 int hoverIndex = -1;
 float holdTimer = 0.0f;
 int holdingNow = 0;
@@ -3616,15 +3616,91 @@ void Update(float dt) {
         }
     }
 
+    /* ==================================================================
+     * 2026-11-06：**家具也可以搜**
+     * ------------------------------------------------------------------
+     * 用户提议：「把它做成一个箱子，特殊箱子可以搜查两次，
+     *           或者那个货架可以搜查三次。」
+     *
+     * 这也是这次"精灵过多导致掉帧"的补偿：每个家具只画 1 个精灵，
+     * 但内容量由可搜查次数承担 ——
+     *   货架 3 次 / 木箱堆 2 次 / 控制台 2 次
+     *
+     * 优先级：**永远排在容器之后**，家具不许抢箱子的 E。
+     * ================================================================ */
+    if (hoverKind == 0) {
+        extern RoomProp roomProps[MAX_ROOM_PROPS];
+        extern int roomPropCount;
+        float bestD = INTERACT_RANGE * INTERACT_RANGE;
+        for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++) {
+            if (!roomProps[i].active || roomProps[i].searchLeft <= 0) continue;
+            float d = Dist2(posX, posY, roomProps[i].x, roomProps[i].y);
+            if (d >= INTERACT_RANGE * INTERACT_RANGE) continue;
+            if (d < bestD) { bestD = d; hoverKind = 3; hoverIndex = i; }
+        }
+    }
+
 
     /* v3.1：藏身提示范围从 2.6 格收到 1.2 格。
        原来是一个直径 5 格的圆，站在房间中间就提示「按 E 躲藏」，
        玩家会以为整片空地都能藏；其实藏身点是一个具体位置。 */
     hideSpotNear = -1;
 
-    /* v3.0：上锁的箱子**按一下 E 就弹锁盘**，不走长按翻箱；
-       没锁的仍然长按搜索。 */
-    if (hoverKind == 1 && hoverIndex >= 0 && hoverIndex < MAX_CONTAINERS &&
+    /* ==================================================================
+     * 家具搜查（hoverKind == 3）
+     * ------------------------------------------------------------------
+     * 按一次 E 拿一样东西，次数用完就空。三种掉落轮换：
+     *   第 1 次 → 金币
+     *   第 2 次 → 电池（有电上限，满电时给金币）
+     *   第 3 次 → 保险丝（本层还缺才给，否则给金币）
+     * 搜查会发出声音 —— 翻箱本来就应该有代价。
+     * ================================================================== */
+    if (hoverKind == 3) {
+        extern RoomProp roomProps[MAX_ROOM_PROPS];
+        if (hoverIndex >= 0 && hoverIndex < MAX_ROOM_PROPS &&
+            roomProps[hoverIndex].active && roomProps[hoverIndex].searchLeft > 0) {
+            if (IsActionPressed(ACT_INTERACT)) {
+                keyPressed[g_bindings[ACT_INTERACT]] = 0;
+                int n = roomProps[hoverIndex].searched;
+                roomProps[hoverIndex].searched++;
+                roomProps[hoverIndex].searchLeft--;
+
+                int gave = 0;
+                if (n == 1) {
+
+                    if (battery < BatteryMax() - 1.0f) {
+                        battery += 18.0f;
+                        if (battery > BatteryMax()) battery = BatteryMax();
+                        pickupMsg = (g_lang == LANG_ZH) ? "翻到电池 +18" : "FOUND A BATTERY +18";
+                        gave = 1;
+                    }
+                } else if (n == 2) {
+                    if (fusesHeld < fusesNeeded) {
+                        fusesHeld++;
+                        pickupMsg = (g_lang == LANG_ZH) ? "翻到一根保险丝！" : "FOUND A FUSE!";
+                        gave = 1;
+                    }
+                }
+                if (!gave) {
+                    int g = 18 + (int)(rand() % 25);
+                    carryGold += g;
+                    {
+                        static char gb[64];
+                        snprintf(gb, sizeof(gb), (g_lang == LANG_ZH) ? "翻到 %d 金币" : "FOUND %d GOLD", g);
+                        pickupMsg = gb;
+                    }
+                }
+                pickupMsgTimer = 1.6f;
+                uiDirty = 1;
+                /* 翻找有声音：这是"搜得越多越危险"的代价，也和小地图/守护者联动 */
+                MakeNoise(posX, posY, 8.0f);
+                PlaySfx(SFX_SEARCH, 0.7f);
+                if (roomProps[hoverIndex].searchLeft <= 0) hoverKind = 0;
+            }
+        } else {
+            hoverKind = 0;
+        }
+    } else if (hoverKind == 1 && hoverIndex >= 0 && hoverIndex < MAX_CONTAINERS &&
         containers[hoverIndex].active && !containers[hoverIndex].searched &&
         containers[hoverIndex].locked && !lockActive) {
         if (IsActionPressed(ACT_INTERACT)) {

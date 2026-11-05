@@ -118,6 +118,18 @@ void DrawSpriteTint(int id, int x, int y, int w, int h,
 void DrawSpriteSub(int id, int sx, int sy, int sw, int sh,
                    int dx, int dy, int dw, int dh, float light, float alpha);
 
+/* ==================================================================
+ * 2026-11-06：**带深度测试的子矩形 blit**
+ * ------------------------------------------------------------------
+ * DrawSpriteSub 是给 UI 用的（无深度测试）。
+ * 世界里的道具必须过 zBuffer，但又只想画**艺术包围盒**那一块 ——
+ * 否则画布上的透明区也会被逐像素遍历（箱子实测浪费 2.67 倍面积，
+ * 这正是"路过就掉帧"的来源）。
+ * ================================================================ */
+void DrawSpriteSubZ(int id, int sx, int sy, int sw, int sh,
+                    int dx, int dy, int dw, int dh,
+                    float light, float alpha, float zDist);
+
 /* 水平镜像 blit（怪物侧面靠它覆盖另一侧，Doom 的做法） */
 void DrawSpriteFlip(int id, int x, int y, int w, int h,
                     float light, float alpha, int zTest, float zDist);

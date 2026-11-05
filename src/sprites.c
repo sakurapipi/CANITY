@@ -2173,6 +2173,47 @@ void DrawSpriteSub(int id, int sx, int sy, int sw, int sh,
     }
 }
 
+/* 带深度测试的子矩形 blit（世界道具用） */
+void DrawSpriteSubZ(int id, int sx, int sy, int sw, int sh,
+                    int dx, int dy, int dw, int dh,
+                    float light, float alpha, float zDist) {
+    if (!g_ready || dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return;
+    if (alpha <= 0.003f) return;
+    Sprite* s = &g_sprites[id];
+    int li = (int)(light * (float)(SPR_SHADES - 1) + 0.5f);
+    if (li < 0) li = 0;
+    if (li >= SPR_SHADES) li = SPR_SHADES - 1;
+    int lr = (s->shade[li] >> 16) & 0xFF;
+
+    int x0 = sx < 0 ? 0 : sx;
+    int y0 = sy < 0 ? 0 : sy;
+    int x1 = sx + sw; if (x1 > s->w) x1 = s->w;
+    int y1 = sy + sh; if (y1 > s->h) y1 = s->h;
+    if (x1 <= x0 || y1 <= y0) return;
+
+    for (int j = 0; j < dh; j++) {
+        int py = dy + j;
+        if (py < 0 || py >= renderH) continue;
+        int srcY = y0 + (j * sh) / dh;
+        if (srcY >= y1) srcY = y1 - 1;
+        for (int i = 0; i < dw; i++) {
+            int px = dx + i;
+            if (px < 0 || px >= renderW) continue;
+            /* 深度测试：被墙挡住的像素直接跳过，别做后面的采样 */
+            if (zDist >= zBuffer[px]) continue;   /* 与 DrawSpriteTint 同一判据 */
+            int srcX = x0 + (i * sw) / dw;
+            if (srcX >= x1) srcX = x1 - 1;
+            unsigned int p = s->px[(size_t)srcY * s->w + srcX];
+            float a = (float)(p >> 24) / 255.0f;
+            if (a < 0.004f) continue;
+            int r = (int)(((p >> 16) & 0xFF) * lr) >> 8;
+            int g = (int)(((p >> 8) & 0xFF) * lr) >> 8;
+            int b = (int)((p & 0xFF) * lr) >> 8;
+            PutPixelBlend(px, py, (unsigned int)((r << 16) | (g << 8) | b), a * alpha);
+        }
+    }
+}
+
 /* 水平镜像 blit */
 void DrawSpriteFlip(int id, int x, int y, int w, int h,
                     float light, float alpha, int zTest, float zDist) {
