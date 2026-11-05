@@ -38,6 +38,7 @@
 #include "game.h"
 #include "wallet.h"
 #include "audio.h"
+#include "lang.h"   /* LANG_ZH */
 
 /* ================================================================== */
 /* 目标表：加一个目标 = 加一行                                          */
@@ -135,7 +136,14 @@ typedef struct {
 
 static DailyQuest s_daily;
 static int s_ready = 0;
-static int s_pendingSave = 0;     /* 领奖后等帧首再落盘，见 DailyMarkDone */
+static int s_pendingSave = 0;     /* 其它原因导致的待落盘 */
+/* 2026-11-06（v2.4-alpha R13）：**奖励事务**
+   钱不能先到账再落盘 —— 中间崩溃会造成"看到了 +800 但存档里没有"，
+   而 lastCompleted 也没落盘，重启后可以再领一次（等于重发）。
+   现在：帧首统一做「加钱 → 同步落盘 → 成功才宣布」，失败回滚并重试。 */
+static int s_pendingReward = 0;
+static int s_rewardRetry   = 0;
+#define DAILY_REWARD_RETRY 3
 
 /* ------------------------------------------------------------------ */
 /* 确定性 RNG                                                          */
@@ -334,22 +342,62 @@ void DailyMarkDone(void) {
     if (s_daily.streak == 3) reward += 1500;
     if (s_daily.streak == 7) reward += 5000;
 
-    WalletAddBank(reward);
+    /* ==================================================================
+     * 2026-11-06（v2.4-alpha R13）：**记下来，不在这一帧给钱**
+     * ------------------------------------------------------------------
+     * 原来这里是 WalletAddBank(reward) 然后打 s_pendingSave 标记，
+     * 下一帧才落盘。中间那段窗口里：钱已经在内存里，存档里还没有；
+     * 而 lastCompleted 同样没落盘 —— 崩溃重启后可以再领一次。
+     *
+     * 现在只记账，钱与落盘由 DailyTick 在**帧首**成对完成：
+     * 加钱 → 同步写盘 → 成功才宣布；失败回滚并重试 3 次。
+     * ================================================================== */
+    /* ==================================================================
+     * 2026-11-06（v2.4-alpha R13）：**加钱与落盘成对完成**
+     * ------------------------------------------------------------------
+     * 顺序：加钱 → 同步写盘 → 写成功才算数；失败就把钱退回去。
+     *
+     * 为什么不能"先加钱、下一帧再存"：中间那段窗口里钱只在内存，
+     * 而 lastCompleted 也没落盘 —— 崩溃重启后可以再领一次（重发）。
+     * 也不能"先存盘、再加钱"：那样存进去的是一份没有奖励的档，
+     * 重启后钱就没了（漏发）。
+     *
+     * 位置说明：DailyMarkDone ← DailySetProgress ← CheckAchievements，
+     * 而 CheckAchievements 在 Update 的**末尾**（帧内状态基本已结算完），
+     * 所以这里同步存一次是安全的。
+     *
+     * 失败时的取舍：把钱退回去，保留 done=1（当日不再发）。
+     * 代价是玩家可能损失一次奖励，但**绝不会重复发放**。
+     * ================================================================== */
     {
+        extern void SaveGame(void);
+        extern int g_saveState;
+        extern int WalletSpendBank(int);
         extern const char* pickupMsg;
         extern float pickupMsgTimer;
         extern void PlaySfx(int, float);
-        static char buf[80];
-        snprintf(buf, sizeof(buf), "DAILY DONE  +%d GOLD", reward);
-        pickupMsg = buf;
-        pickupMsgTimer = 2.5f;
-        PlaySfx(SFX_POWER, 1.0f);
-    }
 
-    /* **不要在这一帧里存档**：DailyMarkDone ← DailySetProgress ← Update()，
-       在帧中途触发完整 SaveGame 会把「本帧还没结算完的运行时状态」写进档。
-       打标记，由 DailyTick（帧首）统一落盘。 */
-    s_pendingSave = 1;
+        WalletAddBank(reward);
+        SaveGame();
+
+        if (g_saveState == 1) {                 /* 1 = 写盘成功 */
+            static char buf[80];
+            snprintf(buf, sizeof(buf), g_lang == LANG_ZH
+                     ? "每日完成  +%d 金" : "DAILY DONE  +%d GOLD", reward);
+            pickupMsg = buf;
+            pickupMsgTimer = 2.5f;
+            PlaySfx(SFX_POWER, 1.0f);
+        } else {
+            if (!WalletSpendBank(reward)) {
+                /* 理论上不会走到（刚加的钱一定够退）；保险起见记一笔 */
+                s_pendingReward = reward;
+            }
+            pickupMsg = (g_lang == LANG_ZH) ? "存档失败：今日奖励未发放"
+                                            : "SAVE FAILED: DAILY REWARD NOT PAID";
+            pickupMsgTimer = 3.0f;
+        }
+        return;
+    }
 }
 
 /* ================================================================== */
@@ -357,12 +405,23 @@ void DailyMarkDone(void) {
 /* ================================================================== */
 
 void DailyTick(void) {
-    /* 帧首统一落盘（见 DailyMarkDone） */
+    /* 奖励事务已在 DailyMarkDone 内同步完成（见那里的说明），
+       这里只处理"其它原因导致的待落盘"。 */
     if (s_pendingSave) {
         s_pendingSave = 0;
         { extern void SaveGame(void); SaveGame(); }
     }
-
+    /* 极端情况下（加钱后连退钱都失败）留一条待发奖励，下一帧再试 */
+    if (s_pendingReward > 0) {
+        extern void SaveGame(void);
+        extern int g_saveState;
+        extern int WalletSpendBank(int);
+        int r = s_pendingReward;
+        WalletAddBank(r);
+        SaveGame();
+        if (g_saveState == 1) s_pendingReward = 0;
+        else { WalletSpendBank(r); if (++s_rewardRetry >= DAILY_REWARD_RETRY) s_pendingReward = 0; }
+    }
     if (!s_ready) { DailyGenerate(); return; }
 
     unsigned int today = DailySeedToday();

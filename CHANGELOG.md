@@ -7,6 +7,49 @@
 
 ---
 
+## [2.4-alpha] - 2026-11-06
+
+预发布。v2.4 是「一个版本四个站点」的第一站：地基。
+几乎不改玩法，改的是数据层不可以出错的地方。
+
+### 新增
+- tests/test_runtime.c、tools/partition_check.py、tools/build_validate.py 入库。
+  这三个文件以前只在开发机上，所以「测试全部通过」无法被任何人复核。
+- tools/build_sources.py：唯一源文件清单，CI / Release / 本地同源。
+- .github/workflows/ci.yml：push 与 PR 编译 + 三条检查。
+- .gitattributes：文本文件统一 LF（Windows runner 检出为 CRLF 会让
+  源码字符串断言误报，实测过）。
+- include/steam_zone.h 的 SteamZoneCloudDecide：云同步判定抽成纯函数，可无 Steam 单测。
+- SteamZoneCloudGetSize / STEAM_SYNC_CONFLICT。
+- save.h 的 SAVE_ERR_CAPACITY / SAVE_ERR_DUP_CHUNK / SAVE_ERR_PAYLOAD。
+- SaveTestSerialize / SaveTestDeserialize：仅测试用的序列化钩子。
+
+### 改动
+- 存档未知块**有序往返**：读记完整目录，写按原顺序重建，SC_LEGACY29 原位替换。
+- 两个写盘入口共用 SaveFileBytes（唯一序列化出口），容量动态计算。
+- 云同步按双方**各自长度**解析校验；同秒不同内容报冲突且不覆盖任何一方。
+- 每日奖励：加钱与落盘成对，成功才算数，失败回滚。
+- 破门石一次撞击只结算一次逻辑噪音（三个终止分支都改）。
+- SaveBackendWrite 检查 FlushFileBuffers / CloseHandle，保留第一次错误码。
+
+### 修复
+- 重复块 ID 以前会被静默丢弃第二份；现在拒绝改写并保留原文件。
+- 发布工作流不再手写源文件清单，改为调用 build_validate.py
+  —— 发布必须建立在测试通过之上。
+
+### 测试
+- 11,481 -> 11,508 项运行期断言。
+- 新增校验和黄金向量。起因：注入 FNV 常数改动后整套测试仍然全绿，
+  因为 seal 与 validate 用的是同一个坏函数；现实中这会让所有老存档判损坏。
+
+### 已知问题
+- 战役第 3/5 关出口位置可能不正确（game.c:1752 读 breaker，但 breaker 在 :2278 才放置）。
+  归入 v2.4-beta 的资源规划一起修。
+- Steam 云同步未经真机验证，本版本不承诺云存档恢复。
+- 不提供防恶意整体回滚存档的保证。
+
+---
+
 ## [2.3.9] — 2026-11-05
 
 存档分区、投石改造、每日任务重写、假人玩偶重做，以及一批操作手感修复。
