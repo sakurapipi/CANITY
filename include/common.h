@@ -141,7 +141,11 @@ extern int bestEndlessScore;
 /* 一层里最多能同时存在多少个可搜索容器。
    RICH 词条会额外 +2，所以数组本身要留出余量，
    否则容器数量一旦真的涨上去就会写越界。 */
-#define MAX_CONTAINERS 8
+/* 2026-11-06：8 -> 12。地图 24x24 -> 36x36 之后可走面积翻倍多，
+   8 个箱子被摊薄成"走很久遇不到一个"。
+   注意：Container cont[] 是存档字段，改这个数就是改布局 ——
+   必须同时提供迁移（见 save.c 的 LoadLegacyBlob 的 containerCount 参数）。 */
+#define MAX_CONTAINERS 12
 #define CONTAINERS_BASE 5    /* v3.4：6 → 5。箱子太多 = 道具白送，
                                 方案 v5 决定把箱子从「道具售货机」改成「金币来源」。 */
 /* 场上最多同时存在几件投掷物（荧光棒 / 玻璃瓶） */
@@ -192,7 +196,7 @@ extern int bestEndlessScore;
 /* 精灵排序表的上界：容器 + 配电箱 + 寻声怪 + 安全屋 + 光敏怪 + 投掷物 + 出口光柱
    + 飞行中的玻璃瓶
    注意：跳脸虫不在这个表里 —— 它是屏幕空间 overlay，由 RenderFrame 直接画。 */
-#define MAX_SPRITES 48   /* v2.2: was 25, worst case 29 -> sprites were silently dropped */
+#define MAX_SPRITES 64   /* 2026-11-06：容器 8->12 之后要留足余量（原来 48） */
 
 /* 内部渲染的像素预算上限。
    窗口再大，内部渲染分辨率也不超过这个像素数 —— 这是全屏帧时间的保护阀。

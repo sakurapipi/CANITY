@@ -427,7 +427,11 @@ static void test_save_persist_contract(void) {
      * 容器格式（SAVE_CONTAINER_VERSION）**没有变**，仍是 1。
      * ================================================================ */
     /* v31：地图 24x24 -> 36x36，worldMap/explored 变大 → 布局又变了一次 */
-    check(contains(saveh, "SAVE_VERSION 31"), "save format must be v31");
+    /* v32：MAX_CONTAINERS 8 -> 12，Container cont[] 变大 → 布局又变了一次。
+       老档仍然只有 8 条记录，迁移靠 LEGACY_CONTAINER_COUNT 读取。 */
+    check(contains(saveh, "SAVE_VERSION 32"), "save format must be v32");
+    check(contains(savec, "LEGACY_CONTAINER_COUNT"),
+          "the container-slot count change needs its own legacy constant");
     check(contains(saveh, "int roomSeed;"), "v30 must carry the room replay seed");
     check(contains(saveh, "int roomCount;"), "v30 must carry the room count");
     check(contains(savec, "g_lang = (g_save.lang == LANG_ZH)"),

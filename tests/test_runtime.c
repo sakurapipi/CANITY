@@ -134,7 +134,9 @@ static void test_wallet_save(void) {
         memset(legacy, 0, sizeof(legacy));
 
         const size_t contOff    = offsetof(SaveBlob, cont);
-        const size_t oldContSz  = 32u * MAX_CONTAINERS;      /* 256 */
+        /* 老档只有 **8** 个槽位；MAX_CONTAINERS 现在是 12，
+           这里若跟着新常量走，夹具就不是 v25 而是"v25 但 12 槽"，测不出真问题。 */
+        const size_t oldContSz  = 32u * 8u;                  /* 256 */
         const int    oldMapW    = 24, oldMapH = 24;
         const size_t oldMapSz   = (size_t)oldMapW * oldMapH * sizeof(int);
         const size_t newTailOff = offsetof(SaveBlob, flares);
@@ -146,7 +148,7 @@ static void test_wallet_save(void) {
         w = contOff;
 
         /* ② 8 条 32 字节 Container */
-        for (int ci = 0; ci < MAX_CONTAINERS; ci++) {
+        for (int ci = 0; ci < 8; ci++) {
             unsigned char* dst = legacy + w;
             const Container* src = &cur.cont[ci];
             memcpy(dst + 0,  &src->x,        sizeof(float));

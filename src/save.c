@@ -937,6 +937,9 @@ typedef struct {
  * 返回 1 = 成功；0 = 参数不合理或文件太小。
  * ================================================================ */
 #define LEGACY_CONTAINER_BYTES 32      /* v28 及以前的 Container 大小 */
+/* 2026-11-06：v31 及以前的槽位数。MAX_CONTAINERS 8 -> 12 之后，
+   老档里仍然只有 8 条记录 —— 迁移必须知道这个数，不能读新常量。 */
+#define LEGACY_CONTAINER_COUNT 8
 #define LEGACY_MAP_W 24
 #define LEGACY_MAP_H 24
 
@@ -944,14 +947,15 @@ typedef char container_must_be_40[(sizeof(Container) == 40) ? 1 : -1];
 typedef char map_must_be_at_least_24[((MAP_WIDTH >= 24) && (MAP_HEIGHT >= 24)) ? 1 : -1];
 
 /* 计算"老布局"各段的偏移与长度。返回 0 = 不合理。 */
-static int LegacySpan(int containerBytes, int mapW, int mapH,
+static int LegacySpan(int containerBytes, int containerCount, int mapW, int mapH,
                       size_t* preLen, size_t* oldContSz, size_t* oldMapSz,
                       size_t* oldExplSz, size_t* oldTailOff) {
     if (containerBytes != 32 && containerBytes != (int)sizeof(Container)) return 0;
+    if (containerCount <= 0 || containerCount > MAX_CONTAINERS) return 0;
     if (mapW <= 0 || mapH <= 0 || mapW > MAP_WIDTH || mapH > MAP_HEIGHT) return 0;
 
     size_t pre = offsetof(SaveBlob, cont);
-    size_t contSz = (size_t)containerBytes * MAX_CONTAINERS;
+    size_t contSz = (size_t)containerBytes * (size_t)containerCount;
     size_t mapSz  = (size_t)mapW * (size_t)mapH * sizeof(int);
     size_t explSz = mapSz;
 
@@ -964,10 +968,11 @@ static int LegacySpan(int containerBytes, int mapW, int mapH,
 }
 
 static int LoadLegacyBlob(const unsigned char* src, size_t size,
-                          int containerBytes, int mapW, int mapH, SaveBlob* out) {
+                          int containerBytes, int containerCount,
+                          int mapW, int mapH, SaveBlob* out) {
     size_t preLen = 0, oldContSz = 0, oldMapSz = 0, oldExplSz = 0, oldTailOff = 0;
     if (!src || !out || size < 16) return 0;
-    if (!LegacySpan(containerBytes, mapW, mapH,
+    if (!LegacySpan(containerBytes, containerCount, mapW, mapH,
                     &preLen, &oldContSz, &oldMapSz, &oldExplSz, &oldTailOff)) return 0;
 
     memset(out, 0, sizeof(*out));
@@ -978,7 +983,7 @@ static int LoadLegacyBlob(const unsigned char* src, size_t size,
     /* ---- ② cont[] 逐字段展开 ---- */
     {
         size_t off = preLen;
-        for (int i = 0; i < MAX_CONTAINERS; i++) {
+        for (int i = 0; i < containerCount && i < MAX_CONTAINERS; i++) {
             if (off + (size_t)containerBytes > size) break;
             const unsigned char* p = src + off;
             if (containerBytes == (int)sizeof(Container)) {
@@ -1051,9 +1056,11 @@ static int LoadLegacyBlob(const unsigned char* src, size_t size,
 }
 
 /* 迁移之后，"当前布局里有多少字节是有效的" */
-static size_t LegacyValidBytes(size_t oldSize, int containerBytes, int mapW, int mapH) {
+static size_t LegacyValidBytes(size_t oldSize, int containerBytes, int containerCount,
+                               int mapW, int mapH) {
     size_t oldTailOff = 0;
-    if (!LegacySpan(containerBytes, mapW, mapH, NULL, NULL, NULL, NULL, &oldTailOff)) return 0;
+    if (!LegacySpan(containerBytes, containerCount, mapW, mapH,
+                    NULL, NULL, NULL, NULL, &oldTailOff)) return 0;
     size_t newTailOff = offsetof(SaveBlob, flares);
     size_t tail = (oldSize > oldTailOff) ? (oldSize - oldTailOff) : 0;
     size_t v = newTailOff + tail;
@@ -1182,9 +1189,11 @@ int LoadSettings(void) {
             long rn = ReadWholeFile(usedPath, raw, sizeof(SaveBlob) + 4096);
             if (rn > 0) {
                 migrated = LoadLegacyBlob(raw, (size_t)rn, legacyCont,
+                                          LEGACY_CONTAINER_COUNT,
                                           LEGACY_MAP_W, LEGACY_MAP_H, &g_save);
                 if (migrated)
                     fileSize = LegacyValidBytes((size_t)rn, legacyCont,
+                                                LEGACY_CONTAINER_COUNT,
                                                 LEGACY_MAP_W, LEGACY_MAP_H);
             }
         }

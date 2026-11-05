@@ -2091,9 +2091,18 @@ void GenerateLevel(void) {
      * 修法：反着来 —— 先让箱子数**跟着保险丝需求涨**（保险丝 + 2 个余量给
      * 电池/药/投掷物），再夹到 MAX_CONTAINERS。这样曲线才真的生效。
      * ================================================================ */
-    if (baseContainers < fusesNeeded + 2) baseContainers = fusesNeeded + 2;
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**地图变大，箱子也要变多**
+     * ------------------------------------------------------------------
+     * 36x36 的可走面积是 24x24 的两倍多，而箱子数一直是"保险丝 + 2"，
+     * 于是搜刮密度被摊薄了一半 —— 走很久遇不到一个箱子。
+     *
+     * 这里在原来基础上按地图规模补一档：
+     *   24x24 时代 +2 够用；现在按面积比给 +4（并夹到 MAX_CONTAINERS）。
+     * ================================================================ */
+    if (baseContainers < fusesNeeded + 4) baseContainers = fusesNeeded + 4;
     if (baseContainers > MAX_CONTAINERS) baseContainers = MAX_CONTAINERS;
-    if (baseContainers < 3) baseContainers = 3;
+    if (baseContainers < 5) baseContainers = 5;
 
     int contCap = (int)(ContainerTargetCount(levelMod, baseContainers) * DailyCrateCountMul() + 0.5f);
     if (contCap < fusesNeeded) contCap = fusesNeeded;
@@ -2132,7 +2141,23 @@ void GenerateLevel(void) {
        （用户实测 hideSpotCount=0）。 */
     hideSpotCount = 0;
     {
-        int want = 2 + (rand() % 2);          /* v3.3：3~5 → 2~3，藏身点少一点 */
+        /* ==================================================================
+         * 2026-11-06（用户要求）：藏身点"稍微增加一点，随层数逐渐减少"
+         * ------------------------------------------------------------------
+         * 原来是 2~3 个、与层数无关。地图 36x36 之后一层要跑更久，
+         * 2~3 个藏身点在长图里几乎遇不到。
+         *
+         * 现在：**第 1 层最多 6 个，越深越少，最低 3 个**。
+         * 递减让后期的紧张感回升 —— 前期给你工具熟悉，后期收回。
+         * 上限 6 等于 HIDESPOT_MAX，不触碰存档布局。
+         * ================================================================ */
+        int want = 6 - (currentLevel - 1) / 5;
+        if (want > HIDESPOT_MAX) want = HIDESPOT_MAX;
+        if (want < 3) want = 3;
+        /* 抖 1 个，避免每层数量完全可预测 */
+        want += (rand() % 2) ? 0 : -1;
+        if (want < 3) want = 3;
+        if (want > HIDESPOT_MAX) want = HIDESPOT_MAX;
 
         /* ---- 第一轮：严格 ---- */
         for (int tries = 0; tries < 300 && hideSpotCount < want && emptyCount > 0; tries++) {
@@ -2609,7 +2634,14 @@ void UpdateExplored(void) {
 }
 int BatteryMax(void) {
     /* v2.2：SAVER 的 "cap -5" 代价现在真的生效 */
-    int m = (int)((100 + SkillBatteryAdd() + RunBatteryCapDelta() + 30*relicOwned[3]) * DailyBatteryCapMul() * BenchBatteryCapMul());
+    /* ==================================================================
+     * 2026-11-06（用户要求）：基础上限 100 -> 150
+     * ------------------------------------------------------------------
+     * 地图从 24x24 扩到 36x36 之后，一层要走的距离大约翻了一倍，
+     * 原来的 100 电量撑不到图另一头 —— 手电变成"前一半能用"。
+     * 同时保留所有加成/惩罚链（技能、遗物、每日、改造树）不变。
+     * ================================================================ */
+    int m = (int)((150 + SkillBatteryAdd() + RunBatteryCapDelta() + 30*relicOwned[3]) * DailyBatteryCapMul() * BenchBatteryCapMul());
     if (m < 30) m = 30;
     return m;
 }
@@ -4290,7 +4322,10 @@ void Update(float dt) {
             int wasDeadPart = (battery <= 0.5f);   /* v6：早松手也判断是否没电 */
             float part = crankTimer / full;
             if (part > 1.0f) part = 1.0f;
-            battery += 32.0f * part;
+            /* 2026-11-06（用户要求）：每次摇电的比例提高一点。
+               上限涨到 150 之后，32 点显得太抠 —— 摇满一次只补 1/5。
+               38 仍然需要摇两次多才能充满，节奏没变。 */
+            battery += 38.0f * part;
             if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
             crankTimeTotal += (int)(3.0f * part);
             crankSecondsTotal += 3.0f * part;

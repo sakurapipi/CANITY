@@ -267,8 +267,16 @@ float SkillStunAdd(void) {
    每个普通节点 3 级，每级同时给「机制」和一项「基础属性」，
    这样属性上限和原来 3 级基础升级完全一致，而玩家只需要看一套界面。 */
 
-int SkillBatteryAdd(void) {                 /* SIPHON    +20/级 */
-    return 20 * skillRank[SK_BATTERY];
+/* ==================================================================
+ * 2026-11-06（用户要求"技能树的数值也做点调整"）
+ * ------------------------------------------------------------------
+ * 前提下限从 100 提到 150，所以"每级 +20"的相对价值被稀释了
+ * （3 级从 +60% 掉到 +40%）。
+ * → 每级 +20 改成 +25：满级 +75/150 = +50%，和原来 +60/100 的
+ *   手感接近，但不会让上限虚高。
+ * ================================================================ */
+int SkillBatteryAdd(void) {                 /* SIPHON    +25/级（原 +20） */
+    return 25 * skillRank[SK_BATTERY];
 }
 float SkillSpeedAdd(void) {                 /* LIGHT STEP +6%/级 */
     extern float sanity;
@@ -286,8 +294,9 @@ int SkillSpareCellMaxed(void) {
     return (skillRank[SK_BATTERY] >= 3) ? 1 : 0;
 }
 float SkillCrankBonus(void) {
-    /* 摇电一次给多少电量：基础 32，满级 55 */
-    return SkillSpareCellMaxed() ? 55.0f : 32.0f;
+    /* 摇电一次给多少电量：基础 38（2026-11-06：32 -> 38，上限涨到 150 后
+       32 只补 1/5，太抠），满级 62。 */
+    return SkillSpareCellMaxed() ? 62.0f : 38.0f;
 }
 float SkillCrankTimeMul(void) {
     /* 摇电所需时间倍率：满级 -30% */

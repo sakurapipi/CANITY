@@ -18,7 +18,7 @@
    —— 参见 LoadSettings 里的迁移逻辑。 */
 /* v28: 末尾追加 Dynamic Res + 通关记录；v25/v26/v27 都按前缀迁移。
    v27 及更早的存档没有这两个字段，读档时按文件长度取默认值。 */
-#define SAVE_VERSION 31   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26/v27 */
+#define SAVE_VERSION 32   /* v8: 末尾追加音乐音量；继续兼容 v24/v25/v26/v27 */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
