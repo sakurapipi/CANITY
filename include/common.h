@@ -183,7 +183,9 @@ extern int bestEndlessScore;
    体力一空就是必死 —— 用户反馈「怪物强度过高」。
    1.90 低于走路，慢走能拉开但每 10 秒只赚 1 格，压力仍在。 */
 #define MONSTER_SPEED_BASE 1.90f    /* 寻声怪基础速度 */
-#define LIGHTBEAST_SPEED_BASE 1.50f /* 光敏怪基础速度 */
+/* 2026-11-06（用户要求）：追光怪移速 x1.2 → 1.50 -> 1.80。
+   上限仍受 MONSTER_SPEED_FINAL_MAX(2.10) 约束，不会超过玩家冲刺 3.0。 */
+#define LIGHTBEAST_SPEED_BASE 1.80f
 /* 2026-11-06（A-4）：每层 +0.03 -> +0.04。
    地图边长 ×1.5，追捕需要更早形成压迫；
    FINAL_MAX 仍是 2.10（不许超过玩家冲刺 3.0），

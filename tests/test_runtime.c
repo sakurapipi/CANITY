@@ -1004,9 +1004,33 @@ static void test_wrench(void) {
     int before=knockCountRun;WrenchStartSwing(1.0f);
     for(int i=0;i<12;++i)WrenchTick(0.04f);
     CHECK(knockCountRun==before+2,"a wrench swing affects both hunters once");
+
+    /* ==================================================================
+     * 2026-11-06：**扳手改成纯冷却制**（用户要求：8 秒，每级 -1，下限 5）
+     * ------------------------------------------------------------------
+     * 旧契约是"每层 N 次"，所以这条用例原来测的是"连挥两次都能命中"。
+     * 新契约下连挥必须被冷却挡住 —— 这里改成同时验证两件事：
+     *   ① 冷却期内再挥**不生效**
+     *   ② 冷却走完之后能再挥
+     * ================================================================ */
     monster.x=lightBeast.x=posX+0.4f;monster.y=lightBeast.y=posY;
     WrenchStartSwing(1.0f);for(int i=0;i<12;++i)WrenchTick(0.04f);
-    CHECK(knockCountRun==before+4,"later swings reset their hit masks");
+    CHECK(knockCountRun==before+2,
+          "a second swing inside the cooldown must not land (wrench is cooldown-based now)");
+
+    /* 把冷却清零。
+       不用 Update(dt) 去"走完"时间 —— 它会把整局推进 8 秒
+       （怪物移动、事件到期、甚至层结束），实测那样第二次挥击仍然不结算。
+       这里直接把计时器清零，隔离出"冷却结束后能不能再挥"这一件事。 */
+    {
+        extern float wrenchCd;
+        CHECK(wrenchCd > 0.0f, "starting a swing must arm the cooldown");
+        wrenchCd = 0.0f;
+    }
+    monster.x=lightBeast.x=posX+0.4f;monster.y=lightBeast.y=posY;
+    WrenchStartSwing(1.0f);for(int i=0;i<12;++i)WrenchTick(0.04f);
+    CHECK(knockCountRun==before+4,
+          "after the cooldown expires a new swing lands again");
     CHECK(monster.active && lightBeast.active,"wrench never kills a monster");
     /* ==================================================================
      * 扳手必须也能击退第 2、3 只听声鬼

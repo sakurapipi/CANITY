@@ -824,8 +824,12 @@ void UpdateParasite(float dt) {
 static void MonsterWanderFor(Monster* m) {
     int cx = (int)m->x, cy = (int)m->y;
     for (int t = 0; t < 24; t++) {
-        int nx = cx + (rand() % 9) - 4;
-        int ny = cy + (rand() % 9) - 4;
+        /* 2026-11-06（用户要求）：**巡逻半径增加**
+           原来只在自己周围 ±4 格挑点，36x36 的地图上等于原地打转，
+           玩家在另一头时它永远碰不到。
+           现在 ±7：覆盖面积从 81 格涨到 225 格（约 2.8 倍）。 */
+        int nx = cx + (rand() % 15) - 7;
+        int ny = cy + (rand() % 15) - 7;
         if (nx < 1 || ny < 1 || nx >= MAP_WIDTH - 1 || ny >= MAP_HEIGHT - 1) continue;
         if (worldMap[ny][nx]) continue;
         if (MonPathFor(m, cx, cy, nx, ny) > 0) {
