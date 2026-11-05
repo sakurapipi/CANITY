@@ -701,8 +701,14 @@ static void test_save_container_contract(void) {
               "steam_zone must not keep a private envelope typedef");
         check(contains(sz, "SAVE_ENVELOPE_MAGIC"),
               "steam_zone must recognize the envelope the save partition writes");
-        check(contains(sv, "BuildSaveFile(") && contains(sv, "ExtractSaveFile("),
+        /* v2.4-alpha R10：BuildSaveFile 已并入 SaveFileBytes（唯一序列化出口），
+           两处业务写盘（SaveSettingsOnly / SaveGame）都走它。 */
+        check(contains(sv, "SaveFileBytes(") && contains(sv, "ExtractSaveFile("),
               "save.c must pack/unpack through the container");
+        check(contains(sv, "SaveCarryCapture("),
+              "save.c must capture the ordered chunk directory for unknown-chunk preservation");
+        check(contains(sv, "SAVE_ERR_DUP_CHUNK"),
+              "duplicate chunk ids must be rejected, not silently dropped");
         check(contains(sv, "SC_LEGACY29"), "save.c must write the legacy chunk");
         check(contains(bk, "SaveBackendWrite") && contains(bk, "SaveBackendSyncAll"),
               "save backend must own the file writes and cloud sync");

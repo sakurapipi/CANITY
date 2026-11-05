@@ -172,35 +172,170 @@ static long ReadWholeFile(const char* path, void* buf, size_t cap) {
  * ================================================================ */
 #define SAVE_BLOB_MAX   ((int)sizeof(SaveBlob) + 4096)
 
-/* 打包成功返回总字节数（信封 + payload），失败返回 -1。
-   out 由调用方提供，cap 至少 sizeof(SaveEnvelope) + sizeof(SaveBlob) + 128。 */
-static int BuildSaveFile(const SaveBlob* blob, void* out, int cap) {
-    if (!blob || !out) return -1;
+/* ==================================================================
+ * 2026-11-06（v2.4-alpha R9-R11）：**未知块原样保留**
+ * ------------------------------------------------------------------
+ * 旧行为：写盘只写 SC_LEGACY29，读盘只取它。
+ * 于是任何新块（将来拆出来的 SC_SETTINGS / SC_WORLD）只要被旧版本
+ * 读一次再存一次就**没了** —— 而"块表支持未知块"只是容器层的能力，
+ * 不等于游戏完整读写流程会保留它。这是两件事。
+ *
+ * 现在的契约：
+ *   读 → 把**完整的有序块目录**记下来（未知块数据独立拷贝）
+ *   写 → 按原顺序重建；SC_LEGACY29 原位替换；未知块原样 memcpy
+ *   首次运行 / 裸档升级 → 没有目录，只写一块
+ *
+ * 为什么存"全部块"而不是"只存未知块"：
+ *   只存未知块会丢掉 SC_LEGACY29 在表里的位置。目前没有消费者依赖
+ *   顺序，但**没证明过**——所以按原位替换做，代价只是多记一条表项。
+ *
+ * 重复 ID：默认 REJECT_AND_KEEP_ORIGINAL —— 不写盘、保留原文件、
+ *   生成 .dup-id-<hex>.bak、报明确错误。在处理玩家存档时静默挑一份
+ *   等于替玩家做决定。
+ * ================================================================ */
+#define SAVE_CARRY_MAX 64          /* 对齐 SaveContainerPack 的 n<=64 */
 
-    SaveChunkDesc d;
-    d.id     = SC_LEGACY29;
-    d.schema = 1;
-    d.size   = (unsigned int)sizeof(SaveBlob);
+typedef struct {
+    unsigned short id;
+    unsigned short schema;
+    unsigned int   size;
+    unsigned char* data;           /* SC_LEGACY29 这一项为 NULL（写盘时替换） */
+} SaveCarryChunk;
 
-    const void* body[1];
-    body[0] = (const void*)blob;
+static SaveCarryChunk s_carry[SAVE_CARRY_MAX];
+static int            s_carryCount = 0;
+static int            s_saveReadOnly = 0;   /* 读档发现结构异常 → 拒绝改写 */
 
-    unsigned char* p = (unsigned char*)out;
-    int payCap = cap - (int)sizeof(SaveEnvelope);
-    if (payCap <= 0) return -1;
+static void SaveCarryClear(void) {
+    for (int i = 0; i < s_carryCount; i++) {
+        if (s_carry[i].data) { free(s_carry[i].data); s_carry[i].data = NULL; }
+    }
+    s_carryCount = 0;
+}
 
-    int pay = SaveContainerPack(&d, body, 1, p + sizeof(SaveEnvelope), payCap, NULL);
-    if (pay <= 0) return -1;
+/* 未知块原始字节总量（容量预算用） */
+static int SaveCarryBytes(void) {
+    int n = 0;
+    for (int i = 0; i < s_carryCount; i++) {
+        if (s_carry[i].data) n += (int)s_carry[i].size;
+    }
+    return n;
+}
+
+/* 从 payload 捕获完整有序目录。返回 1 = 成功，<0 = SAVE_ERR_*。
+   未知块的数据会**独立拷贝**一份 —— 调用方的 raw 缓冲马上就会被释放。 */
+static int SaveCarryCapture(const void* payload, int payLen) {
+    SaveCarryClear();
+    int cnt = SaveContainerCount(payload, payLen);
+    if (cnt < 0) return SAVE_ERR_PAYLOAD;
+
+    /* 重复 ID 检查（包括两块 SC_LEGACY29） */
+    for (int i = 0; i < cnt; i++) {
+        SaveChunkDesc di;
+        if (!SaveContainerAt(payload, payLen, i, &di, NULL)) return SAVE_ERR_PAYLOAD;
+        for (int j = 0; j < i; j++) {
+            SaveChunkDesc dj;
+            if (!SaveContainerAt(payload, payLen, j, &dj, NULL)) return SAVE_ERR_PAYLOAD;
+            if (di.id == dj.id) return SAVE_ERR_DUP_CHUNK;
+        }
+    }
+    if (cnt > SAVE_CARRY_MAX) return SAVE_ERR_CAPACITY;
+
+    for (int i = 0; i < cnt; i++) {
+        SaveChunkDesc d;
+        const void* body = NULL;
+        if (!SaveContainerAt(payload, payLen, i, &d, &body)) { SaveCarryClear(); return SAVE_ERR_PAYLOAD; }
+
+        s_carry[i].id = d.id;
+        s_carry[i].schema = (unsigned short)d.schema;
+        s_carry[i].size = d.size;
+        s_carry[i].data = NULL;
+
+        if (d.id == SC_LEGACY29) continue;     /* 写盘时用新的 SaveBlob 替换 */
+
+        if (d.size > 0) {
+            if (!body) { SaveCarryClear(); return SAVE_ERR_PAYLOAD; }
+            s_carry[i].data = (unsigned char*)malloc((size_t)d.size);
+            if (!s_carry[i].data) { SaveCarryClear(); return SAVE_ERR_CAPACITY; }
+            memcpy(s_carry[i].data, body, (size_t)d.size);
+        }
+    }
+    s_carryCount = cnt;
+    return 1;
+}
+
+/* ==================================================================
+ * 打包：**唯一的 SaveBlob → 文件字节出口**
+ * ------------------------------------------------------------------
+ * SaveSettingsOnly 与 SaveGame 保留各自的业务入口（它们改的字段不同），
+ * 但序列化/容量计算/封信封只有这一份实现。
+ * 原来两处各有一份 static 缓冲 sizeof(SaveBlob)+256 ——
+ * 加未知块之后必然不够，而且改一处漏一处就是"设置能存、对局不能存"。
+ *
+ * 成功返回总字节数，*out 由 malloc 分配（调用方 free）。
+ * 失败返回 SAVE_ERR_*（负数）。
+ * ================================================================ */
+static int SaveFileBytes(const SaveBlob* blob, unsigned char** out) {
+    if (!blob || !out) return SAVE_ERR_CAPACITY;
+    *out = NULL;
+    if (s_saveReadOnly) return SAVE_ERR_DUP_CHUNK;   /* 结构异常，拒绝改写 */
+
+    int nChunks = s_carryCount + 1;                  /* +1 = SC_LEGACY29 */
+    if (nChunks > SAVE_CARRY_MAX) return SAVE_ERR_CAPACITY;
+
+    SaveChunkDesc desc[SAVE_CARRY_MAX + 1];
+    const void*   body[SAVE_CARRY_MAX + 1];
+
+    int n = 0;
+    int hadLegacy = 0;
+    for (int i = 0; i < s_carryCount; i++) {
+        desc[n].id     = s_carry[i].id;
+        desc[n].schema = s_carry[i].schema;
+        if (s_carry[i].id == SC_LEGACY29) {
+            /* **原位替换**：位置不变，内容换成当前 SaveBlob */
+            desc[n].size = (unsigned int)sizeof(SaveBlob);
+            body[n] = (const void*)blob;
+            hadLegacy = 1;
+        } else {
+            desc[n].size = s_carry[i].size;
+            body[n] = s_carry[i].data;
+        }
+        n++;
+    }
+    if (!hadLegacy) {
+        /* 首次运行 / 裸档升级：没有原目录，把已知块追加到末尾 */
+        desc[n].id = SC_LEGACY29;
+        desc[n].schema = 1;
+        desc[n].size = (unsigned int)sizeof(SaveBlob);
+        body[n] = (const void*)blob;
+        n++;
+    }
+
+    /* 容量预算：信封 + 块表 + 各块数据 + 安全余量 */
+    long need = (long)sizeof(SaveEnvelope) + (long)SAVE_PAYLOAD_HEAD_SIZE
+              + (long)n * (long)sizeof(SaveChunkDesc)
+              + (long)sizeof(SaveBlob) + (long)SaveCarryBytes() + 128L;
+    if (need <= 0 || need > 64L * 1024L * 1024L) return SAVE_ERR_CAPACITY;
+
+    unsigned char* buf = (unsigned char*)malloc((size_t)need);
+    if (!buf) return SAVE_ERR_CAPACITY;
+
+    int pay = SaveContainerPack(desc, body, n, buf + sizeof(SaveEnvelope),
+                                (int)(need - (long)sizeof(SaveEnvelope)), NULL);
+    if (pay <= 0) { free(buf); return SAVE_ERR_CAPACITY; }
 
     SaveEnvelope h;
-    SaveEnvelopeSeal(&h, p + sizeof(SaveEnvelope), pay, (unsigned int)time(NULL));
-    memcpy(p, &h, sizeof(h));
+    SaveEnvelopeSeal(&h, buf + sizeof(SaveEnvelope), pay, (unsigned int)time(NULL));
+    memcpy(buf, &h, sizeof(h));
+
+    *out = buf;
     return (int)sizeof(SaveEnvelope) + pay;
 }
 
 /* 从文件字节里取出 SaveBlob。
    返回 1 = 成功（*isEnvelope = 1 表示是新格式），0 = 不是可识别的存档。
-   兼容：没有信封的裸档（SAVE_MAGIC）也认，交给老路径继续处理。 */
+   兼容：没有信封的裸档（SAVE_MAGIC）也认，交给老路径继续处理。
+   失败时把具体原因写进 g_saveError。 */
 static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelope) {
     if (isEnvelope) *isEnvelope = 0;
     if (!buf || n <= 0 || !out) return 0;
@@ -213,38 +348,46 @@ static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelo
         memcpy(&h, p, sizeof(h));
         if (h.magic == SAVE_ENVELOPE_MAGIC) {
             int payLen = (int)(n - (long)sizeof(SaveEnvelope));
-            if (!SaveEnvelopeValid(&h, p + sizeof(h), payLen)) return 0;   /* 校验和不对 = 损坏 */
-
-            SaveChunkDesc d;
-            const void* b = NULL;
-            if (!SaveContainerAt(p + sizeof(h), payLen, 0, &d, &b)) return 0;
-            if (!SaveContainerFind(p + sizeof(h), payLen, SC_LEGACY29, &b, NULL)) return 0;
-
-            int cnt = SaveContainerCount(p + sizeof(h), payLen);
-            (void)cnt;
-            for (int i = 0; i < 16; i++) {
-                const void* b2 = NULL;
-                int sz = 0;
-                if (!SaveContainerFind(p + sizeof(h), payLen, SC_LEGACY29, &b2, &sz)) break;
-                if (!b2 || sz <= 0) return 0;
-                memset(out, 0, sizeof(*out));
-                int copy = (sz < (int)sizeof(*out)) ? sz : (int)sizeof(*out);
-                memcpy(out, b2, (size_t)copy);
-                if (isEnvelope) *isEnvelope = 1;
-                return 1;
+            if (!SaveEnvelopeValid(&h, p + sizeof(h), payLen)) {
+                g_saveError = SAVE_ERR_PAYLOAD;
+                return 0;                                   /* 校验和不对 = 损坏 */
             }
-            return 0;
+
+            /* 先捕获完整目录（含未知块），再取已知块 */
+            int cap = SaveCarryCapture(p + sizeof(h), payLen);
+            if (cap < 0) {
+                SaveCarryClear();
+                s_saveReadOnly = 1;                          /* 拒绝后续改写 */
+                g_saveError = cap;
+                return 0;
+            }
+
+            const void* b = NULL;
+            int sz = 0;
+            if (!SaveContainerFind(p + sizeof(h), payLen, SC_LEGACY29, &b, &sz) || !b || sz <= 0) {
+                SaveCarryClear();
+                g_saveError = SAVE_ERR_PAYLOAD;
+                return 0;
+            }
+            memset(out, 0, sizeof(*out));
+            int copy = (sz < (int)sizeof(*out)) ? sz : (int)sizeof(*out);
+            memcpy(out, b, (size_t)copy);
+            if (isEnvelope) *isEnvelope = 1;
+            g_saveError = 0;
+            return 1;
         }
     }
 
-    /* ---- 旧格式：裸 SaveBlob ---- */
+    /* ---- 旧格式：裸 SaveBlob（没有块目录，写盘时按"首次运行"处理） ---- */
     if (n >= (long)sizeof(unsigned int) + (long)sizeof(int)) {
         unsigned int magic = 0;
         memcpy(&magic, p, sizeof(magic));
         if (magic == SAVE_MAGIC) {
+            SaveCarryClear();
             int copy = ((int)n < (int)sizeof(*out)) ? (int)n : (int)sizeof(*out);
             memset(out, 0, sizeof(*out));
             memcpy(out, p, (size_t)copy);
+            g_saveError = 0;
             return 1;
         }
     }
@@ -258,7 +401,7 @@ static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelo
      -1  = 读不到 / 认不出 */
 static long ReadSaveFile(const char* path, SaveBlob* out) {
     if (!path || !out) return -1;
-    size_t cap = sizeof(SaveEnvelope) + sizeof(SaveBlob) + 4096;
+    size_t cap = sizeof(SaveEnvelope) + sizeof(SaveBlob) + 65536;
     unsigned char* raw = (unsigned char*)malloc(cap);
     if (!raw) return -1;
 
@@ -274,6 +417,20 @@ static long ReadSaveFile(const char* path, SaveBlob* out) {
     }
     free(raw);
     return ret;
+}
+
+/* ==================================================================
+ * 2026-11-06（R12）：测试钩子 —— 原样转发到真实的 static 实现。
+ * 存在意义：让 test_runtime 能用**真正的**捕获/重建逻辑做往返测试，
+ * 而不是另写一份测试专用的序列化（那样测不到实际代码）。
+ * ================================================================ */
+int SaveTestSerialize(const SaveBlob* blob, unsigned char** out) {
+    return SaveFileBytes(blob, out);
+}
+int SaveTestDeserialize(const void* buf, long n, SaveBlob* out) {
+    int isEnv = 0;
+    int ok = ExtractSaveFile(buf, n, out, &isEnv);
+    return ok ? (isEnv ? 2 : 1) : 0;
 }
 
 /* 显示 / 音频 / 键位这些设置项是所有存档共用的，
@@ -319,9 +476,12 @@ static void SaveSettingsOnly(void) {
     char p[MAX_PATH];
     for (int i = 0; i < SAVE_CAND_COUNT; i++) {
         SavePathCand(i, p, sizeof(p));
-        static unsigned char wbuf[sizeof(SaveBlob) + 256];
-        int wn = BuildSaveFile(&tmp, wbuf, (int)sizeof(wbuf));
-        if (wn > 0 && WriteWholeFile(p, wbuf, (size_t)wn) == 0) {
+        /* v2.4-alpha R10：走唯一序列化出口，容量按未知块动态算 */
+        unsigned char* wbuf = NULL;
+        int wn = SaveFileBytes(&tmp, &wbuf);
+        int wok = (wn > 0) && WriteWholeFile(p, wbuf, (size_t)wn) == 0;
+        if (wbuf) { free(wbuf); wbuf = NULL; }
+        if (wok) {
             g_save = tmp;
             g_saveState = 1; SaveBackendUpload(p);
             g_saveError = 0;
@@ -553,9 +713,18 @@ void SaveGame(void) {
     int firstErr = 0;
     for (int i = 0; i < SAVE_CAND_COUNT; i++) {
         SavePathCand(i, p, sizeof(p));
-        static unsigned char wbuf2[sizeof(SaveBlob) + 256];
-        int wn2 = BuildSaveFile(&g_save, wbuf2, (int)sizeof(wbuf2));
-        int err = (wn2 > 0) ? WriteWholeFile(p, wbuf2, (size_t)wn2) : 87;   /* 87 = ERROR_INVALID_PARAMETER */
+        /* v2.4-alpha R10：同一个出口；失败返回 SAVE_ERR_*（负数），
+           这里映射成一个非 0 值给下面的错误累积逻辑。 */
+        unsigned char* wbuf2 = NULL;
+        int wn2 = SaveFileBytes(&g_save, &wbuf2);
+        int err;
+        if (wn2 > 0) {
+            err = WriteWholeFile(p, wbuf2, (size_t)wn2);
+        } else {
+            err = SAVE_ERR_CAPACITY;
+            g_saveError = wn2;
+        }
+        if (wbuf2) { free(wbuf2); wbuf2 = NULL; }
         if (err == 0) {
             g_saveState = 1; SaveBackendUpload(p);
             g_saveError = 0;

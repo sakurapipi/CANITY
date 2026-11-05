@@ -435,6 +435,142 @@ static void test_floor_resets_hunters(void) {
  * 用 SteamZoneCloudDecide（纯函数）测，不需要 Steam 客户端。
  * 注意：这**不等于** Steam 真机通过 —— 传输层仍是 UNKNOWN。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4-alpha R12）：**未知块经过真实读写流程仍然保留**
+ * ------------------------------------------------------------------
+ * 这是 v2.4-alpha 的核心验收（S3 / G02）。
+ * 走的是 save.c 里**真实的**捕获 → 重建逻辑（SaveTestSerialize /
+ * SaveTestDeserialize 只是把两个 static 原样导出），
+ * 不是测试专用的另一套序列化。
+ *
+ * 步骤：
+ *   ① 手搓一份合法 CSAV：SC_LEGACY29 + 未知块 0x7777
+ *   ② 反序列化（应当捕获目录）
+ *   ③ 改一个已知字段（lang）
+ *   ④ 重新序列化
+ *   ⑤ 解析新字节：0x7777 必须还在，且**逐字节相同**
+ *   ⑥ 已知块的 lang 必须是新值
+ * ================================================================== */
+static void test_save_unknown_chunk_roundtrip(void) {
+    extern int SaveTestSerialize(const SaveBlob*, unsigned char**);
+    extern int SaveTestDeserialize(const void*, long, SaveBlob*);
+
+    /* ---- ① 手搓：已知块 + 未知块 ---- */
+    static SaveBlob blob;
+    memset(&blob, 0, sizeof(blob));
+    blob.magic = SAVE_MAGIC;
+    blob.version = SAVE_VERSION;
+    blob.lang = 0;
+
+    static const unsigned char unknown[12] = {
+        0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
+    };
+
+    static unsigned char buf[16384];   /* SaveBlob 约 6.5 KB，留足 */
+    SaveChunkDesc d[2];
+    const void* body[2];
+    d[0].id = SC_LEGACY29; d[0].schema = 1; d[0].size = (unsigned)sizeof(blob);
+    body[0] = &blob;
+    d[1].id = 0x7777;      d[1].schema = 9; d[1].size = (unsigned)sizeof(unknown);
+    body[1] = unknown;
+
+    int pay = SaveContainerPack(d, body, 2, buf + sizeof(SaveEnvelope),
+                                (int)(sizeof(buf) - sizeof(SaveEnvelope)), NULL);
+    CHECK(pay > 0, "test fixture: two-chunk payload must pack");
+    SaveEnvelope h;
+    SaveEnvelopeSeal(&h, buf + sizeof(SaveEnvelope), pay, 1111u);
+    memcpy(buf, &h, sizeof(h));
+    int total = (int)sizeof(SaveEnvelope) + pay;
+
+    /* ---- ② 反序列化 ---- */
+    static SaveBlob loaded;
+    CHECK(SaveTestDeserialize(buf, total, &loaded) != 0,
+          "a valid two-chunk CSAV must load");
+    CHECK(loaded.lang == 0, "test fixture: lang starts at 0");
+
+    /* ---- ③ 改一个已知字段 ---- */
+    loaded.lang = 7;
+
+    /* ---- ④ 重新序列化 ---- */
+    unsigned char* out = NULL;
+    int outLen = SaveTestSerialize(&loaded, &out);
+    CHECK(outLen > 0 && out != NULL, "re-serializing a loaded save must succeed");
+
+    if (outLen > 0 && out) {
+        /* ---- ⑤ 未知块必须逐字节保留 ---- */
+        const void* got = NULL;
+        int gotLen = 0;
+        CHECK(SaveContainerFind(out + sizeof(SaveEnvelope), outLen - (int)sizeof(SaveEnvelope),
+                                0x7777, &got, &gotLen) == 1,
+              "unknown chunk 0x7777 must survive a load-modify-save cycle");
+        CHECK(gotLen == (int)sizeof(unknown),
+              "unknown chunk must keep its size");
+        CHECK(got && memcmp(got, unknown, sizeof(unknown)) == 0,
+              "unknown chunk must keep its bytes exactly");
+
+        /* ---- ⑥ 已知块是新内容 ---- */
+        SaveEnvelope nh;
+        memcpy(&nh, out, sizeof(nh));
+        CHECK(SaveEnvelopeValid(&nh, out + sizeof(SaveEnvelope),
+                                outLen - (int)sizeof(SaveEnvelope)) == 1,
+              "re-serialized envelope must carry a valid checksum");
+
+        const void* kb = NULL;
+        int klen = 0;
+        CHECK(SaveContainerFind(out + sizeof(SaveEnvelope), outLen - (int)sizeof(SaveEnvelope),
+                                SC_LEGACY29, &kb, &klen) == 1,
+              "known chunk must still be present");
+        if (kb && klen >= (int)sizeof(SaveBlob)) {
+            SaveBlob check;
+            memcpy(&check, kb, sizeof(check));
+            CHECK(check.lang == 7, "the modified field must be persisted in the known chunk");
+        }
+
+        /* 块顺序：已知块在前、未知块在后（原位替换） */
+        {
+            SaveChunkDesc first;
+            CHECK(SaveContainerAt(out + sizeof(SaveEnvelope),
+                                  outLen - (int)sizeof(SaveEnvelope), 0, &first, NULL) == 1,
+                  "chunk 0 must be readable");
+            CHECK(first.id == SC_LEGACY29,
+                  "chunk order must be preserved (known chunk stays in place)");
+        }
+
+        free(out);
+    }
+
+    /* ---- ⑦ 重复 ID 必须被拒绝，而不是静默挑一份 ---- */
+    {
+        unsigned char dup[4096];
+        SaveChunkDesc dd[2];
+        const void* db[2];
+        dd[0].id = 0x7777; dd[0].schema = 1; dd[0].size = 4; db[0] = unknown;
+        dd[1].id = 0x7777; dd[1].schema = 1; dd[1].size = 4; db[1] = unknown + 4;
+        int dp = SaveContainerPack(dd, db, 2, dup + sizeof(SaveEnvelope),
+                                   (int)(sizeof(dup) - sizeof(SaveEnvelope)), NULL);
+        CHECK(dp > 0, "test fixture: duplicate-id payload must pack");
+        SaveEnvelope dh;
+        SaveEnvelopeSeal(&dh, dup + sizeof(SaveEnvelope), dp, 2222u);
+        memcpy(dup, &dh, sizeof(dh));
+
+        static SaveBlob dloaded;
+        CHECK(SaveTestDeserialize(dup, (int)sizeof(SaveEnvelope) + dp, &dloaded) == 0,
+              "a save with duplicate chunk ids must be rejected");
+    }
+
+    /* 收尾：让后续用例从干净状态开始（carry 已被置为只读） */
+    {
+        static SaveBlob clean;
+        memset(&clean, 0, sizeof(clean));
+        clean.magic = SAVE_MAGIC;
+        clean.version = SAVE_VERSION;
+        unsigned char* cout = NULL;
+        int cl = SaveTestSerialize(&clean, &cout);
+        if (cout) free(cout);
+        (void)cl;
+    }
+}
+
 static void test_cloud_decide_length(void) {
     extern int SteamZoneCloudDecide(const void*, int, const void*, int, int*);
 
@@ -586,6 +722,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

@@ -32,6 +32,15 @@ extern int  g_saveError;
 extern int  g_saveSlot;      /* v2.0：当前存档槽 0..2 */
 extern char g_savePath[MAX_PATH];
 
+/* ==================================================================
+ * 2026-11-06（v2.4-alpha R9）：**存档序列化错误码**
+ * 负数，和 SaveBackendWrite 返回的 Win32 正数错误码区分开。
+ * ================================================================ */
+#define SAVE_ERR_CAPACITY   (-1)   /* 容量不足（含块数超限） */
+#define SAVE_ERR_DUP_CHUNK  (-2)   /* 块表出现重复 ID → 拒绝改写 */
+#define SAVE_ERR_PAYLOAD    (-3)   /* 信封/块表/校验和损坏 */
+
+
 /* ---- 存档分区后端（src/save/save_backend.c）----
    全工程**唯一**允许碰 canity*.sav 的地方。 */
 int   SaveBackendWrite(const char* path, const void* data, size_t n); /* 0 = 成功 */
@@ -193,6 +202,20 @@ typedef struct {
        所以新字段只能追加在末尾，读档时单独调用 RunUpgLoadExtra()。 */
     int runUpgMinimapSave;
 } SaveBlob;
+
+/* ==================================================================
+ * 2026-11-06（v2.4-alpha R12）：**仅测试用的序列化钩子**
+ * ------------------------------------------------------------------
+ * ExtSaveFile / SaveFileBytes 在 save.c 里是 static。
+ * 要验证「未知块经过真实读写流程仍然保留」，必须能针对内存字节
+ * 走一遍真实的捕获 → 重建逻辑，而不是再造一套测试专用的序列化。
+ * 所以只把这两个 static 原样导出，行为完全一致。
+ *
+ * 生产代码不应调用它们 —— 正式写盘走 SaveGame / SaveSettingsOnly。
+ * ================================================================ */
+int SaveTestSerialize(const SaveBlob* blob, unsigned char** out);   /* >0 长度，<0 SAVE_ERR_* */
+int SaveTestDeserialize(const void* buf, long n, SaveBlob* out);    /* 1 成功，0 失败（看 g_saveError） */
+
 
 /* 写当前进度（游戏中 / 退出时） */
 void SaveGame(void);
