@@ -412,6 +412,27 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
                 (unsigned char)AcousticFor(t->tiles[y][x], t->featureId);
         }
 
+    /* ==================================================================
+     * 2026-11-06：**给外墙环打标记**，渲染层据此画房间专属腰线。
+     * 只写 flags 与 themeId，**不写 roomId** ——
+     * roomId 一旦写到墙上，"房间地面格数 / 可达性"的统计就会把墙算进去。
+     * ================================================================ */
+    {
+        int fx0 = fx + ROOM_BORDER - 1, fy0 = fy + ROOM_BORDER - 1;
+        int fx1 = fx + ROOM_BORDER + t->w, fy1 = fy + ROOM_BORDER + t->h;
+        for (int y = fy0; y <= fy1; y++) {
+            for (int x = fx0; x <= fx1; x++) {
+                if (x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) continue;
+                /* 只标环上的格（内圈已经填过，跳过） */
+                int onRing = (x == fx0 || x == fx1 || y == fy0 || y == fy1);
+                if (!onRing) continue;
+                cellMeta[y][x].themeId =
+                    (unsigned char)((t->themeId >= 0 && t->themeId < THEME_COUNT) ? t->themeId : 0);
+                cellMeta[y][x].flags |= (unsigned char)CELLFLAG_ROOMWALL;
+            }
+        }
+    }
+
     /* ---- ⑤ 两个门都接不上，或者挖完发现房间走不到 → 全部回滚 ---- */
     /* 家具放在连通性检查**之后**：它会读 worldMap 找地板格，
        而这里已经确认房间是通的。 */

@@ -109,3 +109,21 @@ int CellAcousticAt(float x, float y) {
     const CellMeta* m = CellMetaAt(cx, cy);
     return m->acousticId;
 }
+
+
+/* ==================================================================
+ * 2026-11-06：这个格子是不是**房间外墙**？是就带回它的主题色。
+ * ------------------------------------------------------------------
+ * 为什么不复用 CellTintRGB：那个判的是 roomId != 0（房间**内部**），
+ * 而墙的 roomId 必须是 0。房间外墙靠 CELLFLAG_ROOMWALL 单独标。
+ * ================================================================ */
+int CellIsRoomWall(int cx, int cy, int* r, int* g, int* b) {
+    if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return 0;
+    const CellMeta* m = &cellMeta[cy][cx];
+    if (!(m->flags & CELLFLAG_ROOMWALL)) return 0;
+    int t = (int)m->themeId;
+    if (r) *r = CellThemeTintR(t);
+    if (g) *g = CellThemeTintG(t);
+    if (b) *b = CellThemeTintB(t);
+    return 1;
+}

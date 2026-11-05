@@ -444,6 +444,67 @@ static void test_hatch_screenshot(void) {
  *   ④ 失败 → jumperControlT = 10
  *   ⑤ 失败 → 附近的怪全部进入追捕态，记忆点是玩家位置
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**房间外墙被正确标记**
+ * ------------------------------------------------------------------
+ * 用户原话：「特殊房间的总体设计风格只是换了个颜色而已，完全不够突出。」
+ *
+ * 房间的辨识度现在靠两样**结构**（不只是色调）：
+ *   ① 外墙环上的 CELLFLAG_ROOMWALL → 渲染层画主题色腰线
+ *   ② 房间地面铺砖（按格奇偶）
+ *
+ * 这里钉住数据侧：外墙要被打标、并且**不能**把 roomId 写到墙上
+ * （写上去会让"房间地面格数/可达性"把墙算进去）。
+ * ================================================================== */
+static void test_room_wall_flags(void) {
+    extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+    extern int CellIsRoomWall(int, int, int*, int*, int*);
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    int found = 0;
+    for (int attempt = 0; attempt < 20 && !found; attempt++) {
+        currentLevel = 1;
+        GenerateLevel();
+        for (int y = 1; y < MAP_HEIGHT - 1 && !found; y++)
+            for (int x = 1; x < MAP_WIDTH - 1 && !found; x++)
+                if (CellIsRoomWall(x, y, NULL, NULL, NULL)) found = 1;
+    }
+    CHECK(found == 1, "at least one room wall must be tagged on a generated level");
+
+    /* ---- 被标记的格子：必须是墙，而且 roomId 必须还是 0 ---- */
+    {
+        int checked = 0;
+        for (int y = 1; y < MAP_HEIGHT - 1 && checked < 8; y++) {
+            for (int x = 1; x < MAP_WIDTH - 1 && checked < 8; x++) {
+                int r = 0, g = 0, b = 0;
+                if (!CellIsRoomWall(x, y, &r, &g, &b)) continue;
+                checked++;
+                CHECK(cellMeta[y][x].flags & CELLFLAG_ROOMWALL,
+                      "the flag must be what CellIsRoomWall keys on");
+                CHECK(cellMeta[y][x].roomId == 0,
+                      "room WALLS must not carry a roomId (it would corrupt floor counting)");
+                CHECK(r + g + b > 0, "the wall must report its theme colour");
+            }
+        }
+        CHECK(checked > 0, "the tagging scan must have found walls to check");
+    }
+
+    /* ---- 房间**内部**的格子不能被当成外墙 ---- */
+    {
+        int interiorChecked = 0;
+        for (int y = 1; y < MAP_HEIGHT - 1 && interiorChecked < 8; y++) {
+            for (int x = 1; x < MAP_WIDTH - 1 && interiorChecked < 8; x++) {
+                if (cellMeta[y][x].roomId == 0) continue;
+                interiorChecked++;
+                CHECK(!(cellMeta[y][x].flags & CELLFLAG_ROOMWALL),
+                      "a room's interior floor must not be flagged as a wall");
+            }
+        }
+    }
+}
+
 static void test_facehugger_rework(void) {
     extern int jumperPhase, jumperSpawnedRun;
     extern float jumperControlT;
@@ -2750,6 +2811,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
