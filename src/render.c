@@ -2576,6 +2576,27 @@ static void DrawHearingMarker(void) {
     DrawBakedProp(SPR_PROP_CRATE, noiseSrcX, noiseSrcY, 0.0f, 0.18f, 0.45f + 0.3f * noiseDisplay);
 }
 
+/* ==================================================================
+ * 2026-11-06：**诊断用** —— 把舱门投影到屏幕上的框报出来
+ * ------------------------------------------------------------------
+ * 用户看不到门的时候，需要区分三种情况：
+ *   ① 投影出来是空的（不在视野 / 太近被丢）
+ *   ② 投影正常但精灵包围盒无效（画了个空图）
+ *   ③ 都正常但被 zBuffer 全遮住了
+ * 这个函数一次回答前两种。只在测试里调用。
+ * ================================================================ */
+int DebugHatchScreenBox(int idx, float hx, float hy, int* x0, int* y0, int* x1, int* y1,
+                        int* hasBBox, int* bw, int* bh) {
+    (void)idx;
+    SpriteBox s = ProjectSprite(hx, hy, 0.0f, 0.72f);
+    *x0 = s.x0; *y0 = s.y0; *x1 = s.x1; *y1 = s.y1;
+    Sprite* sp = SpriteGet(SPR_HATCH_0);
+    if (sp) { *bw = sp->bx1 - sp->bx0 + 1; *bh = sp->by1 - sp->by0 + 1; }
+    else { *bw = 0; *bh = 0; }
+    *hasBBox = (sp != NULL && *bw > 0 && *bh > 0) ? 1 : 0;
+    return s.ok;
+}
+
 void RenderSprites(void) {
     struct { float d2; int kind, idx; } list[MAX_SPRITES];
     int n = 0;

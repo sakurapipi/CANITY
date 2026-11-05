@@ -273,6 +273,127 @@ static void test_wallet_save(void) {
  *
  * 这个用例就是那条链。它用真实的 GenerateLevel()，不是模拟。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（第 7 轮）：**在真实渲染管线里给舱门拍一张照**
+ * ------------------------------------------------------------------
+ * 为什么要它：精灵样张只能证明"烘焙出来的图长这样"，
+ * 证明不了它放进世界之后（透视缩放、手电照明、主题换色、深度测试）
+ * 还能不能读成"一扇门"。
+ *
+ * 用法：设 CANITY_SHOT=<目录> 跑 test_runtime，
+ * 会在那里写几张 ppm（玩家站在舱门前 2.5 / 4 / 6 格）。
+ * 不设就完全跳过，不影响正常测试。
+ * ================================================================== */
+static void test_hatch_screenshot(void) {
+    const char* dir = getenv("CANITY_SHOT");
+    if (!dir || !dir[0]) return;
+
+    extern float posX, posY, dirX, dirY;
+    extern int hatchCount;
+    extern Hatch hatches[MAX_HATCHES];
+    extern unsigned int* pixels;
+    extern int renderW, renderH;
+    extern void Render3D(void);
+
+    /* ==================================================================
+     * **必须先烘精灵**
+     * ------------------------------------------------------------------
+     * 这个用例在 main 的测试序列里跑得比 test_hunter_models 早，
+     * 而 SpritesInit() 是在那里调的 —— 结果舱门精灵根本不存在，
+     * Render3D 画了个空气，我看到的"门没出现"其实是这个。
+     * 诊断里 `bbox=0 0x0`（hasB=0）就是它。
+     * ================================================================ */
+    {
+        extern void SpritesInit(void);
+        InitPixels();
+        SpritesInit();
+    }
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    flashlightOn = 1;
+
+    /* 生成到一层真的有门为止 */
+    int found = 0;
+    for (int i = 0; i < 80 && !found; i++) {
+        currentLevel = 1;
+        GenerateLevel();
+        if (hatchCount > 0) found = 1;
+    }
+    if (!found) { fprintf(stderr, "  [shot] no hatch after 80 levels\n"); return; }
+    fprintf(stderr, "  [shot] dir=%s hatchCount=%d (cwd-relative output)\n", dir, hatchCount);
+    battery = 150.0f;
+
+    /* 门前面站三个距离各拍一张：近（贴脸）/ 中 / 远 */
+    static const float kDists[3] = { 1.2f, 1.8f, 2.4f };   /* 近 / 中 / 稍远 */
+    for (int k = 0; k < 3; k++) {
+        float hx = hatches[0].x, hy = hatches[0].y;
+
+        /* ================================================================
+         * 站位：从门的四个轴向里挑**一条整段都是空地**的路，
+         * 站在离门 kDists[k] 的位置朝门看。
+         * 第一版是"朝地图中心的反方向退"，结果退到墙里，画面全是砖。
+         * ================================================================ */
+        static const int kdx[4] = { 1, -1, 0, 0 };
+        static const int kdy[4] = { 0, 0, 1, -1 };
+        float vx = 0.0f, vy = 0.0f;
+        int have = 0;
+        for (int d = 0; d < 4 && !have; d++) {
+            int ok = 1;
+            for (int step = 1; step <= 3 && ok; step++) {   /* 房间只有 5x5，3 格够站 */
+                int cx = (int)(hx + (float)kdx[d] * (float)step);
+                int cy = (int)(hy + (float)kdy[d] * (float)step);
+                if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) { ok = 0; break; }
+                if (worldMap[cy][cx]) ok = 0;
+            }
+            if (ok) { vx = (float)kdx[d]; vy = (float)kdy[d]; have = 1; }
+        }
+        if (!have) continue;   /* 四周都堵，这张跳过 */
+
+        posX = hx + vx * (kDists[k] + 1.0f);
+        posY = hy + vy * (kDists[k] + 1.0f);
+        dirX = -vx; dirY = -vy;
+
+        Render3D();
+
+        /* 诊断：把门的投影框报出来，区分"没投影"和"画了个空图" */
+        {
+            extern int DebugHatchScreenBox(int, float, float, int*, int*, int*, int*,
+                                           int*, int*, int*);
+            int x0 = 0, y0 = 0, x1 = 0, y1 = 0, hasB = 0, bw = 0, bh = 0;
+            int ok = DebugHatchScreenBox(0, hx, hy, &x0, &y0, &x1, &y1, &hasB, &bw, &bh);
+            fprintf(stderr, "  [shot] k=%d ok=%d box=(%d,%d)-(%d,%d) bbox=%d %dx%d "
+                            "pos=(%.1f,%.1f) dir=(%.1f,%.1f) hatch=(%.1f,%.1f)\n",
+                    k, ok, x0, y0, x1, y1, hasB, bw, bh,
+                    posX, posY, dirX, dirY, hx, hy);
+        }
+
+        /* 写**相对路径**（cwd = 仓库根）。
+           绝对路径这次 fopen 直接失败，而精灵导出用相对路径是成功的 ——
+           先按能跑通的方式做，之后再由脚本搬到产出目录。 */
+        char path[MAX_PATH];
+        snprintf(path, sizeof(path), "shot_world_%d.ppm", k);
+        {
+            FILE* f = fopen(path, "wb");
+            if (!f) { fprintf(stderr, "  [shot] fopen failed: %s\n", path); continue; }
+            fprintf(f, "P6\n%d %d\n255\n", renderW, renderH);
+            for (int y = 0; y < renderH; y++) {
+                for (int x = 0; x < renderW; x++) {
+                    unsigned int c = pixels[y * renderW + x];
+                    /* 像素是 0x00RRGGBB（渲染层不带 alpha） */
+                    unsigned char px[3] = {
+                        (unsigned char)((c >> 16) & 0xFF),
+                        (unsigned char)((c >> 8) & 0xFF),
+                        (unsigned char)(c & 0xFF)
+                    };
+                    fwrite(px, 1, 3, f);
+                }
+            }
+            fclose(f);
+            fprintf(stderr, "  [shot] wrote %s\n", path);
+        }
+    }
+}
+
 static void test_hatch_end_to_end(void) {
     extern int hatchCount;
     extern Hatch hatches[MAX_HATCHES];
@@ -294,11 +415,38 @@ static void test_hatch_end_to_end(void) {
 
     /* ---- ② 资源拉满时，**每一种**门槛都必须能过 ---- */
     carryGold = 99999; fusesHeld = 8; battery = 150.0f;
-    sanity = 5.0f; stamina = 100.0f; flares = 5; bottles = 5;
-    for (int i = 0; i < hatchCount; i++) {
-        char why[96];
-        CHECK(HatchGateCheck(i, why, (int)sizeof(why)) == 1,
-              "with resources maxed, every hatch gate must pass");
+    /* ================================================================
+     * 理智取 **45**，不是 5 —— 这里有两道门槛互相咬住：
+     *     病房（WARD）要求 理智 < 50
+     *     地狱（HELL）要求 理智 >= 40
+     * 兼容窗口只有 **[40, 50)**。给 5 的话地狱门永远过不去
+     * （第一次就是这样红的：gate blocked: kind=5 why=SANITY TOO LOW (5/40)）。
+     * ================================================================ */
+    sanity = 45.0f;
+    stamina = 100.0f; flares = 5; bottles = 5;
+    /* ================================================================
+     * 锅炉房的门槛是「本房家具**全部搜空** + 1 根保险丝」——
+     * 只给资源是不够的，还得真的把家具搜空。
+     * 这条以前是"碰巧通过"：生成到没家具的层，条件自然成立。
+     * 现在显式满足它，用例才不依赖随机布局。
+     * ================================================================ */
+    {
+        extern RoomProp roomProps[MAX_ROOM_PROPS];
+        extern int roomPropCount;
+        for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++)
+            roomProps[i].searchLeft = 0;
+    }
+    {
+        int gateFails = 0;
+        for (int i = 0; i < hatchCount; i++) {
+            char why[96];
+            why[0] = 0;
+            if (HatchGateCheck(i, why, (int)sizeof(why)) != 1) {
+                gateFails++;
+                fprintf(stderr, "  gate blocked: kind=%d why=%s\n", hatches[i].kind, why);
+            }
+        }
+        CHECK(gateFails == 0, "with resources maxed, every hatch gate must pass");
     }
 
     /* ---- ③ 资源清零时，门槛必须真的挡人（并且给出原因） ---- */
@@ -2127,6 +2275,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
