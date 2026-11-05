@@ -1043,7 +1043,6 @@ SettingItem settings[] = {
     /* 2026-11-06：相位信标（用户要求 Q 传送 / C 放置） */
     {"Phase: Place",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PHASE_PLACE],   NULL, 0, 0, 0, 4},
     {"Phase: Teleport", SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PHASE_TELE],    NULL, 0, 0, 0, 4},
-    {"Debug: Spawn",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DEBUG_SPAWN],   NULL, 0, 0, 0, 4},
     {"Interact",        SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_INTERACT],      NULL, 0, 0, 0, 4},
     {"Crank Battery",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_CRANK],         NULL, 0, 0, 0, 4},
     {"Flashlight",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_FLASHLIGHT],    NULL, 0, 0, 0, 4},
@@ -1169,10 +1168,41 @@ void PhaseReset(void) {
  * 信标设为无效、锚直接不传送，绝不能把玩家塞进几何体。
  * ================================================================ */
 void PhaseOnThrowLanded(int kind, float lx, float ly) {
-    if (Blocked(lx, ly)) {
-        pickupMsg = (g_lang == LANG_ZH) ? "落点不能用" : "BAD LANDING SPOT";
-        pickupMsgTimer = 1.4f;
-        return;
+    /* ==================================================================
+     * 2026-11-06（用户实测）：**信标丢出去炸掉，坐标不生效**
+     * ------------------------------------------------------------------
+     * 原因是我这里用了 Blocked() —— 它是**带玩家半径 0.24** 的判定。
+     * 投掷物撞墙时落点必然贴着墙，Blocked 必然为真，
+     * 于是每一次落地都被判成"落点不能用"，只剩爆炸特效。
+     *
+     * 现在改成**按格子**判：只要这一格是地板就接受；
+     * 如果这一格恰好是墙，就向四邻找一格地板（最多 1 格），
+     * 找不到才真的拒绝。
+     * ================================================================ */
+    {
+        int cx = (int)floorf(lx), cy = (int)floorf(ly);
+        int ok = 0;
+        if (cx >= 1 && cy >= 1 && cx < MAP_WIDTH - 1 && cy < MAP_HEIGHT - 1 && !worldMap[cy][cx]) {
+            ok = 1;
+        } else {
+            /* 贴墙落点：往四邻各试一格 */
+            static const int dx4[4] = { 1, -1, 0, 0 };
+            static const int dy4[4] = { 0, 0, 1, -1 };
+            for (int k = 0; k < 4 && !ok; k++) {
+                int nx = cx + dx4[k], ny = cy + dy4[k];
+                if (nx < 1 || ny < 1 || nx >= MAP_WIDTH - 1 || ny >= MAP_HEIGHT - 1) continue;
+                if (worldMap[ny][nx]) continue;
+                cx = nx; cy = ny; ok = 1;
+            }
+        }
+        if (!ok) {
+            pickupMsg = (g_lang == LANG_ZH) ? "落点不能用" : "BAD LANDING SPOT";
+            pickupMsgTimer = 1.4f;
+            return;
+        }
+        /* 用格子中心，保证信标/玩家不会卡在墙缝上 */
+        lx = (float)cx + 0.5f;
+        ly = (float)cy + 0.5f;
     }
 
     if (kind == 12) {
@@ -5023,21 +5053,6 @@ void Update(float dt) {
      * ------------------------------------------------------------------
      * 放在按骰子之前：它们和投掷物无关，不该被蓄力/投掷状态影响。
      * ================================================================ */
-    /* ==================================================================
-     * 2026-11-06（用户要求）：**F3 生成一只爆脸怪**
-     * 调试用。不做训练营限制 —— 用户可能想在任何地方复现它的行为。
-     * ================================================================ */
-    if (IsActionPressed(ACT_DEBUG_SPAWN)) {
-        keyPressed[g_bindings[ACT_DEBUG_SPAWN]] = 0;
-        {
-            extern void SpawnParasite(void);
-            SpawnParasite();
-            pickupMsg = (g_lang == LANG_ZH) ? "生成一只爆脸怪" : "DEBUG: SPAWNED A FACESUCKER";
-            pickupMsgTimer = 1.6f;
-            uiDirty = 1;
-        }
-    }
-
     if (IsActionPressed(ACT_PHASE_PLACE)) {
         keyPressed[g_bindings[ACT_PHASE_PLACE]] = 0;
         if (!phaseOwned || phaseCharges <= 0) {

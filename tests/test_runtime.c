@@ -631,6 +631,59 @@ static void test_global_balance_invariants(void) {
  *
  * 这条测试从**行为**上钉住：只剩相位投掷物时，选择器必须能落过去。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户实测）：**信标落在墙边也必须生效**
+ * ------------------------------------------------------------------
+ * 用户原话：「放置信标的时候出了老毛病，和以前一样，就是丢到一半
+ *           炸掉了不生效，不会生成那个坐标。」
+ *
+ * 根因：落地结算里用了 Blocked() —— 那是**带玩家半径 0.24** 的判定。
+ * 投掷物撞墙时落点必然贴着墙，Blocked 必然为真 →
+ * 每一次落地都被判成"落点不能用"，只剩爆炸特效。
+ *
+ * 这条测试直接喂"贴着墙的落点"，断言信标仍然被设上、
+ * 并且坐标被吸附到了可站立格子的中心。
+ * ================================================================== */
+static void test_phase_landing_near_wall(void) {
+    extern void PhaseOnThrowLanded(int kind, float lx, float ly);
+    extern int phasePlaced, phaseCharges;
+    extern float phaseX, phaseY;
+    extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+    extern int Blocked(float, float);
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    /* 随便找一格墙，把落点放在它所在的格子里（这就是撞墙的情形） */
+    int wx = 0, wy = 0, found = 0;
+    for (int y = 0; y < MAP_HEIGHT && !found; y++)
+        for (int x = 0; x < MAP_WIDTH && !found; x++)
+            if (worldMap[y][x] && x > 0 && y > 0 && x < MAP_WIDTH - 1 && y < MAP_HEIGHT - 1) {
+                wx = x; wy = y; found = 1;
+            }
+    CHECK(found == 1, "a generated map must contain an interior wall");
+
+    phasePlaced = 0; phaseCharges = 0;
+    phaseX = phaseY = 0.0f;
+
+    /* kind 12 = 信标；落点就在墙格中心 —— 旧代码会直接拒绝 */
+    PhaseOnThrowLanded(12, (float)wx + 0.5f, (float)wy + 0.5f);
+
+    CHECK(phasePlaced == 1,
+          "a beacon must still be placed when the projectile lands against a wall");
+    CHECK(phaseCharges == 2, "placing the beacon must arm two charges");
+
+    /* 坐标必须被吸附到**可站立**的格子中心，不是原来那个墙格 */
+    CHECK(!Blocked(phaseX, phaseY),
+          "the beacon coordinate must be nudged to a standable cell");
+    CHECK(worldMap[(int)phaseY][(int)phaseX] == 0,
+          "the beacon coordinate must sit on floor, not inside geometry");
+    CHECK(phaseX == (float)(int)phaseX + 0.5f && phaseY == (float)(int)phaseY + 0.5f,
+          "the beacon coordinate must be snapped to a cell centre");
+
+    phasePlaced = 0;
+}
+
 static void test_phase_slots_selectable(void) {
     extern int throwSelected;
     extern int phaseBeacons, phaseAnchors;
@@ -3045,6 +3098,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
