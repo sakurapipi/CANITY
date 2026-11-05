@@ -20,7 +20,7 @@
 
 #define ROOM_MAX_W 6
 #define ROOM_MAX_H 6
-#define ROOM_TEMPLATE_COUNT 3
+#define ROOM_TEMPLATE_COUNT 4
 
 /* tiles 取值 */
 #define ROOM_TILE_FLOOR  0

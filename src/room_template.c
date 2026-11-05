@@ -61,11 +61,25 @@ static const unsigned char kPower[ROOM_MAX_H][ROOM_MAX_W] = {
     { 0, 0, 0, 0, 0, 0 }
 };
 
+/* ---- 3 紧凑储藏间 4×4 ------------------------------------------------
+ * 给"实心岩体不够大"的层准备的**最小可用房间**：
+ * 中央 2×2 柱体把空间挤成一圈 1 格宽的环绕通路。
+ * 它只需要 4×4 的实心区，比 5×5/6×5 容易放得多。 */
+static const unsigned char kCloset[ROOM_MAX_H][ROOM_MAX_W] = {
+    { 0, 0, 0, 0, 0, 0 },
+    { 0, 1, 1, 0, 0, 0 },
+    { 0, 1, 1, 0, 0, 0 },
+    { 0, 0, 0, 0, 0, 0 },
+    { 0, 0, 0, 0, 0, 0 },
+    { 0, 0, 0, 0, 0, 0 }
+};
+
 static const RoomTemplate kTemplates[ROOM_TEMPLATE_COUNT] = {
     /* id, w, h, tiles, themeId, featureId */
     { 0, 5, 5, { { 0 } }, 5, ROOM_FEATURE_STEAM },   /* 锈工厂 */
     { 1, 6, 5, { { 0 } }, 1, ROOM_FEATURE_SHELF },   /* 监狱 */
-    { 2, 5, 5, { { 0 } }, 4, ROOM_FEATURE_POWER }    /* 冰窖 */
+    { 2, 5, 5, { { 0 } }, 4, ROOM_FEATURE_POWER },   /* 冰窖 */
+    { 3, 4, 4, { { 0 } }, 3, ROOM_FEATURE_SHELF }    /* 病房：紧凑储藏间 */
 };
 
 /* 静态初始化里不能直接写二维数组的整块拷贝，所以第一次用时填一次。
@@ -86,6 +100,7 @@ static void EnsureTemplates(void) {
             s_tpl[0].tiles[y][x] = kBoiler[y][x];
             s_tpl[1].tiles[y][x] = kWarehouse[y][x];
             s_tpl[2].tiles[y][x] = kPower[y][x];
+            s_tpl[3].tiles[y][x] = kCloset[y][x];
         }
     s_ready = 1;
 }

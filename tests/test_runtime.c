@@ -528,9 +528,15 @@ static void test_theme_rooms_placement(void) {
 
     memcpy(saved, worldMap, sizeof(saved));
 
+    /* 造一张"有走廊"的图：奇数行整行打通，其余是墙。
+       为什么不能再用全墙地图：v2.4-rc 的房间**自带围墙和门**，
+       门要向外挖到"本来就开着"的格子才算接上迷宫。
+       全墙图里没有任何空地可接，房间会被连通性检查正确地拒绝 ——
+       那不是 bug，是测试的夹具不真实。 */
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++)
-            worldMap[y][x] = 1;
+            worldMap[y][x] = (y % 2 == 1 && y > 0 && y < MAP_HEIGHT - 1 &&
+                               x > 0 && x < MAP_WIDTH - 1) ? 0 : 1;
 
     exitX = 20.5f; exitY = 20.5f;
     CellMetaReset();
@@ -627,6 +633,37 @@ static void test_theme_rooms_placement(void) {
                 if (CellTintFor(x, y) != 0) normalTintZero = 0;
             }
         CHECK(normalTintZero, "cells outside rooms must have zero tint");
+    }
+
+    /* ---- ⑧ 这是这一轮真正修的 bug：房间必须走得到 ----
+           400 个种子实测曾有 201 层出现封死的房间。 */
+    {
+        static int seen[MAP_HEIGHT][MAP_WIDTH];
+        static int qx[MAP_WIDTH * MAP_HEIGHT], qy[MAP_WIDTH * MAP_HEIGHT];
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++) seen[y][x] = 0;
+        int head = 0, tail = 0;
+        seen[1][1] = 1; qx[tail] = 1; qy[tail] = 1; tail++;
+        while (head < tail) {
+            int cx = qx[head], cy = qy[head]; head++;
+            static const int ax[4] = { 1, -1, 0, 0 };
+            static const int ay[4] = { 0, 0, 1, -1 };
+            for (int k = 0; k < 4; k++) {
+                int nx = cx + ax[k], ny = cy + ay[k];
+                if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+                if (seen[ny][nx] || worldMap[ny][nx]) continue;
+                seen[ny][nx] = 1;
+                qx[tail] = nx; qy[tail] = ny; tail++;
+            }
+        }
+        int unreachable = 0;
+        for (int y = 0; y < MAP_HEIGHT; y++)
+            for (int x = 0; x < MAP_WIDTH; x++) {
+                if (cellMeta[y][x].roomId == 0) continue;
+                if (worldMap[y][x]) continue;
+                if (!seen[y][x]) unreachable++;
+            }
+        CHECK(unreachable == 0, "every room floor cell must be reachable from the spawn");
     }
 
     CellMetaReset();
