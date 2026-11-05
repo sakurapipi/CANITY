@@ -1037,6 +1037,9 @@ SettingItem settings[] = {
     {"Sprint",          SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SPRINT],        NULL, 0, 0, 0, 3},
 
     /* ========== 分类: KEY BINDINGS / ACTIONS ========== */
+    /* 2026-11-06：相位信标（用户要求 Q 传送 / C 放置） */
+    {"Phase: Place",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PHASE_PLACE],   NULL, 0, 0, 0, 4},
+    {"Phase: Teleport", SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PHASE_TELE],    NULL, 0, 0, 0, 4},
     {"Interact",        SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_INTERACT],      NULL, 0, 0, 0, 4},
     {"Crank Battery",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_CRANK],         NULL, 0, 0, 0, 4},
     {"Flashlight",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_FLASHLIGHT],    NULL, 0, 0, 0, 4},
@@ -1114,6 +1117,64 @@ int SettingsRowCount(void) {
 
 /* 玩家碰撞半径：贴墙时留出半个身位，避免半个身子钻进墙里 */
 #define PLAYER_RADIUS 0.24f
+
+/* ==================================================================
+ * 2026-11-06（用户要求）：**相位信标**
+ * ------------------------------------------------------------------
+ * 用户原话：「新增相位传送装置，按 Q 进行传送，按 C 进行放置，
+ *           一个人身上上限只能有一个，使用次数为 2，价格极其昂贵为百分比价格。」
+ *
+ * 规则：
+ *   · 身上最多 1 个
+ *   · 总共 2 次使用（放 1 次 + 传 1 次算一次完整循环？）
+ *     —— 这里按"**传送次数**"算 2 次：放置不消耗次数，
+ *        每次传送消耗 1 次，用完装置消失。
+ *   · 数量上限 1：场上同时只能存在 1 个信标，再按 C 只会重放（不叠加）。
+ *
+ * 为什么"放置不消耗次数"：
+ *   如果放置也消耗，玩家在一个地方放错就得废掉整个装置，
+ *   而这是最贵的一件道具 —— 惩罚过重。
+ * ================================================================ */
+int   phaseOwned   = 0;   /* 是否持有装置 */
+int   phaseCharges = 0;   /* 剩余传送次数（上限 2） */
+int   phasePlaced  = 0;   /* 场上是否已有信标 */
+float phaseX = 0.0f, phaseY = 0.0f;
+
+#define PHASE_MAX_CHARGES 2
+
+void PhaseGive(void) {
+    phaseOwned = 1;
+    phaseCharges = PHASE_MAX_CHARGES;
+    phasePlaced = 0;
+}
+
+void PhaseReset(void) {
+    phaseOwned = 0;
+    phaseCharges = 0;
+    phasePlaced = 0;
+    phaseX = phaseY = 0.0f;
+}
+
+int PhaseTryPlace(void) {
+    if (!phaseOwned || phaseCharges <= 0) return 0;
+    /* 场上只允许一个：重复按 C 就挪到脚下，不叠第二个 */
+    phaseX = posX;
+    phaseY = posY;
+    phasePlaced = 1;
+    return 1;
+}
+
+int PhaseTryTeleport(void) {
+    if (!phaseOwned || phaseCharges <= 0 || !phasePlaced) return 0;
+    /* 目标格如果已经不是空地（比如期间塌过），拒绝而不是把玩家塞进墙里 */
+    if (Blocked(phaseX, phaseY)) return 0;
+    posX = phaseX;
+    posY = phaseY;
+    phasePlaced = 0;
+    phaseCharges--;
+    if (phaseCharges <= 0) phaseOwned = 0;   /* 用完即消失 */
+    return 1;
+}
 
 int Blocked(float x, float y) {
     int x0 = (int)floorf(x - PLAYER_RADIUS), x1 = (int)floorf(x + PLAYER_RADIUS);
@@ -4887,6 +4948,44 @@ void Update(float dt) {
      * 现在：**训练场里无条件开放 G 键**。
      * 教程的意义就是把操作教一遍，不能先要求玩家去商店买天赋。
      * ================================================================ */
+    /* ==================================================================
+     * 相位信标：C 放置 / Q 传送（2026-11-06 用户要求）
+     * ------------------------------------------------------------------
+     * 放在按骰子之前：它们和投掷物无关，不该被蓄力/投掷状态影响。
+     * ================================================================ */
+    if (IsActionPressed(ACT_PHASE_PLACE)) {
+        keyPressed[g_bindings[ACT_PHASE_PLACE]] = 0;
+        if (!phaseOwned || phaseCharges <= 0) {
+            pickupMsg = (g_lang == LANG_ZH) ? "没有相位信标" : "NO PHASE BEACON";
+            pickupMsgTimer = 1.4f;
+        } else if (PhaseTryPlace()) {
+            pickupMsg = (g_lang == LANG_ZH) ? "信标已放置" : "BEACON PLACED";
+            pickupMsgTimer = 1.4f;
+            PlaySfx(SFX_POWER, 0.55f);
+            uiDirty = 1;
+        }
+    }
+    if (IsActionPressed(ACT_PHASE_TELE)) {
+        keyPressed[g_bindings[ACT_PHASE_TELE]] = 0;
+        if (!phaseOwned || phaseCharges <= 0) {
+            pickupMsg = (g_lang == LANG_ZH) ? "没有相位信标" : "NO PHASE BEACON";
+            pickupMsgTimer = 1.4f;
+        } else if (!phasePlaced) {
+            pickupMsg = (g_lang == LANG_ZH) ? "先按 C 放一个信标" : "PLACE A BEACON FIRST (C)";
+            pickupMsgTimer = 1.4f;
+        } else if (PhaseTryTeleport()) {
+            pickupMsg = (g_lang == LANG_ZH) ? "相位传送！" : "PHASE SHIFT!";
+            pickupMsgTimer = 1.4f;
+            PlaySfx(SFX_POWER, 0.9f);
+            uiDirty = 1;
+        } else {
+            /* 目标格被墙占了（期间塌过 / 被改过地形） */
+            pickupMsg = (g_lang == LANG_ZH) ? "信标位置已失效" : "BEACON OBSTRUCTED";
+            pickupMsgTimer = 1.4f;
+            phasePlaced = 0;
+        }
+    }
+
     if ((HasKeystone(SK_DECOY) || trainingMode) && IsActionPressed(ACT_DECOY)) {
         /* ==================================================================
          * 2026-11-05 修「DECOY 超模 / 可以无限使用」
@@ -6492,6 +6591,7 @@ void StartGame(void) {
 
     /* 重置成就追踪变量 */
     knockCountRun=throwHitCountRun=echoCellsTotalRun=0;
+    { extern void PhaseReset(void); PhaseReset(); }   /* 2026-11-06：相位信标按局重置 */
     { extern int mimicsEscapedThisRun; mimicsEscapedThisRun = 0; }
     floorsNoSanityLoss=dailyEscapeCount=wardenCleanFloors=fullHideDone=0;
     doubleHuntSeconds=0.0f; pendingSkillDraft=0;

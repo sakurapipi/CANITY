@@ -412,6 +412,128 @@ static void test_hatch_screenshot(void) {
  * 编译、跑起来都不报错，只是第二只永远不存在。
  * 所以这里直接断言：生成之后两只都是 active，且位置不同。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**相位信标**
+ * ------------------------------------------------------------------
+ * 规则（用户原话）：
+ *   「按 Q 进行传送，按 C 进行放置，一个人身上上限只能有一个，
+ *     使用次数为 2，价格极其昂贵为百分比价格。」
+ *
+ * 这里钉住机制部分：
+ *   持有上限 1、场上信标上限 1、传送次数 2、用完消失、
+ *   目标格被占时拒绝传送而不是把玩家塞进墙里。
+ * ================================================================== */
+/* ==================================================================
+ * 2026-11-06：**相位信标的百分比定价**
+ * ------------------------------------------------------------------
+ * 用户要求「价格极其昂贵为百分比价格」。
+ * 这里钉住两件事：
+ *   ① 价格随携带金币**线性**变化（不是固定价）
+ *   ② 有下限，不会因为没钱就变成白菜价
+ * ================================================================== */
+static void test_phase_price(void) {
+    extern int ShopPriceAt(int row);
+    extern int carryGold;
+
+    int saved = carryGold;
+
+    carryGold = 0;
+    int p0 = ShopPriceAt(8);
+    CHECK(p0 == 300, "with no gold the beacon must still cost the 300 floor");
+
+    carryGold = 1000;
+    int p1 = ShopPriceAt(8);
+    CHECK(p1 == 700, "1000 gold must price the beacon at 700 (70%)");
+
+    carryGold = 5000;
+    int p2 = ShopPriceAt(8);
+    CHECK(p2 == 3500, "5000 gold must price the beacon at 3500 (70%)");
+
+    CHECK(p2 > p1 && p1 >= p0, "the price must scale with carried gold");
+
+    carryGold = saved;
+}
+
+static void test_phase_beacon(void) {
+    extern int   phaseOwned, phaseCharges, phasePlaced;
+    extern float phaseX, phaseY;
+    extern void  PhaseGive(void), PhaseReset(void);
+    extern int   PhaseTryPlace(void), PhaseTryTeleport(void);
+    extern float posX, posY;
+    extern int   Blocked(float, float);
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    /* ---- 初始状态：没有装置 ---- */
+    PhaseReset();
+    CHECK(phaseOwned == 0, "phase beacon must start not owned");
+    CHECK(PhaseTryPlace() == 0, "cannot place without the device");
+    CHECK(PhaseTryTeleport() == 0, "cannot teleport without the device");
+
+    /* ---- 发放：2 次，未放置 ---- */
+    PhaseGive();
+    CHECK(phaseOwned == 1, "PhaseGive must mark it owned");
+    CHECK(phaseCharges == 2, "the device carries exactly 2 teleport charges");
+    CHECK(phasePlaced == 0, "a fresh device has no beacon on the field");
+    CHECK(PhaseTryTeleport() == 0,
+          "teleporting before placing must fail (and must not eat a charge)");
+    CHECK(phaseCharges == 2, "a failed teleport must not consume a charge");
+
+    /* ---- 放置：一次，且只能有一个 ---- */
+    posX = 3.5f; posY = 3.5f;
+    CHECK(PhaseTryPlace() == 1, "placing on a walkable cell must succeed");
+    CHECK(phasePlaced == 1, "the beacon must be marked as on the field");
+    CHECK(phaseX == 3.5f && phaseY == 3.5f, "the beacon must record the exact spot");
+
+    posX = 6.5f; posY = 6.5f;
+    PhaseTryPlace();
+    CHECK(phaseX == 6.5f && phaseY == 6.5f,
+          "placing again must MOVE the same beacon, never stack a second one");
+
+    /* ---- 传送：回到信标，消耗 1 次 ---- */
+    posX = 20.5f; posY = 20.5f;
+    CHECK(PhaseTryTeleport() == 1, "teleporting to a placed beacon must succeed");
+    CHECK(posX == 6.5f && posY == 6.5f, "teleport must put the player on the beacon");
+    CHECK(phaseCharges == 1, "one teleport consumes exactly one charge");
+    CHECK(phasePlaced == 0, "the beacon is consumed by the teleport");
+
+    /* ---- 第二次：再放一次再传一次，用完消失 ---- */
+    posX = 9.5f; posY = 9.5f;
+    PhaseTryPlace();
+    posX = 20.5f;
+    CHECK(PhaseTryTeleport() == 1, "the second teleport must still work");
+    CHECK(phaseCharges == 0, "charges must be exhausted after two teleports");
+    CHECK(phaseOwned == 0, "with no charges left the device must disappear");
+    CHECK(PhaseTryPlace() == 0, "an exhausted device can no longer be placed");
+
+    /* ---- 目标格被占：拒绝，不能把玩家塞进墙里 ---- */
+    PhaseGive();
+    posX = 4.5f; posY = 4.5f;
+    PhaseTryPlace();
+    {
+        extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+        int bx = (int)phaseX, by = (int)phaseY;
+        int saved = worldMap[by][bx];
+        worldMap[by][bx] = 1;                 /* 事后被塌成墙 */
+        /* 把玩家挪到一个已知空的格子（就用刚才放信标那格），
+           然后断言"被拒绝之后坐标一分没动"。
+           不要断言 `!Blocked(posX,posY)` —— 那假定了 20.5,20.5 是空地，
+           而地图是随机生成的，这个假定不成立（第一次就红在这）。 */
+        posX = 4.5f; posY = 4.5f;
+        {
+            float keepX = posX, keepY = posY;
+            CHECK(PhaseTryTeleport() == 0,
+                  "teleporting into a wall must be refused");
+            CHECK(posX == keepX && posY == keepY,
+                  "a refused teleport must not move the player at all");
+        }
+        worldMap[by][bx] = saved;
+    }
+
+    PhaseReset();
+}
+
 static void test_two_light_beasts(void) {
     extern Monster lightBeasts[LIGHTBEAST_MAX];
 
@@ -2506,6 +2628,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

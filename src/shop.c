@@ -47,8 +47,9 @@ static const int kItemPrice[SHOP_ITEM_KINDS] = {
     95,    /* 4 ECHO    回声 */
     120,   /* 5 DECOY   诱饵 */
     60,    /* 6 BATTERY 电池 */
-    70     /* 7 MEDKIT  药包 */
-};   /* v6：补满 8 项 */
+    70,    /* 7 MEDKIT  药包 */
+    0      /* 8 PHASE BEACON 相位信标 —— 价格是**百分比**，见 ShopPriceAt() */
+};
 
 /* ==================================================================
  * v6 **商店折扣**（每层随机一格打折）
@@ -93,6 +94,21 @@ static void rollDiscount(void) {
  * 这一个 bug 解释了这十轮里所有的「商店打不开 / 一按就崩 / 没有日志」。
  * ================================================================ */
 int ShopPriceAt(int row) {
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**相位信标按百分比定价，极其昂贵**
+     * ------------------------------------------------------------------
+     * 必须放在下面的 `row >= SHOP_OFFERS` 守卫**之前** ——
+     * 那个守卫是按"行号"写的，而调用方 buy 路径传进来的是**物品种类**
+     * （shopOffer[row]，0..SHOP_ITEM_KINDS-1）。相位信标是种类 8，
+     * 放守卫后面会被直接返回 0（第一次就是这么红的）。
+     * ================================================================ */
+    if (row == 8) {
+        extern int carryGold;
+        int p = (int)((float)carryGold * 0.70f);
+        if (p < 300) p = 300;
+        return p;
+    }
+
     if (row < 0 || row >= SHOP_OFFERS) return 0;
     /* 价格优先用 ShopOpen 掷出来的 shopPrice[]；
        没掷过（还没进过商店）就退回物品表 kItemPrice[] ——
@@ -182,9 +198,12 @@ void ShopOpen(int level) {
        而购买逻辑用的是行号 —— 两套 id 完全不相干，
        等于抽了半天没用上，每层卖的永远是同样 8 样。 */
     {
+        /* 2026-11-06：相位信标不进常规池（它太贵，每层都刷会让商店失去意义）。
+           只在**第 3 层以后**、且 25% 概率时把它塞进候选池。 */
         int pool[SHOP_ITEM_KINDS];
-        for (int i = 0; i < SHOP_ITEM_KINDS; i++) pool[i] = i;
-        int n = SHOP_ITEM_KINDS;
+        int n = 0;
+        for (int i = 0; i < SHOP_ITEM_KINDS - 1; i++) pool[n++] = i;
+        if (level >= 3 && (rand() % 100) < 25) pool[n++] = 8;
         for (int k = 0; k < SHOP_OFFERS; k++) {
             int pick = rand() % n;
             int kind = pool[pick];
@@ -581,6 +600,17 @@ void ShopActivate(void) {
                 pickupMsg = Tr("+1 DECOY", "+1 诱饵"); break;
         case 6: battery += 35.0f; if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
                 pickupMsg = Tr("+35 BATTERY", "+35 电量"); break;
+        case 8: {
+                    /* 相位信标：一个就够，重复买没有意义 */
+                    extern int phaseOwned;
+                    extern void PhaseGive(void);
+                    if (phaseOwned) {
+                        pickupMsg = Tr("ALREADY CARRYING ONE", "身上已经有一个了");
+                    } else {
+                        PhaseGive();
+                        pickupMsg = Tr("PHASE BEACON ACQUIRED", "拿到相位信标");
+                    }
+                } break;
         default: sanity += 25.0f; if (sanity > SanityMax()) sanity = SanityMax();
                 pickupMsg = Tr("+25 SANITY", "+25 理智"); break;
         }

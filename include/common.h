@@ -230,7 +230,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 39   /* v8：SFX / Music 音量拆成两项 */
+#define SETTING_COUNT 41   /* 2026-11-06：+2（相位放置 / 相位传送） */   /* v8：SFX / Music 音量拆成两项 */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 
@@ -921,12 +921,21 @@ typedef enum {
     ACT_SWING,             /* v1.8 绣刀挥砍（默认 Q） */
     ACT_DECOY,             /* v1.8 投石（默认 G） */
     ACT_DROP_GOLD,         /* v7 丢钱袋（默认 K，按住弹滑条） */
+    ACT_PHASE_PLACE,       /* 2026-11-06 相位信标：放置（默认 C） */
+    ACT_PHASE_TELE,        /* 2026-11-06 相位信标：传送（默认 Q） */
     ACT_COUNT
 } ActionId;
 
 /* 每个动作绑定一个虚拟键码，0=无绑定。
    默认值集中在一个宏里 —— Settings 的 Reset to Defaults 和自检都要用它，
    别在两处各写一份。 */
+/* ==================================================================
+   2026-11-06（用户要求）：Q 改成相位传送
+   ------------------------------------------------------------------
+   用户原话：「新增相位传送装置，按 Q 进行传送，按 C 进行放置」
+   但 Q 原来是扳手挥击。Q 只有一个，所以扳手挪到 V。
+   这是一处会改变老玩家手感的改动，显式记在这里。
+   ================================================================ */
 #define BINDINGS_DEFAULT { \
     [ACT_MOVE_FWD] = 'W', [ACT_MOVE_BACK] = 'S', \
     [ACT_MOVE_LEFT] = 'A', [ACT_MOVE_RIGHT] = 'D', \
@@ -940,7 +949,8 @@ typedef enum {
     [ACT_MENU_LEFT] = VK_LEFT, [ACT_MENU_RIGHT] = VK_RIGHT, \
     [ACT_MENU_CONFIRM] = VK_RETURN, [ACT_MENU_CANCEL] = VK_ESCAPE, \
     [ACT_DODGE] = VK_SPACE, \
-    [ACT_SWING] = 'Q', [ACT_DECOY] = 'G', \
+    [ACT_SWING] = 'V', [ACT_DECOY] = 'G', \
+    [ACT_PHASE_PLACE] = 'C', [ACT_PHASE_TELE] = 'Q', \
     [ACT_DROP_GOLD] = 'K', \
 }
 
