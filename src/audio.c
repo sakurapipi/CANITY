@@ -100,16 +100,34 @@ void AudioUpdateListener(float px, float py, float dx, float dy) {
     LeaveCriticalSection(&g_audioLock);
 }
 
-/* 常量功率声像，归一到"正前方 = 1.0 / 1.0"（和旧的居中行为一致）。
-   pan = -1 全左，0 正前，+1 全右。 */
-#define PAN_SQRT2   1.41421356f
+/* ==================================================================
+ * 2026-11-06（B02 修正）：**峰值归一化声像**
+ * ------------------------------------------------------------------
+ * 第一版用的是常量功率（cos/sin × √2）。它听着"专业"，但有个硬伤：
+ *
+ *     正前方   → 1.00 / 1.00
+ *     正侧方   → 1.41 / 0.00     ← 响的那一侧被放大了 41%
+ *
+ * 近距离时 att≈1，声音本来就接近满幅；再把一侧放大 41% 就直接撞上
+ * 混音末尾的硬限幅，那一侧波形被**压平** ——
+ * 左右电平差（ILD）被抹掉，于是"越近越分不清左右"。
+ *
+ * 这正是实测到的现象。改法：**峰值恒为 1.0**，只砍不增。
+ *     正前方   → 1.00 / 1.00     （和以前完全一样）
+ *     正侧方   → 1.00 / 0.00
+ * 代价是极侧方总能量略低（−3dB），但换来的是：
+ *   · 不引入任何新的削波
+ *   · 侧方的电平差是**满量程**的，分辨力最大
+ * 对"听出怪在哪边"这件事，ILD 比等功率曲线重要得多。
+ * ================================================================== */
 static void PanGains(float pan, float att, float* gl, float* gr) {
     if (pan < -1.0f) pan = -1.0f;
     if (pan >  1.0f) pan =  1.0f;
-    float theta = (pan + 1.0f) * 0.78539816f;      /* 0..pi/2 */
-    /* cosf/sinf 在音频线程里每缓冲只调两次，8 路也才 16 次 —— 可接受 */
-    float l = cosf(theta) * PAN_SQRT2;
-    float r = sinf(theta) * PAN_SQRT2;
+    /* **只砍不增**的 balance：max(L,R) 恒为 1.0。
+       注意不能写成 (1-pan)/(1+pan) —— 那样极右侧会变成 2.0，
+       又回到放大 → 削波 → 分不清左右的老问题。 */
+    float l = (pan > 0.0f) ? (1.0f - pan) : 1.0f;
+    float r = (pan < 0.0f) ? (1.0f + pan) : 1.0f;
     *gl = l * att;
     *gr = r * att;
 }
@@ -151,6 +169,31 @@ static void WorldGains(const Voice* vo, float* gl, float* gr) {
     if (!s_lisValid) { PanGains(0.0f, 1.0f, gl, gr); return; }
     AudioComputeGains(s_lisX, s_lisY, s_lisDirX, s_lisDirY,
                       vo->srcX, vo->srcY, vo->maxDist, gl, gr);
+}
+
+/* ==================================================================
+ * 软限幅（B02 修正）
+ * ------------------------------------------------------------------
+ * 硬钳位会把波形**压平**，而压平之后就再也分不出两边电平差 ——
+ * 这正是"越近越分不清左右"的第二个来源（8 路叠加时更容易撞上）。
+ *
+ * 这里在 26000 以上做渐近压缩：超过得越多，压得越狠，
+ * 但**不会**变成一条水平线，ILD 得以保留。
+ * 纯整数运算，每采样 2 次分支，代价可以忽略。
+ * ================================================================ */
+static int SoftClip(int v) {
+    const int knee = 26000;
+    const int span = 6767;                 /* knee + span = 32767 */
+    if (v > knee) {
+        int over = v - knee;
+        v = knee + (over * span) / (over + span);
+        if (v > 32767) v = 32767;
+    } else if (v < -knee) {
+        int over = -v - knee;
+        v = -(knee + (over * span) / (over + span));
+        if (v < -32768) v = -32768;
+    }
+    return v;
 }
 
 static void MixInto(short* out) {
@@ -196,12 +239,8 @@ static void MixInto(short* out) {
     for (i = 0; i < AUDIO_SAMPLES; i++) {
         int l = mixL[i] + (int)(musicL[i] * MUSIC_MIX_SCALE);
         int r = mixR[i] + (int)(musicR[i] * MUSIC_MIX_SCALE);
-        if (l > 32767) l = 32767;
-        else if (l < -32768) l = -32768;
-        if (r > 32767) r = 32767;
-        else if (r < -32768) r = -32768;
-        out[i * 2] = (short)l;
-        out[i * 2 + 1] = (short)r;
+        out[i * 2] = (short)SoftClip(l);
+        out[i * 2 + 1] = (short)SoftClip(r);
     }
 }
 

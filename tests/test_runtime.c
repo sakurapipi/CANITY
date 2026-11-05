@@ -495,14 +495,14 @@ static void test_audio_pan_math(void) {
     {
         AudioComputeGains(px, py, dx, dy, 0.0f, 3.0f, 20.0f, &l, &r);
         CHECK(r > l, "a sound on the right must be louder on the right channel");
-        CHECK(l < 0.2f, "a sound fully on the right must nearly vanish on the left");
+        CHECK(l < 0.001f, "a sound fully on the right must vanish on the left channel");
     }
 
     /* ---- ③ 正左方：左明显大于右（对称） ---- */
     {
         AudioComputeGains(px, py, dx, dy, 0.0f, -3.0f, 20.0f, &l, &r);
         CHECK(l > r, "a sound on the left must be louder on the left channel");
-        CHECK(r < 0.2f, "a sound fully on the left must nearly vanish on the right");
+        CHECK(r < 0.001f, "a sound fully on the left must vanish on the right channel");
     }
 
     /* ---- ④ 正后方：左右相等（后方没法分左右，只能变小） ---- */
@@ -525,15 +525,20 @@ static void test_audio_pan_math(void) {
               "a sound beyond maxDist must be completely silent");
     }
 
-    /* ---- ⑥ 常量功率：左右能量之和只随距离变 ---- */
+    /* ---- ⑥ 峰值归一：任何方向都不许放大到 1.0 以上 ----
+           第一版用常量功率（×√2），侧方的响通道会被放大 41%，
+           近距离直接撞上限幅 → 波形压平 → 越近越分不清左右。
+           这条断言就是防它回潮的。 ---- */
     {
         float al = 0.0f, ar = 0.0f, bl = 0.0f, br = 0.0f;
         AudioComputeGains(px, py, dx, dy, 3.0f, 0.0f, 20.0f, &al, &ar);   /* 正前 */
         AudioComputeGains(px, py, dx, dy, 0.0f, 3.0f, 20.0f, &bl, &br);   /* 正右 */
-        float ea = al * al + ar * ar;
-        float eb = bl * bl + br * br;
-        CHECK(ea > (eb - 0.05f) && ea < (eb + 0.05f),
-              "constant-power panning: total energy must not depend on direction");
+        float peakA = (al > ar) ? al : ar;
+        float peakB = (bl > br) ? bl : br;
+        CHECK(peakA <= 1.0001f, "pan gain must never exceed 1.0 (center)");
+        CHECK(peakB <= 1.0001f, "pan gain must never exceed 1.0 (hard side)");
+        CHECK(peakA > 0.9f * peakB && peakA < 1.1f * peakB,
+              "peak-normalized panning: the loud side must keep the same level");
     }
 
     /* ---- ⑦ 转身 90 度：同一个声源从右变成前方 ---- */
