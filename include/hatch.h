@@ -62,6 +62,15 @@ int  HatchNearest(float px, float py, float maxD2);
 float HatchOpen01(int idx);                      /* 0 = 全闭，1 = 全开 */
 int  HatchKindForTheme(int themeId);
 
+/* ==================================================================
+ * 2026-11-06（v33）：**已用状态**的存取
+ * ------------------------------------------------------------------
+ * 只存"哪个种类已经用掉"，不存坐标 ——
+ * 坐标由 roomSeed 确定性重放得出，存了反而可能对不上。
+ * ================================================================ */
+int  HatchUsedMask(void);                    /* 收集当前已用种类 -> 位掩码 */
+void HatchApplyUsedMask(int mask);           /* 读档后把对应种类标成已用 */
+
 /* ---- 由 game.c 提供（门槛与效果都在那边）---- */
 int  HatchGateCheck(int idx, char* why, int cap);   /* 1 = 可以开 */
 void HatchFireEffect(int idx);

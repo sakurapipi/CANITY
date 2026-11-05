@@ -15,6 +15,7 @@
  *   反过来避让房间（房间更"硬"，先放）。
  * ================================================================ */
 #include "common.h"
+#include "hatch.h"
 #include "cell_meta.h"
 #include "room_template.h"
 #include "map_rooms.h"
@@ -599,6 +600,15 @@ int roomSeedUsed = 0;
  * 重放会重写同样的墙/地面（幂等），并重建 cellMeta 与 roomProps。
  * ================================================================ */
 int RoomReplay(int seed, int wantCount) {
+    /* ==================================================================
+     * 2026-11-06：**重放前必须先清舱门表**
+     * ------------------------------------------------------------------
+     * GenerateThemeRooms -> CarveRoomBordered -> HatchPlaceInRoom 是追加式
+     * （HatchAdd 往表尾塞）。这里不清的话，每读一次档就在旧表上再追加
+     * 一批：第二次读档时同一间房会同时存在两扇门，重叠在一起，
+     * 而且上一层的门会残留到这一层。
+     * ================================================================ */
+    HatchReset();
     if (wantCount <= 0) { roomSeedUsed = 0; RoomPropReset(); return 0; }
     roomSeedUsed = seed;
     srand((unsigned)seed);

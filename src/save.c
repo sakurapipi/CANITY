@@ -630,7 +630,9 @@ void SaveGame(void) {
     /* v2.4-rc：房间重放种子也进档 */
     { extern int roomSeedUsed; extern int RoomCount(void);
       g_save.roomSeed = roomSeedUsed;
-      g_save.roomCount = RoomCount(); }
+      g_save.roomCount = RoomCount();
+      /* v33：舱门已用状态（位掩码，按**种类**记，不记坐标） */
+      { extern int HatchUsedMask(void); g_save.hatchUsedMask = HatchUsedMask(); } }
     memcpy(g_save.explored, explored, sizeof(explored));
 
     /* v6 新增字段 */
@@ -1526,7 +1528,13 @@ void ContinueRun(void) {
     { extern int RoomReplay(int, int);
       if (g_save.roomSeed != 0 && g_save.roomCount > 0)
           (void)RoomReplay(g_save.roomSeed, g_save.roomCount);
-      else { extern void CellMetaReset(void); CellMetaReset(); } }
+      else { extern void CellMetaReset(void); CellMetaReset(); }
+      /* ================================================================
+       * v33：**重放之后**才能标已用 —— RoomReplay 会先 HatchReset 清表，
+       * 标早了就没有门可以标。老档这个字段是 0，行为与旧版一致。
+       * ================================================================ */
+      { extern void HatchApplyUsedMask(int);
+        HatchApplyUsedMask(g_save.hatchUsedMask); } }
     memcpy(explored, g_save.explored, sizeof(explored));
 
     /* v4 新增：安全屋 / 投掷物 / 词条 / 主题 */

@@ -1,5 +1,6 @@
 /* Integration checks link the real game modules; all saves are isolated. */
 #include "common.h"
+#include "hatch.h"
 #include "game.h"
 #include "entity.h"
 #include "skills.h"
@@ -256,6 +257,71 @@ static void test_wallet_save(void) {
  *   ② 崩塌层不生成舱门（否则能连锁刷）
  * 真正的"黑屏 -> 重掷 -> 失败回滚"只能实机看，这里不假装测了。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v33）：**舱门状态机 + 已用掩码**
+ * ------------------------------------------------------------------
+ * 这是舱门系统里唯一能完整单测的部分：它不认识金币/电量/理智，
+ * 只吃自己的数组。所以状态转移和存档掩码都在这里钉死。
+ * ================================================================== */
+static void test_hatch_state_and_mask(void) {
+    extern Hatch hatches[MAX_HATCHES];
+    extern int hatchCount;
+
+    HatchReset();
+    CHECK(hatchCount == 0, "HatchReset must clear the table");
+
+    int a = HatchAdd(1.5f, 1.5f, HATCH_POWER, 4);
+    int b = HatchAdd(3.5f, 1.5f, HATCH_HELL, 2);
+    CHECK(a == 0 && b == 1, "HatchAdd must append in order");
+    CHECK(hatches[a].state == HATCH_SEALED, "a new hatch starts SEALED");
+
+    /* 封闭的门在就绪查询里应该能被选中 */
+    CHECK(HatchNearest(1.6f, 1.6f, 4.0f) == a, "the nearest sealed hatch must be found");
+
+    /* ---- 开门：SEALED -> OPENING -> (动画播完) -> FIRED ---- */
+    HatchSetState(a, HATCH_OPENING);
+    CHECK(hatches[a].state == HATCH_OPENING, "hatch must enter OPENING");
+    CHECK(HatchOpen01(a) < 0.5f, "a fresh OPENING hatch must read as mostly closed");
+    /* 动画没播完时，效果不能结算（AD-27） */
+    /* 半径收到 2.0：另一扇门在 3.6 之外，所以这里只能返回 -1。
+       （用 4.0 会把远的那扇选出来 —— 那是正确行为，是测试写错了。） */
+    CHECK(HatchNearest(1.6f, 1.6f, 2.0f) == -1,
+          "a hatch mid-animation must not be pickable again");
+
+    HatchTick(HATCH_OPEN_SECONDS + 0.01f);
+    CHECK(hatches[a].state == HATCH_FIRED,
+          "the effect must fire on the frame the animation finishes");
+
+    /* ---- FIRED 是终态：任何转移都必须被拒 ---- */
+    HatchSetState(a, HATCH_SEALED);
+    CHECK(hatches[a].state == HATCH_FIRED,
+          "FIRED is terminal - a used hatch must never become usable again");
+
+    /* ---- 已用掩码：按**种类**记，不按顺序 ---- */
+    {
+        int mask = HatchUsedMask();
+        CHECK(mask == (1 << HATCH_POWER),
+              "the mask must record the used KIND, not the slot index");
+
+        /* 重建（模拟读档重放）并应用掩码 */
+        HatchReset();
+        HatchAdd(9.5f, 9.5f, HATCH_HELL, 2);     /* 顺序刻意反过来 */
+        HatchAdd(4.5f, 4.5f, HATCH_POWER, 4);
+        HatchApplyUsedMask(mask);
+
+        CHECK(hatches[0].state == HATCH_SEALED,
+              "a kind that was NOT used must stay available after load");
+        CHECK(hatches[1].state == HATCH_FIRED,
+              "a kind that was used must be FIRED after load, whatever its slot");
+    }
+
+    /* ---- 读档不能把上一层的门带过来 ---- */
+    HatchReset();
+    CHECK(hatchCount == 0, "RoomReplay must reset the hatch table before regenerating");
+
+    HatchReset();
+}
+
 static void test_collapse_layer_params(void) {
     extern int collapsedLevel;
     extern float GoldSearchAt(int level);
@@ -1897,6 +1963,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

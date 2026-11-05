@@ -103,3 +103,36 @@ int HatchKindForTheme(int themeId) {
     default: return -1;
     }
 }
+
+
+/* ==================================================================
+ * 已用状态的存取（v33）
+ * ------------------------------------------------------------------
+ * 位索引 = HatchKind（0..6），一扇门一位。
+ * 为什么不是"每扇门一位"：读档后重放出来的门顺序可能和存盘时不同
+ * （取决于房间放置顺序），按**种类**记才稳定。
+ * ================================================================ */
+int HatchUsedMask(void) {
+    int mask = 0;
+    for (int i = 0; i < hatchCount; i++) {
+        const Hatch* h = &hatches[i];
+        if (!h->active) continue;
+        if (h->state != HATCH_FIRED) continue;
+        if (h->kind >= 0 && h->kind < 31) mask |= (1 << h->kind);
+    }
+    return mask;
+}
+
+void HatchApplyUsedMask(int mask) {
+    if (mask == 0) return;
+    for (int i = 0; i < hatchCount; i++) {
+        Hatch* h = &hatches[i];
+        if (!h->active) continue;
+        if (h->kind < 0 || h->kind >= 31) continue;
+        if (mask & (1 << h->kind)) {
+            /* 直接落终态：不播动画、不给第二次机会 */
+            h->state = HATCH_FIRED;
+            h->animT = HATCH_OPEN_SECONDS;
+        }
+    }
+}

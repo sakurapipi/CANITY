@@ -563,7 +563,10 @@ static void test_save_persist_contract(void) {
     /* v31：地图 24x24 -> 36x36，worldMap/explored 变大 → 布局又变了一次 */
     /* v32：MAX_CONTAINERS 8 -> 12，Container cont[] 变大 → 布局又变了一次。
        老档仍然只有 8 条记录，迁移靠 LEGACY_CONTAINER_COUNT 读取。 */
-    check(contains(saveh, "SAVE_VERSION 32"), "save format must be v32");
+    /* v33：舱门"已用"掩码**追加在末尾**，不需要布局重排 ——
+       这正是"新增字段永远追加在末尾"的正确用法。 */
+    check(contains(saveh, "SAVE_VERSION 33"), "save format must be v33");
+    check(contains(saveh, "int hatchUsedMask;"), "v33 must carry the hatch-used mask");
     check(contains(savec, "LEGACY_CONTAINER_COUNT"),
           "the container-slot count change needs its own legacy constant");
     check(contains(saveh, "int roomSeed;"), "v30 must carry the room replay seed");
