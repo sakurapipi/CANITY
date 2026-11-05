@@ -1635,6 +1635,79 @@ static void BakeProp(int id, int kind) {
         /* ---- ⑥ 木纹：稀疏竖条，不做过密噪点 ---- */
         cvSpeckle((int)c, (int)(baseY - 46), 38, 22, 0x00301808u, 0.28f);
 
+    } else if (kind == 14) {    /* 相位信标：地面模型（2026-11-06） */
+        /* ==================================================================
+         * 用户要求：「相位装置的建模」。
+         * 三脚架 + 圆柱主体 + 顶部发光环。落地式小塔，44 宽 46 高。
+         * 审美法则：5 段明暗 / 左上边缘光 / 右下压暗 / 接地 AO / 顶部自发光。
+         * ================================================================== */
+        float bx0 = c - 22, bx1 = c + 22;
+        float by0 = baseY - 46, by1 = baseY;
+
+        /* 三脚：三条斜腿 */
+        cvLine(c - 20, by1, c - 8, by0 + 26, 4.0f, 0x004A4740u, 1.0f);
+        cvLine(c + 20, by1, c + 8, by0 + 26, 4.0f, 0x004A4740u, 1.0f);
+        cvLine(c, by1 - 1, c, by0 + 24, 4.0f, 0x003A3832u, 1.0f);
+
+        /* 主体：5 段明暗 */
+        {
+            float body[8] = { bx0 + 4, by0 + 10, bx1 - 4, by0 + 10, bx1 - 6, by1 - 12, bx0 + 6, by1 - 12 };
+            cvPolyGrad(body, 4, 0x00706A60u, 0x002A2622u, 1.0f);
+            for (int k = 1; k <= 4; k++) {
+                float y = (by0 + 10) + ((by1 - 12) - (by0 + 10)) * (float)k / 5.0f;
+                cvLine(bx0 + 6, y, bx1 - 6, y, 1.0f, 0x00000000u, 0.16f);
+                cvLine(bx0 + 6, y + 1, bx1 - 6, y + 1, 1.0f, 0x009A948Au, 0.10f);
+            }
+            /* 边缘光 / 阴影侧 */
+            cvLine(bx0 + 4, by0 + 10, bx1 - 4, by0 + 10, 1.5f, 0x00B0AA9Eu, 0.85f);
+            cvLine(bx0 + 4, by0 + 10, bx0 + 6, by1 - 12, 1.5f, 0x008E8A80u, 0.60f);
+            cvLine(bx1 - 4, by0 + 10, bx1 - 6, by1 - 12, 1.5f, 0x00000000u, 0.50f);
+        }
+
+        /* 顶部发光环（自发光，不受光照影响的部分靠亮度上限表现） */
+        cvEllipse(c, by0 + 10, 17.0f, 6.0f, 0x00C080FFu, 0.95f);
+        cvEllipse(c, by0 + 10, 11.0f, 4.0f, 0x00F0D0FFu, 0.90f);
+        /* 环下的暗槽，让发光有"嵌进去"的厚度 */
+        cvLine(bx0 + 6, by0 + 16, bx1 - 6, by0 + 16, 2.0f, 0x00000000u, 0.55f);
+
+        /* 接地 AO */
+        cvLine(bx0 + 2, by1 - 2, bx1 - 2, by1 - 2, 4.0f, 0x00000000u, 0.35f);
+        cvSpeckle((int)c, (int)(baseY - 12), 18, 12, 0x00000000u, 0.25f);
+
+    } else if (kind == 15) {    /* 相位信标：手持模型（2026-11-06） */
+        /* ==================================================================
+         * 用户要求：「手持建模也没有做」。
+         * 竖持的小装置：手柄 + 主体 + 顶端两颗充能点。
+         * 构图上比地面模型窄、偏竖，才能在画面右下角读出来。
+         * ================================================================== */
+        float cxx = c;
+        float hy0 = baseY - 96, hy1 = baseY - 10;
+
+        /* 手柄 */
+        cvLine(cxx, hy1, cxx, hy0 + 44, 9.0f, 0x00322E28u, 1.0f);
+        cvLine(cxx - 3, hy1, cxx - 3, hy0 + 44, 2.0f, 0x00706A60u, 0.55f);
+
+        /* 主体 */
+        {
+            float body[8] = { cxx - 15, hy0 + 10, cxx + 15, hy0 + 10, cxx + 13, hy0 + 44, cxx - 13, hy0 + 44 };
+            cvPolyGrad(body, 4, 0x007A746Au, 0x002E2A26u, 1.0f);
+            for (int k = 1; k <= 4; k++) {
+                float y = (hy0 + 10) + 34.0f * (float)k / 5.0f;
+                cvLine(cxx - 13, y, cxx + 13, y, 1.0f, 0x00000000u, 0.16f);
+                cvLine(cxx - 13, y + 1, cxx + 13, y + 1, 1.0f, 0x009A948Au, 0.10f);
+            }
+            cvLine(cxx - 15, hy0 + 10, cxx + 15, hy0 + 10, 1.5f, 0x00B4AEA2u, 0.85f);
+            cvLine(cxx - 15, hy0 + 10, cxx - 13, hy0 + 44, 1.5f, 0x00928E84u, 0.55f);
+            cvLine(cxx + 15, hy0 + 10, cxx + 13, hy0 + 44, 1.5f, 0x00000000u, 0.45f);
+        }
+
+        /* 顶端两颗充能点（表示还剩 2 次） */
+        cvEllipse(cxx - 6, hy0 + 18, 3.2f, 3.2f, 0x00D890FFu, 0.95f);
+        cvEllipse(cxx + 6, hy0 + 18, 3.2f, 3.2f, 0x00D890FFu, 0.95f);
+
+        /* 底部 AO */
+        cvLine(cxx - 10, hy1 - 2, cxx + 10, hy1 - 2, 3.0f, 0x00000000u, 0.30f);
+
     } else if (kind == 1) {     /* 配电箱（v2.4.7 重新建模） */
         /* 按 art_direction.h 重设计：
              地标 ① 顶部两根**瓷瓶 + 垂下的导线**（剪影上凸出柜体上沿）
@@ -2031,6 +2104,8 @@ void SpritesInit(void) {
     BakeProp(SPR_PROP_SHELF_BOARD, 11);
     BakeProp(SPR_PROP_CONSOLE_BASE, 12);
     BakeProp(SPR_PROP_CONSOLE_PANEL, 13);
+    BakeProp(SPR_PROP_PHASE, 14);          /* 2026-11-06 相位信标：地面 */
+    BakeProp(SPR_PHASE_HAND, 15);          /* 2026-11-06 相位信标：手持 */
     BakeUiPanel(SPR_UI_PANEL, 0);
     BakeUiPanel(SPR_UI_PANEL_HOT, 1);
     BakeUiCursor();

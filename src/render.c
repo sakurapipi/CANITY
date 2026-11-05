@@ -2709,6 +2709,20 @@ void RenderSprites(void) {
         }
     }
 
+    /* 2026-11-06：**相位信标的世界模型**（用户要求） */
+    {
+        extern int phasePlaced;
+        extern float phaseX, phaseY;
+        if (phasePlaced) {
+            if (n < MAX_SPRITES) {
+                list[n].d2 = Dist2(phaseX, phaseY, posX, posY);
+                list[n].kind = 18;
+                list[n].idx = 0;
+                n++;
+            }
+        }
+    }
+
     /* 2026-11-06：第二只追光怪 */
     if (lightBeast2.active) {
         if (n < MAX_SPRITES) {
@@ -2805,6 +2819,11 @@ void RenderSprites(void) {
             case 8: DrawShotSprite(list[i].idx); break;
             case 10: DrawSlashSprite(); break;
             case 12: DrawHideSpotSprite(list[i].idx); break;   /* v3.0 藏身点 */
+        case 18: {   /* 2026-11-06：相位信标（地面模型） */
+            extern float phaseX, phaseY;
+            DrawBakedPropArt(SPR_PROP_PHASE, phaseX, phaseY, 0.0f, 0.34f, 1.0f);
+            break;
+        }
         case 17: {   /* 2026-11-06：舱门（两扇对开，4 帧） */
             int hi = list[i].idx;
             if (hi >= 0 && hi < MAX_HATCHES && hatches[hi].active) {
@@ -2844,9 +2863,23 @@ void RenderSprites(void) {
                             int lw = lr * 2 + 1;
                             for (int k = 0; k < 3; k++) {
                                 int lx = sb.x0 + boxW * (3 + k * 4) / 12;
-                                for (int dy = 0; dy < lw; dy++)
-                                    for (int dx = 0; dx < lw; dx++)
-                                        PutPixelBlend(lx + dx, ly + dy, lamp, litK);
+                                for (int dy = 0; dy < lw; dy++) {
+                                    for (int dx = 0; dx < lw; dx++) {
+                                        int px = lx + dx, py = ly + dy;
+                                        if (px < 0 || px >= renderW) continue;
+                                        if (py < 0 || py >= renderH) continue;
+                                        /* ================================================================
+                                         * 2026-11-06（用户实测）：**指示灯原来没有深度测试**
+                                         * ----------------------------------------------------------------
+                                         * "特殊房间的装置出现 3 个点，全局都能看得到，穿墙都能看得到"。
+                                         * 原因是这里直接调 PutPixelBlend —— 它只做混合，不查 zBuffer。
+                                         * 精灵本身走了 DrawSpriteSubZ（有 z），
+                                         * 唯独这三颗灯绕过了深度。
+                                         * ================================================================ */
+                                        if (sb.ty >= zBuffer[px]) continue;
+                                        PutPixelBlend(px, py, lamp, litK);
+                                    }
+                                }
                             }
                         }
                     }
@@ -3708,6 +3741,27 @@ static void DrawViewModel(void) {
     int px = cx - size / 2;
     int py = cy - size;
     DrawSprite(sid, px, py, size, size, light, 1.0f, 0, 0.0f);
+
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**相位信标的手持模型**
+     * ------------------------------------------------------------------
+     * 用户原话：「相位装置的建模，还有手持建模也没有做」。
+     * 画在画面**左下角**（扳手在右下），左右对称，不抢视线。
+     * 剩余次数用顶端两颗点的亮度表示：剩 2 次全亮，剩 1 次只亮一颗。
+     * ================================================================== */
+    {
+        extern int phaseOwned, phaseCharges, phasePlaced;
+        if (phaseOwned && phaseCharges > 0) {
+            int hsize = (int)((float)renderH * 0.30f);
+            if (hsize < 48) hsize = 48;
+            int hx = (int)((float)renderW * 0.10f);
+            int hy = (int)((float)renderH * 0.99f + lift * 0.6f);
+            /* 该画几颗充能点：靠亮度区分，1 次时压暗一半 */
+            float hl = (phaseCharges >= 2) ? 0.95f : 0.62f;
+            DrawSprite(SPR_PHASE_HAND, hx - hsize / 2, hy - hsize, hsize, hsize,
+                       hl, 1.0f, 0, 0.0f);
+        }
+    }
 
     /* 开火瞬间在武器前端补一团光 */
     /* 2026-11-05：**没有枪了** —— 枪口闪光永远不画（原来按 curWeapon 判，

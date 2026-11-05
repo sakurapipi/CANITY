@@ -103,6 +103,9 @@ enum {
     SPR_HATCH_1,       /* 开 1/3 */
     SPR_HATCH_2,       /* 开 2/3 */
     SPR_HATCH_3,       /* 全开 */
+    /* 2026-11-06：相位信标（用户要求"建模"） */
+    SPR_PROP_PHASE,    /* 放在地上的信标（世界模型） */
+    SPR_PHASE_HAND,    /* 拿在手上的信标（手持模型） */
     SPR_COUNT
 };
 

@@ -6623,6 +6623,9 @@ void StartGame(void) {
     /* 重置成就追踪变量 */
     knockCountRun=throwHitCountRun=echoCellsTotalRun=0;
     { extern void PhaseReset(void); PhaseReset(); }   /* 2026-11-06：相位信标按局重置 */
+    /* 2026-11-06（用户实测）：**训练营里没有相位信标** ——
+       那是个测试场，所有机制都该能试。这里直接发一个。 */
+    if (trainingMode) { extern void PhaseGive(void); PhaseGive(); }
     { extern int mimicsEscapedThisRun; mimicsEscapedThisRun = 0; }
     floorsNoSanityLoss=dailyEscapeCount=wardenCleanFloors=fullHideDone=0;
     doubleHuntSeconds=0.0f; pendingSkillDraft=0;

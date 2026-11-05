@@ -618,7 +618,7 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
         L->repath -= dt;
         if (L->repath <= 0.0f) {
             L->repath = 0.35f;
-            MonPathFor(&lightBeast, (int)L->x, (int)L->y, (int)tx, (int)ty);
+            MonPathFor(L, (int)L->x, (int)L->y, (int)tx, (int)ty);
         }
     } else if (L->state == 1) {
         L->state = 0;
@@ -631,7 +631,7 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
             int cx = (int)L->x, cy = (int)L->y;
             int nx = cx + (rand() % 9) - 4, ny = cy + (rand() % 9) - 4;
             if (nx > 0 && ny > 0 && nx < MAP_WIDTH - 1 && ny < MAP_HEIGHT - 1 && !worldMap[ny][nx])
-                MonPathFor(&lightBeast, cx, cy, nx, ny);
+                MonPathFor(L, cx, cy, nx, ny);
         }
     }
 

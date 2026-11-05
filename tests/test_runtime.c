@@ -528,16 +528,37 @@ static void test_global_balance_invariants(void) {
               "the storage hatch's gold gate must be reachable within three floors");
     }
 
-    /* ---- ⑥ 相位信标：百分比定价不能把人清空 ---- */
+    /* ---- ⑥ 相位信标：**递增百分比**（用户 2026-11-06 修正）----
+       原来一律 70% 太狠。现在的契约是：
+         · 随层数递增（第 1 层 30%，每层 +5%，第 11 层起封顶 80%）
+         · 永远不把人清空
+         · 永远不为 0
+       所以这里测的是**关系**：单调递增、有上下界、有保底。 */
     {
         carryGold = 1000;
-        int p = ShopPriceAt(8);
-        CHECK(p < carryGold,
-              "the percentage price must never consume ALL carried gold");
-        CHECK(p * 10 >= carryGold * 6,
-              "the beacon must stay genuinely expensive (>= 60% of carried gold)");
+        int prev = -1, first = -1;
+        for (int lv = 1; lv <= 14; lv++) {
+            currentLevel = lv;
+            int p = ShopPriceAt(8);
+            if (lv == 1) first = p;
+            CHECK(p < carryGold,
+                  "the percentage price must never consume ALL carried gold");
+            CHECK(p > 0, "the beacon must never become free");
+            if (prev >= 0) {
+                CHECK(p >= prev,
+                      "the beacon price must rise with depth (never get cheaper)");
+            }
+            prev = p;
+        }
+        CHECK(first >= 250 && first <= 340,
+              "at floor 1 the beacon must cost about 30% of 1000 gold");
+        CHECK(prev >= 760 && prev <= 840,
+              "by the deep floors the beacon must cap near 80% of 1000 gold");
+
+        currentLevel = 1;
         carryGold = 0;
-        CHECK(ShopPriceAt(8) > 0, "the beacon must never become free");
+        CHECK(ShopPriceAt(8) >= 100,
+              "with no gold the beacon must still cost a real floor price");
     }
 
     /* ---- ⑦ ⑧ 扳手冷却的两个边界 ---- */
@@ -705,25 +726,37 @@ static void test_facehugger_rework(void) {
 
 static void test_phase_price(void) {
     extern int ShopPriceAt(int row);
-    extern int carryGold;
+    extern int carryGold, currentLevel;
 
-    int saved = carryGold;
+    int savedGold = carryGold;
+    int savedLevel = currentLevel;
 
-    carryGold = 0;
-    int p0 = ShopPriceAt(8);
-    CHECK(p0 == 300, "with no gold the beacon must still cost the 300 floor");
-
+    /* ==================================================================
+     * 2026-11-06 修正后的契约：**随层数递增的百分比**
+     *   第 1 层 30%，每层 +5%，第 11 层起封顶 80%，下限 120 金
+     * 固定 70% 的旧契约太狠（用户实测："价格过于昂贵"）。
+     * ================================================================ */
     carryGold = 1000;
-    int p1 = ShopPriceAt(8);
-    CHECK(p1 == 700, "1000 gold must price the beacon at 700 (70%)");
 
-    carryGold = 5000;
-    int p2 = ShopPriceAt(8);
-    CHECK(p2 == 3500, "5000 gold must price the beacon at 3500 (70%)");
+    currentLevel = 1;
+    CHECK(ShopPriceAt(8) == 300, "floor 1 must cost 30% of 1000 gold");
 
-    CHECK(p2 > p1 && p1 >= p0, "the price must scale with carried gold");
+    currentLevel = 5;
+    CHECK(ShopPriceAt(8) == 500, "floor 5 must cost 50% of 1000 gold");
 
-    carryGold = saved;
+    currentLevel = 11;
+    CHECK(ShopPriceAt(8) == 800, "floor 11 must hit the 80% cap");
+
+    currentLevel = 30;
+    CHECK(ShopPriceAt(8) == 800, "the cap must hold on deep floors");
+
+    /* 下限：身上没钱时仍有一个真实价格，不是 0 也不至于买不起到离谱 */
+    currentLevel = 1;
+    carryGold = 0;
+    CHECK(ShopPriceAt(8) == 120, "with no gold the beacon keeps a 120 floor");
+
+    carryGold = savedGold;
+    currentLevel = savedLevel;
 }
 
 static void test_phase_beacon(void) {
