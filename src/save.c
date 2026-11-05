@@ -474,6 +474,8 @@ static void CopyDisplaySettings(SaveBlob* s) {
     s->musicVolume = musicVolumeF;
     for (int a = 0; a < BINDING_SLOTS; a++)
         s->bindings[a] = (a < ACT_COUNT) ? g_bindings[a] : 0;
+    /* 2026-11-06：在最后一槽写绑定表版本，读档时据此判断要不要补默认键 */
+    s->bindings[BINDING_SLOTS - 1] = BINDING_SCHEMA;
     s->lang = g_lang;
     s->saveSlot = g_saveSlot;
 }
@@ -1299,9 +1301,19 @@ int LoadSettings(void) {
     {
         static const int defBindings[BINDING_SLOTS] = BINDINGS_DEFAULT;
         /* 存档里有 32 个槽，但运行时数组只有 ACT_COUNT 个 —— 只能拷前 ACT_COUNT 个 */
+        /* 2026-11-06：**先看这份存档认不认识新动作**
+           旧存档没有这个标记（那一槽是 0）→ 0 必须补成默认值，
+           否则新加的动作永远是"没绑定"，功能做了也按不出来。 */
+        int saveSchema = g_save.bindings[BINDING_SLOTS - 1];
+        int needDefaults = (saveSchema != BINDING_SCHEMA);
+
         for (int a = 0; a < ACT_COUNT; a++) {
             int vk = g_save.bindings[a];
-            if (vk == 0) { g_bindings[a] = 0; continue; }   /* 允许显式无绑定 */
+            if (vk == 0) {
+                /* 老存档：用默认键补上；新存档：尊重玩家的"显式无绑定" */
+                g_bindings[a] = needDefaults ? defBindings[a] : 0;
+                continue;
+            }
             int known = 0;
             for (int k = 0; k < OPT_KEY_COUNT; k++)
                 if (optKeyVKs[k] == vk) { known = 1; break; }

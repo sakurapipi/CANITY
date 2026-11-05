@@ -230,7 +230,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 41   /* 2026-11-06：+2（相位放置 / 相位传送） */   /* v8：SFX / Music 音量拆成两项 */
+#define SETTING_COUNT 42   /* 2026-11-06：+1（调试生成） */   /* 2026-11-06：+2（相位放置 / 相位传送） */   /* v8：SFX / Music 音量拆成两项 */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 
@@ -892,6 +892,21 @@ extern Leech leeches[LEECH_MAX];
 /* 存档里的键位槽固定 32 个：以后加动作不再改变存档布局 */
 #define BINDING_SLOTS 32
 
+/* ==================================================================
+ * 2026-11-06（用户实测：按 C 不能放置相位信标）
+ * ------------------------------------------------------------------
+ * 根因：键位是**存进存档**的（bindings[32]），旧存档里新动作那两槽是 0，
+ * 而读档逻辑把 0 当成"玩家显式取消绑定" → C 键等于没绑。
+ * 于是功能做完了却按不出来。
+ *
+ * 修法：在**没被动作占用的最后一槽**里存一个"绑定表版本号"。
+ * 读档时版本不一致 = 这份存档不认识新动作 → 把 0 补成默认值。
+ * 这样以后再加动作也不会重演同一个 bug。
+ *
+ * 约束：ACT_COUNT 必须小于 BINDING_SLOTS，否则会覆盖标记。
+ * ================================================================ */
+#define BINDING_SCHEMA 2
+
 /* HELP 页：前 10 行是按键说明书（按当前绑定动态生成），后面是玩法说明 */
 #define HELP_KEY_ROWS 10
 #define HELP_TEXT_ROWS 13
@@ -940,8 +955,14 @@ typedef enum {
     ACT_DROP_GOLD,         /* v7 丢钱袋（默认 K，按住弹滑条） */
     ACT_PHASE_PLACE,       /* 2026-11-06 相位信标：放置（默认 C） */
     ACT_PHASE_TELE,        /* 2026-11-06 相位信标：传送（默认 Q） */
+    ACT_DEBUG_SPAWN,       /* 2026-11-06 调试：生成一只爆脸怪（默认 F3） */
     ACT_COUNT
 } ActionId;
+
+/* 2026-11-06：BINDING_SLOTS 的最后一槽被用来存"绑定表版本号"，
+   所以动作数量必须留出那一槽。这条断言在**枚举之后**，
+   因为 ACT_COUNT 到这里才可见。 */
+typedef char binding_slots_must_leave_room[(ACT_COUNT + 1 <= BINDING_SLOTS) ? 1 : -1];
 
 /* 每个动作绑定一个虚拟键码，0=无绑定。
    默认值集中在一个宏里 —— Settings 的 Reset to Defaults 和自检都要用它，
@@ -968,6 +989,7 @@ typedef enum {
     [ACT_DODGE] = VK_SPACE, \
     [ACT_SWING] = 'V', [ACT_DECOY] = 'G', \
     [ACT_PHASE_PLACE] = 'C', [ACT_PHASE_TELE] = 'Q', \
+    [ACT_DEBUG_SPAWN] = VK_F3, \
     [ACT_DROP_GOLD] = 'K', \
 }
 

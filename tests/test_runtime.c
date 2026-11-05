@@ -353,6 +353,21 @@ static void test_hatch_screenshot(void) {
         posY = hy + vy * (kDists[k] + 1.0f);
         dirX = -vx; dirY = -vy;
 
+        /* 2026-11-06：顺便放一个相位信标在门旁边，让截图里能看到它的建模 */
+        {
+            extern void PhaseGive(void);
+            extern int PhaseTryPlace(void);
+            extern float posX, posY;
+            float sx = posX, sy = posY;
+            PhaseGive();
+            /* 放在镜头与门之间（正对着，不偏移）——
+               原来往侧面偏了 1.2 格，正好落进墙里，被 zBuffer 全遮住。 */
+            posX = hx + vx * 0.9f;
+            posY = hy + vy * 0.9f;
+            PhaseTryPlace();
+            posX = sx; posY = sy;
+        }
+
         Render3D();
 
         /* 诊断：把门的投影框报出来，区分"没投影"和"画了个空图" */

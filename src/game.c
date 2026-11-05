@@ -1040,6 +1040,7 @@ SettingItem settings[] = {
     /* 2026-11-06：相位信标（用户要求 Q 传送 / C 放置） */
     {"Phase: Place",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PHASE_PLACE],   NULL, 0, 0, 0, 4},
     {"Phase: Teleport", SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PHASE_TELE],    NULL, 0, 0, 0, 4},
+    {"Debug: Spawn",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DEBUG_SPAWN],   NULL, 0, 0, 0, 4},
     {"Interact",        SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_INTERACT],      NULL, 0, 0, 0, 4},
     {"Crank Battery",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_CRANK],         NULL, 0, 0, 0, 4},
     {"Flashlight",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_FLASHLIGHT],    NULL, 0, 0, 0, 4},
@@ -4984,6 +4985,21 @@ void Update(float dt) {
      * ------------------------------------------------------------------
      * 放在按骰子之前：它们和投掷物无关，不该被蓄力/投掷状态影响。
      * ================================================================ */
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**F3 生成一只爆脸怪**
+     * 调试用。不做训练营限制 —— 用户可能想在任何地方复现它的行为。
+     * ================================================================ */
+    if (IsActionPressed(ACT_DEBUG_SPAWN)) {
+        keyPressed[g_bindings[ACT_DEBUG_SPAWN]] = 0;
+        {
+            extern void SpawnParasite(void);
+            SpawnParasite();
+            pickupMsg = (g_lang == LANG_ZH) ? "生成一只爆脸怪" : "DEBUG: SPAWNED A FACESUCKER";
+            pickupMsgTimer = 1.6f;
+            uiDirty = 1;
+        }
+    }
+
     if (IsActionPressed(ACT_PHASE_PLACE)) {
         keyPressed[g_bindings[ACT_PHASE_PLACE]] = 0;
         if (!phaseOwned || phaseCharges <= 0) {

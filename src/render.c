@@ -2821,7 +2821,8 @@ void RenderSprites(void) {
             case 12: DrawHideSpotSprite(list[i].idx); break;   /* v3.0 藏身点 */
         case 18: {   /* 2026-11-06：相位信标（地面模型） */
             extern float phaseX, phaseY;
-            DrawBakedPropArt(SPR_PROP_PHASE, phaseX, phaseY, 0.0f, 0.34f, 1.0f);
+            /* 半身高 0.34 -> 0.50：第一版太小，暗场里像块石头 */
+            DrawBakedPropArt(SPR_PROP_PHASE, phaseX, phaseY, 0.0f, 0.50f, 1.25f);
             break;
         }
         case 17: {   /* 2026-11-06：舱门（两扇对开，4 帧） */
