@@ -491,6 +491,60 @@ static void test_floor_resets_hunters(void) {
  * 造一间空房间，把记忆点钉在房间中央，然后连挑 12 次，
  * 每次都检查落点到记忆点的距离在环内。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4-beta B05）：**破门石的实际听觉范围**
+ * ------------------------------------------------------------------
+ * 外部审查建议把破门石的 20 格做 12/14/16/20 四参数对照。
+ * 算完发现**不需要改数值** —— 因为听声鬼的判定不是"半径内就听见"，
+ * 而是"有效强度 > 阈值"：
+ *
+ *     破门石写入强度 = 20 × 2.6 = 52
+ *     有效强度       = 52 × SoundReach(d, maxListen=22)
+ *     第 1 只的阈值  = 15  → 需要 reach > 0.288 → d < 约 10 格
+ *     第 3 只的阈值  = 30  → 需要 reach > 0.577 → d < 约 6 格
+ *
+ * 再加上 B03 的路径传播（隔墙 reach 更低），实际范围是 6~10 格，
+ * 并不是"覆盖全图"。**20 那个数只是"强度换算的输入"，不是听觉半径。**
+ *
+ * 这组断言把这个结论钉住，防止以后有人把 strength/maxListen 的关系改乱。
+ * ================================================================== */
+static void test_stone_hearing_range(void) {
+    extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+    static int saved[MAP_HEIGHT][MAP_WIDTH];
+    memcpy(saved, worldMap, sizeof(saved));
+
+    /* **必须用空地图**：SoundReach 走的是真实 worldMap，
+       真实地图里有墙，测出来的曲线会被传播折弯，不是纯距离衰减。 */
+    for (int y = 0; y < MAP_HEIGHT; y++)
+        for (int x = 0; x < MAP_WIDTH; x++)
+            worldMap[y][x] = 0;
+    SoundPropReset();
+
+    float strong = 20.0f * 2.6f;         /* 破门石写入的可疑点强度 */
+    CHECK(strong > 51.9f && strong < 52.1f, "break-stone strength must be 52");
+
+    /* 直线上的可达度（用纯几何，不建图） */
+    float r5  = SoundReach(2.5f, 2.5f, 7.5f, 2.5f, 22.0f);    /* 5 格 */
+    float r10 = SoundReach(2.5f, 2.5f, 12.5f, 2.5f, 22.0f);   /* 10 格 */
+    float r15 = SoundReach(2.5f, 2.5f, 17.5f, 2.5f, 22.0f);   /* 15 格 */
+
+    CHECK(r5 > r10 && r10 > r15, "reach must decrease with distance");
+
+    /* 第 1 只（阈 15）：5 格听得见，15 格听不见 */
+    CHECK(strong * r5  > 15.0f, "hunter #1 must hear the break 5 tiles away");
+    CHECK(strong * r15 < 15.0f, "hunter #1 must NOT hear the break 15 tiles away");
+
+    /* 第 3 只（阈 30）：10 格听不见 —— 它靠速度不靠耳朵 */
+    CHECK(strong * r10 < 30.0f, "hunter #3 must NOT hear the break 10 tiles away");
+
+    /* 顺带确认三个阈值档位对应的最大距离是递减的 */
+    CHECK(r5 > 0.55f, "at 5 tiles reach must still be strong");
+    CHECK(r10 < 0.35f, "at 10 tiles reach must have fallen off sharply");
+
+    SoundPropReset();
+    memcpy(worldMap, saved, sizeof(saved));
+}
+
 static void test_monster_search_around(void) {
     extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
     static int saved[MAP_HEIGHT][MAP_WIDTH];
@@ -1160,6 +1214,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

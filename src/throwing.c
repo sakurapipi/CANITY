@@ -73,7 +73,9 @@ void EchoTryTrigger(float x, float y) {
             SuspicionConsume(i);
 
     SuspicionAdd(x, y, 100.0f, 1.5f, 30.0f, SUSP_THROW);
-    PlaySfx(SFX_ECHO, 0.95f);
+    /* B05：连锁回响也有位置 —— 它发生在你扔出去的那个地方 */
+    { extern void AudioPlayWorld(int, float, float, float, float, int);
+      AudioPlayWorld(SFX_ECHO, x, y, 0.95f, 24.0f, 2); }
     pickupMsg = (g_lang == LANG_ZH) ? "回响炸开了" : "ECHO BURST";
     pickupMsgTimer = 1.6f;
 }
@@ -128,7 +130,9 @@ static int StoneBreakLockAt(float x, float y) {
 
     /* 砸锁的动静比普通落地大得多 —— 这就是它的代价 */
     MakeNoise(x, y, STONE_LOCK_NOISE);
-    PlaySfx(SFX_GLASS, 1.0f);
+    /* B05：破锁的碎玻璃声来自**箱子那边** —— 隔墙听得到，也听得出方向 */
+    { extern void AudioPlayWorld(int, float, float, float, float, int);
+      AudioPlayWorld(SFX_GLASS, x, y, 1.0f, 24.0f, 3); }
     { extern void AddShake(float, float); AddShake(0.10f, 0.08f); }
 
     pickupMsg = (g_lang == LANG_ZH) ? "石头砸开了锁！" : "THE STONE BROKE THE LOCK!";
@@ -338,7 +342,9 @@ void UpdateShots(float dt) {
                 pickupMsg = (g_lang == LANG_ZH) ? "声呐扫描：资源已标出（有声）"
                                                 : "SONAR: RESOURCES MARKED (LOUD)";
                 pickupMsgTimer = 1.8f;
-                PlaySfx(SFX_ECHO, 0.85f);
+                /* B05：回声弹落点有声源 —— 你能听出它落在哪一侧 */
+                { extern void AudioPlayWorld(int, float, float, float, float, int);
+                  AudioPlayWorld(SFX_ECHO, shot[i].x, shot[i].y, 0.85f, 22.0f, 2); }
             } else {
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
             }
@@ -452,7 +458,9 @@ void UpdateShots(float dt) {
                     echoScanT = 5.0f;
                     echoScanX = shot[i].x;
                     echoScanY = shot[i].y;
-                    PlaySfx(SFX_ECHO, 0.80f);
+                    /* B05：撞墙也算落点，同样带位置 */
+                    { extern void AudioPlayWorld(int, float, float, float, float, int);
+                      AudioPlayWorld(SFX_ECHO, shot[i].x, shot[i].y, 0.80f, 22.0f, 2); }
                 }
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 PlaySfx(SFX_GLASS, 0.7f);

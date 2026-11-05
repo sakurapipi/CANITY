@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "sound_event.h"
 #include "state.h"
 #include "economy.h"
 #include "throwing.h"
@@ -769,10 +770,35 @@ void UpdateSmokes(float dt) {
                现在直接往可疑点表写：strength 75（比冲刺的 45 高），
                decay 3/s、寿命 8 秒 —— 三个叫周期都能覆盖到。
                玩家自己的脚步只有 36 强度，抢不过它。 */
-            SuspicionAdd(decoysArr[i].x, decoysArr[i].y, 75.0f, 3.0f, 8.0f, SUSP_DECOY);
+            /* ============================================================
+             * 2026-11-06（v2.4-beta B05）：**诱饵走事件中心，并且有位置**
+             * ------------------------------------------------------------
+             * 原来这里直接 SuspicionAdd + 居中的 PlaySfx。
+             * 结果：**你听不出自己的玩偶在左边还是右边** ——
+             * 而"把怪引到那个方向"正是玩偶的全部意义。
+             *
+             * 现在：
+             *   · 线索走 SoundEmit(SK_VOICE) —— 类别显式，参数在 kKindDefs 里
+             *   · 声音走 AudioPlayWorld —— 从玩偶所在方向传过来
+             * 参数保持原值（强度 75 / decay 3 / ttl 8），行为不变。
+             * ============================================================ */
+            {
+                SoundEvent ev;
+                memset(&ev, 0, sizeof(ev));
+                ev.kind = SK_VOICE;
+                ev.x = decoysArr[i].x;
+                ev.y = decoysArr[i].y;
+                ev.strength = 75.0f;
+                ev.decay = 3.0f;
+                ev.ttl = 8.0f;
+                ev.eventId = 0u;              /* 每 1.5 秒一次是**独立**的叫声 */
+                ev.sourceEntityId = -1;
+                SoundEmit(&ev);
+            }
             /* 保留一小圈物理噪音，让追光怪/环境音也有反应 */
             MakeNoise(decoysArr[i].x, decoysArr[i].y, 6.0f);
-            PlaySfx(SFX_DECOY, 0.70f);   /* 玩偶嘎吱叫 */
+            { extern void AudioPlayWorld(int, float, float, float, float, int);
+              AudioPlayWorld(SFX_DECOY, decoysArr[i].x, decoysArr[i].y, 0.70f, 22.0f, 3); }
         }
     }
 
