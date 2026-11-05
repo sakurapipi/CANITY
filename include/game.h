@@ -295,6 +295,9 @@ void ActivateSettingRow(void);
 
 /* ---- 成就追踪 ---- */
 extern int totalGoldEarned;
+/* 2026-11-05：bottlesKilled 保留 —— 它给 ScoreInput.kills 供值，
+   但本作没有击杀手段（NO_COMBAT），所以**恒为 0**
+   → 结算页的 s_kill 项永远拿 0 分（15% 权重永久为 0，待重做）。 */
 extern int bottlesKilled;
 extern int faceDodged;
 extern int crankTimeTotal;
@@ -310,7 +313,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 #endif /* CANITY_GAME_H */
 
 /* v2.2：从函数内 extern 提到这里（类型改动不再静默错位） */
-extern int totalKills, killsWrench, killsBottle, floorKills;
+/* 2026-11-05：击杀计数器已删除（本作没有击杀手段，见 game.c 的说明） */
 
 /* v2.2：从函数内 extern 提到这里（类型改动不再静默错位） */
 extern int weaponAttach[3][2];

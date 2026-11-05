@@ -83,7 +83,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     timeBeginPeriod(1);
 
     SteamZoneInit();
-    SteamZoneSyncLocalSaves();
+    /* 2026-11-05：云->本地的回写搬到存档分区了。
+       顺序很重要：必须在 LoadSettings() **之前**跑完，
+       否则读到的还是旧档、云端赢的那份要等下次启动才生效。 */
+    { extern void SaveBackendSyncAll(void); SaveBackendSyncAll(); }
     InitAchievements();
     hasSave = LoadSettings();
 

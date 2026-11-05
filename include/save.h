@@ -32,6 +32,16 @@ extern int  g_saveError;
 extern int  g_saveSlot;      /* v2.0：当前存档槽 0..2 */
 extern char g_savePath[MAX_PATH];
 
+/* ---- 存档分区后端（src/save/save_backend.c）----
+   全工程**唯一**允许碰 canity*.sav 的地方。 */
+int   SaveBackendWrite(const char* path, const void* data, size_t n); /* 0 = 成功 */
+long  SaveBackendRead(const char* path, void* buf, size_t cap);       /* 字节数 / -1 */
+void  SaveBackendUpload(const char* path);                            /* 交给 Steam 专区 */
+void  SaveBackendSyncAll(void);                                       /* 云 <-> 本地 */
+
+/* 按「候选路径 i + 存档槽 slot」算路径（save.c 实现） */
+const char* SavePathForSlot(int i, int slot, char* buf, size_t n);
+
 typedef struct {
     unsigned int magic;
     int version;

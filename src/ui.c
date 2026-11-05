@@ -1175,6 +1175,7 @@ static const char* MenuLabel(int i) {
                 "  GIVES AWAY YOUR POSITION.",
                 "",
                 "FACE JUMPER: PRESS SPACE TO DODGE IT.",
+        "SLING: THROW IT AT A LOCKED CRATE TO SHATTER THE LOCK (LOUD).",
                 "  IF IT LANDS ON YOUR FACE, PRESS THE KEY.",
                 "  MISS BOTH AND YOU LOSE SANITY."
             };
@@ -3586,8 +3587,24 @@ void DrawHUD(void) {
        否则开 FPS 时会叠在一起。 */
     {
         /* v3.0：PENDING 行删掉后 hy 没人用了，显式标记避免编译告警。 */
-        int hy = UIS(18);
-        if (showFps) hy += TextHeightWin() + UIS(6);
+        /* ==================================================================
+         * 2026-11-05 修 UI 重叠：**日游行和 LEVEL 行画在同一个 y**
+         * ------------------------------------------------------------------
+         * 左边 HUD 的纵向分配是：
+         *     UIS(18)                    LEVEL / CAMPAIGN / DAILY 种子  (3447)
+         *     UIS(18)                    DAILY 进度 + 目标文本          (本块) ← 重叠
+         *     hudY1 = 18 + 1*(TH+4)      SANITY
+         *     hudY2 = 18 + 2*(TH+4)      FUSES
+         *     hudY3 = 18 + 3*(TH+4)      CARRY / TIER
+         *     18 + 4*(TH+4)              BOOST
+         *
+         * 两行都从 x≈12 起、青色和绿色几乎同色，叠起来就是一坨乱码
+         * （用户截图：DAILY 0/15 和 LEVEL 那行糊在一起）。
+         *
+         * 现在把日游行排到整叠之后：18 + 5*(TH+4)。
+         * ================================================================ */
+        int hy = UIS(18) + 5 * (TextHeightWin() + UIS(4));
+        if (showFps) hy += TextHeightWin() + UIS(4);
         (void)hy;
 (void)hy;
 

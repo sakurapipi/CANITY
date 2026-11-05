@@ -38,7 +38,8 @@ extern const BenchNode benchNodes[];
 
 /* 本局已购买位掩码（1 << id） */
 extern unsigned int benchOwned;
-extern int benchKills;      /* 嗜血：本局击杀计数 */
+/* 2026-11-05：benchKills 已删除 —— 「嗜血」节点在改造树重做时已不存在，
+   这个计数器只剩声明和清零，没有任何读写者（铁律四十四）。 */
 
 void BenchResetRun(void);                  /* 开局清空 */
 int  BenchHas(int id);                     /* 是否已购买 */

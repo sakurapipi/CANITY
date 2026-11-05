@@ -24,9 +24,10 @@ typedef struct {
 
 /* 精灵 id */
 enum {
-    SPR_WRENCH = 0,
-    SPR_PISTOL,
-    SPR_SIGIL,
+    SPR_WRENCH = 0,     /* 2026-11-05：唯一的工具。原来的 SPR_PISTOL（信号枪）
+                           与 SPR_SIGIL（符印发射器）已删除 —— 那两个武器系统
+                           在 NO_COMBAT 时就下线了，模型却还留着，
+                           每日/战役的随机武器会把它画到屏幕上。 */
     /* 投掷物（左手）—— v2.4.82 按**槽位**命名，和 ITEM_SLOT_* 一一对应。
        旧的名字（BOTTLE/BRICK/ACID/FIRE/MIRROR）是已删除的投掷物，
        留着只会让人以为还有那几种东西。 */

@@ -329,6 +329,10 @@ int   ultKind = -1;             /* v3.0：正在生效的大招 id */
 int   vanished = 0;             /* v3.0 消失：1 = 已隐身 */
 float vanishHold = 0.0f;        /* v3.0 消失：本次隐身剩余秒数 */
 float decoySelfTimer = 0.0f;  /* 投石后的自身噪声加成计时 */
+/* 2026-11-05：**G 键投石的冷却计时器**。
+   原来没有这个东西 —— 技能描述写着 8 秒 cd，代码里却是无限制。
+   文件级 static：只有下面那个按键分支会写它。 */
+static float s_decoyKeyCd = 0.0f;
 int hubPage = 1;   /* v6：Hub **只有一页**（技能树）。变量保留兼容旧判断，但恒为 1。 */
 int levelEvent = -1;         /* 本层随机事件，-1 = 无 */
 int eventBonus = 0;          /* 本局事件累计加分 */
@@ -359,15 +363,16 @@ static int pendingSkillDraft=0;      /* v2.0：0 = 局内技能，1 = 遗物 */
 int bossLevel = 0;     /* v2.1：本层是否 Boss 层 */
 int bossMaxHp = 1;
 int bossDefeated = 0;
-int totalKills = 0;      /* v2.0：累计击杀，成就用 */
+/* 2026-11-05：**totalKills / killsWrench / killsBottle / floorKills 已删除** ——
+   NO_COMBAT 之后本作没有任何击杀手段（ApplyDamage 只做噪音 + 硬直），
+   这几个计数器一次都不会 +1。留着它们只会让人以为战斗系统还在。
+   注：floorKills 原来还被 UNSEEN FLOOR 成就引用过，早在 v3.3 已换成 floorSpotted。 */
 int shortcutUsed = 0;
 int helpPage = 0;   /* v2.2：帮助页分页 */
-/* v2.2：成就计数器（原来 15 个成就没有任何触发点） */
-int killsWrench = 0, killsBottle = 0;
 float crankSecondsTotal = 0.0f;
 int floorsNoLight = 0, floorsFlawless = 0, floorsPacifist = 0, floorsFast = 0, floorsQuiet = 0;
 float lowSanitySeconds = 0.0f;
-int floorKills = 0, floorTookDamage = 0;
+int floorTookDamage = 0;
 /* v3.3 **新增 floorSpotted** ——
    UNSEEN FLOOR（原文案「Clear a floor without ever being spotted」）
    原来判的是 floorKills == 0，但 floorKills++ 在 NO_COMBAT 的
@@ -634,7 +639,7 @@ void SpawnGlue(float x, float y) {
     glues[best].life = GLUE_LIFE;
     glues[best].active = 1;
     /* 2026-11-05：宝箱怪不是普通怪，胶水管线扫不到它 —— 单独通知一次。
-       命中后它硬直 2 秒，玩家可以趁机搜空壳（铁律四十 登记点）。 */
+       命中后它硬直 2 秒，玩家可以趁机搜空壳（铁律二十二 登记点）。 */
     MimicOnGlue(x, y);
 }
 
@@ -2980,7 +2985,7 @@ void WrenchStartSwing(float charge) {
       if (DailyForbidWrench()) {
           extern const char* pickupMsg;
           extern float pickupMsgTimer;
-          pickupMsg = "TODAY: NO WRENCH";
+          pickupMsg = g_lang == LANG_ZH ? "今天不能用扳手" : "TODAY: NO WRENCH";
           pickupMsgTimer = 1.6f;
           return;
       } }
@@ -3915,7 +3920,8 @@ void Update(float dt) {
             }
         }
         if (hit) {
-            WeaponAddXp(WPN_SPELL, 1);         /* v2.1：法术也能练 */
+            /* 2026-11-05：法术武器已下线，这一行只会给一个不存在的武器加经验 */
+
             slashFade = 0.18f;                 /* 命中留一点余辉 */
             slashHitStop = 0.05f;              /* 50ms 顿帧 */
             /* 在命中点炸一圈金币（复用玻璃金币池） */
@@ -3940,16 +3946,39 @@ void Update(float dt) {
         decoySelfTimer -= dt;
         if (decoySelfTimer < 0.0f) decoySelfTimer = 0.0f;
     }
+    /* G 键冷却倒计时 */
+    if (s_decoyKeyCd > 0.0f) {
+        s_decoyKeyCd -= dt;
+        if (s_decoyKeyCd < 0.0f) s_decoyKeyCd = 0.0f;
+    }
     if (HasKeystone(SK_DECOY) && IsActionPressed(ACT_DECOY)) {
-        float px = posX, py = posY;
-        for (float d = DECOY_MIN; d <= DECOY_MAX; d += 0.5f) {
-            float tx = posX + dirX * d, ty = posY + dirY * d;
-            if (Blocked(tx, ty)) break;
-            px = tx; py = ty;
+        /* ==================================================================
+         * 2026-11-05 修「DECOY 超模 / 可以无限使用」
+         * ------------------------------------------------------------------
+         * 技能树里这条的描述是：
+         *     "G: throw a stone (8s cd), noise 14"
+         * 但这里**从来没有冷却判定** —— 每按一次 G 就无条件放一发 14 格噪音，
+         * 玩家可以一直按，把所有怪无限往一个点引。
+         * 现在补上描述承诺的 8 秒；冷却中给明确提示，不做静默吞键。
+         * ================================================================== */
+        if (s_decoyKeyCd > 0.0f) {
+            extern const char* pickupMsg;
+            extern float pickupMsgTimer;
+            extern int g_lang;
+            pickupMsg = (g_lang == LANG_ZH) ? "投石冷却中" : "STONE ON COOLDOWN";
+            pickupMsgTimer = 0.8f;
+        } else {
+            float px = posX, py = posY;
+            for (float d = DECOY_MIN; d <= DECOY_MAX; d += 0.5f) {
+                float tx = posX + dirX * d, ty = posY + dirY * d;
+                if (Blocked(tx, ty)) break;
+                px = tx; py = ty;
+            }
+            MakeNoise(px, py, DECOY_NOISE);
+            decoySelfTimer = DECOY_SELF_TIME;
+            s_decoyKeyCd = DECOY_KEY_COOLDOWN;
+            PlaySfx(SFX_STEP, 0.7f);
         }
-        MakeNoise(px, py, DECOY_NOISE);
-        decoySelfTimer = DECOY_SELF_TIME;
-        PlaySfx(SFX_STEP, 0.7f);
     }
 
     /* 手摇发电：站着摇，摇满一次回一截电；期间不能移动 */
@@ -4551,6 +4580,32 @@ void Update(float dt) {
     UpdateParasite(dt);
     UpdateLeech(dt);
 
+    /* ==================================================================
+     * 2026-11-05 修「荧光棒卡进墙里、建模消失」
+     * ------------------------------------------------------------------
+     * 原来的墙判定是**点**（ShotBlocked 只看中心那一格），而且出手后
+     * 0.15 秒内 `justThrown` 完全跳过判定 ——
+     *   玩家贴着墙扔 → 荧光棒先无碰撞飞 1.4 格（9.5 格/秒 × 0.15 秒）
+     *   → 早已埋进墙里 → 下一帧判成"两个方向都被挡" → z=0 停在墙内
+     *   → 渲染在墙背面 → 玩家看到的就是「东西没了」。
+     *
+     * 修法：
+     *   ① 给荧光棒**实体半径**（中心 + 四个方向各推一个半径都能穿过才算空）
+     *   ② 撞墙改成**反弹**（法向反射 + 切向摩擦），不再原地急停
+     *   ③ 宽限期压到 0.08 秒；结束后如果还卡在墙里，朝玩家方向退出来
+     * ================================================================== */
+    #define THROWN_R        0.28f   /* 荧光棒的实体半径（格） */
+    #define THROWN_BOUNCE   0.45f   /* 撞墙后保留的反弹速度 */
+    #define THROWN_FRICTION 0.80f   /* 另一根轴的摩擦 */
+
+    /* 带体积的墙判定：中心 + 四个方向各推一个半径，全都不是墙才算空 */
+    #define THROWN_SOLID(x, y) ( \
+        ShotBlocked((x), (y)) || \
+        ShotBlocked((x) + THROWN_R, (y)) || \
+        ShotBlocked((x) - THROWN_R, (y)) || \
+        ShotBlocked((x), (y) + THROWN_R) || \
+        ShotBlocked((x), (y) - THROWN_R) )
+
     /* 荧光棒/金币物理更新：飞行中受重力，落地转静止 */
     for (int i = 0; i < MAX_THROWN; i++) {
         if (!thrown[i].active) continue;
@@ -4566,21 +4621,37 @@ void Update(float dt) {
                nx/ny 立刻落进墙里，会被判成"两个方向都被挡"，
                于是速度清零、荧光棒垂直掉在脚下（玩家看到的就是"不飞"）。
                宽限期内允许它先离开手心。 */
-            int justThrown = (thrown[i].life > 24.85f);
-            int blockedX = justThrown ? 0 : ShotBlocked(nx, thrown[i].y);
-            int blockedY = justThrown ? 0 : ShotBlocked(thrown[i].x, ny);
-            
-            if (blockedX && blockedY) {
-                /* 两个方向都被挡，完全停止 */
+            /* 宽限期 0.15 → 0.08 秒：够离开手心，又不至于钻进墙里 */
+            int justThrown = (thrown[i].life > 24.92f);
+            int blockedX = justThrown ? 0 : THROWN_SOLID(nx, thrown[i].y);
+            int blockedY = justThrown ? 0 : THROWN_SOLID(thrown[i].x, ny);
+
+            /* **反弹而不是急停**：法向速度取反并衰减，切向速度摩擦。
+               这样贴着墙斜着扔会「擦墙滑一下再弹开」，
+               直着砸墙会「弹回来落在脚边」，而不是原地消失。 */
+            if (blockedX) {
+                thrown[i].vx = -thrown[i].vx * THROWN_BOUNCE;
+                thrown[i].vy *= THROWN_FRICTION;
+                if (fabsf(thrown[i].vx) < 0.25f) thrown[i].vx = 0.0f;
+            } else {
+                thrown[i].x = nx;
+            }
+            if (blockedY) {
+                thrown[i].vy = -thrown[i].vy * THROWN_BOUNCE;
+                thrown[i].vx *= THROWN_FRICTION;
+                if (fabsf(thrown[i].vy) < 0.25f) thrown[i].vy = 0.0f;
+            } else {
+                thrown[i].y = ny;
+            }
+
+            /* 宽限期结束后还卡在墙里（出生点贴墙）→ 朝玩家方向退出来。
+               没有这一步，它仍然会停在墙内不再可见。 */
+            if (!justThrown && THROWN_SOLID(thrown[i].x, thrown[i].y)) {
+                float bx = thrown[i].x - dirX * 0.6f;
+                float by = thrown[i].y - dirY * 0.6f;
+                if (!THROWN_SOLID(bx, by)) { thrown[i].x = bx; thrown[i].y = by; }
                 thrown[i].vx = 0.0f;
                 thrown[i].vy = 0.0f;
-                thrown[i].vz = 0.0f;
-                thrown[i].z = 0.0f;
-            } else {
-                if (!blockedX) thrown[i].x = nx;
-                else thrown[i].vx = 0.0f;
-                if (!blockedY) thrown[i].y = ny;
-                else thrown[i].vy = 0.0f;
             }
             /* v1.9：这里原来还有一次 vz -= GRAVITY*dt ——
                一帧减两次重力，抛物线直接塌成"砸脚面"。已删除。 */
@@ -4597,13 +4668,15 @@ void Update(float dt) {
             float nx = thrown[i].x + thrown[i].vx * dt;
             float ny = thrown[i].y + thrown[i].vy * dt;
             
-            int blockedX = ShotBlocked(nx, thrown[i].y);
-            int blockedY = ShotBlocked(thrown[i].x, ny);
-            
+            /* 地面滑行同样要用体积判定 + 轻微反弹，
+               否则会「滑进墙脚」再消失 */
+            int blockedX = THROWN_SOLID(nx, thrown[i].y);
+            int blockedY = THROWN_SOLID(thrown[i].x, ny);
+
             if (!blockedX) thrown[i].x = nx;
-            else thrown[i].vx = 0.0f;
+            else thrown[i].vx = -thrown[i].vx * 0.35f;
             if (!blockedY) thrown[i].y = ny;
-            else thrown[i].vy = 0.0f;
+            else thrown[i].vy = -thrown[i].vy * 0.35f;
             
             thrown[i].vx *= 0.95f;
             thrown[i].vy *= 0.95f;
@@ -4849,7 +4922,6 @@ GenerateLevel();
             OpenSkillPick();
         }
 
-        floorKills = 0;
     floorSpotted = 0;
     /* v3.3：换层时清空胶水，否则上一层扔的会残留到下一层 */
     for (int gi = 0; gi < MAX_GLUE; gi++) { glues[gi].active = 0; glues[gi].life = 0.0f; }
@@ -4889,7 +4961,10 @@ void StartDailyRun(void) {
     if (!tm) return;
     dailySeed = (tm->tm_year + 1900) * 10000 + (tm->tm_mon + 1) * 100 + tm->tm_mday;
     srand((unsigned)dailySeed);
-    curWeapon = dailySeed % WPN_COUNT;
+    /* 2026-11-05：原来 `curWeapon = dailySeed % WPN_COUNT` ——
+       每日局会随机抽到信号枪/符印，屏幕上卡出已下线武器的建模。
+       本作只有扳手，钉死。 */
+    curWeapon = WPN_MELEE;
     /* v29：不删旧存档 —— 见 ActivateMenuItem 里的说明。 */
     pendingStartMode = START_DAILY;
     StartGame();
@@ -4903,7 +4978,8 @@ void StartCampaign(int stage) {
     if (stage < 0) stage = 0;
     if (stage >= CAMPAIGN_STAGE_COUNT) stage = CAMPAIGN_STAGE_COUNT - 1;
     srand((unsigned)(9000 + stage * 733));
-    curWeapon = stage % WPN_COUNT;
+    /* 同上：战役不再按关卡号换武器 */
+    curWeapon = WPN_MELEE;
     /* v29：不删旧存档 —— 见 ActivateMenuItem 里的说明。 */
     pendingStartMode = START_CAMPAIGN;
     pendingCampaignStage = stage;
@@ -5378,6 +5454,7 @@ void StartGame(void) {
     slashFade = 0.0f;
     slashHitStop = 0.0f;
     decoySelfTimer = 0.0f;
+    s_decoyKeyCd = 0.0f;   /* 新局冷却清零 */
     leechHintTimer = 0.0f;
     ResetLeeches();
     RunSkillsReset();
@@ -7107,23 +7184,50 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (dn) { skillPickSel = (skillPickSel + 1) % INRUN_CHOICES; uiDirty = 1; }
                 if (menuConfirm) CloseSkillPick();
             } else if (currentState == STATE_SAFEHOUSE) {
-                /* v2.4：空格 = 校准（开始 / 锁定） */
-                if (wParam == VK_SPACE && !(lParam & 0x40000000)) {
+                /* ==================================================================
+                 * 2026-11-05 修三个「局内改造树」操作 bug
+                 * ------------------------------------------------------------------
+                 * ① **空格买不了东西**
+                 *    这段「空格 = 校准」在按键处理的最前面，而且无条件 return ——
+                 *    空格本来也算 menuConfirm（下面 ShopActivate 会处理），
+                 *    却被这里整个吃掉了。改造树页按空格永远没反应。
+                 *    修：树页不吃空格（让给 menuConfirm）；其它页保持原行为。
+                 *
+                 * ② **买完东西画面位置会变 / 左右移动像没动**
+                 *    原来这里有一行**无条件**的 BenchFocusNode(shopNodeSel) ——
+                 *    它是「把画布硬居中到选中节点」，每次按键都跑一遍：
+                 *      · 按回车买东西 → 先居中再买 → 视图跳一下
+                 *      · 按左右移动     → 改选中后立刻居中 → 节点永远在屏幕正中，
+                 *                        看起来"没有左右跳跃"，只有背景在滑
+                 *      · 鼠标拖过画布之后按任意键 → 画布被拽回原位
+                 *    修：只在**真的从别的页切到树页**时居中一次。
+                 * ================================================================== */
+                if (wParam == VK_SPACE && !(lParam & 0x40000000) && shopPage != SHP_TREE) {
                     if (calibActive) CalibLock();
                     else             CalibStart();
                     return 0;
                 }
                 if (wParam == VK_TAB) ShopNextPage();
-                /* v2.9：切到树页时把选中节点居中（原来 treeVX=0，第一列半截在屏外） */
-                if (shopPage == SHP_TREE) BenchFocusNode(shopNodeSel);
+                /* 只在「切到树页」这一下居中，之后不再干扰玩家的视角 */
+                {
+                    static int s_lastShopPage = -1;
+                    if (shopPage != s_lastShopPage) {
+                        s_lastShopPage = shopPage;
+                        if (shopPage == SHP_TREE) BenchFocusNode(shopNodeSel);
+                    }
+                }
                 if (wParam == VK_HOME && currentState == STATE_HUB) SkillResetView();   /* v6：技能树复位 */
                 if (wParam == VK_HOME && shopPage == SHP_TREE) BenchResetView();   /* v2.8 */
                 if (shopPage == SHP_TREE) {
-                    /* v2.8：树页四向移动 + 画布自动跟随 */
-                    if (menuUp)    { ShopTreeMove(0, -1); BenchFocusNode(shopNodeSel); }
-                    if (menuDown)  { ShopTreeMove(0, 1);  BenchFocusNode(shopNodeSel); }
-                    if (menuLeft)  { ShopTreeMove(-1, 0); BenchFocusNode(shopNodeSel); }
-                    if (menuRight) { ShopTreeMove(1, 0);  BenchFocusNode(shopNodeSel); }
+                    /* 2026-11-05：**移动不再强制居中**。
+                       原来每次移动都 BenchFocusNode 把画布拉回使选中节点居中，
+                       结果"节点永远在屏幕正中、只有背景在滑"，玩家感觉
+                       「左右跳跃没反应」。现在只改选中，画布跟着玩家的
+                       拖动/滚轮走；看不见时按 HOME 复位。 */
+                    if (menuUp)    ShopTreeMove(0, -1);
+                    if (menuDown)  ShopTreeMove(0, 1);
+                    if (menuLeft)  ShopTreeMove(-1, 0);
+                    if (menuRight) ShopTreeMove(1, 0);
                 } else {
                     if (menuUp)      ShopMoveSel(-1);
                     if (menuDown)    ShopMoveSel(1);
@@ -7320,7 +7424,42 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     MapCursorRefresh();
                 }
                 if (wParam == (WPARAM)g_bindings[ACT_FLASHLIGHT]) {
-                    /* v6 战役第 1 关：手电永远关不掉 */
+                    /* ==========================================================
+                     * 2026-11-05 修：**两个规则抢手电，而且优先级判反了**
+                     * ----------------------------------------------------------
+                     * 旧顺序：先判战役「手电关不掉」→ 直接 return，
+                     *         每日的「今天不能开手电」永远轮不到。
+                     *
+                     * 后果（用户报告）：「战役模式左脑打右脑又能重新开那个手电筒」
+                     *   —— 战役关按 F 会无条件把手电打开，
+                     *      连每日 NOLIGHT 限制和 SALVAGE keystone 都被绕过。
+                     *
+                     * 正确优先级：**禁止 > 强制 > 自由**
+                     *   ① 禁止（每日 NOLIGHT / SALVAGE）最高 ——
+                     *      它关系到每日任务的公平性，任何模式都不能覆盖它。
+                     *   ② 强制（战役「关不掉」）次之。
+                     *   ③ 都允许时才自由切换。
+                     * ========================================================== */
+                    if (!FlashlightUseAllowed()) {
+                        flashlightOn = 0; uiDirty = 1;
+                        /* 2026-11-05：**提示必须说清是哪一个原因**。
+                           原来两种情况都显示「今天不能开手电」，
+                           于是买了 SALVAGE 的玩家会以为
+                           「普通关卡被每日任务篡改了标志位」——
+                           其实是他自己买的天赋永久禁灯。 */
+                        { extern int DailyForbidLight(void);
+                          extern int HasKeystone(int);
+                          if (DailyForbidLight())
+                              pickupMsg = g_lang == LANG_ZH ? "今天不能开手电（每日限制）"
+                                                            : "NO FLASHLIGHT TODAY (DAILY RULE)";
+                          else if (HasKeystone(SK_SALVAGE))
+                              pickupMsg = g_lang == LANG_ZH ? "「抢救」天赋让你用不了手电"
+                                                            : "THE SALVAGE KEYSTONE DISABLES IT";
+                          else
+                              pickupMsg = g_lang == LANG_ZH ? "现在不能开手电" : "CANNOT USE FLASHLIGHT"; }
+                        pickupMsgTimer = 1.6f;
+                        return 0;
+                    }
                     { extern int CampaignFlashlightLocked(void);
                       if (CampaignFlashlightLocked()) {
                           flashlightOn = 1; uiDirty = 1;
@@ -7328,13 +7467,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                           pickupMsgTimer = 1.2f;
                           return 0;
                       } }
-                    /* v6 每日限制：不能开手电；SALVAGE keystone 同理 */
-                    if (!FlashlightUseAllowed()) {
-                        flashlightOn = 0; uiDirty = 1;
-                        pickupMsg = g_lang == LANG_ZH ? "今天不能开手电" : "NO FLASHLIGHT TODAY";
-                        pickupMsgTimer = 1.2f;
-                        return 0;
-                    }
                     if (battery > 0.0f) flashlightOn = !flashlightOn;
                     uiDirty = 1;
                 }

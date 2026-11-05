@@ -15,6 +15,10 @@
 
 #include "../include/common.h"
 #include "../include/steam_ach.h"
+/* 2026-11-05：存档分区的容器契约。这个头是纯类型/常量、无系统依赖，
+   所以 test_canity 能直接链 src/save/save_container.c 做**真单元测试**
+   （见 test_save_container_contract）。 */
+#include "../include/save_format.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -536,6 +540,123 @@ static void test_mimic_contract(void) {
     free((void*)rd);
 }
 
+/* ==================================================================
+ * 2026-11-05：**存档分区契约**
+ * ------------------------------------------------------------------
+ * 这一组是**真单元测试**（test_canity 链接了 src/save/save_container.c），
+ * 不是读源码做文字断言。覆盖四件事：
+ *   ① 打包 -> 按 id 取回，内容逐字节一致
+ *   ② 信封校验和能抓住一个字节的损坏
+ *   ③ 未知块 id 也能枚举出来（云存档跨版本保留的前提）
+ *   ④ 块表声明越界时必须拒绝，不能返回越界指针
+ * 另外用源码断言钉住分区规则和「信封优先、裸档回退」的接线。
+ * ================================================================== */
+static void test_save_container_contract(void) {
+    /* ---- ① 打包 / 取回 ---- */
+    {
+        SaveChunkDesc d[3];
+        const void* body[3];
+        char a[4] = { 'A', 'B', 'C', 'D' };
+        char b[2] = { 'x', 'y' };
+        char c[3] = { '1', '2', '3' };
+        d[0].id = 0x0001; d[0].schema = 1; d[0].size = 4; body[0] = a;
+        d[1].id = 0x0002; d[1].schema = 3; d[1].size = 2; body[1] = b;
+        d[2].id = 0x00FF; d[2].schema = 1; d[2].size = 3; body[2] = c;
+
+        unsigned char buf[256];
+        unsigned int sum = 0;
+        int n = SaveContainerPack(d, body, 3, buf, (int)sizeof(buf), &sum);
+        check(n > 0, "SaveContainerPack must succeed for 3 small chunks");
+        check(SaveContainerCount(buf, n) == 3, "chunk count must round-trip");
+
+        const void* got = NULL;
+        int sz = 0;
+        check(SaveContainerFind(buf, n, 0x0002, &got, &sz) == 1 && sz == 2 &&
+              got && memcmp(got, b, 2) == 0,
+              "chunk 0x0002 must come back byte-identical");
+        check(SaveContainerFind(buf, n, 0x7777, &got, &sz) == 0,
+              "unknown chunk id must not be found");
+
+        /* ---- ③ 未知块也能枚举 ---- */
+        SaveChunkDesc d2[2];
+        const void* body2[2];
+        char q[1] = { 'Q' };
+        d2[0].id = 0x7777; d2[0].schema = 9; d2[0].size = 1; body2[0] = q;
+        d2[1].id = 0x0001; d2[1].schema = 1; d2[1].size = 1; body2[1] = a;
+        unsigned char buf2[128];
+        int n2 = SaveContainerPack(d2, body2, 2, buf2, (int)sizeof(buf2), NULL);
+        check(n2 > 0, "pack with unknown chunk must succeed");
+        SaveChunkDesc e;
+        const void* eb = NULL;
+        check(SaveContainerAt(buf2, n2, 0, &e, &eb) == 1 && e.id == 0x7777,
+              "unknown chunk must still be enumerable (cloud forward-compat)");
+
+        /* ---- ② 信封校验和 ---- */
+        SaveEnvelope h;
+        SaveEnvelopeSeal(&h, buf, n, 1793866745u);
+        check(h.magic == SAVE_ENVELOPE_MAGIC, "envelope magic must be CSAV");
+        check(h.version == SAVE_CONTAINER_VERSION, "envelope container version");
+        check(SaveEnvelopeValid(&h, buf, n) == 1, "fresh envelope must validate");
+        buf[SAVE_PAYLOAD_HEAD_SIZE + 8] ^= 0xFF;      /* 损坏一个字节 */
+        check(SaveEnvelopeValid(&h, buf, n) == 0,
+              "one flipped byte must fail the checksum");
+        buf[SAVE_PAYLOAD_HEAD_SIZE + 8] ^= 0xFF;      /* 复原 */
+        check(SaveEnvelopeValid(&h, buf, n) == 1, "restored payload must validate again");
+        check(SaveEnvelopeValid(&h, buf, n - 1) == 0,
+              "truncated payload must be rejected (payload length mismatch)");
+    }
+
+    /* ---- ④ 越界块表必须拒绝 ---- */
+    {
+        unsigned char bad[32];
+        memset(bad, 0, sizeof(bad));
+        /* 容器版本 1 / 块数 1 / 保留 / 一个宣称 9999 字节的块 */
+        int ver = 1, cnt = 1, rsv = 0;
+        memcpy(bad + 0, &ver, 4);
+        memcpy(bad + 4, &cnt, 4);
+        memcpy(bad + 8, &rsv, 4);
+        SaveChunkDesc d;
+        d.id = 1; d.schema = 1; d.size = 9999;
+        memcpy(bad + 12, &d, sizeof(d));
+        check(SaveContainerCount(bad, (int)sizeof(bad)) < 0,
+              "a chunk claiming more bytes than the payload must be rejected");
+    }
+
+    /* ---- 源码断言：分区接线 ---- */
+    {
+        const char* lk = read_file("include/save_format.h");
+        const char* sz = read_file("src/steam/steam_zone.c");
+        const char* sv = read_file("src/save.c");
+        const char* bk = read_file("src/save/save_backend.c");
+        const char* sh = read_file("include/save.h");
+
+        check(contains(lk, "SAVE_ENVELOPE_MAGIC     0x56415343u"),
+              "envelope magic must stay 'CSAV' (steam_zone contract)");
+        check(contains(lk, "SC_LEGACY29"), "legacy chunk id missing");
+        check(contains(sz, "#include \"save_format.h\""),
+              "steam_zone must consume the shared envelope contract");
+        check(!contains(sz, "typedef struct {\n    unsigned int magic;"),
+              "steam_zone must not keep a private envelope typedef");
+        check(contains(sz, "SAVE_ENVELOPE_MAGIC"),
+              "steam_zone must recognize the envelope the save partition writes");
+        check(contains(sv, "BuildSaveFile(") && contains(sv, "ExtractSaveFile("),
+              "save.c must pack/unpack through the container");
+        check(contains(sv, "SC_LEGACY29"), "save.c must write the legacy chunk");
+        check(contains(bk, "SaveBackendWrite") && contains(bk, "SaveBackendSyncAll"),
+              "save backend must own the file writes and cloud sync");
+        check(contains(sh, "SaveBackendWrite"),
+              "save backend API must be exported from save.h");
+        /* 老档兼容：裸档分支必须还在 */
+        check(contains(sv, "magic == SAVE_MAGIC"),
+              "raw legacy save path must be kept as fallback");
+        check(contains(lk, "SAVE_CONTAINER_VERSION  1"),
+              "container version must be independent from SAVE_VERSION");
+
+        free((void*)lk); free((void*)sz); free((void*)sv);
+        free((void*)bk); free((void*)sh);
+    }
+}
+
 static void test_mode_leak_contract(void) {
     const char* savec = read_file("src/save.c");
     const char* game  = read_file("src/game.c");
@@ -594,7 +715,7 @@ int main(void) {
     test_tune_geometry();
     test_stable_visuals_and_input();
     test_save_persist_contract();
-    test_mode_leak_contract();test_lock_types_contract();test_mimic_contract();test_map_drain_contract();
+    test_mode_leak_contract();test_lock_types_contract();test_mimic_contract();test_save_container_contract();test_map_drain_contract();
     test_lockbox_contract();
     puts("CANITY offline self-check: PASS");
     return 0;

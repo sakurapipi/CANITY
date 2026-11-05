@@ -38,11 +38,10 @@ typedef char benchNodes_count_check[(sizeof(benchNodes)/sizeof(benchNodes[0])==B
 
 
 unsigned int benchOwned = 0u;
-int benchKills = 0;          /* 嗜血：本局击杀计数 */
+
 
 void BenchResetRun(void) {
     benchOwned = 0u;
-    benchKills = 0;
 }
 
 int BenchHas(int id) {

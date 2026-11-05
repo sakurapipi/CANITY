@@ -46,7 +46,9 @@ extern "C" {
 
 /* 返回 1 = 连上 Steam；0 = 没连上（没开、没 DLL、没登录都会返回 0） */
 int  SteamZoneInit(void);
-void SteamZoneSyncLocalSaves(void);
+/* 2026-11-05：SteamZoneSyncLocalSaves 已迁移 ——
+   云->本地要写存档文件，而存档文件只允许存档后端写。
+   调用方改调 src/save/save_backend.c 的 SaveBackendSyncAll()。 */
 void SteamZoneUploadSave(const char* path);
 void SteamZoneShutdown(void);
 

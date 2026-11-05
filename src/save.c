@@ -41,7 +41,18 @@ static SaveBlob g_save;
 
 int g_saveSlot = 0;   /* v2.0：当前存档槽 0..2 */
 
-static const char* SavePathCand(int i, char* buf, size_t n);
+static const char* SavePathCandSlot(int i, int slot, char* buf, size_t n);
+
+/* 当前槽的候选路径（内部用） */
+static const char* SavePathCand(int i, char* buf, size_t n) {
+    return SavePathCandSlot(i, g_saveSlot, buf, n);
+}
+
+/* 2026-11-05：导出给存档后端用 —— 云同步要按槽号逐个算路径，
+   不能靠临时改 g_saveSlot（那会影响正在进行的对局）。 */
+const char* SavePathForSlot(int i, int slot, char* buf, size_t n) {
+    return SavePathCandSlot(i, slot, buf, n);
+}
 
 /* v2.0：写盘前把旧档复制成 .bak */
 static void BackupSave(void) {
@@ -54,11 +65,11 @@ static void BackupSave(void) {
     CopyFileA(p, b, FALSE);
 }
 
-static const char* SavePathCand(int i, char* buf, size_t n) {
+static const char* SavePathCandSlot(int i, int slot, char* buf, size_t n) {
     buf[0] = 0;
     const char* isolated = getenv("CANITY_DATA_DIR");
     if (isolated && isolated[0]) {
-        snprintf(buf, n, "%s\\canity%d.sav", isolated, g_saveSlot);
+        snprintf(buf, n, "%s\\canity%d.sav", isolated, slot);
         return buf;
     }
     if (i == 0) {
@@ -67,7 +78,7 @@ static const char* SavePathCand(int i, char* buf, size_t n) {
         if (sl) sl[1] = 0; else buf[0] = 0;
         {
             char fn[64];
-            snprintf(fn, sizeof(fn), "canity%d.sav", g_saveSlot);
+            snprintf(fn, sizeof(fn), "canity%d.sav", slot);
             strncat(buf, fn, n - strlen(buf) - 1);
         }
         return buf;
@@ -102,10 +113,10 @@ static const char* SavePathCand(int i, char* buf, size_t n) {
                 CreateDirectoryA(lvl1, NULL);
             }
         }
-        char suffix[32]; snprintf(suffix,sizeof(suffix),"\\canity%d.sav",g_saveSlot);
+        char suffix[32]; snprintf(suffix,sizeof(suffix),"\\canity%d.sav",slot);
         if(strlen(dir)+strlen(suffix)<n) { strcpy(buf,dir); strcat(buf,suffix); }
     } else {
-        snprintf(buf, n, "%s\\canity%d.sav", base, g_saveSlot);
+        snprintf(buf, n, "%s\\canity%d.sav", base, slot);
     }
     return buf;
 }
@@ -123,40 +134,146 @@ int  g_saveError = 0;          /* 失败时的 GetLastError */
 int  g_saveErrAll[SAVE_CAND_COUNT] = {0};  /* 每个候选的失败码，排查用 */
 char g_savePath[MAX_PATH] = "";/* 最近一次写入成功的路径 */
 
-/* 返回 0 = 成功，否则 = Win32 错误码 */
+/* 2026-11-05：**文件 I/O 已搬到存档分区的后端** ——
+   WriteWholeFile / ReadWholeFile 现在叫 SaveBackendWrite / SaveBackendRead，
+   住在 src/save/save_backend.c。
+   这样「谁碰存档文件」只有一个答案（铁律十八），
+   云同步也能复用同一套原子写。
+
+   下面这两个薄壳只为让本文件其余代码不用整段改名。 */
+#include "save_format.h"
+extern int  SaveBackendWrite(const char* path, const void* data, size_t n);
+extern long SaveBackendRead(const char* path, void* buf, size_t cap);
+extern void SaveBackendUpload(const char* path);
+extern void SaveBackendSyncAll(void);
+
 static int WriteWholeFile(const char* path, const void* data, size_t n) {
-    /* v2.2：先写临时文件、flush 落盘、再原子改名。
-       原来是 CREATE_ALWAYS 原地覆盖 —— 写到一半掉电/被杀就只剩半截文件，
-       而半截文件能过 magic+version 校验，于是"存档存在但是空的"。 */
-    char tmp[MAX_PATH + 16];   /* v3.0：留 ".tmp" 的位置 */
-    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-    HANDLE h = CreateFileA(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) return (int)GetLastError();
-    DWORD wrote = 0;
-    BOOL ok = WriteFile(h, data, (DWORD)n, &wrote, NULL);
-    DWORD err = ok ? 0 : GetLastError();
-    if (ok && wrote != (DWORD)n) err = ERROR_WRITE_FAULT;
-    if (ok) FlushFileBuffers(h);
-    CloseHandle(h);
-    if (err) { DeleteFileA(tmp); return (int)err; }
-    if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) {
-        err = GetLastError();
-        DeleteFileA(tmp);
-        return (int)err;
+    return SaveBackendWrite(path, data, n);
+}
+static long ReadWholeFile(const char* path, void* buf, size_t cap) {
+    return SaveBackendRead(path, buf, cap);
+}
+
+/* ==================================================================
+ * 2026-11-05：**存档分区的序列化入口**
+ * ------------------------------------------------------------------
+ * 旧格式：文件 = SaveBlob 裸字节（magic = SAVE_MAGIC）
+ * 新格式：
+ *      [SaveEnvelope 20 字节]           ← Steam 专区认的就是这个头
+ *      [payload: 块表 + SC_LEGACY29 块] ← SaveBlob 整体，暂时不动字段
+ *
+ * 为什么要套信封：steam_zone.c 的 SteamZoneCloudSync 要求文件本身
+ * 以 SaveEnvelope 开头，否则直接返回 STEAM_SYNC_ERROR。
+ * 以前是上传时临时包一层（ReadLocalEnvelope），现在由存档分区在写盘时封好，
+ * 于是「本地文件」和「云端对象」是同一份字节。
+ *
+ * 为什么不现在拆块：本阶段目标是**建立契约 + 不丢老档**。
+ * SaveBlob 整体作为 SC_LEGACY29 一块，第二阶段再逐块迁出。
+ * ================================================================ */
+#define SAVE_BLOB_MAX   ((int)sizeof(SaveBlob) + 4096)
+
+/* 打包成功返回总字节数（信封 + payload），失败返回 -1。
+   out 由调用方提供，cap 至少 sizeof(SaveEnvelope) + sizeof(SaveBlob) + 128。 */
+static int BuildSaveFile(const SaveBlob* blob, void* out, int cap) {
+    if (!blob || !out) return -1;
+
+    SaveChunkDesc d;
+    d.id     = SC_LEGACY29;
+    d.schema = 1;
+    d.size   = (unsigned int)sizeof(SaveBlob);
+
+    const void* body[1];
+    body[0] = (const void*)blob;
+
+    unsigned char* p = (unsigned char*)out;
+    int payCap = cap - (int)sizeof(SaveEnvelope);
+    if (payCap <= 0) return -1;
+
+    int pay = SaveContainerPack(&d, body, 1, p + sizeof(SaveEnvelope), payCap, NULL);
+    if (pay <= 0) return -1;
+
+    SaveEnvelope h;
+    SaveEnvelopeSeal(&h, p + sizeof(SaveEnvelope), pay, (unsigned int)time(NULL));
+    memcpy(p, &h, sizeof(h));
+    return (int)sizeof(SaveEnvelope) + pay;
+}
+
+/* 从文件字节里取出 SaveBlob。
+   返回 1 = 成功（*isEnvelope = 1 表示是新格式），0 = 不是可识别的存档。
+   兼容：没有信封的裸档（SAVE_MAGIC）也认，交给老路径继续处理。 */
+static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelope) {
+    if (isEnvelope) *isEnvelope = 0;
+    if (!buf || n <= 0 || !out) return 0;
+
+    const unsigned char* p = (const unsigned char*)buf;
+
+    /* ---- 新格式：信封 + 块表 ---- */
+    if (n > (long)sizeof(SaveEnvelope)) {
+        SaveEnvelope h;
+        memcpy(&h, p, sizeof(h));
+        if (h.magic == SAVE_ENVELOPE_MAGIC) {
+            int payLen = (int)(n - (long)sizeof(SaveEnvelope));
+            if (!SaveEnvelopeValid(&h, p + sizeof(h), payLen)) return 0;   /* 校验和不对 = 损坏 */
+
+            SaveChunkDesc d;
+            const void* b = NULL;
+            if (!SaveContainerAt(p + sizeof(h), payLen, 0, &d, &b)) return 0;
+            if (!SaveContainerFind(p + sizeof(h), payLen, SC_LEGACY29, &b, NULL)) return 0;
+
+            int cnt = SaveContainerCount(p + sizeof(h), payLen);
+            (void)cnt;
+            for (int i = 0; i < 16; i++) {
+                const void* b2 = NULL;
+                int sz = 0;
+                if (!SaveContainerFind(p + sizeof(h), payLen, SC_LEGACY29, &b2, &sz)) break;
+                if (!b2 || sz <= 0) return 0;
+                memset(out, 0, sizeof(*out));
+                int copy = (sz < (int)sizeof(*out)) ? sz : (int)sizeof(*out);
+                memcpy(out, b2, (size_t)copy);
+                if (isEnvelope) *isEnvelope = 1;
+                return 1;
+            }
+            return 0;
+        }
+    }
+
+    /* ---- 旧格式：裸 SaveBlob ---- */
+    if (n >= (long)sizeof(unsigned int) + (long)sizeof(int)) {
+        unsigned int magic = 0;
+        memcpy(&magic, p, sizeof(magic));
+        if (magic == SAVE_MAGIC) {
+            int copy = ((int)n < (int)sizeof(*out)) ? (int)n : (int)sizeof(*out);
+            memset(out, 0, sizeof(*out));
+            memcpy(out, p, (size_t)copy);
+            return 1;
+        }
     }
     return 0;
 }
 
-/* 返回读到的字节数，失败返回 -1 */
-static long ReadWholeFile(const char* path, void* buf, size_t cap) {
-    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
-                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) return -1;
-    DWORD got = 0;
-    BOOL ok = ReadFile(h, buf, (DWORD)cap, &got, NULL);
-    CloseHandle(h);
-    return ok ? (long)got : -1;
+/* 读一个存档文件并解出 SaveBlob。
+   返回值语义和旧的 ReadWholeFile 保持兼容：
+     >0  = **逻辑**文件字节数（信封格式返回 sizeof(SaveBlob)，
+           裸档返回真实字节数 —— 后面的前缀迁移全靠这个数）
+     -1  = 读不到 / 认不出 */
+static long ReadSaveFile(const char* path, SaveBlob* out) {
+    if (!path || !out) return -1;
+    size_t cap = sizeof(SaveEnvelope) + sizeof(SaveBlob) + 4096;
+    unsigned char* raw = (unsigned char*)malloc(cap);
+    if (!raw) return -1;
+
+    long n = ReadWholeFile(path, raw, cap);
+    if (n <= 0) { free(raw); return -1; }
+
+    long ret = -1;
+    int isEnv = 0;
+    if (ExtractSaveFile(raw, n, out, &isEnv)) {
+        /* 信封格式：载荷就是当前版本的完整 SaveBlob → 逻辑长度取 sizeof
+           （否则 isOldSave 会误判成老档，把 bindings 重置成出厂值）。 */
+        ret = isEnv ? (long)sizeof(SaveBlob) : n;
+    }
+    free(raw);
+    return ret;
 }
 
 /* 显示 / 音频 / 键位这些设置项是所有存档共用的，
@@ -202,9 +319,11 @@ static void SaveSettingsOnly(void) {
     char p[MAX_PATH];
     for (int i = 0; i < SAVE_CAND_COUNT; i++) {
         SavePathCand(i, p, sizeof(p));
-        if (WriteWholeFile(p, &tmp, sizeof(tmp)) == 0) {
+        static unsigned char wbuf[sizeof(SaveBlob) + 256];
+        int wn = BuildSaveFile(&tmp, wbuf, (int)sizeof(wbuf));
+        if (wn > 0 && WriteWholeFile(p, wbuf, (size_t)wn) == 0) {
             g_save = tmp;
-            g_saveState = 1; SteamZoneUploadSave(p);
+            g_saveState = 1; SaveBackendUpload(p);
             g_saveError = 0;
             strncpy(g_savePath, p, sizeof(g_savePath) - 1);
             g_savePath[sizeof(g_savePath) - 1] = 0;
@@ -434,9 +553,11 @@ void SaveGame(void) {
     int firstErr = 0;
     for (int i = 0; i < SAVE_CAND_COUNT; i++) {
         SavePathCand(i, p, sizeof(p));
-        int err = WriteWholeFile(p, &g_save, sizeof(g_save));
+        static unsigned char wbuf2[sizeof(SaveBlob) + 256];
+        int wn2 = BuildSaveFile(&g_save, wbuf2, (int)sizeof(wbuf2));
+        int err = (wn2 > 0) ? WriteWholeFile(p, wbuf2, (size_t)wn2) : 87;   /* 87 = ERROR_INVALID_PARAMETER */
         if (err == 0) {
-            g_saveState = 1; SteamZoneUploadSave(p);
+            g_saveState = 1; SaveBackendUpload(p);
             g_saveError = 0;
             strncpy(g_savePath, p, sizeof(g_savePath) - 1);
             g_savePath[sizeof(g_savePath) - 1] = 0;
@@ -685,12 +806,12 @@ int LoadSettings(void) {
     long fs = -1;
     for (int i = 0; i < SAVE_CAND_COUNT && fs < 0; i++) {
         const char* cand = SavePathCand(i, p, sizeof(p));
-        fs = ReadWholeFile(cand, &g_save, sizeof(g_save));
+        fs = ReadSaveFile(cand, &g_save);
         if (fs <= 0) {
             /* v2.2：主档读不出来就试 .bak —— 原来只写不读，等于白备份 */
             char bak[MAX_PATH];
             snprintf(bak, sizeof(bak), "%s.bak", cand);
-            fs = ReadWholeFile(bak, &g_save, sizeof(g_save));
+            fs = ReadSaveFile(bak, &g_save);
         }
     }
     if (fs <= 0) {
@@ -707,11 +828,11 @@ int LoadSettings(void) {
     if (!got || g_save.magic != SAVE_MAGIC) {
         for (int i = 1; i < SAVE_CAND_COUNT; i++) {
             const char* c2 = SavePathCand(i, p, sizeof(p));
-            long f2 = ReadWholeFile(c2, &g_save, sizeof(g_save));
+            long f2 = ReadSaveFile(c2, &g_save);
             if (f2 > 0 && g_save.magic == SAVE_MAGIC) { fs = f2; break; }
             char b2[MAX_PATH];
             snprintf(b2, sizeof(b2), "%s.bak", c2);
-            f2 = ReadWholeFile(b2, &g_save, sizeof(g_save));
+            f2 = ReadSaveFile(b2, &g_save);
             if (f2 > 0 && g_save.magic == SAVE_MAGIC) { fs = f2; break; }
         }
         if (g_save.magic != SAVE_MAGIC) return 0;

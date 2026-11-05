@@ -29,13 +29,13 @@
 #include <stdint.h>   /* uint32_t：程序化配乐用（规则：系统头只在本文件出现） */
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 27         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_NUM 28         /* 整数版本，进存档做记录 */
 /* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
    置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
    置 0 = 回到旧的战斗版本。 */
 #define NO_COMBAT 1
 
-#define CANITY_VERSION_STR "2.3.8"    /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_STR "2.3.9"    /* 显示版本，窗口标题 / 主菜单 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -574,6 +574,8 @@ typedef struct { float x, y; int active; } Breaker;
    老 8 种：光球/瓶/砖/酸/烟/火/胶/镜 —— 其中酸、燃烧瓶、镜片只有伤害，
    NO_COMBAT 之后完全是空壳，删掉。
    瓶 + 砖合并成「投石」（蓄力同时控制距离和噪音）。
+      2026-11-05：改造成 **破门石** —— 砸在锁箱上直接崩开锁，
+      跳过锁盘小游戏，代价是 20 格噪音。见 throwing.c 的 StoneBreakLockAt。
    砖头腾出的槽位换成「回声弹」，另新增「玩家诱饵」。
    新 6 种：光球 / 投石 / 烟雾 / 胶水 / 回声 / 诱饵 */
 #define ITEM_SLOT_COUNT 6
@@ -687,6 +689,12 @@ enum {
 #define DECOY_NOISE 14.0f       /* 落点噪声半径 */
 #define DECOY_SELF_TIME 2.0f    /* 扔完自身噪声加成持续 */
 #define DECOY_SELF_MUL  1.25f
+/* 2026-11-05：**G 键投石的冷却** ——
+   技能树里 DECOY 的描述写的是「G: throw a stone (8s cd), noise 14」，
+   但实现里**一个冷却都没有**：每按一次 G 就无条件放一次 14 格噪音。
+   测试者报「这技能超模、可以无限使用」就是这条。
+   现在把描述承诺的 8 秒真接上。 */
+#define DECOY_KEY_COOLDOWN 8.0f
 
 /* ---- 局内技能 ---- */
 #define INRUN_COUNT 24    /* v2.0：16→24，池子够大才不重复 */

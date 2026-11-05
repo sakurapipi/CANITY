@@ -389,162 +389,6 @@ static void BakeWrench(void) {
     cvFinish(&g_sprites[SPR_WRENCH]);
 }
 
-static void BakePistol(void) {
-    cvClear();
-    float c = CANVAS_W * 0.5f;
-
-    /* 折开式信号枪。三版草图对比后定这一版：
-       ① 直管手枪  —— 和扳手剪影太像，认不出
-       ② 转轮手枪  —— 细节太多，128px 下糊成一块
-       ③ 折开式（本版）—— 喇叭口 + 铰链 + 独立握把，三个特征块在剪影上分得开 */
-
-    float bx = c - 4.0f;        /* 枪管中线 */
-    float muzzleY = 58.0f;      /* 喇叭口位置 */
-    float hingeY  = 150.0f;     /* 铰链 */
-    float gripY   = 236.0f;     /* 握把底 */
-
-    /* ---- 喇叭口：外扩的锥形，这是信号枪唯一的身份特征 ---- */
-    {
-        float m[8] = { bx - 30, muzzleY - 26, bx + 30, muzzleY - 26,
-                       bx + 16, muzzleY + 8,  bx - 16, muzzleY + 8 };
-        float o[8];
-        for (int i = 0; i < 4; i++) {
-            o[i * 2] = bx + (m[i * 2] - bx) * 1.10f;
-            o[i * 2 + 1] = muzzleY + (m[i * 2 + 1] - muzzleY) * 1.12f;
-        }
-        cvPoly(o, 4, 0x00080A0Eu, 1.0f);
-        cvPolyGrad(m, 4, 0x00A0A0AEu, 0x00484C58u, 1.0f);
-        /* 口径：黑洞 + 余温 */
-        cvEllipse(bx, muzzleY - 20, 14.0f, 5.5f, 0x000C0C10u, 1.0f);
-        cvEllipse(bx, muzzleY - 20, 9.0f, 3.2f, 0x0020100Cu, 1.0f);
-        cvGlow(bx, muzzleY - 19, 18.0f, 0x00FF6020u, 0.40f);
-        /* 口沿高光 */
-        cvLine(bx - 24, muzzleY - 24, bx + 24, muzzleY - 24, 2.4f, 0x00D8D8E0u, 0.75f);
-    }
-
-    /* ---- 枪管：短而粗，两侧各一条加强筋 ---- */
-    {
-        float b[8] = { bx - 15, muzzleY + 6, bx + 15, muzzleY + 6,
-                       bx + 13, hingeY,        bx - 13, hingeY };
-        cvPoly(b, 4, 0x00080A0Eu, 1.0f);
-        float b2[8] = { bx - 11, muzzleY + 10, bx + 11, muzzleY + 10,
-                        bx + 9, hingeY - 3,     bx - 9, hingeY - 3 };
-        cvPolyGrad(b2, 4, 0x00707480u, 0x003A3E48u, 1.0f);
-        cvLine(bx - 8, muzzleY + 14, bx - 8, hingeY - 8, 2.0f, 0x009098A4u, 0.6f);
-    }
-
-    /* ---- 铰链：一颗横向的圆轴，折开结构的证据 ---- */
-    {
-        cvEllipse(bx, hingeY - 6, 13.0f, 11.0f, 0x00080A0Eu, 1.0f);
-        cvEllipse(bx, hingeY - 6, 10.0f, 8.0f, 0x00A89878u, 1.0f);
-        cvEllipse(bx, hingeY - 6, 4.2f, 3.6f, 0x00302A22u, 1.0f);
-    }
-
-    /* ---- 药室：打开时能看到的红膛 ---- */
-    {
-        cvEllipse(bx, hingeY + 12, 16.0f, 7.0f, 0x00080A0Eu, 1.0f);
-        cvEllipse(bx, hingeY + 12, 12.0f, 4.6f, 0x00C03010u, 1.0f);
-        cvEllipse(bx - 3, hingeY + 11, 5.0f, 2.0f, 0x00FFA060u, 0.9f);
-        cvGlow(bx, hingeY + 12, 20.0f, 0x00FF5020u, 0.32f);
-    }
-
-    /* ---- 握把：向后下方掏空，带防滑纹和一颗底板螺丝 ---- */
-    {
-        float g[8] = { bx - 13, hingeY + 16,
-                       bx + 13, hingeY + 16,
-                       bx + 30, gripY,
-                       bx + 2,  gripY };
-        float go[8];
-        for (int i = 0; i < 4; i++) {
-            go[i * 2] = bx + (g[i * 2] - bx) * 1.12f;
-            go[i * 2 + 1] = g[i * 2 + 1];
-        }
-        cvPoly(go, 4, 0x00080A0Eu, 1.0f);
-        cvPolyGrad(g, 4, 0x00644A32u, 0x002A1E16u, 1.0f);
-        /* 防滑纹 */
-        for (int i = 0; i < 5; i++) {
-            float gy = hingeY + 30.0f + (float)i * 11.0f;
-            float gw = 11.0f + (float)i * 0.6f;
-            cvLine(bx + 1 - gw * 0.2f, gy, bx + 1 + gw, gy + 2.0f, 2.6f, 0x00180F0Au, 0.85f);
-        }
-        cvEllipse(bx + 12, gripY - 8, 3.4f, 3.4f, 0x00A89878u, 0.95f);
-    }
-
-    /* ---- 扳机护圈 + 扳机 ---- */
-    {
-    /* v3.0：cvEllipse(..., 0.0f) 是空调用（alpha=0 直接 return），删掉 */
-        for (int a = 20; a <= 160; a += 8) {
-            float rad = (float)a * 3.14159f / 180.0f;
-            float ax = bx - 6 + cosf(rad) * 13.0f;
-            float ay = hingeY + 34 + sinf(rad) * 11.0f;
-            cvEllipse(ax, ay, 2.0f, 2.0f, 0x00342C24u, 1.0f);
-        }
-        cvLine(bx - 6, hingeY + 22, bx - 6, hingeY + 34, 3.4f, 0x00807868u, 1.0f);
-    }
-
-    /* ---- 锈迹 ---- */
-    cvSpeckle((int)bx, (int)hingeY - 10, 26, 70, 0x00703818u, 0.45f);
-    cvSpeckle((int)bx + 14, (int)gripY - 40, 20, 40, 0x00602810u, 0.40f);
-
-    cvFinish(&g_sprites[SPR_PISTOL]);
-}
-
-static void BakeSigil(void) {
-    cvClear();
-    float c = CANVAS_W * 0.5f;
-    float cy = 118;
-    /* 手：托着符印 */
-    cvEllipse(c, cy + 62, 34.0f, 22.0f, 0x000A0C10u, 1.0f);
-    cvEllipse(c, cy + 60, 30.0f, 18.0f, 0x00382C26u, 1.0f);
-    cvEllipse(c - 6, cy + 54, 16.0f, 9.0f, 0x005A4638u, 0.9f);
-
-    /* 外层符文环：用 24 段小方块拼成 */
-    int R = 46;
-    for (int i = 0; i < 24; i++) {
-        float ang = (float)i * 6.2831853f / 24.0f;
-        float ax = c + cosf(ang) * (float)R;
-        float ay = cy + sinf(ang) * (float)R * 0.62f;
-        unsigned int col = (i % 3 == 0) ? 0x00E8F8FFu : 0x0060C8FFu;
-        float sz = (i % 3 == 0) ? 3.4f : 2.2f;
-        cvEllipse(ax, ay, sz, sz, col, 0.95f);
-    }
-    /* 内层环 */
-    for (int i = 0; i < 12; i++) {
-        float ang = (float)i * 6.2831853f / 12.0f + 0.26f;
-        float ax = c + cosf(ang) * 26.0f;
-        float ay = cy + sinf(ang) * 16.0f;
-        cvEllipse(ax, ay, 1.8f, 1.8f, 0x00A8E0FFu, 0.85f);
-    }
-
-    /* 中央菱形核心 */
-    float core[8] = {
-        c, cy - 26,
-        c + 16, cy,
-        c, cy + 26,
-        c - 16, cy
-    };
-    cvPoly(core, 4, 0x00081420u, 1.0f);
-    float core2[8] = {
-        c, cy - 19,
-        c + 11, cy,
-        c, cy + 19,
-        c - 11, cy
-    };
-    cvPolyGrad(core2, 4, 0x00E8FBFFu, 0x003090C0u, 1.0f);
-
-    /* 辉光 */
-    cvGlow(c, cy, 54.0f, 0x0040C8FFu, 0.30f);
-    cvGlow(c, cy, 26.0f, 0x00C8F0FFu, 0.30f);
-
-    /* 三条能量触须：往手的方向收拢 */
-    for (int i = -1; i <= 1; i++) {
-        float ox = c + (float)i * 22.0f;
-        cvLine(c + (float)i * 10.0f, cy + 22.0f, ox, cy + 52.0f, 2.4f, 0x0060C8FFu, 0.55f);
-    }
-
-    cvFinish(&g_sprites[SPR_SIGIL]);
-}
-
 /* ------------------------------------------------------------------ */
 /* 投掷物（左手持）                                                     */
 /* ------------------------------------------------------------------ */
@@ -703,28 +547,147 @@ static void BakeItem(int id, int kind) {
         cvLine(c - 18, cy - 26, c - 18, cy + 30, 8.0f, hi, 0.45f);
 
     } else if (kind == 5) {
-        /* ===== 玩偶（诱饵）=====
-           地标：**圆头 + 两只尖耳朵 + 两条垂腿**
-           唯一的"生物形"投掷物 —— 填黑像一个坐着的小人。 */
-        /* 身体 */
-        cvEllipse(c, cy + 6, 40.0f, 34.0f, 0x000A0C10u, 1.0f);
-        cvEllipse(c, cy + 6, 35.0f, 29.0f, main, 1.0f);
-        /* 头 */
-        cvEllipse(c, cy - 44, 27.0f, 25.0f, 0x000A0C10u, 1.0f);
-        cvEllipse(c, cy - 44, 23.0f, 21.0f, main, 1.0f);
-        /* 两只尖耳朵 */
-        cvLine(c - 20, cy - 56, c - 30, cy - 78, 14.0f, 0x000A0C10u, 1.0f);
-        cvLine(c - 20, cy - 55, c - 29, cy - 76, 10.0f, main, 1.0f);
-        cvLine(c + 20, cy - 56, c + 30, cy - 78, 14.0f, 0x000A0C10u, 1.0f);
-        cvLine(c + 20, cy - 55, c + 29, cy - 76, 10.0f, main, 1.0f);
-        /* 两条垂腿 */
-        cvLine(c - 16, cy + 28, c - 20, cy + 54, 14.0f, 0x000A0C10u, 1.0f);
-        cvLine(c - 16, cy + 28, c - 20, cy + 52, 10.0f, main, 1.0f);
-        cvLine(c + 16, cy + 28, c + 20, cy + 54, 14.0f, 0x000A0C10u, 1.0f);
-        cvLine(c + 16, cy + 28, c + 20, cy + 52, 10.0f, main, 1.0f);
-        /* 眼睛：两颗亮点，让它读作"会叫的娃娃" */
-        cvEllipse(c - 9, cy - 46, 4.0f, 4.0f, 0x00FFF0A0u, 0.95f);
-        cvEllipse(c + 9, cy - 46, 4.0f, 4.0f, 0x00FFF0A0u, 0.95f);
+        /* ==================================================================
+         * 2026-11-05 重做：**假人玩偶（诱饵）**
+         * ------------------------------------------------------------------
+         * 旧版的问题（对着 art_direction.h 逐条核）：
+         *   · 头和身体是两个正圆 → 没有任何体积感（铁律七）
+         *   · "耳朵"是两根直线 → 读成天线，不是玩偶（铁律二）
+         *   · 两颗发光黄眼 → **违反铁律五**：用荧光当恐怖，还读成可爱
+         *   · 纯平面单色，左上没有受光、右下没有暗部（铁律七）
+         *   · 缩小到实际显示的 ~90px 后只剩一个橙色团（铁律九）
+         *
+         * 新设计 —— **三个主要特征**（铁律三，只给三个）：
+         *   ① 绕颈的粗麻绳 + 垂下的绳头   ← 唯一地标，其它 5 个道具都没有
+         *   ② 纽扣眼：一颗扣子 + 一个缝出来的空洞   ← 生物形，但不发光
+         *   ③ 右臂断了，只剩稻草茬          ← 不对称，叙事：它被用过一次
+         *
+         * 负空间（铁律二）：头和身体之间留一道**脖子缝**，绳横穿过去；
+         *   缝的两侧能看到背景，头才不像"黏在身体上"。
+         *
+         * 材质（铁律七）：粗麻布 = 主体 + 暗部 + 受光三层，
+         *   加缝线（短深线）和稻草（亮黄丝）两种次级材质。
+         *
+         * 光照方向和全场一致：**左上受光、右下暗部**，左缘一条轮廓光。
+         * ================================================================== */
+        const unsigned int dollEdge  = 0x000A0C10u;   /* 描边 */
+        const unsigned int dollShade = 0x00402C18u;   /* 暗部 */
+        const unsigned int dollCloth = 0x00987048u;   /* 麻布主体 */
+        const unsigned int dollLit   = 0x00D0AC74u;   /* 左上受光 */
+        const unsigned int dollSeam  = 0x00281A0Cu;   /* 缝线 */
+        const unsigned int dollRope  = 0x00705838u;   /* 麻绳 */
+        const unsigned int dollRopeL = 0x00A08050u;   /* 绳受光 */
+        const unsigned int dollStraw = 0x00D8B440u;   /* 稻草 */
+
+        /* ---- ① 稻草：先画，让它从头和肩后面冒出来 ---- */
+        for (int s = 0; s < 7; s++) {
+            float a = -0.9f + (float)s * 0.32f;
+            float len = 16.0f + (float)((s * 7) % 11);
+            cvLine(c + 26, cy - 30,
+                   c + 26 + cosf(a) * len, cy - 30 + sinf(a) * len - 10.0f,
+                   2.2f, dollStraw, 0.85f);
+        }
+
+        /* ---- ② 左臂：完整，垂在体侧，手是粗糙的缝口 ---- */
+        cvLine(c - 34, cy - 6, c - 46, cy + 30, 17.0f, dollEdge, 1.0f);
+        cvLine(c - 34, cy - 6, c - 45, cy + 28, 12.0f, dollShade, 1.0f);
+        cvLine(c - 36, cy - 6, c - 46, cy + 26, 5.0f, dollCloth, 0.9f);
+        cvEllipse(c - 47, cy + 32, 8.0f, 7.0f, dollEdge, 1.0f);
+        cvEllipse(c - 47, cy + 31, 6.0f, 5.0f, dollShade, 1.0f);
+
+        /* ---- ③ 两条腿：末端是粗缝口，不是尖的 ---- */
+        for (int leg = 0; leg < 2; leg++) {
+            float lx = (leg == 0) ? c - 15.0f : c + 15.0f;
+            float lx2 = (leg == 0) ? c - 19.0f : c + 19.0f;
+            cvLine(lx, cy + 30, lx2, cy + 66, 15.0f, dollEdge, 1.0f);
+            cvLine(lx, cy + 30, lx2, cy + 64, 10.0f, dollShade, 1.0f);
+            cvEllipse(lx2, cy + 68, 9.0f, 7.0f, dollEdge, 1.0f);
+            cvEllipse(lx2, cy + 67, 7.0f, 5.0f, dollCloth, 0.95f);
+            /* 脚上的缝线 */
+            cvLine(lx2 - 4, cy + 66, lx2 + 4, cy + 66, 1.6f, dollSeam, 0.85f);
+        }
+
+        /* ---- ④ 身体：梨形（肩窄胯宽），三层色 ---- */
+        {
+            float body[10] = {
+                c - 22, cy - 18,   /* 左肩 */
+                c + 22, cy - 18,   /* 右肩 */
+                c + 33, cy + 12,   /* 右腰 */
+                c + 30, cy + 34,   /* 右胯 */
+                c - 30, cy + 34    /* 左胯 */
+            };
+            float bodyO[10];
+            for (int i = 0; i < 5; i++) {
+                bodyO[i * 2]     = c + (body[i * 2] - c) * 1.14f;
+                bodyO[i * 2 + 1] = body[i * 2 + 1];
+            }
+            cvPoly(bodyO, 5, dollEdge, 1.0f);
+            cvPolyGrad(body, 5, dollCloth, dollShade, 1.0f);
+            /* 左上受光面：从肩往腰的一条斜带 */
+            {
+                float lit[8] = { c - 20, cy - 16, c - 2, cy - 16, c - 10, cy + 30, c - 26, cy + 30 };
+                cvPolyGrad(lit, 4, dollLit, dollCloth, 0.75f);
+            }
+            /* 补丁缝：身体上三道短缝线（次级材质） */
+            cvLine(c - 16, cy + 2,  c - 4,  cy + 6,  1.6f, dollSeam, 0.8f);
+            cvLine(c - 14, cy + 10, c - 2,  cy + 14, 1.6f, dollSeam, 0.8f);
+            cvLine(c + 8,  cy + 24, c + 20, cy + 22, 1.6f, dollSeam, 0.7f);
+            /* 右下暗部 */
+            cvEllipse(c + 20, cy + 20, 11.0f, 14.0f, dollShade, 0.55f);
+        }
+
+        /* ---- ⑤ 脖子：一道**负空间缝**，头和身体不再黏在一起 ---- */
+        cvLine(c + 1, cy - 24, c + 1, cy - 14, 13.0f, dollEdge, 1.0f);
+        cvLine(c + 1, cy - 23, c + 1, cy - 15, 8.0f, dollShade, 1.0f);
+
+        /* ---- ⑥ 头：略扁、略歪（重心偏右，不对称有依据） ---- */
+        cvEllipse(c + 3, cy - 46, 27.0f, 25.0f, dollEdge, 1.0f);
+        cvEllipse(c + 3, cy - 46, 23.0f, 21.0f, dollCloth, 1.0f);
+        /* 头的暗部（右下）与受光（左上） */
+        cvEllipse(c + 11, cy - 40, 14.0f, 12.0f, dollShade, 0.6f);
+        cvEllipse(c - 6, cy - 53, 12.0f, 9.0f, dollLit, 0.55f);
+
+        /* ---- ⑦ 纽扣眼 + 空洞眼（不发光） ---- */
+        cvEllipse(c - 6, cy - 50, 6.5f, 6.5f, dollEdge, 1.0f);
+        cvEllipse(c - 6, cy - 50, 5.0f, 5.0f, 0x002A2018u, 1.0f);
+        cvEllipse(c - 7, cy - 51, 2.4f, 2.4f, 0x00807868u, 0.85f);   /* 扣子的受光点 */
+        cvEllipse(c + 12, cy - 50, 4.2f, 4.2f, dollEdge, 1.0f);
+        cvEllipse(c + 12, cy - 50, 2.6f, 2.6f, 0x00140E08u, 1.0f);
+
+        /* ---- ⑧ 十字嘴：缝出来的（唯一的"脸"细节） ---- */
+        cvLine(c - 6, cy - 36, c + 10, cy - 36, 2.0f, dollSeam, 0.9f);
+        cvLine(c + 2, cy - 41, c + 2, cy - 31, 2.0f, dollSeam, 0.9f);
+
+        /* ---- ⑨ 麻绳绕颈：地标，两圈 + 垂下的绳头 ---- */
+        cvLine(c - 20, cy - 19, c + 24, cy - 19, 9.0f, dollEdge, 1.0f);
+        cvLine(c - 20, cy - 19, c + 24, cy - 19, 6.0f, dollRope, 1.0f);
+        cvLine(c - 19, cy - 14, c + 23, cy - 14, 8.0f, dollEdge, 1.0f);
+        cvLine(c - 19, cy - 14, c + 23, cy - 14, 5.0f, dollRope, 1.0f);
+        /* 绳的受光边 */
+        cvLine(c - 18, cy - 21, c + 18, cy - 21, 2.0f, dollRopeL, 0.75f);
+        /* 绳头：从右侧打结处垂下来 */
+        cvLine(c + 22, cy - 15, c + 26, cy + 6, 5.0f, dollEdge, 1.0f);
+        cvLine(c + 22, cy - 15, c + 25, cy + 4, 3.0f, dollRope, 1.0f);
+        cvEllipse(c + 23, cy - 17, 6.0f, 5.0f, dollEdge, 1.0f);
+        cvEllipse(c + 23, cy - 17, 4.0f, 3.4f, dollRope, 1.0f);
+
+        /* ---- ⑩ 右臂：**断了**，只剩稻草茬 ---- */
+        cvLine(c + 28, cy - 6, c + 36, cy + 2, 15.0f, dollEdge, 1.0f);
+        cvLine(c + 28, cy - 6, c + 35, cy + 1, 10.0f, dollShade, 1.0f);
+        /* 断口：一圈深色，外面炸出稻草 */
+        cvEllipse(c + 37, cy + 3, 7.0f, 6.0f, dollEdge, 1.0f);
+        cvEllipse(c + 37, cy + 3, 5.0f, 4.0f, dollSeam, 1.0f);
+        for (int s = 0; s < 5; s++) {
+            float a = -1.2f + (float)s * 0.42f;
+            float len = 11.0f + (float)((s * 5) % 8);
+            cvLine(c + 37, cy + 3,
+                   c + 37 + cosf(a) * len, cy + 3 + sinf(a) * len + 4.0f,
+                   2.0f, dollStraw, 0.9f);
+        }
+
+        /* ---- ⑪ 左上轮廓光：让它在暗场里有体积（和怪物同一套光照） ---- */
+        cvLine(c - 18, cy - 56, c - 12, cy - 30, 2.4f, dollLit, 0.5f);
+        cvLine(c - 24, cy - 14, c - 30, cy + 18, 2.4f, dollLit, 0.4f);
 
     } else if (kind == 6) {
         /* ===== 胶水瓶 =====
@@ -1593,7 +1556,7 @@ static void BakeProp(int id, int kind) {
          * 和普通箱子（kind 0）**同宽同高** —— 铁律一：剪影必须仍读作"箱子"，
          * 否则玩家一眼就看出不对，破绽设计就废了。
          *
-         * 只改两处「约定部件」（铁律十五）：
+         * 只改两处「约定部件」（铁律十六）：
          *   ① 金属包边从暗铁色改成**暗金色** → 看起来更值钱（这是诱饵）
          *   ② 锁扣是**双层**（普通箱子单层） → 破绽②，细看才发现
          * ============================================================ */
@@ -1848,8 +1811,7 @@ void SpritesInit(void) {
         memset(g_sprites[i].px, 0, sizeof(unsigned int) * SPR_W * SPR_H);
     }
     BakeWrench();
-    BakePistol();
-    BakeSigil();
+    /* 2026-11-05：BakePistol() / BakeSigil() 已删除 */
     /* v2.4.82：六个槽位，一一对应，不再有"复用空闲槽位"这种事 */
     BakeItem(SPR_ITEM_FLARE, 0);   /* 光球 */
     BakeItem(SPR_ITEM_SLING, 8);   /* 投石（石弹） */

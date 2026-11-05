@@ -1557,9 +1557,8 @@ int HitMonster(Monster* m, int dmg) {
         /* 血量耗尽：直接驱离（重新生成到别处），而不是留在原地 */
         if (m == &monster) SpawnMonster();
         else SpawnLightBeast();
-        /* 成就：用瓶子击杀怪物 */
-        extern int bottlesKilled;
-        bottlesKilled++;
+        /* 2026-11-05：bottlesKilled 已删除 —— NO_COMBAT 下 m->hp 永远打不光，
+           这个分支是编译死代码（保留结构，去掉无意义的计数）。 */
     } else {
         KnockbackMonster(m);
     }

@@ -36,9 +36,10 @@ jobs:
         shell: msys2 {0}
         run: |
           windres res/canity.rc -O coff -o res/canity_res.o
-          # src/steam/ 是独立子目录，`src/*.c` 的通配匹配不到它。
-          # 少了它链接会报 SteamZoneInit / SteamZoneSetStatInt 等 20 个 undefined reference。
-          gcc src/*.c src/steam/*.c res/canity_res.o -Iinclude -o canity.exe -O2 -Wall -Wextra \
+          # src/steam/ 与 src/save/ 都是独立子目录，`src/*.c` 的通配匹配不到它们。
+          # 少了 steam/：链接报 SteamZoneInit / SteamZoneSetStatInt 等 20 个 undefined reference。
+          # 少了 save/ ：链接报 SaveContainerPack / SaveBackendWrite 等 undefined reference。
+          gcc src/*.c src/save/*.c src/steam/*.c res/canity_res.o -Iinclude -o canity.exe -O2 -Wall -Wextra \
               -lgdi32 -luser32 -lwinmm -mwindows
 
       # 步骤 4：打包产物（exe + 解除锁定脚本 + 说明）

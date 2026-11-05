@@ -345,24 +345,26 @@ void SteamZoneOpenOverlay(const char* dialog) {
  *
  * 注意：**永远不删本地**。云端赢的时候也是先备份再覆盖。
  */
-typedef struct {
-    unsigned int magic;
-    int          version;
-    unsigned int stamp;
-    unsigned int sum;
-    int          payload;
-} SteamCloudHead;
+/* ==================================================================
+ * 2026-11-05：**信封上移到存档分区**
+ * ------------------------------------------------------------------
+ * 这里原来私有一份 SteamCloudHead + STEAM_CLOUD_MAGIC + fnv1a。
+ * 现在它们住在 include/save_format.h，由**存档分区**所有：
+ *   · 存档写盘时就把信封封好（SaveEnvelopeSeal），文件本身就是云格式；
+ *   · Steam 专区只消费这份字节，不再现场合成。
+ * 于是「存档版本」和「云存档格式」只有**一个**权威来源（铁律十八）。
+ *
+ * 依赖方向是单向的：
+ *   src/save/  ──调用──>  src/steam/        （上传 / 下载）
+ *   src/steam/ ──include──> save_format.h   （只共享类型，不反向调用）
+ * ================================================================== */
+#include "save_format.h"
 
-#define STEAM_CLOUD_MAGIC 0x56415343u   /* 'CSAV' 小端 */
-
-static unsigned int fnv1a(const unsigned char* p, int n) {
-    unsigned int h = 2166136261u;
-    for (int i = 0; i < n; i++) {
-        h ^= (unsigned int)p[i];
-        h *= 16777619u;
-    }
-    return h;
-}
+/* 旧名字保留成本文件的别名，避免这一次改动同时动 60 行调用点。
+   新代码请直接用 SaveEnvelope / SAVE_ENVELOPE_MAGIC / SaveFnv1a。 */
+typedef SaveEnvelope SteamCloudHead;
+#define STEAM_CLOUD_MAGIC SAVE_ENVELOPE_MAGIC
+#define fnv1a(p, n)       SaveFnv1a((p), (n))
 
 int SteamZoneCloudSync(const char* name, void* localBuf, int bufSize) {
     if (!s_ready || !name || !localBuf || bufSize <= (int)sizeof(SteamCloudHead)) {
@@ -465,6 +467,25 @@ static void* ReadLocalEnvelope(const char* path,int* bytes) {
     FILE* f=fopen(path,"rb");if(!f) return NULL;
     fseek(f,0,SEEK_END);long n=ftell(f);rewind(f);
     if(n<=0 || n>1024*1024) {fclose(f);return NULL;}
+
+    /* 2026-11-05：**文件本身可能已经是信封格式了**。
+       存档分区从这一版起在写盘时就封好信封，所以上传路径应当原样搬运。
+       判断方式：读出前 4 字节，等于 SAVE_ENVELOPE_MAGIC 且整份自洽 → 直接用。 */
+    {
+        unsigned char* raw=(unsigned char*)malloc((size_t)n);
+        if(!raw) {fclose(f);return NULL;}
+        if(fread(raw,1,(size_t)n,f)!=(size_t)n) {free(raw);fclose(f);return NULL;}
+        if(n>(long)sizeof(SaveEnvelope)) {
+            SaveEnvelope h;memcpy(&h,raw,sizeof(h));
+            if(h.magic==SAVE_ENVELOPE_MAGIC && h.payload==(int)(n-(long)sizeof(h)) &&
+               SaveEnvelopeValid(&h,raw+sizeof(h),h.payload)) {
+                fclose(f);*bytes=(int)n;return raw;    /* 已经是云格式，原样返回 */
+            }
+        }
+        free(raw);
+        rewind(f);
+    }
+
     unsigned char* p=(unsigned char*)malloc(sizeof(SteamCloudHead)+(size_t)n);
     if(!p) {fclose(f);return NULL;}
     if(fread(p+sizeof(SteamCloudHead),1,(size_t)n,f)!=(size_t)n) {free(p);fclose(f);return NULL;}
@@ -473,7 +494,7 @@ static void* ReadLocalEnvelope(const char* path,int* bytes) {
         ULARGE_INTEGER t;t.LowPart=info.ftLastWriteTime.dwLowDateTime;t.HighPart=info.ftLastWriteTime.dwHighDateTime;
         stamp=(unsigned)(t.QuadPart/10000000ULL-11644473600ULL);
     }
-    SteamCloudHead h={STEAM_CLOUD_MAGIC,26,stamp,fnv1a(p+sizeof(h),(int)n),(int)n};memcpy(p,&h,sizeof(h));
+    SteamCloudHead h={STEAM_CLOUD_MAGIC,SAVE_CONTAINER_VERSION,stamp,fnv1a(p+sizeof(h),(int)n),(int)n};memcpy(p,&h,sizeof(h));
     *bytes=(int)(sizeof(h)+n);return p;
 }
 void SteamZoneUploadSave(const char* path) {
@@ -482,19 +503,12 @@ void SteamZoneUploadSave(const char* path) {
     const char* name=strrchr(path,'\\');name=name?name+1:path;
     SteamZoneCloudUpload(name,p,bytes);free(p);
 }
-void SteamZoneSyncLocalSaves(void) {
-    if(!s_ready) return;
-    char path[MAX_PATH];GetModuleFileNameA(NULL,path,sizeof(path));char* name=strrchr(path,'\\');if(!name) return;
-    ++name;
-    for(int slot=0;slot<3;++slot) {
-        snprintf(name,sizeof(path)-(size_t)(name-path),"canity%d.sav",slot);
-        int bytes=0;void* p=ReadLocalEnvelope(path,&bytes);if(!p) continue;
-        if(SteamZoneCloudSync(name,p,bytes)==STEAM_SYNC_CLOUDWIN) {
-            char bak[MAX_PATH+32];snprintf(bak,sizeof(bak),"%s.pre-cloud.bak",path);
-            if(CopyFileA(path,bak,FALSE)) {
-                FILE* f=fopen(path,"wb");if(f) {SteamCloudHead* h=(SteamCloudHead*)p;fwrite((char*)p+sizeof(*h),1,(size_t)h->payload,f);fclose(f);}
-            }
-        }
-        free(p);
-    }
-}
+/* 2026-11-05：云->本地的回写已搬到**存档分区的后端**
+   （src/save/save_backend.c 的 SaveBackendSyncAll）。
+
+   为什么搬：这一步要**写本地存档文件**，而存档文件只允许后端写
+   （原来这里用裸 fopen，绕过了 tmp+fsync+原子改名和 .bak 链）。
+   现在 Steam 专区只做它该做的事：传输原语 + 冲突判定。
+
+   对外接口变化：调用方把 SteamZoneSyncLocalSaves() 换成 SaveBackendSyncAll()。 */
+

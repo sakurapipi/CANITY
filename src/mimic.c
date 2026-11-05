@@ -177,7 +177,7 @@ void MimicOnEchoHit(int containerIdx) {
 
 /* 扳手挥击：伪装态 → 逼现形且**不挨咬**；现形态 → 击退 + 硬直。
    ⚠ 它不在 monHunters[] 里，MonsterCollect 永远扫不到 ——
-     所以扳手那边必须单独调用这个函数（铁律四十 登记点 ⑫）。 */
+     所以扳手那边必须单独调用这个函数（铁律二十二 登记点 ⑫）。 */
 int MimicWrenchSweep(float px, float py, float facing, float range) {
     int hitAny = 0;
     for (int i = 0; i < mimicCount; i++) {
@@ -210,7 +210,7 @@ int MimicWrenchSweep(float px, float py, float facing, float range) {
 }
 
 /* 胶水：定身 2 秒（复用 stun）。
-   ⚠ 调用点在 throwing.c / game.c 的胶水落地处（铁律四十 登记点）。 */
+   ⚠ 调用点在 throwing.c / game.c 的胶水落地处（铁律二十二 登记点）。 */
 void MimicOnGlue(float x, float y) {
     for (int i = 0; i < mimicCount; i++) {
         Mimic* m = &mimics[i];

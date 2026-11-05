@@ -46,6 +46,21 @@ float throwChainTimer = 0.0f; /* 归零倒计时，8 秒不扔就断链 */
      · **全场最多只有一个回响** —— 触发前先清掉已有的，
        否则多个 100 强度的假线索叠在一起会把怪物数值彻底搞乱。 */
 void EchoTryTrigger(float x, float y) {
+    /* ==================================================================
+     * 2026-11-05 修「回响触发机制」——用户报告「回响探测键有点小问题」
+     * ------------------------------------------------------------------
+     * 设计意图（原注释）：**任何投掷物都算进连投计数**。
+     *
+     * 但原来的接线只在「落在地面上」那一条分支里调了这个函数 ——
+     * 于是下面三种结束方式**完全不计数**：
+     *     · 撞墙      ← 走廊里最常见
+     *     · 打中怪
+     *     · 空中寿命到期
+     * 玩家实际感受就是「扔了半天不回响」，因为大部分投掷都撞墙了。
+     *
+     * 现在四个出口（落地 / 撞墙 / 打怪 / 空中到期）都会调到这里，
+     * 连投计数才和"扔了几次"真正对应上。
+     * ================================================================== */
     extern SuspicionPoint susp[SUSP_MAX];
     throwChain++;
     throwChainTimer = THROW_CHAIN_IDLE;
@@ -61,6 +76,65 @@ void EchoTryTrigger(float x, float y) {
     PlaySfx(SFX_ECHO, 0.95f);
     pickupMsg = (g_lang == LANG_ZH) ? "回响炸开了" : "ECHO BURST";
     pickupMsgTimer = 1.6f;
+}
+
+/* ==================================================================
+ * 2026-11-05：**投石 → 破门石**（方案 B）
+ * ------------------------------------------------------------------
+ * 用户原话：「局里有个叫投石的技能的设计是怎么样的」→ 结论是它没有
+ * 不可替代的功能（噪音输给诱饵、功能性输给烟雾/胶水）。
+ *
+ * 现在给它一件**别的道具都做不到**的事：
+ *     丢过去的石头砸在锁箱上 → 锁直接崩开，跳过锁盘小游戏。
+ *
+ * 为什么这个功能该归它：
+ *   · 物理上最自然 —— 抛物线扔一块石头砸锁，本来就是这件事
+ *   · 锁盘现在有 6 种、开一把 8~15 秒，而它提供「用噪音换时间」的解法
+ *   · 代价明确且够痛：20 格噪音，砸完就得跑
+ *
+ * 和「宝箱怪的扳手解法」是同一族设计：
+ *   同一个障碍（锁/伪装），给两种完全不同的应对（动手 / 动脑）。
+ * ================================================================ */
+#define STONE_LOCK_RADIUS   2.5f     /* 命中判定的落点半径（格）—— 2.0 太严，放宽 */
+#define STONE_LOCK_NOISE   20.0f     /* 砸锁的噪音 —— 这是它的代价 */
+#define STONE_LOCK_CHANCE   100      /* 100 = 必成。留个口子方便以后调成概率 */
+
+/* 落点 x,y 附近有没有锁箱；有就砸开。返回 1 = 砸开了。
+   ⚠ 只处理 `locked`，不碰 `mimicHost`（宝箱怪不是锁箱）。 */
+static int StoneBreakLockAt(float x, float y) {
+    extern Container containers[];
+    extern int containerCount;
+    extern int g_lang;
+    extern const char* pickupMsg;
+    extern float pickupMsgTimer;
+
+    int best = -1;
+    float bestD = STONE_LOCK_RADIUS * STONE_LOCK_RADIUS;
+    for (int i = 0; i < containerCount && i < MAX_CONTAINERS; i++) {
+        if (!containers[i].active) continue;
+        if (!containers[i].locked) continue;
+        if (containers[i].mimicHost) continue;
+        float dx = containers[i].x - x, dy = containers[i].y - y;
+        float d2 = dx * dx + dy * dy;
+        if (d2 < bestD) { bestD = d2; best = i; }
+    }
+    if (best < 0) return 0;
+    if ((rand() % 100) >= STONE_LOCK_CHANCE) return 0;
+
+    containers[best].locked   = 0;      /* 锁崩开 */
+    containers[best].lockType = 0;
+    containers[best].lockCode = 0;
+    containers[best].searched = 0;
+
+    /* 砸锁的动静比普通落地大得多 —— 这就是它的代价 */
+    MakeNoise(x, y, STONE_LOCK_NOISE);
+    PlaySfx(SFX_GLASS, 1.0f);
+    { extern void AddShake(float, float); AddShake(0.10f, 0.08f); }
+
+    pickupMsg = (g_lang == LANG_ZH) ? "石头砸开了锁！" : "THE STONE BROKE THE LOCK!";
+    pickupMsgTimer = 1.6f;
+    { extern int uiDirty; uiDirty = 1; }
+    return 1;
 }
 
 void ThrowItem(int type, float charge) {
@@ -340,6 +414,9 @@ void UpdateShots(float dt) {
             /* 撞地面：碎裂生成金币 */
             if (shot[i].z <= 0.0f) {
                 shot[i].z = 0.0f;
+                /* 2026-11-05：**破门石** —— 落在锁箱旁边就把锁砸开。
+                   放在碎片/音效之前：砸开了要盖掉普通落地的提示。 */
+                if (shot[i].kind == 1) StoneBreakLockAt(shot[i].x, shot[i].y);
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                 PlaySfx(SFX_GLASS, 0.7f);
                 /* v3.0 逃生试炼：**扔东西制造噪音把追捕者引开**是核心手法，
@@ -356,6 +433,12 @@ void UpdateShots(float dt) {
                玩家感觉就是「胶水有时候不生效」。
                现在撞墙也走和落地一样的效果分派（只是落点变成墙面位置）。 */
             if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
+                /* 2026-11-05：**破门石** —— 锁箱贴着墙时，瓶子会先撞墙，
+                   所以撞墙分支也要试一次，否则「贴着墙的锁箱永远砸不开」。 */
+                if (shot[i].kind == 1) StoneBreakLockAt(shot[i].x, shot[i].y);
+                /* 2026-11-05 修「回响触发机制」：撞墙也算一次投掷结束。
+                   见下面 EchoTryTrigger 的说明。 */
+                EchoTryTrigger(shot[i].x, shot[i].y);
                 if (shot[i].kind == 4) {
                     SpawnSmoke(shot[i].x, shot[i].y);
                 } else if (shot[i].kind == 8) {
@@ -441,14 +524,37 @@ void UpdateShots(float dt) {
                     } else if (shot[i].kind == 6) {     /* v2.0 信号枪弹 */
                         base = shot[i].dmg > 0 ? shot[i].dmg : 8;
                         type = WeaponDamageType(curWeapon);
-                    } else {                            /* 玻璃瓶 */
-                        base = (int)(SHOT_DAMAGE * RunThrowDmgMul() + 0.5f) + chargeBonus(shot[i].charge);   /* v2.2 SILENT BOTTLE */
+                    } else {                            /* 玻璃瓶 = 破门石 */
+                        /* ==========================================================
+                         * 2026-11-05 修「投掷物半空碎裂、没有效果」
+                         * ----------------------------------------------------------
+                         * 用户报告：**终点附近有两个物体时**，投掷物会在半空炸开、
+                         * 什么效果都没有。
+                         *
+                         * 根因就是这里：投石原本和别的投掷物走同一条通用管线 ——
+                         * 碰到第一只怪就 `shot[i].active = 0; break;` 销毁。
+                         * 而 NO_COMBAT 之后 ApplyDamage **不造成任何伤害**
+                         * （只有噪音 + 0.35 秒硬直），所以玩家看到的是：
+                         *   瓶子飞到一半 → 碰上一只怪 → 碎 → 什么都没发生。
+                         * 如果那只怪旁边还有第二只，视觉上更像"卡在半空"。
+                         *
+                         * 修法：**投石是工具，不是武器** —— 它穿过怪物，
+                         * 只给 0.35 秒硬直，然后继续飞到玩家真正瞄的落点
+                         * （那里才该砸锁 / 制造噪音）。
+                         * 这样"两个物体在终点"也不会再吃掉它。
+                         * ========================================================== */
+                        ApplyDamage(m, 0, DT_SHARD, shot[i].x, shot[i].y);
+                        SpawnShards(shot[i].x, shot[i].y, 0, 0, 0.25f);
+                        continue;        /* ← 不销毁，继续飞 */
                     }
                     SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
                     ApplyDamage(m, base, type, shot[i].x, shot[i].y);
-                    if (shot[i].kind == 6) WeaponAddXp(WPN_RANGED, 1);   /* v2.1：远程也能练 */
+                    /* 2026-11-05：武器系统已下线，信号枪弹（kind 6）也已不再生成 */
+
                     g_dmgIgnoreArmor = 0;
                     if (shot[i].pierce) { shot[i].pierce = 0; continue; }   /* v2.0：穿透一次 */
+                    /* 打在怪物身上同样是「这一次投掷结束了」 —— 回响要计数 */
+                    EchoTryTrigger(shot[i].x, shot[i].y);
                     shot[i].active = 0;
                     break;
                 }
@@ -456,8 +562,23 @@ void UpdateShots(float dt) {
             }
         }
         if (shot[i].life <= 0.0f || (shot[i].z <= 0.0f && shot[i].age > 0.02f)) {
-            if (shot[i].kind == 4) {
+            /* 2026-11-05：**空中过期也要生效**。
+               原来这里只有 `SpawnShards()` 就销毁 —— 瓶子在半空炸开、
+               一点效果都没有（另一半"半空碎裂"报告就是这条）。
+               寿命到期意味着"它飞到哪儿就在哪儿落地"，所以补一次落地效果。 */
+            EchoTryTrigger(shot[i].x, shot[i].y);   /* 空中到期也算一次投掷结束 */
+            if (shot[i].kind == 1) {
+                StoneBreakLockAt(shot[i].x, shot[i].y);
+                MakeNoise(shot[i].x, shot[i].y, 15.0f);
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+            } else if (shot[i].kind == 4) {
                 SpawnSmoke(shot[i].x, shot[i].y);       /* 烟雾弹落地成云 */
+            } else if (shot[i].kind == 8) {
+                SpawnGlue(shot[i].x, shot[i].y);
+                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+            } else if (shot[i].kind == 10) {
+                extern void EchoMarksScan(float, float, float);
+                EchoMarksScan(shot[i].x, shot[i].y, ECHO_RADIUS);
             } else if (shot[i].z > 0.0f) {
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
             }
