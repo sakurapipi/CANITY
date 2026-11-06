@@ -91,8 +91,21 @@ def main() -> int:
     run([tool("windres"), os.path.join("res", "canity.rc"), "-O", "coff", "-o", obj])
 
     print("2/4 编译")
-    sources = [os.path.join("src", f) for f in sorted(os.listdir(os.path.join(ROOT, "src")))
-               if f.endswith(".c")]
+    # 2026-11-06：**必须递归**。
+    # 原来只扫 src/*.c，但 save 后端与 steam 后端在子目录里
+    # （src/save/save_backend.c、src/steam/*.c）。
+    # 于是打包出来的 exe 在链接期报一堆 undefined reference：
+    #   SaveBackendRead / SaveBackendWrite / SaveBackendUpload /
+    #   SaveEnvelopeValid / SaveContainerAt ...
+    # build_validate 和 build_deploy 都是递归的，只有打包这步会炸。
+    sources = []
+    for _dp, _dn, _fn in os.walk(os.path.join(ROOT, "src")):
+        for _f in sorted(_fn):
+            if _f.endswith(".c"):
+                _rel = os.path.relpath(_dp, os.path.join(ROOT, "src"))
+                sources.append(os.path.join("src", _f) if _rel == "."
+                               else os.path.join("src", _rel, _f))
+    sources.sort()
     exe = os.path.join(out_dir, "canity.exe")
     run([tool("gcc")] + sources + [obj, "-Iinclude", "-o", exe, "-O2", "-Wall", "-Wextra",
                                    "-lgdi32", "-luser32", "-lwinmm", "-mwindows"])
