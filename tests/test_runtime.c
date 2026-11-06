@@ -86,6 +86,119 @@ static void test_daily(void) {
     DailyGenerate();
     CHECK(!DailyForbidSprint() && !DailyForbidWrench() && DailyGoldTierBonus()==0,"daily restrictions do not leak into normal games");
 }
+/* ==================================================================
+ * 2026-11-06（v2.4.1 / v34）：**三类投掷物与爆脸怪计数必须能存档**
+ * ------------------------------------------------------------------
+ * 审计发现 echoBolts / decoys / phaseBeacons 从来没有进过 SaveBlob：
+ * 中途保存再继续，这三样静默消失，而同为投掷物的 flares/bottles 却在。
+ * 玩家很难判断这是 bug。
+ *
+ * jumperSpawnedRun 同样要存 —— 不存的话读档会重置，
+ * 可以靠反复读档刷出超过 4 只爆脸怪。
+ * ================================================================== */
+static void test_save_v34_items(void) {
+    extern int echoBolts, decoys, phaseBeacons, jumperSpawnedRun;
+
+    clear_meta(); StartGame();
+    echoBolts = 3; decoys = 2; phaseBeacons = 4; jumperSpawnedRun = 3;
+    runInProgress = 1;
+    SaveGame();
+    CHECK(g_saveState == 1, "v34 save write succeeds");
+
+    echoBolts = 0; decoys = 0; phaseBeacons = 0; jumperSpawnedRun = 0;
+    CHECK(LoadSettings(), "v34 save can be loaded");
+    ContinueRun();
+
+    CHECK(echoBolts == 3,        "echo bolts must survive a restart");
+    CHECK(decoys == 2,           "decoys must survive a restart");
+    CHECK(phaseBeacons == 4,     "phase beacons must survive a restart");
+    CHECK(jumperSpawnedRun == 3, "the facehugger per-run budget must survive a restart");
+}
+
+/* ==================================================================
+ * 2026-11-06（v2.4.1 / v34）：**v33 老档不能被拒**
+ * ------------------------------------------------------------------
+ * LoadSettings 里有一句
+ *     if (g_save.version != SAVE_VERSION) { 把档改名归档; return 0; }
+ * 也就是说：只把字段追加到末尾**还不够**，必须显式放行 v33，
+ * 否则玩家一更新版本，整局进度被归档丢弃。
+ *
+ * 这条用例直接写一份**真实的 v33 布局**（当前结构体砍掉最后 16 字节，
+ * 版本号写 33），然后走一次真正的 LoadSettings。
+ * ================================================================== */
+static void test_v33_save_is_accepted(void) {
+    extern int echoBolts, decoys, phaseBeacons, jumperSpawnedRun;
+    extern const char* SavePathForSlot(int, int, char*, size_t);
+
+    clear_meta(); StartGame();
+    runInProgress = 1;
+    SaveGame();                       /* 先把目录和路径建出来 */
+    CHECK(g_saveState == 1, "prerequisite save written");
+
+    /* 自己造一份 v33 档：当前布局的前缀 + 版本号 33 */
+    {
+        SaveBlob b;
+        memset(&b, 0, sizeof(b));
+        b.magic   = SAVE_MAGIC;
+        b.version = 33;               /* 上一版 */
+        /* 必须标成"有进行中的对局"，否则 LoadSettings 读成功之后
+           会按"没有可继续的存档"返回 0 —— 那是另一条退出路径，
+           会让这条用例看起来像"v33 被版本校验拒了"。 */
+        b.hasRun = 1;
+        b.flares  = 7;                /* 用来证明"前缀字段没丢" */
+        b.bankGoldSave = 4242;
+        b.echoBolts = 9;              /* 老档里这几个字段**不存在**，填垃圾值 */
+        b.decoys = 9;
+        b.phaseBeacons = 9;
+        b.jumperSpawnedRun = 9;
+
+        /* ==================================================================
+         * 写遍**所有候选路径 × 所有槽**。
+         * 第一次只写了槽 0 的候选 0，结果 LoadSettings 读的是别的路径，
+         * 拿到的还是上一步的 v34 档 —— 用例假失败。
+         * SavePathForSlot 是导出的，所以这里可以老老实实全覆盖。
+         * ================================================================ */
+        size_t legacyLen = sizeof(SaveBlob) - 4 * sizeof(int);
+        int written = 0;
+        for (int slot = 0; slot < 3; slot++) {
+            for (int cand = 0; cand < 6; cand++) {
+                char p[MAX_PATH];
+                SavePathForSlot(cand, slot, p, sizeof(p));
+                if (!p[0]) continue;
+                FILE* f = fopen(p, "wb");
+                if (!f) continue;
+                fwrite(&b, 1, legacyLen, f);
+                fclose(f);
+                written++;
+                char bak[MAX_PATH + 16];
+                snprintf(bak, sizeof(bak), "%s.bak", p);
+                FILE* fb = fopen(bak, "wb");
+                if (fb) { fwrite(&b, 1, legacyLen, fb); fclose(fb); }
+            }
+        }
+        CHECK(written > 0, "the v33 fixture must reach at least one real save path");
+    }
+
+    echoBolts = decoys = phaseBeacons = jumperSpawnedRun = -1;
+    CHECK(LoadSettings(), "a v33 save must NOT be rejected by the version gate");
+    /* LoadSettings 只把数据填进 g_save；全局变量是在 ContinueRun 里灌回来的。
+       不调这一步，断言检查的还是测试自己设的 -1。 */
+    ContinueRun();
+
+    /* 尾部四项在老档里不存在 → 必须是 0，而不是垃圾值 */
+    CHECK(echoBolts == 0 && decoys == 0 && phaseBeacons == 0 && jumperSpawnedRun == 0,
+          "fields appended in v34 must read as 0 from a v33 save");
+    /* 前缀字段必须原样保留 */
+    {
+        extern const SaveBlob* SaveTestBlob(void);
+        const SaveBlob* blob = SaveTestBlob();
+        CHECK(blob->flares == 7,
+              "v33 prefix fields must survive the v33->v34 hand-off");
+        CHECK(blob->bankGoldSave == 4242,
+              "v33 economy fields must survive the v33->v34 hand-off");
+    }
+}
+
 static void test_wallet_save(void) {
     clear_meta();bankGold=1000;bankHistMax=1000;bankCarryPct=5;
     StartGame();CHECK(bankGold==750 && carryGold==250 && carryAtRunStart==250,"opening withdrawal stays in the player's pocket");
@@ -3091,6 +3204,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

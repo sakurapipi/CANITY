@@ -705,6 +705,13 @@ void SaveGame(void) {
     g_save.firePots = firePots;
     g_save.gluePots = gluePots;
     g_save.mirrors = mirrors;
+    /* v34：2026-11-06 —— 这三类投掷物以前完全没进档，读档即消失。
+       同一处写齐，避免以后再漏一个。 */
+    { extern int echoBolts, decoys, phaseBeacons, jumperSpawnedRun;
+      g_save.echoBolts        = echoBolts;
+      g_save.decoys           = decoys;
+      g_save.phaseBeacons     = phaseBeacons;
+      g_save.jumperSpawnedRun = jumperSpawnedRun; }
     g_save.bankStreak = bankStreak;
     g_save.modBatteryMul = modBatteryMul;
     g_save.modShardMul = modShardMul;
@@ -1212,6 +1219,22 @@ int LoadSettings(void) {
             if (g_save.runPrincipalSave == 0) g_save.runPrincipalSave = g_save.carryGoldSave;
         }
     }
+    /* ==================================================================
+     * 2026-11-06（v2.4.1 / v34）：**v33 -> v34 只需要放行**
+     * ------------------------------------------------------------------
+     * v34 只在结构体**末尾**追加了 4 个 int，布局没有任何重排：
+     *   echoBolts / decoys / phaseBeacons / jumperSpawnedRun
+     * 所以 v33 的老档（比现在短 16 字节）按前缀读进来之后，
+     * 这 4 项本来就已经是 0（LoadSettings 开头 memset 过整份 g_save）。
+     *
+     * 但**必须在这里把版本号改掉** —— 下面那句
+     *   if (g_save.version != SAVE_VERSION) { 归档并 return 0; }
+     * 会直接拒档。不做这一步，玩家一更新版本就丢整局进度。
+     * 这正是"新增字段追加在末尾"还需要配套放行的原因。
+     * ================================================================ */
+    if (g_save.version == 33) {
+        g_save.version = SAVE_VERSION;
+    }
     if (g_save.version != SAVE_VERSION) {
         char oldp[MAX_PATH], arc[MAX_PATH + 24];   /* v3.0：留 ".v%d.bak" 的位置 */
         SavePathCand(0, oldp, sizeof(oldp));
@@ -1590,6 +1613,14 @@ void ContinueRun(void) {
     firePots = g_save.firePots;   CLAMP_ITEM_RARE(firePots);
     gluePots = g_save.gluePots;   CLAMP_ITEM_RARE(gluePots);
     mirrors = g_save.mirrors;   CLAMP_ITEM_RARE(mirrors);
+    /* v34：三类投掷物 + 爆脸怪计数。v33 短档读进来是 0，夹取不改变语义。 */
+    { extern int echoBolts, decoys, phaseBeacons, jumperSpawnedRun;
+      echoBolts    = g_save.echoBolts;     CLAMP_ITEM_RARE(echoBolts);
+      decoys       = g_save.decoys;        CLAMP_ITEM_RARE(decoys);
+      phaseBeacons = g_save.phaseBeacons;  CLAMP_ITEM(phaseBeacons);
+      jumperSpawnedRun = g_save.jumperSpawnedRun;
+      if (jumperSpawnedRun < 0) jumperSpawnedRun = 0;
+      if (jumperSpawnedRun > JUMPER_MAX_PER_RUN) jumperSpawnedRun = JUMPER_MAX_PER_RUN; }
     bankStreak = g_save.bankStreak;
     modBatteryMul = g_save.modBatteryMul;
     if (!(modBatteryMul > 0.0f)) modBatteryMul = 1.0f;

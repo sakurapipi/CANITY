@@ -565,8 +565,14 @@ static void test_save_persist_contract(void) {
        老档仍然只有 8 条记录，迁移靠 LEGACY_CONTAINER_COUNT 读取。 */
     /* v33：舱门"已用"掩码**追加在末尾**，不需要布局重排 ——
        这正是"新增字段永远追加在末尾"的正确用法。 */
-    check(contains(saveh, "SAVE_VERSION 33"), "save format must be v33");
+    /* v34（2026-11-06）：三类投掷物 + 爆脸怪计数，同样只追加在末尾。
+       v33 的短档读进来时这几项是 0（g_save 先 memset 过），无需迁移代码。 */
+    check(contains(saveh, "SAVE_VERSION 34"), "save format must be v34");
     check(contains(saveh, "int hatchUsedMask;"), "v33 must carry the hatch-used mask");
+    check(contains(saveh, "int echoBolts;"), "v34 must persist echo bolts");
+    check(contains(saveh, "int decoys;"), "v34 must persist decoys");
+    check(contains(saveh, "int phaseBeacons;"), "v34 must persist phase beacons");
+    check(contains(saveh, "int jumperSpawnedRun;"), "v34 must persist the facehugger budget");
     check(contains(savec, "LEGACY_CONTAINER_COUNT"),
           "the container-slot count change needs its own legacy constant");
     check(contains(saveh, "int roomSeed;"), "v30 must carry the room replay seed");
