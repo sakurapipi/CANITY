@@ -307,6 +307,11 @@ src/steam/steam_zone_web.c    Steam 分区的网页后端
 
 进一步阅读：[网页版说明](docs/WEB.md)、[审美与体验规范](include/art_direction.h)。
 
+include/art_direction.h 里有 **86 条铁律**（AD-01..AD-86）。
+2026-11 这一轮把双端稳定性补丁踩过的坑全部沉淀成了 AD-67..AD-86：
+存档迁移、判据一致性、效果分派唯一性、状态机死点、触屏按住语义、
+无头测试假绿、发布链与推送清单 —— 都在那个文件的 I 段与 J 段。
+
 ---
 
 ## Steam 接入状态
