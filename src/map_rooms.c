@@ -289,12 +289,33 @@ static void ClearCell(int cx, int cy) {
 #define ROOM_DOOR_MAX 8
 
 static int CarveDoorTunnel(int doorX, int doorY, int stepX, int stepY) {
+    /* ==================================================================
+     * 2026-11-06（用户实测）：**挖不通的盲道必须填回去**
+     * ------------------------------------------------------------------
+     * 用户原话：「这是主题房间的出口处……这种地方也有死路」。
+     *
+     * 根因：这个函数沿一个方向连挖最多 8 格，挖到空地就算成功；
+     * 挖到头没接上就 return 0 —— **但已经挖开的格子留在那里**。
+     * 一扇门接上、另一扇挖成盲道的情况下（很常见），
+     * 房间外面就多出一条死胡同，玩家从房间出来必须原路退回。
+     *
+     * 现在记住挖过的格子，失败就全部填回去（连同 explored）。
+     * ================================================================ */
+    int carvedX[ROOM_DOOR_MAX], carvedY[ROOM_DOOR_MAX], carvedN = 0;
     int cx = doorX, cy = doorY;
     for (int i = 0; i < ROOM_DOOR_MAX; i++) {
         cx += stepX; cy += stepY;
-        if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) return 0;
+        if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) break;
         if (!worldMap[cy][cx]) return 1;      /* 本来就是空地 = 已经接上迷宫 */
         ClearCell(cx, cy);
+        carvedX[carvedN] = cx;
+        carvedY[carvedN] = cy;
+        carvedN++;
+    }
+    /* 没接上：把挖开的盲道填回去 */
+    for (int i = 0; i < carvedN; i++) {
+        worldMap[carvedY[i]][carvedX[i]] = 1;
+        explored[carvedY[i]][carvedX[i]] = 0;
     }
     return 0;
 }

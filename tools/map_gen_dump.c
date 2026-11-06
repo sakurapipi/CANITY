@@ -260,6 +260,8 @@ static long g_sealCells = 0, g_sealBad = 0;
 static int  g_sealSeeds = 0;
 
 /* 生成一层（不含打印），统计用 */
+static int collapsedLevelStub = 0;   /* dump 不做崩塌层 */
+
 static int GenerateOne(int seed) {
     srand((unsigned)seed);
     CarveMaze();
@@ -267,6 +269,46 @@ static int GenerateOne(int seed) {
     CellMetaReset();
     int want = 1 + (rand() % 2);
     int r = GenerateThemeRooms(want);
+
+    /* 2026-11-06：房间门可能挖出新的盲道 —— 与 game.c 一样再 braid 一次 */
+    {
+        if (!collapsedLevelStub) {
+            for (int pass = 0; pass < 4; pass++) {
+                for (int y = 1; y < MAP_HEIGHT - 1; y++) {
+                    for (int x = 1; x < MAP_WIDTH - 1; x++) {
+                        if (worldMap[y][x]) continue;
+                        int openN = 0;
+                        if (!worldMap[y][x - 1]) openN++;
+                        if (!worldMap[y][x + 1]) openN++;
+                        if (!worldMap[y - 1][x]) openN++;
+                        if (!worldMap[y + 1][x]) openN++;
+                        if (openN != 1) continue;
+                        if (cellMeta[y][x].roomId != 0) continue;
+                        static const int dxs3[4] = { 1, -1, 0, 0 };
+                        static const int dys3[4] = { 0, 0, 1, -1 };
+                        int done = 0;
+                        for (int k = 0; k < 4 && !done; k++) {
+                            int wx = x + dxs3[k], wy = y + dys3[k];
+                            if (wx < 1 || wy < 1 || wx >= MAP_WIDTH - 1 || wy >= MAP_HEIGHT - 1) continue;
+                            if (!worldMap[wy][wx]) continue;
+                            if (cellMeta[wy][wx].flags & CELLFLAG_ROOMWALL) continue;
+                            if (cellMeta[wy][wx].roomId != 0) continue;
+                            int bx = wx + dxs3[k], by = wy + dys3[k];
+                            if (bx < 1 || by < 1 || bx >= MAP_WIDTH - 1 || by >= MAP_HEIGHT - 1) continue;
+                            if (!worldMap[by][bx]) { worldMap[wy][wx] = 0; done = 1; }
+                            else {
+                                int c2x = bx + dxs3[k], c2y = by + dys3[k];
+                                if (c2x < 1 || c2y < 1 || c2x >= MAP_WIDTH - 1 || c2y >= MAP_HEIGHT - 1) continue;
+                                if (worldMap[c2y][c2x]) continue;
+                                worldMap[by][bx] = 0;
+                                done = 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     g_props += roomPropCount;
 
     /* 死路：四邻里只有 1 个是空地的位置。

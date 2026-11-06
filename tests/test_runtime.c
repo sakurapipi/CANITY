@@ -854,6 +854,67 @@ static void test_facehugger_is_brutal(void) {
  *   ① 7 个主题都有名字（中英各一），没有空名
  *   ② 玩家站在房间里能读到 roomId / themeId（HUD 据此决定显示什么）
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户实测）：**第二次 braid 不许打穿房间外墙**
+ * ------------------------------------------------------------------
+ * 用户截图指出「主题房间的出口处也有死路」。
+ * 修法是：① 挖不通的门道回填 ② 房间生成后再 braid 一次。
+ *
+ * 但第二次 braid 跑在房间之后，如果不设保护，
+ * 房间角上的凹角会被当成死路 → 打穿外墙 → 房间漏进迷宫，
+ * 而且"只有内侧面是主题色"的判定也会跟着错乱。
+ *
+ * 这条断言检查：**所有带 CELLFLAG_ROOMWALL 的格子必须是墙**。
+ * ================================================================== */
+static void test_rooms_stay_sealed(void) {
+    extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+    extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    int sealedFloors = 0, roomsSeen = 0;
+    for (int lv = 1; lv <= 10; lv++) {
+        currentLevel = lv;
+        GenerateLevel();
+
+        int roomCells = 0, holes = 0;
+        for (int y = 1; y < MAP_HEIGHT - 1; y++) {
+            for (int x = 1; x < MAP_WIDTH - 1; x++) {
+                if (cellMeta[y][x].roomId != 0) roomCells++;
+                if (!(cellMeta[y][x].flags & CELLFLAG_ROOMWALL)) continue;
+                if (worldMap[y][x] != 0) continue;     /* 还是墙：正常 */
+                /* 环上的格子是空地 —— 只有**门**才允许。
+                   门的判据：一侧是房间内部（roomId != 0），
+                   对侧是非房间的空地。其他情况就是被打穿了。 */
+                {
+                    static const int dx4[4] = { 1, -1, 0, 0 };
+                    static const int dy4[4] = { 0, 0, 1, -1 };
+                    int isDoor = 0;
+                    for (int k = 0; k < 4; k++) {
+                        int ax = x + dx4[k], ay = y + dy4[k];
+                        int bx = x - dx4[k], by = y - dy4[k];
+                        if (ax < 0 || ay < 0 || ax >= MAP_WIDTH || ay >= MAP_HEIGHT) continue;
+                        if (bx < 0 || by < 0 || bx >= MAP_WIDTH || by >= MAP_HEIGHT) continue;
+                        int aIn  = (cellMeta[ay][ax].roomId != 0);
+                        int aOut = (!worldMap[ay][ax] && cellMeta[ay][ax].roomId == 0);
+                        int bIn  = (cellMeta[by][bx].roomId != 0);
+                        int bOut = (!worldMap[by][bx] && cellMeta[by][bx].roomId == 0);
+                        if ((aIn && bOut) || (bIn && aOut)) { isDoor = 1; break; }
+                    }
+                    if (!isDoor) holes++;              /* 不是门 = 被打穿 */
+                }
+            }
+        }
+        if (roomCells > 0) roomsSeen++;
+        if (holes == 0) sealedFloors++;
+    }
+
+    CHECK(roomsSeen > 0, "the test must have seen at least one theme room");
+    CHECK(sealedFloors == 10,
+          "no room wall may be punched open by the post-room braid pass");
+}
+
 static void test_theme_room_label(void) {
     extern const char* ThemeName(int, int);
     extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
@@ -4062,6 +4123,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

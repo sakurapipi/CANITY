@@ -2460,6 +2460,56 @@ int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId) {
  * 抽成纯函数是为了能直接测：走 GenerateLevel 的话，
  * 模板放置失败时会回滚，roomCount 不一定反映"预算"。
  * ================================================================ */
+/* ==================================================================
+ * 2026-11-06（用户实测）：**死路重连抽成函数，房间之后再跑一次**
+ * ------------------------------------------------------------------
+ * 用户截图指出「主题房间的出口处也有死路」。
+ * 原来这段只在**房间生成之前**跑，房间门外挖出来的新死路没人处理。
+ * ================================================================ */
+static void BraidDeadEnds(void) {
+    if (collapsedLevel) return;   /* 崩塌层故意更堵 */
+    for (int pass = 0; pass < 4; pass++) {
+        for (int y = 1; y < MAP_HEIGHT - 1; y++) {
+            for (int x = 1; x < MAP_WIDTH - 1; x++) {
+                if (worldMap[y][x]) continue;
+                int openN = 0;
+                if (!worldMap[y][x - 1]) openN++;
+                if (!worldMap[y][x + 1]) openN++;
+                if (!worldMap[y - 1][x]) openN++;
+                if (!worldMap[y + 1][x]) openN++;
+                if (openN != 1) continue;
+                /* 2026-11-06：**房间内外一律不动**。
+                   第二次 braid 跑在房间生成之后，如果不设这条保护，
+                   房间角上的凹角会被当成死路 → 打穿房间外墙，
+                   房间直接漏到迷宫里（而且主题色的"内侧面"判定也会失效）。 */
+                if (cellMeta[y][x].roomId != 0) continue;
+                static const int dxs[4] = { 1, -1, 0, 0 };
+                static const int dys[4] = { 0, 0, 1, -1 };
+                int done = 0;
+                for (int k = 0; k < 4 && !done; k++) {
+                    int wx = x + dxs[k], wy = y + dys[k];
+                    if (wx < 1 || wy < 1 || wx >= MAP_WIDTH - 1 || wy >= MAP_HEIGHT - 1) continue;
+                    if (!worldMap[wy][wx]) continue;
+                    if (cellMeta[wy][wx].flags & CELLFLAG_ROOMWALL) continue;   /* 房间外墙不许穿 */
+                    if (cellMeta[wy][wx].roomId != 0) continue;
+                    int bx = wx + dxs[k], by = wy + dys[k];
+                    if (bx < 1 || by < 1 || bx >= MAP_WIDTH - 1 || by >= MAP_HEIGHT - 1) continue;
+                    if (!worldMap[by][bx]) {
+                        worldMap[wy][wx] = 0;
+                        done = 1;
+                    } else {
+                        int c2x = bx + dxs[k], c2y = by + dys[k];
+                        if (c2x < 1 || c2y < 1 || c2x >= MAP_WIDTH - 1 || c2y >= MAP_HEIGHT - 1) continue;
+                        if (worldMap[c2y][c2x]) continue;
+                        worldMap[by][bx] = 0;
+                        done = 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
 int ThemeRoomBudgetForLevel(int level, int training) {
     if (training) return 0;                  /* 训练营：一间都不放 */
     int want = (level <= 2) ? 1 : 2;         /* 前两层 1 间，之后 2 间 */
@@ -2598,49 +2648,7 @@ void GenerateLevel(void) {
      * 只在能接上时才打，接不上就保留（不会凭空挖出新的死路）。
      * 崩塌层跳过：那时候本来就是故意要"路更堵"。
      * ================================================================ */
-    if (!collapsedLevel) {
-        /* 2026-11-06（用户实测）：**死路率还是太高** → 4 个回合（原来 2 个）。
-           后面几轮处理的是"第一轮打穿后新暴露出来"的短死路。 */
-        for (int pass = 0; pass < 4; pass++) {
-            for (int y = 1; y < MAP_HEIGHT - 1; y++) {
-                for (int x = 1; x < MAP_WIDTH - 1; x++) {
-                    if (worldMap[y][x]) continue;
-
-                    /* 数四邻开口 */
-                    int openN = 0;
-                    if (!worldMap[y][x - 1]) openN++;
-                    if (!worldMap[y][x + 1]) openN++;
-                    if (!worldMap[y - 1][x]) openN++;
-                    if (!worldMap[y + 1][x]) openN++;
-                    if (openN != 1) continue;          /* 只处理死路 */
-
-                    /* 试四个方向：墙在 (x+dx,y+dy)，再往外是空地就打穿 */
-                    static const int dxs[4] = { 1, -1, 0, 0 };
-                    static const int dys[4] = { 0, 0, 1, -1 };
-                    int done = 0;
-                    for (int k = 0; k < 4 && !done; k++) {
-                        int wx = x + dxs[k], wy = y + dys[k];
-                        if (wx < 1 || wy < 1 || wx >= MAP_WIDTH - 1 || wy >= MAP_HEIGHT - 1) continue;
-                        if (!worldMap[wy][wx]) continue;             /* 已经是通路 */
-                        int bx = wx + dxs[k], by = wy + dys[k];
-                        if (bx < 1 || by < 1 || bx >= MAP_WIDTH - 1 || by >= MAP_HEIGHT - 1) continue;
-                        if (!worldMap[by][bx]) {
-                            worldMap[wy][wx] = 0;                    /* 打通 → 死路变环 */
-                            done = 1;
-                        } else {
-                            /* 3 格远视：隔两堵墙也是空地 → 连打两格会更像宽走廊，
-                               所以只打**第二格**、保留第一格当门框，避免到处开大洞。 */
-                            int c2x = bx + dxs[k], c2y = by + dys[k];
-                            if (c2x < 1 || c2y < 1 || c2x >= MAP_WIDTH - 1 || c2y >= MAP_HEIGHT - 1) continue;
-                            if (worldMap[c2y][c2x]) continue;
-                            worldMap[by][bx] = 0;
-                            done = 1;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    BraidDeadEnds();
 
     /* 随机小房间（严格限制在内部格，避免打穿边界墙）
        2026-11-06：5 -> 3。每个 blob 是 2x2 的强制空地，
@@ -2705,6 +2713,8 @@ void GenerateLevel(void) {
 #else
     CellMetaReset();
 #endif
+    /* 2026-11-06：房间门可能挖出新的盲道 —— 再braid 一次 */
+    BraidDeadEnds();
 
     /* DARK 词条（手电起始电量低）的处理放在掷出词条之后 ——
        原来它写在掷词条之前，用的是**上一层**的 levelMod，
