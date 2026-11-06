@@ -567,6 +567,25 @@ static void test_save_persist_contract(void) {
        这正是"新增字段永远追加在末尾"的正确用法。 */
     /* v34（2026-11-06）：三类投掷物 + 爆脸怪计数，同样只追加在末尾。
        v33 的短档读进来时这几项是 0（g_save 先 memset 过），无需迁移代码。 */
+    /* ==================================================================
+     * 2026-11-06（子代理审计·高 3）：**落地只能结算一次**（源码契约）
+     * ------------------------------------------------------------------
+     * throwing.c 里内层落地分支会 active=0 并做完全部效果，
+     * 但 z 被置 0 之后又满足外层"到期"条件。外层如果没判 active，
+     * 同一颗投掷物就会被结算两次（烟雾一颗两朵、胶水两滩）。
+     *
+     * 这是**字符串级契约检查**，不是行为验证：
+     * 行为验证需要精确控制投掷物的飞行终点（会被怪物拦截），不稳定，
+     * 所以这里只保证"那道保险还在"。
+     * ================================================================== */
+    {
+        char* throwc = read_file("src/throwing.c");
+        check(throwc != NULL, "src/throwing.c must be readable");
+        check(contains(throwc, "if (!shot[i].active) continue;"),
+              "the shot expiry block must skip shots already settled by the landing branch");
+        free(throwc);
+    }
+
     check(contains(saveh, "SAVE_VERSION 34"), "save format must be v34");
     check(contains(saveh, "int hatchUsedMask;"), "v33 must carry the hatch-used mask");
     check(contains(saveh, "int echoBolts;"), "v34 must persist echo bolts");

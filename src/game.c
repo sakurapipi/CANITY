@@ -2184,6 +2184,12 @@ typedef struct {
     Breaker breaker;
     float exitX, exitY, posX, posY;
     int   fusesHeld, fusesNeeded, roomCount;
+    /* 审计·中 7：这几项也会被 GenerateLevel 改掉，回滚时必须还原，
+       否则地图回来了、墙面贴图/词条/事件却还是新层的。 */
+    int   themeIdSave;
+    int   levelModSave;
+    float modSanityMulSave, modSpeedMulSave;
+    float modBatteryMulSave, modShardMulSave, modNoiseMulSave;
 } CollapseSnapshot;
 
 static CollapseSnapshot* s_collapseSnap = NULL;
@@ -2205,6 +2211,13 @@ static void CollapseSnapshotTake(void) {
     s_collapseSnap->breaker        = breaker;
     s_collapseSnap->exitX = exitX; s_collapseSnap->exitY = exitY;
     s_collapseSnap->posX  = posX;  s_collapseSnap->posY  = posY;
+    s_collapseSnap->themeIdSave     = themeId;
+    s_collapseSnap->levelModSave    = levelMod;
+    s_collapseSnap->modSanityMulSave = modSanityMul;
+    s_collapseSnap->modSpeedMulSave  = modSpeedMul;
+    s_collapseSnap->modBatteryMulSave = modBatteryMul;
+    s_collapseSnap->modShardMulSave   = modShardMul;
+    s_collapseSnap->modNoiseMulSave   = modNoiseMul;
     s_collapseSnap->fusesHeld = fusesHeld;
     s_collapseSnap->fusesNeeded = fusesNeeded;
     s_collapseSnap->roomCount = roomCount;
@@ -2227,6 +2240,19 @@ static void CollapseSnapshotRestore(void) {
     exitX = s_collapseSnap->exitX; exitY = s_collapseSnap->exitY;
     posX  = s_collapseSnap->posX;  posY  = s_collapseSnap->posY;
     fusesHeld = s_collapseSnap->fusesHeld;
+    themeId      = s_collapseSnap->themeIdSave;
+    levelMod     = s_collapseSnap->levelModSave;
+    modSanityMul = s_collapseSnap->modSanityMulSave;
+    modSpeedMul  = s_collapseSnap->modSpeedMulSave;
+    modBatteryMul= s_collapseSnap->modBatteryMulSave;
+    modShardMul  = s_collapseSnap->modShardMulSave;
+    modNoiseMul  = s_collapseSnap->modNoiseMulSave;
+    /* 审计·中 7：临时实体会在新层重新生成过一次，回滚后必须按老地图重刷，
+       否则蜘蛛/拾光虫停在新层的出生点（可能是墙里或不可达区）。 */
+    { extern void SpiderReset(void);  SpiderReset(); }
+    { extern void NeutralReset(void); NeutralReset(); }
+    { extern void SpawnLightBeast(void);  SpawnLightBeast(); }
+    { extern void SpawnLightBeast2(void); SpawnLightBeast2(); }
     fusesNeeded = s_collapseSnap->fusesNeeded;
     roomCount = s_collapseSnap->roomCount;
 }
@@ -4224,9 +4250,9 @@ void Update(float dt) {
     /* v7：扳手冷却递减 */
     { extern float wrenchCd; if (wrenchCd > 0.0f) { wrenchCd -= dt; if (wrenchCd < 0.0f) wrenchCd = 0.0f; } }
 
-    CalibTick(dt);   /* v2.4：校准小游戏计时（冷却与滑块） */
-    MimicTick(dt);   /* 2026-11-05 宝箱怪状态机 */
-    { extern void EchoMarksTick(float); EchoMarksTick(dt); }   /* 回声标记寿命 */
+    /* 审计·中 8：CalibTick / MimicTick / EchoMarksTick 都只在游玩中推进，
+       已移到下面的状态门之后（原来暂停/菜单里仍在走，宝箱怪的 3 秒窗
+       和 12 秒追人窗会在暂停中走完）。 */
     /* v2.1 屏幕特效推进：抖动 / 红闪 / 枪口闪 */
     if (hitFlash > 0.0f) { hitFlash -= dt * 3.2f; if (hitFlash < 0.0f) hitFlash = 0.0f; }
     if (muzzleFlash > 0.0f) { muzzleFlash -= dt * 9.0f; if (muzzleFlash < 0.0f) muzzleFlash = 0.0f; }
@@ -4287,6 +4313,11 @@ void Update(float dt) {
 
     if (currentState != STATE_PLAYING || (isMapOpen && mapFullScreen)) return;
     if (flashTime > 0.0f) return;
+
+    /* 2026-11-06（子代理审计·中 8）：这三个只在真正游玩时推进 */
+    CalibTick(dt);   /* 校准小游戏计时（冷却与滑块） */
+    MimicTick(dt);   /* 宝箱怪状态机 */
+    { extern void EchoMarksTick(float); EchoMarksTick(dt); }   /* 回声标记寿命 */
 
     runTime += dt;
     if (levelBanner > 0.0f) levelBanner -= dt;
@@ -4893,7 +4924,12 @@ void Update(float dt) {
            原来只判 jumperControlT（抱脸虫的 10 秒），
            于是蛛网虽然"抓住了玩家"，却完全不限制移动 —— 效果等于没有。 */
         extern int ControlActive(void);
-        if (jumperControlT > 0.0f || ControlActive()) { inF = 0; inS = 0; }
+        extern int collapseArmed;
+        /* 审计·中 6：崩塌黑屏期间也不能走。
+           原来 CollapseTick 的"吞输入"放在移动**之后**，
+           0.8 秒淡出里玩家照样能挪两步，重掷后还得靠 CollapseUnstickPlayer
+           去补救"被埋进新地形"。 */
+        if (jumperControlT > 0.0f || ControlActive() || collapseArmed) { inF = 0; inS = 0; }
     }
     /* v3.0：藏在柜子里不能动（但可以转头偷看） */
     if (hiddenIn >= 0) { inF = 0; inS = 0; }
@@ -4929,7 +4965,8 @@ void Update(float dt) {
        这样柜子/床底从「单纯躲避」变成「喘息 + 回复」，才有存在感。 */
     if ((inSafe || hiddenIn >= 0) && currentState == STATE_PLAYING) {
         int spaceDown = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
-        if (keyPressed[VK_SPACE]) {
+        /* 审计·中 4：控制效果生效时，空格属于 QTE，校准不能抢 */
+    if (keyPressed[VK_SPACE] && !ControlActive()) {
             keyPressed[VK_SPACE] = 0;   /* 吃掉这一次，别再触发闪避 */
             if (!calibStartLatch) {
                 calibStartLatch = 1;
@@ -5873,7 +5910,19 @@ void Update(float dt) {
         extern float ControlTimeLeft(void);
         extern void ControlTimeout(void);
         if (ControlActive()) {
-            if (IsActionPressed(ACT_DODGE)) ControlPress();
+            if (IsActionPressed(ACT_DODGE)) {
+                ControlPress();
+                /* ================================================================
+                 * 2026-11-06（子代理审计·高 1）：**必须把边沿清掉**
+                 * ----------------------------------------------------------------
+                 * 主循环一帧可能跑多次 Update（120Hz 逻辑 vs 60Hz 渲染 ≈ 2 次），
+                 * keyPressed 的边沿要到 ClearKeyEdges() 才清。这里消费了却不清，
+                 * 同一帧后面的几次 Update 会把**同一次按键**再算一遍：
+                 *   60fps 按 2 下就过（要求 3 下）；30fps 按 1 下就过。
+                 * QTE 难度随帧率变化，正好推翻"按次计数"这条硬约束。
+                 * ================================================================ */
+                keyPressed[g_bindings[ACT_DODGE]] = 0;
+            }
             if (ControlActive() && ControlTimeLeft() <= 0.0f) ControlTimeout();
         }
     }
@@ -7405,7 +7454,7 @@ int OpenRelicPick(void) {
     if (n <= 0) return 0;
     for (int k = 0; k < RELIC_CHOICES; k++) {
         if (n <= 0) { skillPickOptions[k] = -1; continue; }
-        int pick = rand() % n;
+        int pick = (int)(RunRngNext() % (unsigned)n);   /* 审计·中 9：不碰全局 rand */
         skillPickOptions[k] = pool[pick];
         pool[pick] = pool[--n];
     }

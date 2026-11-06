@@ -1441,6 +1441,9 @@ void ContinueRun(void) {
      *   · 上一层放的信标坐标被当成这一层的
      * ================================================================== */
     { extern void ControlReset(void); ControlReset(); }
+    /* 审计·低 11：抱脸虫的 10 秒锁定不随存档走，读档必须清掉，
+       否则在锁定期间存档退出，读档后会莫名其妙继续不能动。 */
+    { extern float jumperControlT; jumperControlT = 0.0f; }
     { extern void SpiderReset(void);  SpiderReset(); }
     { extern void NeutralReset(void); NeutralReset(); }
     { extern void PhaseResetPlacement(void); PhaseResetPlacement(); }

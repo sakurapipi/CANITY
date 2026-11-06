@@ -4045,12 +4045,37 @@ void DrawHUD(void) {
     /* 这是整个事件里最关键的一块 UI。玩家只有不到 2 秒的反应时间，
        所以提示必须：**巨大、居中、带明确的倒计时条**。
        任何含糊都会让玩家觉得是游戏 bug。 */
-    if (parasite.active && jumperPhase != JMP_IDLE && jumperPhase != JMP_DONE) {
+    /* ==================================================================
+     * 2026-11-06（子代理审计·高 2）：**QTE 提示必须和判定一致**
+     * ------------------------------------------------------------------
+     * 原来这里只画 JMP_DODGE（死分支，全工程没有赋值点）和 else（按键 QTE），
+     * 而实际能走到的状态是 LURK / TELL / MASH：
+     *   · 提示画的是**移动键**（W/A/S/D），判定却是 ACT_DODGE（空格）
+     *   · 进度条用 jumperTimer/JUMPER_QTE_WINDOW，而 MASH 里 jumperTimer 不更新
+     *     → 条永远是空的
+     *   · LURK（刚生成、还没发现玩家）就把居中大提示画出来了，提前剧透
+     * 玩家照提示按移动键必失败 → 10 秒锁定 + 全图怪扑过来。
+     * ================================================================== */
+    if (parasite.active && jumperPhase != JMP_IDLE && jumperPhase != JMP_DONE &&
+        jumperPhase != JMP_LURK && jumperPhase != JMP_TELL) {
         float frac = 0.0f;
         char prompt[48];
         unsigned int col = 0x00FFE060u;
 
-        if (jumperPhase == JMP_DODGE) {
+        if (jumperPhase == JMP_MASH) {
+            /* 唯一真正的交互窗口：连按 ACT_DODGE */
+            extern float ControlTimeLeft(void);
+            extern int   ControlMashLeft(void);
+            frac = ControlTimeLeft() / JUMPER_MASH_WINDOW;
+            {
+                const char* dodgeName = VkName(g_bindings[ACT_DODGE]);
+                if (!dodgeName) dodgeName = "???";
+                int left = ControlMashLeft();
+                if (left < 0) left = 0;
+                sprintf(prompt, "MASH %s  x%d", dodgeName, left);
+            }
+            col = 0x00FF3030u;
+        } else if (jumperPhase == JMP_DODGE) {
             frac = jumperTimer / JUMPER_DODGE_WINDOW;
             /* 提示跟随绑定：改绑后提示和实际按键保持一致 */
             const char* dodgeName = VkName(g_bindings[ACT_DODGE]);
@@ -4072,7 +4097,7 @@ void DrawHUD(void) {
         if (frac > 1.0f) frac = 1.0f;
 
         /* 阶段二：把要按的键画得非常大，一眼就能看到 */
-        if (jumperPhase == JMP_QTE) {
+        if (jumperPhase == JMP_QTE || jumperPhase == JMP_MASH) {
             /* 用点阵字放大绘制：把字符画成一个方块阵 */
             int keyW = TextWidthWin(prompt) * 3;
             int keyH = TextHeightWin() * 3;
