@@ -212,9 +212,18 @@ jobs:
   pages:
     needs: [web]
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    # ================================================================
+    # 2026-11-07：**不要挂 github-pages 环境**
+    # ----------------------------------------------------------------
+    # 第一版这里写了 environment: github-pages，结果 v2.4.2-alpha 部署失败：
+    #   Tag "v2.4.2-alpha" is not allowed to deploy to github-pages
+    #   due to environment protection rules.
+    # 那个环境上有一条"只允许正式标签 / main"的保护规则。
+    #
+    # actions/deploy-pages 并不需要 environment 才能工作
+    # （授权靠 permissions 里的 pages: write + id-token: write），
+    # 所以这里直接去掉，预发布标签也能更新站点。
+    # ================================================================
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -234,3 +243,6 @@ jobs:
 
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Show page URL
+        run: echo "deployed -> ${{ steps.deployment.outputs.page_url }}"
