@@ -1,7 +1,5 @@
 name: Deploy web build to GitHub Pages
 
-# 2026-11-06（网页版 R9）：把 web/dist 发布到 GitHub Pages。
-# 只在手动触发或打 tag 时跑 —— 不想让每次 push 都重新跑一遍 Emscripten。
 on:
   workflow_dispatch:
   push:
@@ -35,6 +33,12 @@ jobs:
 
       - name: Build web
         run: python -X utf8 tools/build_web.py
+
+      # 👇 核心修复：在打包前，强制覆盖正确的 CNAME，并确保有 index.html
+      - name: Fix CNAME for GitHub Pages
+        run: |
+          echo "syuunet.qzz.io" > web/dist/CNAME
+          ls -la web/dist/  # 打印出来看看里面到底有没有 index.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
