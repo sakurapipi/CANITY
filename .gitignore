@@ -48,9 +48,17 @@ work/
 #   git check-ignore tests/test_runtime.c        → 无输出
 #   git ls-files tests/ tools/                    → 能看到它们
 # ==================================================================
+# 2026-11-07（B1）：tests/fixtures/ 要进库 ——
+# 它是**历史存档夹具**（5 个真实 .sav + 生成器源码），
+# 旧档迁移测试没有它就跑不了。白名单必须逐级放行目录与内容，
+# 否则 git 不会进入被排除的目录。
 tests/*
 tools/*
 !tests/test_runtime.c
+!tests/fixtures/
+!tests/fixtures/gen_fixture_main.c
+!tests/fixtures/saves/
+!tests/fixtures/saves/*.sav
 !tools/partition_check.py
 !tools/build_validate.py
 !tools/build_sources.py

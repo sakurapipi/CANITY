@@ -119,6 +119,89 @@ static void test_save_v34_items(void) {
 }
 
 /* ==================================================================
+ * 2026-11-07（v2.4.2 / B1）：**用真实历史存档验证旧档迁移**
+ * ------------------------------------------------------------------
+ * tests/fixtures/saves/ 里那 5 个 .sav 不是伪造的：
+ * 它们是各旧 tag（v2.3.6 / v2.3.9 / v2.4-rc / v2.4 / v2.4.1）
+ * 用自己的 SaveGame() 写出来的真实文件，见该目录的 README。
+ *
+ * 每个夹具写入时的状态是固定的：
+ *     runInProgress=1, currentLevel=3, posX=12.5, posY=9.5,
+ *     dirX=0.8, dirY=0.6, sanity=61.5, battery=47.0
+ * 所以迁移正确时，读回来必须还是这些值。
+ *
+ * 这条用例存在的意义：静态审查说"旧档迁移拿整文件当结构体会错位"，
+ * 但只有真档跑一遍才知道**是否真的错位、错到什么程度**。
+ * ================================================================== */
+static int fixture_copy(const char* from, const char* to) {
+    FILE* a = fopen(from, "rb");
+    FILE* b;
+    char buf[4096];
+    size_t n;
+    if (!a) return 0;
+    b = fopen(to, "wb");
+    if (!b) { fclose(a); return 0; }
+    while ((n = fread(buf, 1, sizeof(buf), a)) > 0) fwrite(buf, 1, n, b);
+    fclose(a);
+    fclose(b);
+    return 1;
+}
+
+static void test_legacy_fixture_one(const char* file, int* ok, int* total) {
+    extern const char* SavePathForSlot(int, int, char*, size_t);
+    char dst[MAX_PATH];
+    char src[MAX_PATH];
+    int loaded;
+    int same = 1;
+
+    snprintf(src, sizeof(src), "tests/fixtures/saves/%s", file);
+    SavePathForSlot(0, 0, dst, sizeof(dst));
+
+    ++(*total);
+    if (!fixture_copy(src, dst)) {
+        fprintf(stderr, "  [fixture] %-20s 复制失败（夹具缺失？）\n", file);
+        return;
+    }
+
+    loaded = LoadSettings();
+    if (!loaded) {
+        fprintf(stderr, "  [fixture] %-20s 读档被拒\n", file);
+        return;
+    }
+
+    ContinueRun();
+
+    if (currentLevel != 3) same = 0;
+    if (fabsf(sanity - 61.5f) >= 0.5f) same = 0;
+    if (fabsf(posX - 12.5f) >= 0.05f || fabsf(posY - 9.5f) >= 0.05f) same = 0;
+
+    fprintf(stderr, "  [fixture] %-20s %s  level=%d sanity=%.1f pos=(%.1f,%.1f)\n",
+            file, same ? "OK  " : "错位", currentLevel, sanity, posX, posY);
+    if (same) ++(*ok);
+}
+
+static void test_legacy_fixtures(void) {
+    /* 裸档（v27）与四个 CSAV 信封档（v29 / v30 / v33 / v34）。
+       每个夹具录入时的状态都是 level=3 / sanity=61.5 / pos=(12.5,9.5)。 */
+    const char* files[] = {
+        "sav_v2_3_6.sav",
+        "sav_v2_3_9.sav",
+        "sav_v2_4-rc.sav",
+        "sav_v2_4.sav",
+        "sav_v2_4_1.sav"
+    };
+    int ok = 0, total = 0;
+    size_t i;
+
+    fprintf(stderr, "  ---- 历史存档迁移（tests/fixtures/saves）----\n");
+    for (i = 0; i < sizeof(files) / sizeof(files[0]); i++)
+        test_legacy_fixture_one(files[i], &ok, &total);
+
+    fprintf(stderr, "  ---- 迁移结果: %d/%d 正确 ----\n", ok, total);
+    CHECK(ok == total, "every historical save must migrate with identical key state");
+}
+
+/* ==================================================================
  * 2026-11-06（v2.4.1 / v34）：**v33 老档不能被拒**
  * ------------------------------------------------------------------
  * LoadSettings 里有一句
@@ -4318,6 +4401,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_legacy_fixtures();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
