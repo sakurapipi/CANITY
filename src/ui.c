@@ -1766,6 +1766,50 @@ void DrawMenuPanels(void) {
         }
     }
 
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**主菜单右侧闪烁提示 F11 全屏**
+     * ------------------------------------------------------------------
+     * 用户原话：「刚进游戏那个主界面的 UI 右侧新增一栏……
+     *           在右边添加一个闪烁的提醒字幕，风格要跟主界面 UI 一致，
+     *           然后是按 F11 切换全屏还有缩小屏切换状态，
+     *           闪烁 3 秒钟之后消失」。
+     *
+     * 为什么是"3 秒后消失"而不是常驻：这是个**一次性提示**，
+     * 常驻会变成又一条视觉噪声；但玩家第一次进游戏确实不知道 F11 能全屏。
+     * ================================================================ */
+    {
+        static int    s_hintState = -1;   /* 与 currentState 同域比较，用 int */
+        static double s_hintStart = 0.0;
+        extern double g_timeSec;
+        if (s_hintState != (int)currentState) {
+            s_hintState = (int)currentState;
+            if (currentState == STATE_MAIN_MENU) s_hintStart = g_timeSec;
+        }
+        if (currentState == STATE_MAIN_MENU) {
+            double age = g_timeSec - s_hintStart;
+            if (age >= 0.0 && age < 3.0) {
+                /* 2Hz 闪烁；最后 0.5 秒改成慢闪，读起来像"要消失了" */
+                int on = ((int)(age * 4.0) % 2) == 0;
+                if (age > 2.5) on = ((int)(age * 2.0) % 2) == 0;
+                if (on) {
+                    const char* hint = (g_lang == LANG_ZH)
+                        ? "[F11]  全屏 / 窗口"
+                        : "[F11]  FULLSCREEN / WINDOWED";
+                    int hw = TextWidthWin(hint);
+                    /* 位置试了三处（都截图确认过）：
+                       ① panel.top + 14   -> 压住 CANITY 标题
+                       ② panel.bottom-56  -> 压住 BEST LEVEL
+                       ③ 现在：面板**上方**、右对齐面板右边。
+                          面板外是纯背景，永远不会和任何控件重叠；
+                          窗口太矮时退回面板内顶部。 */
+                    int hy = g.panel.top - UIS(26);
+                    if (hy < UIS(4)) hy = g.panel.top + UIS(4);
+                    DrawTextWin(g.panel.right - hw, hy, hint, 0x00E8C040u);
+                }
+            }
+        }
+    }
+
     /* ===== v2.2 统一装饰：所有界面共用，不再各写各的 ===== */
     {
         int L2 = g.panel.left, T2 = g.panel.top, R2 = g.panel.right, B2 = g.panel.bottom;
@@ -4640,13 +4684,16 @@ void DrawHUD(void) {
             sprintf(pbuf, "HOLD %s  POWER ON", VkName(g_bindings[ACT_INTERACT]));
         else sprintf(pbuf, "NEED %d MORE FUSE", fusesNeeded - fusesHeld);
 
-        /* 2026-11-06（用户要求）：舱门再画一行**后果说明** */
+        /* 2026-11-06（用户实测）：舱门的**后果说明**再画一行。
+           第一次放在 +UIS(26)，正好压在长按进度条上（截图里叠成一条）。
+           进度条占 py+30..py+38，所以这里放到 +UIS(46)，
+           顺序读起来也顺：标题 -> 进度条 -> 后果。 */
         if (hoverKind == 4) {
             extern const char* HatchEffectLine(int idx);
             const char* eff = HatchEffectLine(hoverIndex);
             if (eff && eff[0]) {
                 int tw2 = TextWidthWin(eff);
-                DrawTextWin((winW - tw2) / 2, winH - UIS(214) + UIS(26),
+                DrawTextWin((winW - tw2) / 2, winH - UIS(214) + UIS(46),
                             eff, 0x00E0B050u);
             }
         }
