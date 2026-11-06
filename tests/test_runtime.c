@@ -1484,6 +1484,53 @@ static void test_jumper_removed_spider_takes_over(void) {
  * 用户原话：「也要出一个克制蜘蛛的方法，就是用那个扳手砸中蜘蛛的话，
  *           蜘蛛会消失，然后 30 秒之内都不会刷新在场上」。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**蜘蛛正式入局，频率随深度上升**
+ * ------------------------------------------------------------------
+ * 用户原话：「可以把它加入局内了，然后频率的话你根据平均数值来定」。
+ *
+ * 这里做统计而不是单次断言：每个深度跑 400 次，看实际出现率
+ * 是否落在"基础 + 每层 +5%，封顶 60%"这条曲线附近（±10%）。
+ * ================================================================== */
+static void test_spider_spawn_curve(void) {
+    extern void  SpiderReset(void);
+    extern int   SpiderTrySpawn(int);
+    extern float SpiderRespawnCd(void);
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    /* 起始层之前一次都不出 */
+    for (int lv = 1; lv < SPIDER_MIN_LEVEL; lv++) {
+        int hit = 0;
+        for (int i = 0; i < 200 && !hit; i++) hit = SpiderTrySpawn(lv);
+        CHECK(hit == 0, "the spider must not appear before SPIDER_MIN_LEVEL");
+    }
+
+    /* 各深度的实际出现率 */
+    {
+        int levels[4] = { SPIDER_MIN_LEVEL, 6, 10, 14 };
+        for (int k = 0; k < 4; k++) {
+            int lv = levels[k];
+            int expect = SPIDER_APPEAR_BASE + (lv - SPIDER_MIN_LEVEL) * SPIDER_APPEAR_STEP;
+            if (expect > SPIDER_APPEAR_CAP) expect = SPIDER_APPEAR_CAP;
+
+            int hits = 0, tries = 400;
+            for (int i = 0; i < tries; i++) {
+                SpiderReset();
+                if (SpiderTrySpawn(lv)) hits++;
+            }
+            /* 期望值 ±10 个百分点（400 次采样够稳） */
+            int lo = expect - 10, hi = expect + 10;
+            if (lo < 0) lo = 0;
+            CHECK(hits * 100 / tries >= lo && hits * 100 / tries <= hi,
+                  "the spider spawn rate must follow the depth curve (+5% per floor, capped)");
+        }
+    }
+
+    SpiderReset();
+}
+
 static void test_spider_dispel_cooldown(void) {
     extern void  SpiderReset(void);
     extern void  SpiderDispel(void);
@@ -4271,6 +4318,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

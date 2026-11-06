@@ -84,7 +84,11 @@ static int SpawnCell(float* ox, float* oy) {
 int SpiderTrySpawn(int level) {
     if (s_respawnCd > 0.0f) return 0;      /* 刚被砸掉，本层不再刷新 */
     if (level < SPIDER_MIN_LEVEL) return 0;
-    if (rand() % 100 >= SPIDER_APPEAR_CHANCE) return 0;
+    {
+        int chance = SPIDER_APPEAR_BASE + (level - SPIDER_MIN_LEVEL) * SPIDER_APPEAR_STEP;
+        if (chance > SPIDER_APPEAR_CAP) chance = SPIDER_APPEAR_CAP;
+        if (rand() % 100 >= chance) return 0;
+    }
     float x, y;
     if (!SpawnCell(&x, &y)) return 0;
     memset(&s_spider, 0, sizeof(s_spider));

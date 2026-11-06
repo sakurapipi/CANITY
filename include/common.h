@@ -238,7 +238,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 41   /* 2026-11-06：+1（F3 召唤缚丝蛛） */   /* 2026-11-06：删掉 C 放置行 -1 */   /* 2026-11-06：删掉调试行 -1 */   /* 2026-11-06：+1（调试生成） */   /* 2026-11-06：+2（相位放置 / 相位传送） */   /* v8：SFX / Music 音量拆成两项 */
+#define SETTING_COUNT 40   /* 2026-11-06：删掉 F3 -1 */   /* 2026-11-06：+1（F3 召唤缚丝蛛） */   /* 2026-11-06：删掉 C 放置行 -1 */   /* 2026-11-06：删掉调试行 -1 */   /* 2026-11-06：+1（调试生成） */   /* 2026-11-06：+2（相位放置 / 相位传送） */   /* v8：SFX / Music 音量拆成两项 */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 
@@ -1030,7 +1030,6 @@ typedef enum {
     ACT_DECOY,             /* v1.8 投石（默认 G） */
     ACT_DROP_GOLD,         /* v7 丢钱袋（默认 K，按住弹滑条） */
     ACT_PHASE_TELE,        /* 2026-11-06 相位信标：传送（默认 Q） */
-    ACT_DEBUG_SPAWN,       /* 2026-11-06 调试：召唤一只缚丝蛛（默认 F3） */
     ACT_COUNT
 } ActionId;
 
@@ -1064,7 +1063,6 @@ typedef char binding_slots_must_leave_room[(ACT_COUNT + 1 <= BINDING_SLOTS) ? 1 
     [ACT_DODGE] = VK_SPACE, \
     [ACT_SWING] = 'V', [ACT_DECOY] = 'G', \
     [ACT_PHASE_TELE] = 'Q', \
-    [ACT_DEBUG_SPAWN] = VK_F3, \
     [ACT_DROP_GOLD] = 'K', \
 }
 

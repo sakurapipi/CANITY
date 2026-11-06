@@ -1051,7 +1051,6 @@ SettingItem settings[] = {
     /* ========== 分类: KEY BINDINGS / ACTIONS ========== */
     /* 2026-11-06：相位信标（用户要求 Q 传送 / C 放置） */
     {"Phase: Teleport", SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PHASE_TELE],    NULL, 0, 0, 0, 4},
-    {"Debug: Spider",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DEBUG_SPAWN],   NULL, 0, 0, 0, 4},
     {"Interact",        SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_INTERACT],      NULL, 0, 0, 0, 4},
     {"Crank Battery",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_CRANK],         NULL, 0, 0, 0, 4},
     {"Flashlight",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_FLASHLIGHT],    NULL, 0, 0, 0, 4},
@@ -5328,23 +5327,6 @@ void Update(float dt) {
      * ------------------------------------------------------------------
      * 放在按骰子之前：它们和投掷物无关，不该被蓄力/投掷状态影响。
      * ================================================================ */
-    /* ==================================================================
-     * 2026-11-06（用户要求）：**F3 召唤缚丝蛛**
-     * ------------------------------------------------------------------
-     * 用户原话：「把那个 F3 键改成召唤那个吐丝怪物」。
-     * 跳脸怪已删，这个调试键改成召唤蜘蛛，放在玩家前方 3~5 格。
-     * ================================================================ */
-    if (IsActionPressed(ACT_DEBUG_SPAWN)) {
-        keyPressed[g_bindings[ACT_DEBUG_SPAWN]] = 0;
-        {
-            extern int SpiderSpawnNearPlayer(void);
-            SpiderSpawnNearPlayer();
-            pickupMsg = (g_lang == LANG_ZH) ? "召唤缚丝蛛" : "DEBUG: SPIDER SUMMONED";
-            pickupMsgTimer = 1.6f;
-            uiDirty = 1;
-        }
-    }
-
     if (IsActionPressed(ACT_PHASE_TELE)) {
         keyPressed[g_bindings[ACT_PHASE_TELE]] = 0;
         if (!phaseOwned || phaseCharges <= 0) {

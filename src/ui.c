@@ -4572,7 +4572,10 @@ void DrawHUD(void) {
             {
                 int tw = TextWidthWin(wbuf);
                 unsigned int col = atFloor ? 0x00A0A0A0u : 0x00FFE060u;
-                DrawTextWin((winW - tw) / 2, winH / 2 + UIS(46), wbuf, col);
+                /* 2026-11-06（用户实测）：**放到准星上方**。
+                   原来在 winH/2 + 46，正好和底部的
+                   「HOLD E SEARCH」/「PULL -> ...」撞在一起叠字。 */
+                DrawTextWin((winW - tw) / 2, winH / 2 - UIS(64), wbuf, col);
             }
         }
     }
