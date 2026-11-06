@@ -909,21 +909,23 @@ void UpdateParasite(float dt) {
      * 窗口走完还没戳满就失败（控 10 秒 + 召唤附近所有怪）。
      * ================================================================ */
     case JMP_MASH: {
-        /* 2026-11-06（第 4 轮）：**不再自己计时/计数**。
-           计时由 Update() 每帧调用的 ControlTick 推进（暂停自然停表），
-           这里只负责"读一次按键边沿"和"读计时是否走完"。 */
+        /* 2026-11-06（审计修正）：**按键与超时都由 Update 里的统一处理点结算**。
+           这里只贴住脸、取一次结果 —— 自己再读 IsActionPressed 会让
+           同一次按键被消费两次（一次在这里、一次在全局点）。 */
         parasite.x = posX + dirX * 0.75f;
         parasite.y = posY + dirY * 0.75f;
-        if (IsActionPressed(ACT_DODGE)) {
-            PlaySfx(SFX_GLASS, 0.55f);
-            if (ControlPress()) { JumperDodged(); return; }
+        {
+            int r = ControlTakeResult();
+            if (r == 1) { JumperDodged(); return; }
+            if (r == 2) {
+                if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
+                JumperFail();
+                JumperFinish();
+                return;
+            }
         }
-        if (ControlTimeLeft() <= 0.0f) {
-            ControlRelease(0);
-            if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
-            JumperFail();
-            JumperFinish();
-        }
+        /* 控制槽被别人抢走 / 被外部 Reset 掉：安全退出，不要卡在 MASH */
+        if (!ControlActive()) { JumperFinish(); }
         break;
     }
 

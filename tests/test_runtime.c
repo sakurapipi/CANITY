@@ -1273,6 +1273,164 @@ static void test_spider_bind_no_damage(void) {
     ControlReset();
 }
 
+/* ==================================================================
+ * 2026-11-06（审计补）：**蛛网必须有挣脱路径，且结果可被取走**
+ * ------------------------------------------------------------------
+ * 审计发现的真 bug：
+ *   只有抱脸虫的 JMP_MASH 读空格，蛛网虽然也走 ControlBegin，
+ *   却**没有任何代码读 ControlPress** ——
+ *   控制槽被永久占住：玩家既没被限制移动，也永远挣脱不掉，
+ *   之后抱脸虫再也抓不到人。
+ *
+ * 修法：Update 里一个统一处理点读按键/判超时，
+ *       持有者用 ControlTakeResult() 取一次结果。
+ * 这条用例钉住"结果能被正确取走且只取一次"。
+ * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（审计补）：**换层必须清掉"场内系统"**
+ * ------------------------------------------------------------------
+ * 这是本轮审计发现的**最严重**的一个：
+ * 这些 Reset 原来只写在 StartGame 里，换层根本不走。
+ *
+ * 后果：
+ *   · 在蛛网里走完一层 → 新层蜘蛛已重置，控制槽却还占着，
+ *     没有任何代码会释放它 → 玩家**永久无法移动**
+ *   · 信标"已放置"跨层保留 → 按 Q 被传送到上一层的坐标
+ *   · 照明棒治疗预算按局累计，而不是设计里的按层 24 点
+ * ================================================================== */
+static void test_floor_change_clears_field_state(void) {
+    extern int   ControlBegin(ControlType, int, float);
+    extern int   ControlActive(void);
+    extern void  ControlReset(void);
+    extern float FlareHealBudgetLeft(void);
+    extern void  FlareHealTick(float);
+    extern void  RunSkillTake(int);
+    extern void  RunSkillsReset(void);
+    extern int   relicOwned[RELIC_COUNT];
+    extern int   phaseOwned, phaseCharges, phasePlaced;
+    extern void  PhaseGive(void);
+    extern int   PhaseTryPlace(void);
+    extern float sanity;
+    extern float SanityMax(void);
+    extern void  ThrowItem(int, float);
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+    RunSkillsReset();
+    for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
+
+    /* ---- ① 控制槽 ---- */
+    ControlReset();
+    CHECK(ControlBegin(CTRL_SPIDER_WEB, 3, 2.0f) == 1, "web applied on this floor");
+    CHECK(ControlActive(), "control is active before the floor change");
+
+    /* ---- ② 信标 ---- */
+    PhaseGive();
+    (void)PhaseTryPlace();
+
+    /* ---- ③ 治疗预算先花掉一点 ---- */
+    RunSkillTake(IR_BIOLUM);
+    sanity = SanityMax() * 0.2f;
+    ThrowItem(0, 1.0f);
+    for (int i = 0; i < 50; i++) FlareHealTick(0.02f);
+    float spent = FLARE_HEAL_FLOOR_BUDGET - FlareHealBudgetLeft();
+    CHECK(spent > 0.0f, "some healing budget was spent on this floor");
+
+    /* ---- 换层 ---- */
+    GenerateLevel();
+
+    CHECK(!ControlActive(),
+          "changing floors MUST clear the control slot "
+          "(otherwise the player can never move again)");
+    CHECK(phasePlaced == 0,
+          "changing floors MUST clear the placed beacon");
+    CHECK(phaseOwned == 1 && phaseCharges > 0,
+          "the beacon DEVICE is inventory and must survive the floor change");
+    CHECK(FlareHealBudgetLeft() >= FLARE_HEAL_FLOOR_BUDGET - 0.01f,
+          "the flare healing budget is PER FLOOR and must refill on a new floor");
+
+    ControlReset();
+    RunSkillsReset();
+    for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
+}
+
+static void test_control_result_contract(void) {
+    extern int   ControlBegin(ControlType, int, float);
+    extern int   ControlPress(void);
+    extern int   ControlTakeResult(void);
+    extern void  ControlTimeout(void);
+    extern void  ControlReset(void);
+    extern int   ControlActive(void);
+
+    ControlReset();
+    CHECK(ControlTakeResult() == 0, "no result before anything happens");
+
+    /* ---- 挣脱成功 → 结果 1，取走一次后归零 ---- */
+    CHECK(ControlBegin(CTRL_SPIDER_WEB, 3, 2.0f) == 1, "web control begins");
+    ControlPress(); ControlPress();
+    CHECK(ControlPress() == 1, "third press escapes");
+    CHECK(ControlTakeResult() == 1, "the escape result must be readable once");
+    CHECK(ControlTakeResult() == 0, "reading the result must clear it");
+    CHECK(!ControlActive(), "escaping must clear the control slot");
+
+    /* ---- 超时 → 结果 2 ---- */
+    ControlReset();
+    CHECK(ControlBegin(CTRL_SPIDER_WEB, 3, 2.0f) == 1, "second web control begins");
+    ControlTimeout();
+    CHECK(ControlTakeResult() == 2, "a timeout must be reported as result 2");
+    CHECK(!ControlActive(), "a timeout must clear the control slot");
+    CHECK(ControlTakeResult() == 0, "timeout result is also consumed once");
+
+    /* ---- 陈旧结果不能串到下一次控制 ---- */
+    ControlReset();
+    CHECK(ControlBegin(CTRL_SPIDER_WEB, 3, 2.0f) == 1, "web begins");
+    ControlTimeout();                       /* 留下 result = 2 且没人取 */
+    CHECK(ControlBegin(CTRL_FACEHUGGER, 3, 1.8f) == 0,
+          "still immune right after a timeout");
+    {
+        extern void ControlTick(float);
+        ControlTick(CONTROL_IMMUNE_TIME + 0.1f);   /* 等免疫结束 */
+    }
+    CHECK(ControlBegin(CTRL_FACEHUGGER, 3, 1.8f) == 1, "facehugger can grab again");
+    CHECK(ControlTakeResult() == 0,
+          "a stale result from the previous control must NOT leak into the new one");
+
+    ControlReset();
+}
+
+/* ==================================================================
+ * 2026-11-06（审计补）：**换层要清掉信标的已放置状态**
+ * ------------------------------------------------------------------
+ * PhaseReset 只在开局调用。换层时不清 phasePlaced 的话，
+ * 上一层的信标坐标会留到下一层 —— 按 Q 会被传送到上一层的坐标。
+ * 但 phaseOwned / phaseCharges 是背包物品，必须跨层保留。
+ * ================================================================== */
+static void test_beacon_cleared_between_floors(void) {
+    extern int   phaseOwned, phaseCharges, phasePlaced;
+    extern float phaseX, phaseY;
+    extern void  PhaseGive(void);
+    extern int   PhaseTryPlace(void);
+    extern void  PhaseResetPlacement(void);
+    extern float posX, posY;
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    PhaseGive();
+    CHECK(phaseOwned == 1 && phaseCharges == 2, "device granted");
+
+    PhaseTryPlace();                 /* 放在脚下 */
+    CHECK(phasePlaced == 1, "beacon placed on this floor");
+
+    /* 模拟换层 */
+    PhaseResetPlacement();
+    CHECK(phasePlaced == 0, "changing floors must clear the placed beacon");
+    CHECK(phaseX == 0.0f && phaseY == 0.0f, "the stale coordinates must be wiped");
+    CHECK(phaseOwned == 1, "the DEVICE is inventory and must survive a floor change");
+    CHECK(phaseCharges == 2, "charges must survive a floor change too");
+    (void)posX; (void)posY;
+}
+
 static void test_control_layer(void) {
     extern int   ControlBegin(ControlType, int, float);
     extern void  ControlTick(float);
@@ -1510,6 +1668,18 @@ static void test_shop_full_bag_no_charge(void) {
 
     /* 直接把售价表改成"照明棒"，然后把它塞满 */
     ShopOpen(1);
+    /* ==================================================================
+     * 2026-11-06（审计补）：**测试也要自己消掉随机性**
+     * ------------------------------------------------------------------
+     * ShopOpen 会随机挑一行打折。之前这条用例能过，是因为
+     * 前面的测试 consume 的 rand() 次数正好让折扣落在别的行上；
+     * 我新加了一条测试（多调了几次 rand），折扣就落到了第 0 行，
+     * 价格从 50 变成 50*(1-pct)，断言随即失败。
+     *
+     * 这不是游戏 bug，是**测试依赖了全局随机序列**（AD-64 的同类问题）。
+     * ================================================================ */
+    { extern float shopDiscountPct; extern int shopDiscountRow;
+      shopDiscountPct = 0.0f; shopDiscountRow = -1; }
     shopPage = SHP_SHOP;         /* 商品页 */
     shopRow = 0;
     shopOffer[0] = 1;            /* kind 1 = flares */
@@ -1520,20 +1690,20 @@ static void test_shop_full_bag_no_charge(void) {
 
     /* ---- 满包：钱不能少 ---- */
     carryGold = 1000;
-    int before = carryGold;
+    int before = carryGold + bankGold;
     { extern float shopCooldown[SHOP_COOLDOWN_ROWS]; shopCooldown[0] = 0.0f; }
     ShopActivate();
-    CHECK(carryGold == before,
+    CHECK(carryGold + bankGold == before,
           "buying a full-bag throwable must NOT charge gold");
     CHECK(flares == cap, "the bag must stay exactly at cap, not overflow");
 
     /* ---- 不满：正常扣钱、正常入包 ---- */
     flares = cap - 1;
     carryGold = 1000;
-    before = carryGold;
+    before = carryGold + bankGold;
     { extern float shopCooldown[SHOP_COOLDOWN_ROWS]; shopCooldown[0] = 0.0f; }
     ShopActivate();
-    CHECK(carryGold == before - 50,
+    CHECK(carryGold + bankGold == before - 50,
           "a purchase that fits must still charge exactly the listed price");
     CHECK(flares == cap, "a purchase that fits must put the item in the bag");
 
@@ -1544,10 +1714,10 @@ static void test_shop_full_bag_no_charge(void) {
     flares = cap; bottles = cap; smokeBombs = cap;
     gluePots = cap; echoBolts = cap; decoys = cap;
     carryGold = 500;
-    before = carryGold;
+    before = carryGold + bankGold;
     { extern float shopCooldown[SHOP_COOLDOWN_ROWS]; shopCooldown[0] = 0.0f; }
     ShopActivate();
-    CHECK(carryGold == before - 40,
+    CHECK(carryGold + bankGold == before - 40,
           "battery is not bag-limited and must remain purchasable at full bag");
 }
 
@@ -3754,6 +3924,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

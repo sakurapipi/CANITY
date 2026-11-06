@@ -44,6 +44,20 @@ int ControlPress(void);
 void  ControlRelease(int escaped);   /* 唯一出口：清槽 + 开免疫窗口 */
 void  ControlReset(void);            /* 新局 / 换层 / 读档 / 崩塌 */
 
+/* ==================================================================
+ * 2026-11-06（审计补）：**谁都可以按空格挣脱，结果由持有者取走**
+ * ------------------------------------------------------------------
+ * 原来只有抱脸虫的 JMP_MASH 自己读空格。蜘蛛的蛛网虽然也走
+ * ControlBegin，却**没有任何代码读 ControlPress** ——
+ * 于是蛛网一旦生效就永远占着控制槽：玩家既没被限制移动，
+ * 也永远挣脱不掉，后面抱脸虫再也抓不到人。
+ *
+ * 现在把"按键 + 超时"统一放到 Update 里的一个处理点，
+ * 持有者通过 ControlTakeResult() 取一次结果：
+ *   0 = 没有新结果，1 = 挣脱成功，2 = 超时失败（读走即清零）
+ * ================================================================ */
+int   ControlTakeResult(void);
+
 int         ControlActive(void);
 ControlType ControlCurrent(void);
 int         ControlMashLeft(void);

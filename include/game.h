@@ -242,7 +242,7 @@ extern float leechHintTimer;
 
 void PollInput(void);
 void OpenSkillPick(void);
-void OpenRelicPick(void);   /* v2.0 遗物三选一 */
+int  OpenRelicPick(void);   /* v2.0 遗物三选一；v2.4.1 返回 0 = 池空了 */
 extern int pickMode;
 extern int bossLevel;      /* 1 = 本层是 Boss 层 */
 extern int bossDefeated;

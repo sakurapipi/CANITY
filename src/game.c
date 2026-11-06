@@ -1226,6 +1226,24 @@ void PhaseOnThrowLanded(int kind, float lx, float ly) {
     uiDirty = 1;
 }
 
+/* ==================================================================
+ * 2026-11-06（审计补）：**换层必须清掉信标的"已放置"状态**
+ * ------------------------------------------------------------------
+ * PhaseReset() 只在 StartGame 里调用，换层时不会走。
+ * 结果：在第 3 层放下的信标，坐标会一直留到第 4 层 ——
+ * 按 Q 会被传送到上一层的坐标上（可能正好是这层的空地，
+ * 那就是"莫名其妙被传走"；也可能落进墙里被拒绝）。
+ *
+ * 注意两者要分开：
+ *   phaseOwned / phaseCharges 是**背包物品**，跨层保留；
+ *   phasePlaced / phaseX / phaseY 是**场上装置**，换层即失效。
+ * ================================================================ */
+void PhaseResetPlacement(void) {
+    phasePlaced = 0;
+    phaseX = 0.0f;
+    phaseY = 0.0f;
+}
+
 int PhaseTryPlace(void) {
     if (!phaseOwned || phaseCharges <= 0) return 0;
     /* 场上只允许一个：重复按 C 就挪到脚下，不叠第二个 */
@@ -3157,6 +3175,20 @@ void GenerateLevel(void) {
     /* 2026-11-06：用户要求追光怪 +1 只 */
     SpawnLightBeast();
     SpawnLightBeast2();
+    /* ==================================================================
+     * 2026-11-06（审计补）：**换层必须重置"场内系统"**
+     * ------------------------------------------------------------------
+     * 之前这些 Reset 只写在 StartGame 里 —— 换层根本不走。
+     * 后果（都是真的会卡住玩家的）：
+     *   · 在蛛网里走完一层 → 新层蜘蛛已经重置，控制槽却还占着，
+     *     没有任何代码会释放它 → 玩家永久无法移动
+     *   · 信标"已放置"跨层保留 → 按 Q 被传送到上一层的坐标
+     *   · 照明棒治疗预算按**局**累计，而不是设计里的按层 24 点
+     * ================================================================ */
+    { extern void ControlReset(void);       ControlReset(); }
+    { extern void FlareHealReset(void);     FlareHealReset(); }
+    { extern void PhaseResetPlacement(void); PhaseResetPlacement(); }
+
     /* 2026-11-06（第 11 轮）：拾光虫 —— 第 2 层起、30%、每层最多 1 只 */
     { extern void NeutralReset(void); extern int NeutralTrySpawn(int);
       NeutralReset(); NeutralTrySpawn(currentLevel); }
@@ -4857,7 +4889,11 @@ void Update(float dt) {
      * ================================================================ */
     {
         extern float jumperControlT;
-        if (jumperControlT > 0.0f) { inF = 0; inS = 0; }
+        /* 2026-11-06 审计补：**任何控制生效时都不能动**。
+           原来只判 jumperControlT（抱脸虫的 10 秒），
+           于是蛛网虽然"抓住了玩家"，却完全不限制移动 —— 效果等于没有。 */
+        extern int ControlActive(void);
+        if (jumperControlT > 0.0f || ControlActive()) { inF = 0; inS = 0; }
     }
     /* v3.0：藏在柜子里不能动（但可以转头偷看） */
     if (hiddenIn >= 0) { inF = 0; inS = 0; }
@@ -5823,6 +5859,24 @@ void Update(float dt) {
        放在这里意味着**只有真正游玩时**才走 —— 暂停 / 设置界面 /
        失焦都不会调用 Update，计时自然停表。 */
     { extern void ControlTick(float); ControlTick(dt); }
+    /* ==================================================================
+     * 2026-11-06 审计补：**控制效果的唯一输入点**
+     * ------------------------------------------------------------------
+     * 原来只有抱脸虫的 JMP_MASH 读空格。蛛网也走控制层，却没有代码读
+     * ControlPress —— 蛛网会永久占住控制槽：既不限移动，也永远挣脱不掉。
+     *
+     * 现在所有控制类型共用这一个处理点，持有者用 ControlTakeResult() 取结果。
+     * ================================================================ */
+    {
+        extern int ControlActive(void);
+        extern int ControlPress(void);
+        extern float ControlTimeLeft(void);
+        extern void ControlTimeout(void);
+        if (ControlActive()) {
+            if (IsActionPressed(ACT_DODGE)) ControlPress();
+            if (ControlActive() && ControlTimeLeft() <= 0.0f) ControlTimeout();
+        }
+    }
     { extern void SpiderTick(float); SpiderTick(dt); }   /* 2026-11-06 第 5 轮 */
     { extern void FlareHealTick(float); FlareHealTick(dt); }   /* 2026-11-06 第 10 轮 */
     { extern void NeutralTick(float); NeutralTick(dt); }        /* 2026-11-06 第 11 轮 */
@@ -6568,10 +6622,23 @@ void StartGame(void) {
      * 于是 PhaseGive 永远不执行，训练营里根本没有装置，按 C 当然没反应。
      * ================================================================ */
     { extern void PhaseReset(void); PhaseReset(); }
+    /* ==================================================================
+     * 2026-11-06（审计补）：**抽卡 PRNG 从来没有被播种**
+     * ------------------------------------------------------------------
+     * RunRngSeed 写了却没人调用，s_runRng 一直是 0 ——
+     * RunRngNext 里的兜底常量会让**每一局的抽卡序列完全一样**：
+     * 同一个种子之外，玩家第二局拿到的三张卡会和第一局相同。
+     *
+     * 在这里播种（rand() 之前，避免影响地图生成序列）。
+     * ================================================================== */
+    { extern void RunRngSeed(unsigned int);
+      extern unsigned int RunRngState(void);
+      if (RunRngState() == 0) RunRngSeed((unsigned int)time(NULL) ^ 0x5bf03635u); }
     { extern void ControlReset(void); ControlReset(); }   /* 2026-11-06：控制层按局清零 */
     { extern void SpiderReset(void); SpiderReset(); }      /* 2026-11-06：蜘蛛按局清零 */
     { extern void FlareHealReset(void); FlareHealReset(); } /* 2026-11-06：每局/每层重置治疗预算 */
     { extern void NeutralReset(void); NeutralReset(); }       /* 2026-11-06：中立怪按局清零 */
+    { extern void PhaseResetPlacement(void); PhaseResetPlacement(); } /* 2026-11-06：信标换层失效 */
     if (trainingMode) {
         /* 2026-11-06：训练营里直接发一批相位投掷物 —— 那里就是拿来试机制的。
            相位装置已经改成投掷物（槽 6/7），不再需要 PhaseGive。 */
@@ -7180,8 +7247,14 @@ void RewardScheduleForLevel(int level) {
     skillPickTotal = (relic && skill) ? 2 : 1;
     skillPickRound = 1;
     if (relic) {
-        extern void OpenRelicPick(void);
-        OpenRelicPick();
+        extern int OpenRelicPick(void);
+        if (!OpenRelicPick() && skill) {
+            /* 遗物池空了：不能把这一层的技能奖励一起吞掉 */
+            skillPickTotal = 1;
+            skillPickRound = 1;
+            extern void OpenSkillPick(void);
+            OpenSkillPick();
+        }
     } else if (skill) {
         extern void OpenSkillPick(void);
         OpenSkillPick();
@@ -7318,14 +7391,18 @@ void OpenSkillPick(void) {
 }
 
 /* v2.0：遗物三选一（复用同一块界面） */
-void OpenRelicPick(void) {
+/* 2026-11-06 审计补：**返回值**。
+   原来 n <= 0 时直接 return，而 RewardScheduleForLevel 里
+   "遗物 + 技能"是链式的 —— 遗物池空了，技能奖励也被一起吞掉。
+   现在返回 1 = 真的开了界面，0 = 没得选。 */
+int OpenRelicPick(void) {
     int pool[RELIC_COUNT];
     int n = 0;
     for (int i = 0; i < RELIC_COUNT; i++) {
         if (relicOwned[i] >= 3) continue;      /* 同类最多 3 层 */
         pool[n++] = i;
     }
-    if (n <= 0) return;
+    if (n <= 0) return 0;
     for (int k = 0; k < RELIC_CHOICES; k++) {
         if (n <= 0) { skillPickOptions[k] = -1; continue; }
         int pick = rand() % n;
@@ -7338,6 +7415,7 @@ void OpenRelicPick(void) {
     currentState = STATE_SKILL_PICK;
     ForceCursor(1);
     uiDirty = 1;
+    return 1;
 }
 
 static void ApplyInstantSkill(int id) {
