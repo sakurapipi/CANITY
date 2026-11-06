@@ -5,7 +5,10 @@
 射线投射、纹理采样、Z-Buffer 和后处理全部由 CPU 在内存位图中完成，**不需要 OpenGL / DirectX / 任何图形库**。
 游戏里的贴图、模型、音效、配乐都是**代码程序化生成**的 —— 仓库里没有美术素材文件，只有一张程序图标。
 
-当前版本 **v2.4.1**。下载见 [Releases](https://github.com/sakurapipi/CANITY/releases/latest)。
+当前版本 **v2.4.2**（双端稳定性补丁）。下载见 [Releases](https://github.com/sakurapipi/CANITY/releases/latest)。
+
+> v2.4.2 不改存档结构：仍是 **v34**，v2.3.6 之后的存档可以直接读，
+> 旧版本会在迁移前自动留一份 `.v<版本>.bak`。
 
 ---
 
@@ -15,9 +18,9 @@
 
 | 版本 | 文件 | 说明 |
 |---|---|---|
-| **Windows 桌面版** | `CANITY_v2.4.1_win64.zip` | 解压双击 `canity.exe`。需要 64 位 Windows |
-| **网页版** | `CANITY_v2.4.1_web.zip` | 解压后在该目录起 HTTP 服务，浏览器打开 |
-| **网页版单文件** | `CANITY_v2.4.1_web_single.html` | 约 1.6 MB，wasm 已内联，**双击即玩** |
+| **Windows 桌面版** | `CANITY_v2.4.2_win64.zip` | 解压双击 `canity.exe`。需要 64 位 Windows |
+| **网页版** | `CANITY_v2.4.2_web.zip` | 解压后在该目录起 HTTP 服务，浏览器打开 |
+| **网页版单文件** | `CANITY_v2.4.2_web_single.html` | 约 1.6 MB，wasm 已内联，**双击即玩** |
 
 ### 网页版怎么开
 
@@ -30,7 +33,7 @@ python -m http.server 8080
 
 然后打开 `http://127.0.0.1:8080/`
 
-嫌麻烦就用**单文件版**：双击 `CANITY_v2.4.1_web_single.html` 即可，不需要服务器。
+嫌麻烦就用**单文件版**：双击 `CANITY_v2.4.2_web_single.html` 即可，不需要服务器。
 
 手机上横屏打开单文件版：左半屏拖动移动，右半屏拖动转视角，右侧是动作键。
 
@@ -331,8 +334,10 @@ Steam 封装已接生命周期、成就共用定义、统计、云存档和音�
 **网页版**
 
 - 渲染是**单线程**（WebAssembly 默认不带 pthread），比桌面版慢
-- 没有背景音乐（音效有）
+- 没有背景音乐（音效有，且已带左右声像）
 - 没有手柄支持
+- 存档在浏览器 `localStorage` 里：清站点数据会丢，请用界面上的
+  「导出存档」保存成 `.sav` 文件（可直接放进桌面版存档目录）
 - 触屏第一人称 + 0.42 秒 QTE 在手机上偏难，后续会放宽 QTE 窗口
 
 **桌面版**

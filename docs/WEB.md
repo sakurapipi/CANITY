@@ -109,8 +109,8 @@ Win32 的类型与键码垫片**写在 `common.h` 里**（`#ifdef CANITY_WEB` �
 |---|---|---|
 | 渲染线程 | 主线程 + 最多 8 个 worker 分带 | **单线程**（WASM 默认无 pthread） |
 | 存档 | `canityN.sav`（原子写 + `.bak` 链） | `localStorage['canity:canityN.sav']`（base64） |
-| 音频 | waveOut 合成 | **静音**（`audio.c` 在网页构建里被排除） |
-| 配乐 | MCI | **静音**（`music.c` 被排除） |
+| 音频 | waveOut 合成 | **WebAudio 实时合成**（`audio_web.c`，16 种音效 + 左右声像） |
+| 配乐 | MCI | **静音**（`music_web.c` 是空实现，网页暂无背景音乐） |
 | 手柄 | XInput 动态加载 | 无（`gamepad.c` 被排除） |
 | Steam | Steamworks | 全部空实现（`steam_zone.c` 被排除） |
 | 入口 | `src/main.c`（WinMain） | `src/platform/main_web.c`（rAF） |
@@ -147,7 +147,8 @@ python -X utf8 tools/build_validate.py     # 期望 ALL VALIDATION PASSED
 
 1. **性能**：单线程软件渲染。内部渲染分辨率有像素预算上限（约 28 万像素），
    1080p 下会降到 640×360 再放大 —— 和桌面版的动态分辨率是同一套逻辑。
-2. **音频**：一期静音。R7 计划接 WebAudio（浏览器自动播放策略要求
+2. **音频**：已接 WebAudio（`audio_web.c`）。首次点击/按键会解锁 AudioContext
+   （浏览器自动播放策略要求
    首次用户手势后才 `resume()`）。
 3. **存档**：只按文件名做键，多存档槽之间不会串，但**不同目录的同名文件会互相覆盖**
    （网页端本来就没有目录）。
