@@ -47,14 +47,33 @@ EM_JS(void, js_audio_init, (void), {
     window.addEventListener('keydown', unlock, { passive: true });
 });
 
-EM_JS(void, js_play, (int id, float vol), {
+EM_JS(void, js_play, (int id, float vol, float pan), {
     if (!Module._actx) return;
     var ctx = Module._actx;
     if (ctx.state === 'suspended') ctx.resume();
 
     var t0 = ctx.currentTime + 0.001;
     var out = ctx.createGain();
-    out.connect(Module._master);
+
+    /* ==================================================================
+     * 2026-11-07（v2.4.2 / B4）：**真正的左右声像**
+     * ------------------------------------------------------------------
+     * 原来 AudioPlayWorld 把 l/r 取最大值合成一个标量音量，
+     * 只保留了距离衰减，没有方向 —— 对"听声辨位"的恐怖游戏来说等于
+     * 少了一条信息渠道。
+     *
+     * 现在把这个标量换成 StereoPannerNode 的 pan（-1 左 .. +1 右），
+     * 音量仍由距离负责。不支持 StereoPanner 的浏览器
+     * （老 Safari）退回单声道，功能不缺失、只是没有方向。
+     * ================================================================== */
+    var sink = Module._master;
+    if (ctx.createStereoPanner) {
+        var p = ctx.createStereoPanner();
+        p.pan.value = (pan < -1) ? -1 : (pan > 1 ? 1 : pan);
+        p.connect(Module._master);
+        sink = p;
+    }
+    out.connect(sink);
 
     /* 2026-11-06（用户实测：**走路/怪物/低频全部听不见**）
        ------------------------------------------------------------------
@@ -228,7 +247,7 @@ EM_JS(void, js_set_volume, (float v), {
 void InitAudio(void) { js_audio_init(); }
 void ShutdownAudio(void) { }
 
-void PlaySfx(int id, float vol) { js_play(id, vol); }
+void PlaySfx(int id, float vol) { js_play(id, vol, 0.0f); }
 
 /* 世界音效：先按听者朝向算声像与距离衰减，再交给合成器。
    这样"背后的脚步"和"正前方的脚步"听起来不一样。 */
@@ -238,14 +257,25 @@ void AudioPlayWorld(int id, float x, float y, float vol, float maxDist, int prio
                                   float, float, float, float*, float*);
     extern float posX, posY, dirX, dirY;
     float l = 0.0f, r = 0.0f;
+    float gain, pan;
     AudioComputeGains(posX, posY, dirX, dirY, x, y, maxDist, &l, &r);
-    float gain = (l > r ? l : r) * 2.0f;
-    if (gain <= 0.001f) return;
-    /* 2026-11-06：线性距离衰减在浏览器里听感太弱（远处几乎没声），
-       开平方根让中远距离还能听见，近处依然是满音量。 */
-    gain = sqrtf(gain);
-    if (gain > 1.0f) gain = 1.0f;
-    PlaySfx(id, vol * gain);
+
+    /* 常量功率声像：l 与 r 是两个声道的能量增益，l+r 就是总响度。
+       原来取 max*2 会把"偏左"当成"很响"，也不携带方向信息。 */
+    if (l < 0.0f) l = 0.0f;
+    if (r < 0.0f) r = 0.0f;
+    {
+        float sum = l + r;
+        if (sum <= 0.0005f) return;
+        /* 距离衰减：开平方根，避免远处几乎没声（浏览器里对比太强）。 */
+        gain = sqrtf(sum);
+        if (gain > 1.0f) gain = 1.0f;
+        /* 方向：完全偏一侧时 ±1，正中时 0。 */
+        pan = (r - l) / sum;
+        if (pan < -1.0f) pan = -1.0f;
+        if (pan > 1.0f) pan = 1.0f;
+    }
+    js_play(id, vol * gain, pan);
 }
 
 void AudioUpdateListener(float px, float py, float dx, float dy) {

@@ -202,6 +202,59 @@ void CanityProbeSampleKeys(void) {
  * 只读、无副作用，正式构建里留着也无害（不画、不写）。
  * ================================================================ */
 /* 触屏按钮直接调这两个，不合成按键 */
+/* ==================================================================
+ * 2026-11-07（v2.4.2 / B4）：**触屏按钮按动作名找键位**
+ * ------------------------------------------------------------------
+ * 原来 web/shell.html 里写死 data-key="69"（E）、"86"（V）这种虚拟键码。
+ * 游戏支持改键 —— 玩家一改，触屏按钮就指向错的键。
+ *
+ * 现在按钮写 data-act="INTERACT"，由这里把动作名翻译成**当前绑定**的键码。
+ * 之后按住/松开仍然走同一套 Module._keys[] 通道，所以 Menu / 死亡界面等
+ * 只认 keys[] 的逻辑完全不用改。
+ *
+ * 找不到动作名返回 -1（前端会隐藏该按钮，而不是绑定到一个错的键）。
+ * ================================================================== */
+typedef struct { const char* name; int act; } ActionNameRow;
+
+static const ActionNameRow kActionNames[] = {
+    { "MOVE_FWD",     ACT_MOVE_FWD },
+    { "MOVE_BACK",    ACT_MOVE_BACK },
+    { "MOVE_LEFT",    ACT_MOVE_LEFT },
+    { "MOVE_RIGHT",   ACT_MOVE_RIGHT },
+    { "SPRINT",       ACT_SPRINT },
+    { "INTERACT",     ACT_INTERACT },
+    { "CRANK",        ACT_CRANK },
+    { "FLASHLIGHT",   ACT_FLASHLIGHT },
+    { "MAP",          ACT_MAP },
+    { "THROW",        ACT_THROW },
+    { "PAUSE",        ACT_PAUSE },
+    { "MENU_CONFIRM", ACT_MENU_CONFIRM },
+    { "MENU_CANCEL",  ACT_MENU_CANCEL },
+    { "DODGE",        ACT_DODGE },
+    { "SWING",        ACT_SWING },
+    { "DECOY",        ACT_DECOY },
+    { "PHASE_TELE",   ACT_PHASE_TELE },
+    { "SELECT_1",     ACT_SELECT_1 },
+    { "SELECT_2",     ACT_SELECT_2 },
+    { "SELECT_3",     ACT_SELECT_3 }
+};
+
+EMSCRIPTEN_KEEPALIVE int CanityActionVk(const char* name) {
+    int i;
+    if (!name) return -1;
+    for (i = 0; i < (int)(sizeof(kActionNames) / sizeof(kActionNames[0])); i++) {
+        const char* a = kActionNames[i].name;
+        const char* b = name;
+        while (*a && *a == *b) { a++; b++; }
+        if (*a == 0 && *b == 0) {
+            extern int g_bindings[ACT_COUNT];
+            int vk = g_bindings[kActionNames[i].act];
+            return (vk > 0 && vk < 256) ? vk : -1;
+        }
+    }
+    return -1;
+}
+
 EMSCRIPTEN_KEEPALIVE void CanityActionPause(void) { CanityPauseToggle(); }
 EMSCRIPTEN_KEEPALIVE void CanityActionMenu(void) { CanityMenuAction(); }
 EMSCRIPTEN_KEEPALIVE void CanityActionFlashlight(void) { CanityToggleFlashlight(); }

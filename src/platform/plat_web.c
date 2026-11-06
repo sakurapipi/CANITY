@@ -273,28 +273,53 @@ EM_JS(int, js_file_write, (const char* name, const void* buf, int len), {
     } catch (e) { return -1; }
 });
 
+/* ==================================================================
+ * 2026-11-07（v2.4.2 / B4）：**复制 / 改名必须连 #ts 一起搬**
+ * -----------------------------------------------------------------
+ * 存档的"修改时间"在网页端是单独一个键 `canity:<name>#ts`，
+ * 而内容在 `canity:<name>`。原来的 copy/rename 只搬内容，
+ * 于是：
+ *   · PlatFileTime(新文件) 返回 0
+ *   · 主档与 .bak 的"谁更新"判定永远拿不到真实时间
+ *   · 备份/回滚逻辑会挑错文件
+ * 现在两个键一起搬；时间戳缺失时用当前时间兜底，
+ * 保证"复制出来的文件至少不比原来旧"。
+ * ================================================================== */
 EM_JS(int, js_file_copy, (const char* from, const char* to), {
     try {
-        var v = localStorage.getItem('canity:' + UTF8ToString(from));
+        var fs = 'canity:' + UTF8ToString(from);
+        var fd = 'canity:' + UTF8ToString(to);
+        var v = localStorage.getItem(fs);
         if (v === null) return -1;
-        localStorage.setItem('canity:' + UTF8ToString(to), v);
+        var ts = localStorage.getItem(fs + '#ts') || String(Date.now());
+        localStorage.setItem(fd, v);
+        localStorage.setItem(fd + '#ts', ts);
         return 0;
     } catch (e) { return -1; }
 });
 
 EM_JS(int, js_file_rename, (const char* from, const char* to), {
     try {
-        var v = localStorage.getItem('canity:' + UTF8ToString(from));
+        var fs = 'canity:' + UTF8ToString(from);
+        var fd = 'canity:' + UTF8ToString(to);
+        var v = localStorage.getItem(fs);
         if (v === null) return -1;
-        localStorage.setItem('canity:' + UTF8ToString(to), v);
-        localStorage.removeItem('canity:' + UTF8ToString(from));
+        var ts = localStorage.getItem(fs + '#ts') || String(Date.now());
+        localStorage.setItem(fd, v);
+        localStorage.setItem(fd + '#ts', ts);
+        localStorage.removeItem(fs);
+        localStorage.removeItem(fs + '#ts');
         return 0;
     } catch (e) { return -1; }
 });
 
 EM_JS(int, js_file_delete, (const char* name), {
-    try { localStorage.removeItem('canity:' + UTF8ToString(name)); return 0; }
-    catch (e) { return -1; }
+    try {
+        var k = 'canity:' + UTF8ToString(name);
+        localStorage.removeItem(k);
+        localStorage.removeItem(k + '#ts');   /* 别留孤儿时间戳键 */
+        return 0;
+    } catch (e) { return -1; }
 });
 
 EM_JS(double, js_file_time, (const char* name), {

@@ -154,18 +154,17 @@
   <div id="look"></div>
 
   <div id="btns">
-    <button data-key="69">交互</button>
-    <button data-key="86">挥击</button>
-    <button data-key="13">确认</button>
-    <button data-key="2">投掷</button>
+    <button data-act="INTERACT">交互</button>
+    <button data-act="SWING">挥击</button>
+    <button data-act="MENU_CONFIRM">确认</button>
+    <button data-act="THROW">投掷</button>
   </div>
 
   <div id="btns2">
-    <button data-key="77">地图</button>
-    <button data-action="flashlight">手电</button>
-    <button data-key="82">摇电</button>
-    <button data-key="84">商店</button>
-    <button data-action="menu">菜单</button>
+    <button data-act="MAP">地图</button>
+    <button data-act="FLASHLIGHT">手电</button>
+    <button data-act="CRANK">摇电</button>
+    <button data-act="PAUSE">菜单</button>
   </div>
 </div>
 
@@ -396,33 +395,84 @@
       movezone.addEventListener('touchcancel', endMove, false);
     }
 
-    // 动作按钮
+    // ==================================================================
+    // 动作按钮（v2.4.2 / B4）
+    // ------------------------------------------------------------------
+    // 按钮上写的是**动作名**（data-act="INTERACT"），不是虚拟键码。
+    // 启动时向 C 侧问一次当前绑定：CanityActionVk("INTERACT") -> 69。
+    // 这样玩家在设置里改键之后，触屏按钮会自动跟着走。
+    //
+    // 问不到绑定（-1）就把按钮隐藏 —— 宁可少一个键，
+    // 也不要让它指向一个错的键，那比没有更糟。
+    // ==================================================================
+    function resolveAct(b) {
+      var name = b.getAttribute('data-act');
+      if (!name) return -1;
+      try {
+        if (Module._CanityActionVk) {
+          var vk = Module._CanityActionVk(allocUTF8(name));
+          freeUTF8();
+          return vk | 0;
+        }
+      } catch (err) { }
+      return -1;
+    }
+
+    /* UTF8ToString 需要 C 侧分配；用 Module._malloc/_free 走一遍 */
+    function allocUTF8(str) {
+      var n = lengthBytesUTF8(str) + 1;
+      var p = Module._malloc(n);
+      stringToUTF8(str, p, n);
+      Module.__lastStrPtr = p;
+      return p;
+    }
+    function freeUTF8() {
+      if (Module.__lastStrPtr) { Module._free(Module.__lastStrPtr); Module.__lastStrPtr = 0; }
+    }
+
+    /* 绑定在 C 侧是运行期状态（可能还没加载完），所以延迟解析：
+       第一次触摸时再问，问到就缓存。 */
     Array.prototype.forEach.call(document.querySelectorAll('#btns button, #btns2 button'), function (b) {
-      var act = b.getAttribute('data-action');
-      if (act) {
-        /* 直接调游戏函数：手机上没有"按键码"这层，最可靠 */
-        b.addEventListener('touchstart', function (e) {
-          try {
-            if (act === 'menu' && Module._CanityActionMenu) Module._CanityActionMenu();
-            else if (act === 'pause' && Module._CanityActionPause) Module._CanityActionPause();
-            else if (act === 'flashlight' && Module._CanityActionFlashlight) Module._CanityActionFlashlight();
-          } catch (err) { }
-          e.preventDefault();
-        }, { passive: false });
-        b.addEventListener('click', function (e) {
-          try {
-            if (act === 'menu' && Module._CanityActionMenu) Module._CanityActionMenu();
-            else if (act === 'pause' && Module._CanityActionPause) Module._CanityActionPause();
-            else if (act === 'flashlight' && Module._CanityActionFlashlight) Module._CanityActionFlashlight();
-          } catch (err) { }
-        });
-        return;
+      var name = b.getAttribute('data-act');
+      if (!name) return;
+
+      function vkOf() {
+        /* 只缓存**成功**的解析结果。失败（Module 还没就绪 / 动作名写错）
+           每次重试，避免第一次触摸太早把按钮永久钉死成不可用。 */
+        if (b.__vk === undefined || b.__vk < 0) {
+          var v = resolveAct(b);
+          if (v >= 0) b.__vk = v;
+          return v;
+        }
+        return b.__vk;
       }
-      var vk = parseInt(b.getAttribute('data-key'), 10);
-      b.addEventListener('touchstart', function (e) { key(vk, 1); e.preventDefault(); }, { passive: false });
-      b.addEventListener('touchend', function (e) { key(vk, 0); e.preventDefault(); }, { passive: false });
-      b.addEventListener('touchcancel', function () { key(vk, 0); }, false);
+
+      b.addEventListener('touchstart', function (e) {
+        var vk = vkOf();
+        if (vk < 0) return;
+        key(vk, 1);
+        e.preventDefault();
+      }, { passive: false });
+      b.addEventListener('touchend', function (e) {
+        var vk = vkOf();
+        if (vk >= 0) key(vk, 0);
+        e.preventDefault();
+      }, { passive: false });
+      b.addEventListener('touchcancel', function () {
+        var vk = vkOf();
+        if (vk >= 0) key(vk, 0);
+      }, false);
+      /* 桌面浏览器用鼠标也能点（调试方便） */
+      b.addEventListener('mousedown', function (e) {
+        var vk = vkOf();
+        if (vk >= 0) key(vk, 1);
+      });
+      b.addEventListener('mouseup', function (e) {
+        var vk = vkOf();
+        if (vk >= 0) key(vk, 0);
+      });
     });
+
   })();
 
   // ==================================================================
