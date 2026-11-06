@@ -38,6 +38,8 @@ void PlatMarkReady(void) { }
 
 int PlatSelfTestRequested(void) { return 0; }
 
+unsigned int PlatTicksMs(void) { return (unsigned int)GetTickCount(); }
+
 void PlatSleepMs(int ms) {
     if (ms <= 0) return;
     Sleep((DWORD)ms);

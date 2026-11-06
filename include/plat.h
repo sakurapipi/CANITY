@@ -31,6 +31,9 @@ void PlatMarkReady(void);
 /* 单调递增秒数，首次调用返回 0 附近。用于主循环累加与排程。 */
 double PlatNow(void);
 
+/* 毫秒级单调时钟（双键防误触这类"两秒内再按一次"用）。 */
+unsigned int PlatTicksMs(void);
+
 /* 让出指定毫秒。桌面真睡；网页端只让出一帧（不能阻塞主线程）。 */
 void PlatSleepMs(int ms);
 

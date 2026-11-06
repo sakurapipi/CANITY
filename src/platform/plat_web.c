@@ -242,6 +242,10 @@ double PlatNow(void) {
     return emscripten_get_now() / 1000.0;
 }
 
+unsigned int PlatTicksMs(void) {
+    return (unsigned int)(emscripten_get_now());
+}
+
 void PlatSleepMs(int ms) {
     (void)ms;   /* 主线程不能阻塞；让出一帧即可 */
 }

@@ -35,13 +35,35 @@ static void WebFrame(void) {
     s_prev = now;
     if (dt > 0.25) dt = 0.25;
     if (dt < 0.0) dt = 0.0;
+    { extern double g_probeDt; g_probeDt = dt; }
 
-    /* 窗口逻辑尺寸跟着 canvas 走（对应桌面版的 SyncWindowSize） */
+    /* ==================================================================
+     * 2026-11-06（用户实测：**UI 错位**）
+     * ------------------------------------------------------------------
+     * 桌面循环每帧调 SyncWindowSize()，而它末尾有一条关键约定：
+     *     if (winW != renderW || winH != renderH) { winW = renderW; ... }
+     * 也就是 **UI 空间 == 渲染空间**。
+     *
+     * 我原来在网页循环里把 winW/winH 直接设成 canvas 的 CSS 尺寸
+     * （1708x960），而 renderW/renderH 只有 ~640x360 ——
+     * DrawTextWin 会做 x*renderW/winW 的换算，两边比例一错，
+     * 整个菜单就整体偏移、溢出面板（用户截图里的样子）。
+     *
+     * 正确做法：调同一个 SyncWindowSize()，别自己维护一套。
+     * ================================================================ */
     {
-        int cw = 0, ch = 0;
-        PlatWindowSize(&cw, &ch);
-        if (cw > 0 && ch > 0) { winW = cw; winH = ch; }
+        extern void SyncWindowSize(void);
+        SyncWindowSize();
     }
+
+    /* 时间基准：桌面端在 WinMain 里维护 g_timeSec，网页端也得给。 */
+    {
+        extern double g_timeSec;
+        g_timeSec = now;
+    }
+
+    extern void CanityProbeSampleKeys(void);
+    CanityProbeSampleKeys();
 
     extern void PollInput(void);
     extern void UpdatePitch(void);
@@ -58,12 +80,31 @@ static void WebFrame(void) {
         if ((mdx || mdy) && PlatCursorLocked()) CanityMouseLook(mdx, mdy);
     }
 
+    /* ==================================================================
+     * 2026-11-06（用户实测：**按键全失效**）
+     * ------------------------------------------------------------------
+     * 桌面端的按键有两个入口：PollInput（轮询，喂 keys[]/keyPressed[]）
+     * 和 WindowProc 的 WM_KEYDOWN（菜单导航/确认/取消/快捷键全在那儿）。
+     * 网页端只有前者 —— 所以走动可能正常，但菜单一点反应都没有。
+     *
+     * 现在补上第二条：这里做 0->1 边沿检测，交给同一个 CanityKeyDown。
+     * ================================================================ */
+    {
+        static int prevKey[256];
+        for (int vk = 1; vk < 256; vk++) {
+            int down = PlatKeyDown(vk);
+            if (down && !prevKey[vk]) CanityKeyDown(vk, 0);
+            prevKey[vk] = down;
+        }
+    }
+
     s_accum += dt;
     int steps = 0;
     while (s_accum >= WEB_LOGIC_STEP && steps < 16) {
         PollInput();
         UpdatePitch();
         Update((float)WEB_LOGIC_STEP);
+        { extern int g_probeUpdates; g_probeUpdates++; }
         s_accum -= WEB_LOGIC_STEP;
         steps++;
     }
@@ -76,6 +117,56 @@ static void WebFrame(void) {
         static int s_first = 0;
         if (!s_first) { s_first = 1; PlatMarkReady(); }
     }
+}
+
+/* 只给探针用：统计当前按下的虚拟键数量 */
+int g_probeKeysDown = 0;
+int g_probeUpdates = 0;     /* Update() 被调用的累计次数 */
+double g_probeDt = 0.0;     /* 上一帧的 dt（秒） */
+void CanityProbeSampleKeys(void) {
+    int n = 0;
+    for (int vk = 1; vk < 256; vk++) if (PlatKeyDown(vk)) n++;
+    g_probeKeysDown = n;
+}
+
+/* ==================================================================
+ * 调试探针（2026-11-06）
+ * ------------------------------------------------------------------
+ * 网页端出问题，控制台和截图都只能看个大概。这两个函数让自动化脚本
+ * 直接读到游戏内部状态，判断"按键到底有没有进到游戏里"。
+ * 只读、无副作用，正式构建里留着也无害（不画、不写）。
+ * ================================================================ */
+EMSCRIPTEN_KEEPALIVE int CanityProbeState(void) {
+    return (int)currentState;      /* currentState 在 game.h 里已有正确类型 */
+}
+
+EMSCRIPTEN_KEEPALIVE int CanityProbeMenu(void) {
+    extern int menuSelection;
+    return menuSelection;
+}
+
+/* 游戏内部真正在用的按键数组（不是 JS 那份原始状态） */
+EMSCRIPTEN_KEEPALIVE int CanityProbeGameKey(int vk) {
+    extern int keys[];
+    extern int keyPressed[];
+    if (vk < 0 || vk > 255) return -1;
+    return (keys[vk] ? 1 : 0) | (keyPressed[vk] ? 2 : 0);
+}
+
+EMSCRIPTEN_KEEPALIVE int CanityProbeUpdates(void) {
+    extern int g_probeUpdates;
+    return g_probeUpdates;
+}
+
+EMSCRIPTEN_KEEPALIVE double CanityProbeDt(void) {
+    extern double g_probeDt;
+    return g_probeDt;
+}
+
+EMSCRIPTEN_KEEPALIVE int CanityProbeKeys(void) {
+    /* 当前有多少个键被按下（含绑定键与菜单键） */
+    extern int g_probeKeysDown;
+    return g_probeKeysDown;
 }
 
 int main(void) {
