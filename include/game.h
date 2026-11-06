@@ -33,6 +33,7 @@ void CanityMouseWheel(int delta, int mx, int my);
 /* 触屏直接动作（不合成按键）：暂停切换 / 手电开关。 */
 void CanityPauseToggle(void);
 void CanityToggleFlashlight(void);
+void CanityMenuAction(void);   /* 手机端合并键：暂停 / 返回 / 退出当前页 */
 extern GameState currentState, prevState;
 extern int gameWon;                 /* 0=失败结局 1=通关结局（第 10 层逃出生天） */
 

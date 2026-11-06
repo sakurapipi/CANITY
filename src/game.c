@@ -8178,6 +8178,44 @@ int  itemHasStock(void);
  *   · F 之类的短按可能落在两次轮询之间
  * 所以触屏不合成按键了，直接调游戏函数。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户实测：「暂停键跟返回键功能差不多，没什么用」）
+ * ------------------------------------------------------------------
+ * 手机上把三个键（暂停 / 返回 / 退出当前页）合并成一个「菜单」：
+ *   · 局内        -> 暂停
+ *   · 暂停中      -> 继续
+ *   · 技能树/商店/成就/图鉴/银行/设置 -> 存盘并回主菜单
+ *   · 主菜单      -> 不动（避免误退）
+ * 这样少一个键，也不会出现"点暂停没反应、点返回又不知道会去哪"。
+ * ================================================================== */
+void CanityMenuAction(void) {
+    switch (currentState) {
+    case STATE_PLAYING:
+        { extern void PauseGame(void); PauseGame(); }
+        uiDirty = 1;
+        break;
+    case STATE_PAUSED:
+        currentState = STATE_PLAYING;
+        uiDirty = 1;
+        break;
+    case STATE_HUB:
+    case STATE_SAFEHOUSE:
+    case STATE_ACHIEVEMENTS:
+    case STATE_BESTIARY:
+    case STATE_BANK:
+    case STATE_SETTINGS:
+    case STATE_HELP:
+        SaveGame();
+        currentState = STATE_MAIN_MENU;
+        menuSelection = 0;
+        ForceCursor(1);
+        uiDirty = 1;
+        break;
+    default:
+        break;
+    }
+}
+
 void CanityPauseToggle(void) {
     if (currentState == STATE_PLAYING) {
         extern void PauseGame(void);

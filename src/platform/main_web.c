@@ -203,6 +203,7 @@ void CanityProbeSampleKeys(void) {
  * ================================================================ */
 /* 触屏按钮直接调这两个，不合成按键 */
 EMSCRIPTEN_KEEPALIVE void CanityActionPause(void) { CanityPauseToggle(); }
+EMSCRIPTEN_KEEPALIVE void CanityActionMenu(void) { CanityMenuAction(); }
 EMSCRIPTEN_KEEPALIVE void CanityActionFlashlight(void) { CanityToggleFlashlight(); }
 
 EMSCRIPTEN_KEEPALIVE int CanityProbeFlashlight(void) {

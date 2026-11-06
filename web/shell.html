@@ -54,72 +54,58 @@
   #entry a:hover { color: #e8c040; border-color: #4a5a6c; }
   #entry a.primary { color: #e8c040; border-color: #6a5a20; }
 
-  /* ==================================================================
-   * 触屏操作层（2026-11-06 第三版 —— 功能性齐全优先）
-   * ------------------------------------------------------------------
-   * 用户实测反馈：
-   *   「右边划不到屏幕」「奔跑键等很多键位适配不进来」「键位透明一点」
-   *   「可以多加几个键位」「功能性齐全为第一目的」
-   *
-   * 这一版的结构：
-   *   ① #look **铺满整屏**（z 序最低）—— 屏幕上任何地方按下拖动都能转视角，
-   *      不再有"右边是死区"这种事
-   *   ② 按钮浮在它上面（pointer-events: auto），半透明，不挡视线
-   *   ③ 键位从 5 个扩到 8 个：
-   *      交互 E / 挥击 V / 挣脱·跳 空格 / 疾跑 SHIFT
-   *      投掷 右键 / 地图 M / 手电 F / 暂停 ESC
-   * ================================================================== */
+  /* 触屏操作层 v5：左半屏移动 + 右半屏视角 + 7 个按钮 */
   #touch { position: fixed; inset: 0; z-index: 12; display: none; }
   #touch.on { display: block; }
   #touch > * { pointer-events: none; }
 
-  #look { position: absolute; inset: 0; pointer-events: auto; touch-action: none; }
+  #movezone { position: absolute; left: 0; top: 0; width: 46%; height: 100%;
+              pointer-events: auto; touch-action: none; }
+  #look     { position: absolute; right: 0; top: 0; width: 54%; height: 100%;
+              pointer-events: auto; touch-action: none; }
 
   #stick {
-    position: absolute;
-    left: calc(14px + env(safe-area-inset-left, 0px));
-    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-    width: min(26vw, 118px); height: min(26vw, 118px);
+    position: absolute; display: none;
+    width: 116px; height: 116px; margin: -58px 0 0 -58px;
     border-radius: 50%;
     border: 1px solid rgba(120,140,165,.45);
-    background: rgba(12,18,24,.22);
-    pointer-events: auto; touch-action: none;
+    background: rgba(12,18,24,.18);
+    pointer-events: none;
   }
+  #stick.on { display: block; }
   #stick > i {
     position: absolute; left: 50%; top: 50%;
-    width: 40%; height: 40%; margin: -20% 0 0 -20%;
+    width: 44px; height: 44px; margin: -22px 0 0 -22px;
     border-radius: 50%;
-    background: rgba(232,192,64,.20);
-    border: 1px solid rgba(200,170,80,.55);
+    background: rgba(232,192,64,.22);
+    border: 1px solid rgba(200,170,80,.60);
   }
 
   #btns, #btns2 {
     position: absolute;
-    right: calc(10px + env(safe-area-inset-right, 0px));
-    display: grid;
-    gap: 6px;
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    display: grid; gap: 10px;
     pointer-events: none;
   }
-  #btns  { bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-           grid-template-columns: repeat(3, min(13vw, 54px)); }
-  #btns2 { top: calc(8px + env(safe-area-inset-top, 0px));
-           grid-template-columns: repeat(2, min(13vw, 54px)); }
+  #btns  { bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+           grid-template-columns: repeat(2, min(15vw, 62px)); }
+  #btns2 { top: calc(10px + env(safe-area-inset-top, 0px));
+           grid-template-columns: repeat(2, min(15vw, 62px)); }
 
   #btns button, #btns2 button {
-    width: min(13vw, 54px); height: min(13vw, 54px);
+    width: min(15vw, 62px); height: min(15vw, 62px);
     border-radius: 50%;
-    border: 1px solid rgba(120,140,165,.40);
-    /* 半透明：既看得见又不太挡视线 */
-    background: rgba(14,20,28,.34);
-    color: rgba(207,216,228,.82);
-    font: 600 12px/1.15 ui-monospace, monospace;
+    border: 1px solid rgba(120,140,165,.42);
+    background: rgba(14,20,28,.30);
+    color: rgba(207,216,228,.85);
+    font: 600 13px/1.2 ui-monospace, monospace;
     pointer-events: auto; touch-action: none;
     -webkit-tap-highlight-color: transparent;
     display: flex; align-items: center; justify-content: center;
   }
   #btns button:active, #btns2 button:active {
-    background: rgba(232,192,64,.30); color: #ffe27a;
-    border-color: rgba(232,192,64,.7);
+    background: rgba(232,192,64,.32); color: #ffe27a;
+    border-color: rgba(232,192,64,.75);
   }
 
   /* 竖屏提示：手机上竖着拿根本看不清，直接让用户横过来 */
@@ -163,27 +149,21 @@
 </div>
 
 <div id="touch">
-  <div id="look"></div>
+  <div id="movezone"></div>
   <div id="stick"><i></i></div>
+  <div id="look"></div>
 
-  <!-- 右下：动作键（3 列 2 行） -->
   <div id="btns">
     <button data-key="69">交互</button>
     <button data-key="86">挥击</button>
     <button data-key="32">挣脱</button>
-    <button data-key="16">疾跑</button>
     <button data-key="2">投掷</button>
-    <button data-key="77">地图</button>
   </div>
 
-  <!-- 右上：系统键（直接调游戏函数，不合成按键） -->
   <div id="btns2">
+    <button data-key="77">地图</button>
     <button data-action="flashlight">手电</button>
-    <button data-key="82">摇电</button>
-    <button data-action="pause">暂停</button>
-    <button data-key="13">确认</button>
-    <button data-key="84">商店</button>
-    <button data-key="27">返回</button>
+    <button data-action="menu">菜单</button>
   </div>
 </div>
 
@@ -322,46 +302,73 @@
       lookId = null; Module._touchLook = false;
     }, false);
 
-    // 左下摇杆 = 移动
-    var stick = document.getElementById('stick');
-    var knob = stick.querySelector('i');
-    var stickId = null, cx = 0, cy = 0, R = 56;
-    function clearMove() { key(87, 0); key(83, 0); key(65, 0); key(68, 0); }
-    function applyMove(dx, dy) {
-      clearMove();
-      var dead = 14;
-      if (dy < -dead) key(87, 1);
-      if (dy > dead) key(83, 1);
-      if (dx < -dead) key(65, 1);
-      if (dx > dead) key(68, 1);
+    // ==================================================================
+    // 左半屏移动区（v5）
+    // ------------------------------------------------------------------
+    // 用户实测：「移动键没有用」—— 118px 的小圆圈在手机上按不准。
+    // 改成：手指按在左半屏**任意位置**，那个点就是摇杆中心，
+    // 往哪拖就往哪走（手机 FPS 通行做法）。
+    // ==================================================================
+    var movezone = document.getElementById('movezone');
+    var stickEl = document.getElementById('stick');
+    var knob = stickEl ? stickEl.querySelector('i') : null;
+    var moveId = null, originX = 0, originY = 0;
+    var STICK_R = 46;
+
+    function clearMove() {
+      key(87, 0); key(83, 0); key(65, 0); key(68, 0);
     }
-    stick.addEventListener('touchstart', function (e) {
-      var t = e.changedTouches[0];
-      var r = stick.getBoundingClientRect();
-      cx = r.left + r.width / 2; cy = r.top + r.height / 2;
-      stickId = t.identifier;
-      /* 2026-11-06：按下就按接触点算方向 —— 原来只在 touchmove 里更新，
-         手指按上去不动就完全走不了（用户说的"刚进游戏动不了"）。 */
-      applyMove(t.clientX - cx, t.clientY - cy);
-      e.preventDefault();
-    }, { passive: false });
-    stick.addEventListener('touchmove', function (e) {
-      for (var i = 0; i < e.changedTouches.length; i++) {
-        var t = e.changedTouches[i];
-        if (t.identifier !== stickId) continue;
-        var dx = t.clientX - cx, dy = t.clientY - cy;
-        var len = Math.sqrt(dx * dx + dy * dy) || 1;
-        var k = Math.min(1, R / len);
-        knob.style.transform = 'translate(' + (dx * k) + 'px,' + (dy * k) + 'px)';
-        applyMove(dx, dy);
+    function applyMove(dx, dy) {
+      var dead = 12;
+      key(87, dy < -dead);   /* W 前 */
+      key(83, dy > dead);    /* S 后 */
+      key(65, dx < -dead);   /* A 左 */
+      key(68, dx > dead);    /* D 右 */
+    }
+    function moveStickKnob(dx, dy) {
+      if (!knob) return;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var k = Math.min(1, STICK_R / len);
+      knob.style.transform = 'translate(' + (dx * k) + 'px,' + (dy * k) + 'px)';
+    }
+
+    if (movezone) {
+      movezone.addEventListener('touchstart', function (e) {
+        var t = e.changedTouches[0];
+        moveId = t.identifier;
+        originX = t.clientX; originY = t.clientY;
+        if (stickEl) {
+          stickEl.style.left = originX + 'px';
+          stickEl.style.top = originY + 'px';
+          stickEl.classList.add('on');
+        }
+        /* 按下即生效：以接触点为原点，此时位移为 0 —— 真正的方向由后续拖动给出 */
+        applyMove(0, 0);
+        moveStickKnob(0, 0);
+        e.preventDefault();
+      }, { passive: false });
+
+      movezone.addEventListener('touchmove', function (e) {
+        for (var i = 0; i < e.changedTouches.length; i++) {
+          var t = e.changedTouches[i];
+          if (t.identifier !== moveId) continue;
+          var dx = t.clientX - originX;
+          var dy = t.clientY - originY;
+          applyMove(dx, dy);
+          moveStickKnob(dx, dy);
+        }
+        e.preventDefault();
+      }, { passive: false });
+
+      function endMove(e) {
+        moveId = null;
+        clearMove();
+        if (stickEl) stickEl.classList.remove('on');
+        if (knob) knob.style.transform = '';
       }
-      e.preventDefault();
-    }, { passive: false });
-    stick.addEventListener('touchend', function () {
-      stickId = null;
-      knob.style.transform = '';
-      clearMove();
-    }, false);
+      movezone.addEventListener('touchend', endMove, false);
+      movezone.addEventListener('touchcancel', endMove, false);
+    }
 
     // 动作按钮
     Array.prototype.forEach.call(document.querySelectorAll('#btns button, #btns2 button'), function (b) {
@@ -370,14 +377,16 @@
         /* 直接调游戏函数：手机上没有"按键码"这层，最可靠 */
         b.addEventListener('touchstart', function (e) {
           try {
-            if (act === 'pause' && Module._CanityActionPause) Module._CanityActionPause();
+            if (act === 'menu' && Module._CanityActionMenu) Module._CanityActionMenu();
+            else if (act === 'pause' && Module._CanityActionPause) Module._CanityActionPause();
             else if (act === 'flashlight' && Module._CanityActionFlashlight) Module._CanityActionFlashlight();
           } catch (err) { }
           e.preventDefault();
         }, { passive: false });
         b.addEventListener('click', function (e) {
           try {
-            if (act === 'pause' && Module._CanityActionPause) Module._CanityActionPause();
+            if (act === 'menu' && Module._CanityActionMenu) Module._CanityActionMenu();
+            else if (act === 'pause' && Module._CanityActionPause) Module._CanityActionPause();
             else if (act === 'flashlight' && Module._CanityActionFlashlight) Module._CanityActionFlashlight();
           } catch (err) { }
         });
