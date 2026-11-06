@@ -27,7 +27,7 @@ EM_JS(void, js_audio_init, (void), {
        限幅器很关键：并发的噪声爆发不加限幅会刺耳、破音，
        这正是"和桌面差距很大"的一部分。 */
     Module._master = Module._actx.createGain();
-    Module._master.gain.value = 0.75;
+    Module._master.gain.value = 0.95;
     var comp = Module._actx.createDynamicsCompressor();
     comp.threshold.value = -18;
     comp.knee.value = 24;
@@ -55,7 +55,17 @@ EM_JS(void, js_play, (int id, float vol), {
     var t0 = ctx.currentTime + 0.001;
     var out = ctx.createGain();
     out.connect(Module._master);
-    var peak = Math.max(0.02, Math.min(1.0, vol));
+
+    /* 2026-11-06（用户实测：**走路/怪物/低频全部听不见**）
+       ------------------------------------------------------------------
+       两个真原因：
+         ① 游戏传进来的音量本来就小（走路 0.28，冲刺 0.50）
+         ② 我用的基频太低（脚步 95Hz、心跳 62Hz、守门人 44Hz）——
+            笔记本/手机喇叭根本发不出 100Hz 以下，等于没声音
+       修法：增益做一次补偿；低频音色**补上 2/3 次谐波**，
+       让它在小喇叭上也有"能听见的音高"。 */
+    var peak = Math.max(0.02, Math.min(1.0, vol)) * 1.8;
+    if (peak > 1.0) peak = 1.0;
 
     function osc(type, f0, f1, dur, gain, detune) {
         var o = ctx.createOscillator();
@@ -99,16 +109,19 @@ EM_JS(void, js_play, (int id, float vol), {
     }
 
     switch (id) {
-    // ---- 0 SFX_STEP 脚步：极短闷响 ----
+    // ---- 0 SFX_STEP 脚步：鞋底摩擦（中频）+ 低频身音，两层都要 ----
     case 0:
-        noiseBurst(0.055, 220, 140, 0.30);
-        osc('sine', 95, 55, 0.06, 0.18);
+        noiseBurst(0.070, 1500, 700, 0.42);   /* 能听见的那一下"嗒" */
+        osc('triangle', 190, 120, 0.07, 0.34); /* 身音提到 190Hz */
+        osc('sine', 380, 240, 0.05, 0.16);     /* 二次谐波：小喇叭靠它 */
         break;
 
-    // ---- 1 SFX_HEART 心跳：两下低频 ----
+    // ---- 1 SFX_HEART 心跳：低频 + 谐波堆叠 ----
     case 1:
-        osc('sine', 62, 38, 0.18, 0.55);
-        osc('sine', 58, 36, 0.14, 0.35);
+        osc('sine', 78, 55, 0.20, 0.55);
+        osc('sine', 156, 110, 0.18, 0.26);    /* 2× */
+        osc('sine', 234, 165, 0.14, 0.12);    /* 3× */
+        noiseBurst(0.10, 140, 90, 0.16);
         break;
 
     // ---- 2 SFX_PICKUP 拾取：上行两声方波 ----
@@ -180,10 +193,12 @@ EM_JS(void, js_play, (int id, float vol), {
         noiseBurst(0.10, 900, 600, 0.10, 0.05);
         break;
 
-    // ---- 13 SFX_WARDEN 守门人：极低频压迫 ----
+    // ---- 13 SFX_WARDEN 守门人：低频压迫 + 可听频段的不谐和音 ----
     case 13:
-        osc('sine', 44, 34, 0.55, 0.60);
-        osc('sine', 66, 52, 0.45, 0.20);
+        osc('sine', 48, 36, 0.60, 0.55);
+        osc('sine', 96, 72, 0.55, 0.30);      /* 2× 谐波 */
+        osc('sine', 150, 108, 0.45, 0.16);    /* 3× 谐波 */
+        noiseBurst(0.45, 260, 110, 0.22);     /* 低频隆隆，落在能听见的边 */
         break;
 
     // ---- 14 SFX_SCAVENGER 清道夫：刺耳刮擦 ----
@@ -226,6 +241,10 @@ void AudioPlayWorld(int id, float x, float y, float vol, float maxDist, int prio
     AudioComputeGains(posX, posY, dirX, dirY, x, y, maxDist, &l, &r);
     float gain = (l > r ? l : r) * 2.0f;
     if (gain <= 0.001f) return;
+    /* 2026-11-06：线性距离衰减在浏览器里听感太弱（远处几乎没声），
+       开平方根让中远距离还能听见，近处依然是满音量。 */
+    gain = sqrtf(gain);
+    if (gain > 1.0f) gain = 1.0f;
     PlaySfx(id, vol * gain);
 }
 

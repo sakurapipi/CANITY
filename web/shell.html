@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#05070a">
 <title>CANITY — 浏览器版</title>
 <style>
   html, body {
@@ -50,36 +54,96 @@
   #entry a:hover { color: #e8c040; border-color: #4a5a6c; }
   #entry a.primary { color: #e8c040; border-color: #6a5a20; }
 
-  /* ---- 触屏操作层（2026-11-06 R8）---- */
+  /* ==================================================================
+   * 触屏操作层（2026-11-06 第二版）
+   * ------------------------------------------------------------------
+   * 用户实测（iPhone 13 Pro Max）：
+   *   「左边移动键是对的，但右边四个按键导致我划不到屏幕」
+   * 原因：拖拽转视角的区域（#look）铺满右侧整屏，而按钮压在它上面，
+   *       手指一碰按钮就吃掉了拖拽。
+   *
+   * 现在把屏幕**分区**，互不重叠：
+   *   左下 摇杆          右下 按钮簇（只占底部 180px）
+   *   右中上 拖拽区      顶部 留给 HUD
+   * 另外全部尺寸用 min() 跟着屏幕缩放，横屏时按钮不至于太大。
+   * ================================================================== */
   #touch { position: fixed; inset: 0; z-index: 12; display: none; pointer-events: none; }
   #touch.on { display: block; }
+
   #stick {
-    position: absolute; left: 18px; bottom: 22px;
-    width: 128px; height: 128px; border-radius: 50%;
-    border: 1px solid #2f3a48; background: rgba(12,18,24,.42);
+    position: absolute;
+    left: calc(14px + env(safe-area-inset-left, 0px));
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    width: min(30vw, 132px); height: min(30vw, 132px);
+    border-radius: 50%;
+    border: 1px solid #2f3a48;
+    background: rgba(12,18,24,.38);
     pointer-events: auto; touch-action: none;
   }
   #stick > i {
     position: absolute; left: 50%; top: 50%;
-    width: 48px; height: 48px; margin: -24px 0 0 -24px;
-    border-radius: 50%; background: rgba(232,192,64,.28);
+    width: 42%; height: 42%; margin: -21% 0 0 -21%;
+    border-radius: 50%; background: rgba(232,192,64,.26);
     border: 1px solid #6a5a20;
   }
-  #look { position: absolute; right: 0; top: 0; width: 55%; height: 100%;
-          pointer-events: auto; touch-action: none; }
+
+  /* 拖拽转视角：只占右半屏的**中间偏上**，底部让给按钮 */
+  #look {
+    position: absolute;
+    right: 0; top: 0;
+    width: 52%;
+    height: calc(100% - 172px);
+    pointer-events: auto; touch-action: none;
+  }
+
   #btns {
-    position: absolute; right: 16px; bottom: 20px;
-    display: grid; grid-template-columns: repeat(2, 62px); gap: 10px;
+    position: absolute;
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    display: grid;
+    grid-template-columns: repeat(2, min(16vw, 66px));
+    gap: 8px;
     pointer-events: none;
   }
   #btns button {
-    width: 62px; height: 62px; border-radius: 50%;
-    border: 1px solid #3a4656; background: rgba(14,20,28,.68);
-    color: #cfd8e4; font: 600 13px/1 ui-monospace, monospace;
+    width: min(16vw, 66px); height: min(16vw, 66px);
+    border-radius: 50%;
+    border: 1px solid #3a4656; background: rgba(14,20,28,.66);
+    color: #cfd8e4; font: 600 14px/1 ui-monospace, monospace;
     pointer-events: auto; touch-action: none;
+    -webkit-tap-highlight-color: transparent;
   }
-  #btns button:active { background: rgba(232,192,64,.24); color: #e8c040; }
-  #btns button.wide { grid-column: span 2; width: auto; border-radius: 10px; height: 44px; }
+  #btns button:active { background: rgba(232,192,64,.26); color: #e8c040; }
+  #btns button.wide {
+    grid-column: span 2; width: auto; border-radius: 12px;
+    height: min(11vw, 46px);
+  }
+
+  /* 竖屏提示：手机上竖着拿根本看不清，直接让用户横过来 */
+  #rotate {
+    position: fixed; inset: 0; z-index: 30;
+    display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 16px;
+    background: #05070a; color: #c8d0dc;
+    font: 600 15px/1.9 ui-monospace, monospace; text-align: center;
+  }
+  #rotate.on { display: flex; }
+
+  /* 触屏横屏时，下载入口移到右上角并缩小 ——
+     原来贴右下角，正好压在「投掷」按钮上。 */
+  @media (pointer: coarse), (max-height: 520px) {
+    #entry {
+      right: 10px; bottom: auto; top: 8px;
+      font-size: 10px;
+    }
+    #entry a { padding: 5px 9px; }
+  }
+  #rotate .icon { font-size: 46px; color: #e8c040; }
+  #rotate .lnk {
+    margin-top: 6px; padding: 9px 16px; border-radius: 4px;
+    border: 1px solid #3a4656; color: #9fb0c4; text-decoration: none;
+    pointer-events: auto;
+  }
 </style>
 </head>
 <body>
@@ -104,6 +168,13 @@
   </div>
 </div>
 
+<div id="rotate">
+  <div class="icon">⟳</div>
+  <div>请把手机横过来玩</div>
+  <div style="color:#6f7d90;font-size:12px">横屏后画面才会铺满</div>
+  <a class="lnk" href="javascript:void(0)" id="rotBtn">点我尝试自动横屏</a>
+</div>
+
 <div id="entry">
   <a class="primary" href="https://github.com/sakurapipi/CANITY/releases/latest">下载完整版 (Windows)</a>
 </div>
@@ -124,6 +195,49 @@
     },
     locateFile: function (path) { return path; }
   };
+  // ==================================================================
+  // 竖屏守卫 + 自动横屏（2026-11-06 第二版）
+  // ------------------------------------------------------------------
+  // 用户实测（iPhone 13 Pro Max）：「打开的时候屏幕不够用」。
+  // 第一人称横向视野在竖屏下只有窄窄一条，没法玩。
+  // 所以：手机竖屏时盖一层提示，点一下尝试全屏 + 锁定横屏。
+  // ==================================================================
+  (function () {
+    var forced = (location.search || '').indexOf('touch=1') >= 0;
+    var isTouch = forced || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if (!isTouch) return;
+    var box = document.getElementById('rotate');
+    var btn = document.getElementById('rotBtn');
+    if (!box) return;
+
+    function portrait() {
+      return window.innerHeight > window.innerWidth * 1.02;
+    }
+    function update() {
+      if (portrait()) box.classList.add('on');
+      else box.classList.remove('on');
+    }
+    update();
+    window.addEventListener('resize', update, false);
+    window.addEventListener('orientationchange', function () {
+      setTimeout(update, 250);
+    }, false);
+
+    function tryLandscape() {
+      var el = document.documentElement;
+      var req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req) {
+        try { req.call(el); } catch (e) { /* iOS 上可能直接拒绝 */ }
+      }
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape').catch(function () {});
+      }
+      setTimeout(update, 400);
+    }
+    if (btn) btn.addEventListener('click', tryLandscape, false);
+    box.addEventListener('click', tryLandscape, false);
+  })();
+
   // ==================================================================
   // 触屏操作（2026-11-06 R8）
   // ------------------------------------------------------------------
