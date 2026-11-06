@@ -1001,6 +1001,106 @@ static void test_phase_price(void) {
     currentLevel = savedLevel;
 }
 
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 2 轮）：**背包满了买不到东西，也不能扣钱**
+ * ------------------------------------------------------------------
+ * 旧顺序：先 WalletSpend，再 `if (x < BottleCap()) x++`。
+ * 结果背包满时金币照扣、物品静默丢弃，而且没有任何退款路径
+ * （全文件 WalletAdd 出现 0 次）。
+ * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 3 轮）：**第 6 层给两次奖励，界面要说明白**
+ * ------------------------------------------------------------------
+ * 技能在偶数层、遗物在 3 的倍数层 → 第 6 / 12 层同时命中。
+ * 代码里本来就有链式调用（取完遗物自动开技能选择），
+ * 但界面标题两次都写「三选一 / 选择遗物」，玩家会以为第二次是 bug。
+ * 这里钉住轮次标记：第一次 (1/2)，链式第二次 (2/2)。
+ * ================================================================== */
+static void test_double_reward_rounds(void) {
+    extern int skillPickRound, skillPickTotal;
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+    currentLevel = 6;                 /* 6 % 3 == 0 且 6 % 2 == 0 */
+    GenerateLevel();
+    { extern void RewardScheduleForLevel(int); RewardScheduleForLevel(6); }
+
+    CHECK(skillPickTotal == 2,
+          "level 6 must announce two separate rewards");
+    CHECK(skillPickRound == 1,
+          "the relic pick comes first and must be labelled 1 of 2");
+
+    /* 模拟"取完遗物"之后的链式第二次 */
+    {
+        extern void OpenSkillPick(void);
+        skillPickRound = 2;
+        OpenSkillPick();
+        CHECK(skillPickRound == 2 && skillPickTotal == 2,
+              "the chained skill pick must be labelled 2 of 2");
+    }
+
+    /* 普通偶数层只有一个奖励 */
+    currentLevel = 4;
+    GenerateLevel();
+    { extern void RewardScheduleForLevel(int); RewardScheduleForLevel(4); }
+    CHECK(skillPickTotal == 1, "a plain even floor must announce a single reward");
+}
+
+static void test_shop_full_bag_no_charge(void) {
+    extern int shopRow, shopPage, shopOffer[SHOP_OFFERS], shopPrice[SHOP_OFFERS];
+    extern int flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
+    extern int carryGold;
+    extern int BottleCap(void);
+    extern void ShopOpen(int);
+    extern void ShopActivate(void);
+    extern int ShopRowCount(void);
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    /* 直接把售价表改成"照明棒"，然后把它塞满 */
+    ShopOpen(1);
+    shopPage = SHP_SHOP;         /* 商品页 */
+    shopRow = 0;
+    shopOffer[0] = 1;            /* kind 1 = flares */
+    shopPrice[0] = 50;
+
+    int cap = BottleCap();
+    flares = cap;                /* 满 */
+
+    /* ---- 满包：钱不能少 ---- */
+    carryGold = 1000;
+    int before = carryGold;
+    { extern float shopCooldown[SHOP_COOLDOWN_ROWS]; shopCooldown[0] = 0.0f; }
+    ShopActivate();
+    CHECK(carryGold == before,
+          "buying a full-bag throwable must NOT charge gold");
+    CHECK(flares == cap, "the bag must stay exactly at cap, not overflow");
+
+    /* ---- 不满：正常扣钱、正常入包 ---- */
+    flares = cap - 1;
+    carryGold = 1000;
+    before = carryGold;
+    { extern float shopCooldown[SHOP_COOLDOWN_ROWS]; shopCooldown[0] = 0.0f; }
+    ShopActivate();
+    CHECK(carryGold == before - 50,
+          "a purchase that fits must still charge exactly the listed price");
+    CHECK(flares == cap, "a purchase that fits must put the item in the bag");
+
+    /* ---- 电池没有容量上限：满包也必须能买 ---- */
+    shopRow = 0;
+    shopOffer[0] = 6;            /* kind 6 = 电池 */
+    shopPrice[0] = 40;
+    flares = cap; bottles = cap; smokeBombs = cap;
+    gluePots = cap; echoBolts = cap; decoys = cap;
+    carryGold = 500;
+    before = carryGold;
+    { extern float shopCooldown[SHOP_COOLDOWN_ROWS]; shopCooldown[0] = 0.0f; }
+    ShopActivate();
+    CHECK(carryGold == before - 40,
+          "battery is not bag-limited and must remain purchasable at full bag");
+}
+
 static void test_phase_beacon(void) {
     extern int   phaseOwned, phaseCharges, phasePlaced;
     extern float phaseX, phaseY;
@@ -3204,6 +3304,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

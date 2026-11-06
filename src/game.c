@@ -387,6 +387,12 @@ int skillPickOptions[INRUN_CHOICES] = {-1, -1, -1};
 int skillPickSel = 0;
 int pickMode = 0;
 static int pendingSkillDraft=0;      /* v2.0：0 = 局内技能，1 = 遗物 */
+/* 2026-11-06（v2.4.1 第 3 轮）：第 6 / 12 层**技能与遗物同时触发**，
+   两次是独立选择。这两个计数只用于界面提示"第几次 / 共几次"，
+   不参与任何逻辑判断 —— 用当前持有状态去推是不可能的。 */
+void RewardScheduleForLevel(int level);   /* 2026-11-06 第 3 轮：前置声明 */
+int skillPickRound = 1;
+int skillPickTotal = 1;
 int bossLevel = 0;     /* v2.1：本层是否 Boss 层 */
 /* 2026-11-06：bossMaxHp 删除（BOSS 已不存在，没有任何读者） */
 int bossDefeated = 0;
@@ -6136,14 +6142,7 @@ GenerateLevel();
          * 设计：每 3 层给一次遗物三选一（比技能稀有），
          *       和技能错开层级（技能在偶数层，遗物在 3 的倍数层）。
          * ================================================================ */
-        if (currentLevel % 3 == 0) {
-            pendingSkillDraft = (currentLevel % 2 == 0);
-            extern void OpenRelicPick(void);
-            OpenRelicPick();
-        } else if (currentLevel % 2 == 0) {
-            extern void OpenSkillPick(void);
-            OpenSkillPick();
-        }
+        RewardScheduleForLevel(currentLevel);
 
     floorSpotted = 0;
     /* v3.3：换层时清空胶水，否则上一层扔的会残留到下一层 */
@@ -7140,6 +7139,32 @@ void ActivateMenuItem(void) {
     }
 }
 
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 3 轮）：**奖励调度抽成函数**
+ * ------------------------------------------------------------------
+ * 原来这段逻辑内联在 Update() 里（一个两千多行的函数），
+ * 既没法单独测，也没法在别处复用。
+ *
+ * 规则：
+ *   3 的倍数层 → 遗物
+ *   偶数层     → 技能
+ *   6 / 12 同时命中 → 遗物先、技能后，界面标 (1/2) 与 (2/2)
+ * ================================================================== */
+void RewardScheduleForLevel(int level) {
+    int relic = (level % 3 == 0);
+    int skill = (level % 2 == 0);
+    pendingSkillDraft = (relic && skill) ? 1 : 0;
+    skillPickTotal = (relic && skill) ? 2 : 1;
+    skillPickRound = 1;
+    if (relic) {
+        extern void OpenRelicPick(void);
+        OpenRelicPick();
+    } else if (skill) {
+        extern void OpenSkillPick(void);
+        OpenSkillPick();
+    }
+}
+
 /* ---- v1.8 局内技能三选一 ---- */
 void OpenSkillPick(void) {
     int pool[INRUN_COUNT];
@@ -7265,7 +7290,14 @@ void CloseSkillPick(void) {
     pickMode = 0;
     for (int k = 0; k < INRUN_CHOICES; k++) skillPickOptions[k] = -1;
     currentState = prevState;
-    if (wasRelic && pendingSkillDraft) { pendingSkillDraft=0; OpenSkillPick(); return; }
+    if (wasRelic && pendingSkillDraft) {
+        /* 链式第二次：轮次标记成 2，界面显示"（2/2）" */
+        pendingSkillDraft = 0;
+        skillPickRound = 2;
+        if (skillPickTotal < 2) skillPickTotal = 2;
+        OpenSkillPick();
+        return;
+    }
     ForceCursor(0);
     /* 鼠标点的卡：回到局内时左键还按着，不清就会立刻开始蓄力、
        松手朝面前的墙扔一个道具（还带 14 半径噪声把怪引来）。 */

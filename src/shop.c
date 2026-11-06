@@ -243,6 +243,26 @@ const char* ShopPageTitle(void) {
    但安全屋就在本层，玩家身上明明有 60 金币，站店里却提示「金币不够」。
    这里提供统一入口：先扣已入账的 carryGold，不够再扣本层待上缴的 carryGold。
    返回 1 = 扣成功，0 = 两边加起来也不够。 */
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 2 轮）：**这一格物品还装得下吗**
+ * ------------------------------------------------------------------
+ * 投掷物都受 BottleCap() 限制；电池（6）与理智（default）没有容量，
+ * 恒为"装得下"。判定与真正入包用的是**同一个上限**，避免"能买但进不去"。
+ * ================================================================== */
+static int ShopItemFits(int kind) {
+    int cap = BottleCap();
+    switch (kind) {
+    case 0: return bottles    < cap;
+    case 1: return flares     < cap;
+    case 2: return smokeBombs < cap;
+    case 3: return gluePots   < cap;
+    case 4: return echoBolts  < cap;
+    case 5: return decoys     < cap;
+    case 8: { extern int phaseBeacons; return phaseBeacons < cap; }
+    default: return 1;      /* 电池 / 理智 / 药包 */
+    }
+}
+
 static int ShopSpend(int cost) {
     /* v6：统一走 Wallet —— 单一货币，不再有"已入账 / 待上缴"两级 */
     extern int WalletSpendRun(int);
@@ -576,6 +596,25 @@ void ShopActivate(void) {
         if (idx < 0) idx = 0;
         if (idx >= SHOP_OFFERS) return;
 
+        /* ==================================================================
+         * 2026-11-06（v2.4.1 第 2 轮）：**先判容量，再扣钱**
+         * ------------------------------------------------------------------
+         * 原来顺序是：扣钱 → 再 `if (x < BottleCap()) x++;`
+         * 于是背包满的时候金币照扣、物品静默丢弃
+         * （整个 shop.c 里 WalletAdd 出现 0 次，没有任何退款路径）。
+         *
+         * 现在把"这一格装不装得下"提到扣钱之前，装不下就整笔拒绝。
+         * kind 的计算也必须一起上移 —— 它原来在扣钱**之后**。
+         * ================================================================ */
+        int kind = (idx >= 0 && idx < SHOP_OFFERS) ? shopOffer[idx] : 0;
+        if (kind < 0 || kind >= SHOP_ITEM_KINDS) kind = 0;
+        if (!ShopItemFits(kind)) {
+            pickupMsg = Tr("BAG FULL", "背包已满");
+            pickupMsgTimer = 1.2f;
+            uiDirty = 1;
+            return;
+        }
+
         /* 冷却中 → 拒绝并提示还剩多久 */
         if (ShopCooldownOf(idx) > 0.05f) {
             static char cmsg[64];
@@ -594,8 +633,7 @@ void ShopActivate(void) {
             return;
         }
         /* v6 第 ㊹ 轮：**买的是这一格的物品，不是"第几行"** */
-        int kind = (idx >= 0 && idx < SHOP_OFFERS) ? shopOffer[idx] : 0;
-        if (kind < 0 || kind >= SHOP_ITEM_KINDS) kind = 0;
+        /* 2026-11-06：kind 已经在上面的容量判定里算好了，这里不再重复声明 */
         switch (kind) {
         case 0: if (bottles < BottleCap()) bottles++;
                 pickupMsg = Tr("+1 SLING", "+1 投石"); break;

@@ -903,10 +903,23 @@ MenuGeo GetMenuGeo(void) {
                 return g;
             }
             return MakeGeo("THE HUB", HUB_ROWS, UIS(50), UIS(30), UIS(700), UIS(46), STATE_HUB);
-        case STATE_SKILL_PICK:
-            return MakeGeo(pickMode == 1 ? Tr("CHOOSE A RELIC", "选择遗物")
-                                         : Tr("CHOOSE ONE", "三选一"),
+        case STATE_SKILL_PICK: {
+            /* 2026-11-06（v2.4.1 第 3 轮）：第 6/12 层会连着给两次奖励，
+               标题必须说清"这是第几次"，否则玩家以为界面卡住了、
+               或者以为第二次是浪费。 */
+            extern int skillPickRound, skillPickTotal;
+            static char pickTitle[96];
+            const char* base = (pickMode == 1)
+                ? Tr("CHOOSE A RELIC", "选择遗物")
+                : Tr("CHOOSE ONE", "三选一");
+            if (skillPickTotal > 1)
+                snprintf(pickTitle, sizeof(pickTitle), "%s  (%d/%d)",
+                         base, skillPickRound, skillPickTotal);
+            else
+                snprintf(pickTitle, sizeof(pickTitle), "%s", base);
+            return MakeGeo(pickTitle,
                            INRUN_CHOICES, UIS(48), UIS(30), UIS(780), UIS(56), STATE_SKILL_PICK);
+        }
         case STATE_WEAPON_PICK: return MakeGeo(Tr("CHOOSE WEAPON", "选择初始武器"), WPN_COUNT, UIS(52), UIS(32), UIS(760), UIS(60), STATE_WEAPON_PICK);
         /* v2.9：安全屋不画大红标题 —— 顶部页签已经说清是哪个页面，
            那行「SAFE HOUSE - SHOP」横在中间会把改造树整个遮住（用户截图）。
