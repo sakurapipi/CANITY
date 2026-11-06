@@ -18,6 +18,7 @@
 #include "game.h"
 #include "control_effect.h"
 #include "spider.h"
+#include "plat.h"
 #include "build_tags.h"
 #include "neutral.h"
 #include "suspicion.h"
@@ -519,7 +520,7 @@ static inline int IsActionDown(ActionId act) {
     int vk = g_bindings[act];
     if (vk == 0) return 0;
     if (vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON) {
-        return (GetAsyncKeyState(vk) & 0x8000) != 0;
+        return PlatKeyDown(vk);
     }
     return keys[vk];
 }
@@ -895,8 +896,8 @@ void PollInput(void) {
        就能把自己还原 —— 不注册全局热键，也不会在正常游戏时抢键。 */
     if (IsIconic(g_hwnd)) {
         static int prevF11 = 0, prevEnter = 0;
-        int f11 = (GetAsyncKeyState(VK_F11) & 0x8000) ? 1 : 0;
-        int ent = (GetAsyncKeyState(VK_RETURN) & 0x8000) ? 1 : 0;
+        int f11 = PlatKeyDown(VK_F11);
+        int ent = PlatKeyDown(VK_RETURN);
         if ((f11 && !prevF11) || (ent && !prevEnter)) {
             ShowWindow(g_hwnd, SW_RESTORE);
             SetForegroundWindow(g_hwnd);
@@ -919,7 +920,7 @@ void PollInput(void) {
         int vk = g_bindings[a];
         if (vk <= 0 || vk > 255) continue;
         if (vk == VK_LBUTTON || vk == VK_RBUTTON) continue;   /* 鼠标键由 Windows 消息驱动 */
-        int down = (GetAsyncKeyState(vk) & 0x8000) ? 1 : 0;
+        int down = PlatKeyDown(vk);
         if (down && !prevDown[vk]) {
             keyPressed[vk] = 1;              /* 0→1 的边沿，等价于 WM_KEYDOWN 那次 */
             if (currentState == STATE_PLAYING) keyPressed[vk] = 1;
@@ -963,7 +964,7 @@ int IsActionPressed(ActionId act) {
     if (vk == 0) return 0;
     if (vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON) {
         /* 鼠标边缘触发简化：这里只返回按下状态，Update 里用前一帧对比实现边缘 */
-        return (GetAsyncKeyState(vk) & 0x8000) != 0;
+        return PlatKeyDown(vk);
     }
     return keyPressed[vk];
 }
@@ -3587,16 +3588,47 @@ void GenerateLevel(void) {
         }
     }
 }
-/* ShowCursor 是引用计数的，跨状态切换很容易把引用数弄歪；
-   这里用 GetCursorInfo 把光标状态直接拧到目标值 */
+/* 2026-11-06（R2）：实现搬到平台层（Win32 用 GetCursorInfo/ShowCursor，
+   网页端改 canvas style.cursor）。这里只保留接口。 */
 void ForceCursor(int visible) {
-    CURSORINFO ci;
-    ci.cbSize = sizeof(ci);
-    for (int i = 0; i < 64; i++) {
-        if (!GetCursorInfo(&ci)) break;
-        int showing = (ci.flags & CURSOR_SHOWING) ? 1 : 0;
-        if (showing == (visible ? 1 : 0)) break;
-        ShowCursor(visible ? TRUE : FALSE);
+    PlatShowCursor(visible);
+}
+
+/* ==================================================================
+ * 2026-11-06（网页版 R2）：**鼠标视角旋转抽成平台无关函数**
+ * ------------------------------------------------------------------
+ * 原来这段逻辑长在 WM_MOUSEMOVE 里，网页端根本没有窗口消息。
+ * 现在 Win32 的 WndProc 与网页后端都调这一个函数，行为完全一致。
+ * ================================================================== */
+void CanityMouseLook(int dx, int dyv) {
+    if (dyv != 0) {
+        /* v1.12：鼠标上下 = 抬头/低头（地平线偏移）。
+           y-shearing 与这套墙渲染冲突（远距离黑边、缝隙、光球遮挡错乱），
+           先关掉，等换成"真俯仰"（每列按 pitch 重新投影）再开。 */
+        #define PITCH_ENABLED 0
+        #if PITCH_ENABLED
+        extern float pitchRatio;
+        pitchRatio -= (float)dyv * 0.0030f * mouseSens;
+        if (pitchRatio > 1.0f) pitchRatio = 1.0f;
+        if (pitchRatio < -1.0f) pitchRatio = -1.0f;
+        uiDirty = 1;
+        #else
+        {
+            extern float pitchRatio;
+            extern int horizon;
+            pitchRatio = 0.0f;
+            horizon = 0;
+        }
+        #endif
+    }
+    if (dx != 0) {
+        float rot = (float)(dx * MOUSE_BASE_SENS * mouseSens);
+        float oldDirX = dirX;
+        dirX = dirX * cosf(rot) - dirY * sinf(rot);
+        dirY = oldDirX * sinf(rot) + dirY * cosf(rot);
+        float oldPlaneX = planeX;
+        planeX = planeX * cosf(rot) - planeY * sinf(rot);
+        planeY = oldPlaneX * sinf(rot) + planeY * cosf(rot);
     }
 }
 void UpdateExplored(void) {
@@ -5142,7 +5174,7 @@ void Update(float dt) {
        用户要求把校准系统移进藏身点，冷却 60 秒，主要奖励改成理智。
        这样柜子/床底从「单纯躲避」变成「喘息 + 回复」，才有存在感。 */
     if ((inSafe || hiddenIn >= 0) && currentState == STATE_PLAYING) {
-        int spaceDown = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+        int spaceDown = PlatKeyDown(VK_SPACE);
         /* 审计·中 4：控制效果生效时，空格属于 QTE，校准不能抢 */
     if (keyPressed[VK_SPACE] && !ControlActive()) {
             keyPressed[VK_SPACE] = 0;   /* 吃掉这一次，别再触发闪避 */
@@ -5171,7 +5203,7 @@ void Update(float dt) {
     {
         static int tPrev = 0;
         extern int shopOverlayOpen;
-        int tNow = (GetAsyncKeyState('T') & 0x8000) ? 1 : 0;
+        int tNow = PlatKeyDown('T');
         if (tNow && !tPrev && currentState == STATE_PLAYING && !shopOverlayOpen) {
             extern void ShopOpen(int);
             ShopOpen(currentLevel);
@@ -5875,7 +5907,7 @@ void Update(float dt) {
                 /* v3.4：TWIN THROW（局内树 id 11）一次扔两个 ——
                    按住 Shift 时生效，消耗 2 个。 */
                 ThrowItem(sel, mouseCharge);
-                if (BenchTwinThrow() && GetKeyState(VK_SHIFT) < 0 && counts[sel] >= 2) {
+                if (BenchTwinThrow() && PlatKeyDown(VK_SHIFT) && counts[sel] >= 2) {
                     ThrowItem(sel, mouseCharge);
                     /* 第二个也扣掉：下面那一行只扣 1，这里补扣 */
                     extern int flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
@@ -8365,32 +8397,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
             int dx = currentPos.x - lastMousePos.x;
             int dyv = currentPos.y - lastMousePos.y;
-            if (dyv != 0) {
-                /* v1.12：鼠标上下 = 抬头/低头（地平线偏移） */
-                extern float pitchRatio;
-                /* v1.12：y-shearing 与这套墙渲染冲突（远距离黑边、缝隙、光球遮挡错乱），
-                   先关掉，等换成"真俯仰"（每列按 pitch 重新投影）再开。
-                   要重新启用：把下面这行改成 1。 */
-                #define PITCH_ENABLED 0   /* 真俯仰待重做：垂直/水平焦距需统一 */
-                #if PITCH_ENABLED
-                pitchRatio -= (float)dyv * 0.0030f * mouseSens;
-                if (pitchRatio > 1.0f) pitchRatio = 1.0f;
-                if (pitchRatio < -1.0f) pitchRatio = -1.0f;
-                uiDirty = 1;
-                #else
-                pitchRatio = 0.0f;
-                horizon = 0;
-                #endif
-            }
-            if (dx != 0) {
-                float rot = (float)(dx * MOUSE_BASE_SENS * mouseSens);
-                float oldDirX = dirX;
-                dirX = dirX * cosf(rot) - dirY * sinf(rot);
-                dirY = oldDirX * sinf(rot) + dirY * cosf(rot);
-                float oldPlaneX = planeX;
-                planeX = planeX * cosf(rot) - planeY * sinf(rot);
-                planeY = oldPlaneX * sinf(rot) + planeY * cosf(rot);
-            }
+            CanityMouseLook(dx, dyv);
             SetCursorPos(center.x, center.y);
             lastMousePos = center;
             return 0;

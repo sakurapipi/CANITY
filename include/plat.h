@@ -71,6 +71,9 @@ int  PlatKeyDown(int vk);
 /* 自上一帧以来的鼠标位移（像素）。 */
 void PlatMouseDelta(int* dx, int* dy);
 
+/* 光标可见性（跨状态切换要能确定地拧到目标值）。 */
+void PlatShowCursor(int visible);
+
 /* 指针锁定（第一人称视角需要无限位移）。 */
 void PlatSetCursorLock(int on);
 int  PlatCursorLocked(void);
@@ -89,6 +92,18 @@ void PlatSetCursorPos(int x, int y);
 int PlatReadFileBytes(const char* name, void* buf, int cap);      /* 返回字节数，失败 <0 */
 int PlatWriteFileBytes(const char* name, const void* buf, int len);/* 返回 0 成功 */
 int PlatExeDir(char* out, int cap);                                /* 返回写入长度 */
+
+/* ---------------------------------------------------------------------
+ * 路径级原语（存档分区用；path 是完整路径，不是相对名）
+ * -------------------------------------------------------------------
+ * 网页端没有真实文件系统：这里的 path 只取**文件名部分**作为 localStorage
+ * 的键，目录信息被丢弃。存档格式与调用方逻辑完全不变。
+ * ------------------------------------------------------------------- */
+int PlatReadFilePath(const char* path, void* buf, int cap);         /* 字节数，失败 <0 */
+/* 原子写：先写临时文件 + 落盘 + 改名。0 = 成功，否则平台错误码。 */
+int PlatWriteFileAtomic(const char* path, const void* data, int len);
+int PlatCopyPath(const char* from, const char* to);                 /* 0 = 成功 */
+int PlatRenamePath(const char* from, const char* to);               /* 0 = 成功 */
 
 /* ---------------------------------------------------------------------
  * 音频

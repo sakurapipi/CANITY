@@ -232,6 +232,19 @@ void PlatMouseDelta(int* dx, int* dy) {
     last = p;
 }
 
+/* ShowCursor 是引用计数的，跨状态切换很容易把引用数弄歪；
+   这里用 GetCursorInfo 把光标状态直接拧到目标值（原有逻辑）。 */
+void PlatShowCursor(int visible) {
+    CURSORINFO ci;
+    for (int i = 0; i < 64; i++) {
+        ci.cbSize = sizeof(ci);
+        if (!GetCursorInfo(&ci)) break;
+        int showing = (ci.flags & CURSOR_SHOWING) ? 1 : 0;
+        if (showing == (visible ? 1 : 0)) break;
+        ShowCursor(visible ? TRUE : FALSE);
+    }
+}
+
 void PlatSetCursorLock(int on) {
     if (on) {
         if (g_hwnd) {
@@ -308,6 +321,61 @@ int PlatWriteFileBytes(const char* name, const void* buf, int len) {
     size_t n = fwrite(buf, 1, (size_t)len, f);
     fclose(f);
     return (n == (size_t)len) ? 0 : -1;
+}
+
+/* ---------------------------------------------------------------------
+ * 路径级文件原语（R3）
+ * -------------------------------------------------------------------
+ * 原子写仍是原来那一套：.tmp -> FlushFileBuffers -> 原子改名。
+ * 这一段从 src/save/save_backend.c 原样搬过来 —— 存档后端从此只认平台层。
+ * ------------------------------------------------------------------- */
+int PlatReadFilePath(const char* path, void* buf, int cap) {
+    if (!path || !path[0] || !buf || cap <= 0) return -1;
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    DWORD got = 0;
+    BOOL ok = ReadFile(h, buf, (DWORD)cap, &got, NULL);
+    CloseHandle(h);
+    return ok ? (long)got : -1;
+}
+
+int PlatWriteFileAtomic(const char* path, const void* data, int len) {
+    if (!path || !path[0] || (!data && len > 0)) return 87;   /* ERROR_INVALID_PARAMETER */
+    char tmp[MAX_PATH + 16];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+
+    HANDLE h = CreateFileA(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return (int)GetLastError();
+
+    DWORD wrote = 0;
+    BOOL ok = WriteFile(h, data, (DWORD)len, &wrote, NULL);
+    DWORD err = ok ? 0 : GetLastError();
+    if (ok && wrote != (DWORD)len) err = ERROR_WRITE_FAULT;
+
+    /* FlushFileBuffers 失败 = 数据可能没落盘，等同于写失败，必须报出去。
+       后续失败不能覆盖**第一个**错误码 —— 第一个才是根因。 */
+    if (!err && !FlushFileBuffers(h)) err = GetLastError();
+    if (!CloseHandle(h) && !err) err = GetLastError();
+
+    if (err) { DeleteFileA(tmp); return (int)err; }
+    if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) {
+        err = GetLastError();
+        DeleteFileA(tmp);
+        return (int)err;
+    }
+    return 0;
+}
+
+int PlatCopyPath(const char* from, const char* to) {
+    if (!from || !to) return -1;
+    return CopyFileA(from, to, FALSE) ? 0 : -1;
+}
+
+int PlatRenamePath(const char* from, const char* to) {
+    if (!from || !to) return -1;
+    return MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
 }
 
 /* ---------------------------------------------------------------------

@@ -18,7 +18,8 @@
 #include "common.h"
 #include "save.h"
 #include "save_format.h"
-#include "steam_zone.h"   /* 传输原语：SteamZoneCloudUpload / SteamZoneCloudSync */
+#include "steam_zone.h"
+#include "plat.h"   /* 传输原语：SteamZoneCloudUpload / SteamZoneCloudSync */
 
 /* g_saveState / g_saveError / g_savePath 的定义在 save.c，
    声明在 save.h（上面已 include），这里直接用，不重复定义。 */
@@ -34,59 +35,18 @@ const char* SavePathForSlot(int i, int slot, char* buf, size_t n);
    先写 .tmp、flush 落盘、再原子改名 —— 写到一半掉电只会留下 .tmp，
    不会把主档变成「存在但是空的」。 */
 int SaveBackendWrite(const char* path, const void* data, size_t n) {
-    if (!path || !path[0] || !data) return 87;   /* ERROR_INVALID_PARAMETER */
-    char tmp[MAX_PATH + 16];
-    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-
-    HANDLE h = CreateFileA(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) return (int)GetLastError();
-
-    DWORD wrote = 0;
-    BOOL ok = WriteFile(h, data, (DWORD)n, &wrote, NULL);
-    DWORD err = ok ? 0 : GetLastError();
-    if (ok && wrote != (DWORD)n) err = ERROR_WRITE_FAULT;
-
-    /* ==================================================================
-     * 2026-11-06（v2.4-alpha R6）：**保留第一次失败的错误码**
-     * ------------------------------------------------------------------
-     * 原来这两行都没检查返回值：
-     *     if (ok) FlushFileBuffers(h);
-     *     CloseHandle(h);
-     *
-     * 对存档来说，FlushFileBuffers 失败 = 数据可能还在系统缓存里没落盘，
-     * 这等同于写失败，必须报出去；否则会向调用方谎报"保存成功"，
-     * 而掉电后文件是旧的甚至半截。
-     *
-     * 顺序问题：后续失败不能覆盖**第一个**错误码 —— 第一个才是根因。
-     * （审查提到的另一点也修了：调用方不该在失败后再去读
-     *   GetLastError()，因为中间任何一次成功调用都可能把它冲掉。
-     *   这里返回的是捕获到的值，调用方必须用返回值。）
-     * ================================================================== */
-    if (!err && !FlushFileBuffers(h)) err = GetLastError();
-    if (!CloseHandle(h) && !err) err = GetLastError();
-
-    if (err) { DeleteFileA(tmp); return (int)err; }
-    if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) {
-        err = GetLastError();
-        DeleteFileA(tmp);
-        return (int)err;
-    }
-    return 0;
+    /* 2026-11-06（R3）：原子写搬进平台层。
+       桌面仍是 .tmp -> FlushFileBuffers -> 原子改名；
+       网页端是 localStorage 的临时键 -> 正式键。
+       这里只拿错误码，不再碰任何系统 API。 */
+    if (!path || !path[0] || !data) return 87;
+    return PlatWriteFileAtomic(path, data, (int)n);
 }
 
 /* 返回读到的字节数，失败返回 -1 */
 long SaveBackendRead(const char* path, void* buf, size_t cap) {
     if (!path || !path[0] || !buf || cap == 0) return -1;
-    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
-                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) return -1;
-    DWORD got = 0;
-    BOOL ok = ReadFile(h, buf, (DWORD)cap, &got, NULL);
-    /* 读侧的 CloseHandle 失败不影响已读到的数据，但也不该静默：
-       记一份在 g_saveError 之外没有意义 —— 这里只保证句柄一定被关掉。 */
-    CloseHandle(h);
-    return ok ? (long)got : -1;
+    return (long)PlatReadFilePath(path, buf, (int)cap);
 }
 
 /* ================================================================== */

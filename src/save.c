@@ -6,6 +6,7 @@
 #include "common.h"
 #include "achievements.h"
 #include "save.h"
+#include "plat.h"
 #include "daily.h"
 #include "threat.h"
 #include "steam_zone.h"
@@ -62,7 +63,7 @@ static void BackupSave(void) {
     /* v3.0：缓冲区要留后缀的位置，否则满路径时后缀被截断 */
     char b[MAX_PATH + 16];
     snprintf(b, sizeof(b), "%s.bak", p);
-    CopyFileA(p, b, FALSE);
+    PlatCopyPath(p, b);
 }
 
 static const char* SavePathCandSlot(int i, int slot, char* buf, size_t n) {
@@ -73,9 +74,8 @@ static const char* SavePathCandSlot(int i, int slot, char* buf, size_t n) {
         return buf;
     }
     if (i == 0) {
-        GetModuleFileNameA(NULL, buf, (DWORD)n);
-        char* sl = strrchr(buf, '\\');
-        if (sl) sl[1] = 0; else buf[0] = 0;
+        /* 2026-11-06（R3）：目录名由平台层给（网页端为空 = 用相对名） */
+        PlatExeDir(buf, (int)n);
         {
             char fn[64];
             snprintf(fn, sizeof(fn), "canity%d.sav", slot);
@@ -1240,7 +1240,7 @@ int LoadSettings(void) {
         SavePathCand(0, oldp, sizeof(oldp));
         if (oldp[0]) {
             snprintf(arc, sizeof(arc), "%s.v%d.bak", oldp, g_save.version);
-            MoveFileExA(oldp, arc, MOVEFILE_REPLACE_EXISTING);
+            PlatRenamePath(oldp, arc);
         }
         return 0;
     }
