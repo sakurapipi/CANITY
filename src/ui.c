@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "build_tags.h"
 #include "hatch.h"
 #include "map_rooms.h"
 #include "art_direction.h"
@@ -912,11 +913,25 @@ MenuGeo GetMenuGeo(void) {
             const char* base = (pickMode == 1)
                 ? Tr("CHOOSE A RELIC", "选择遗物")
                 : Tr("CHOOSE ONE", "三选一");
-            if (skillPickTotal > 1)
-                snprintf(pickTitle, sizeof(pickTitle), "%s  (%d/%d)",
-                         base, skillPickRound, skillPickTotal);
-            else
-                snprintf(pickTitle, sizeof(pickTitle), "%s", base);
+            /* 2026-11-06（v2.4.1 第 9 轮）：标题里带上当前流派倾向。
+               用户要的是"看得出这一局正在形成什么玩法"，
+               而不是只看到一排技能名。 */
+            {
+                extern BuildTag BuildDominant(void);
+                extern const char* BuildName(BuildTag, int);
+                BuildTag d = BuildDominant();
+                const char* bn = (d != BUILD_NONE) ? BuildName(d, g_lang == LANG_ZH) : NULL;
+                if (skillPickTotal > 1 && bn)
+                    snprintf(pickTitle, sizeof(pickTitle), "%s  (%d/%d)  ·  %s",
+                             base, skillPickRound, skillPickTotal, bn);
+                else if (skillPickTotal > 1)
+                    snprintf(pickTitle, sizeof(pickTitle), "%s  (%d/%d)",
+                             base, skillPickRound, skillPickTotal);
+                else if (bn)
+                    snprintf(pickTitle, sizeof(pickTitle), "%s  ·  %s", base, bn);
+                else
+                    snprintf(pickTitle, sizeof(pickTitle), "%s", base);
+            }
             return MakeGeo(pickTitle,
                            INRUN_CHOICES, UIS(48), UIS(30), UIS(780), UIS(56), STATE_SKILL_PICK);
         }

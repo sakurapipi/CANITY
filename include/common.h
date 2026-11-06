@@ -29,7 +29,7 @@
 #include <stdint.h>   /* uint32_t：程序化配乐用（规则：系统头只在本文件出现） */
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 32         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_NUM 33         /* 整数版本，进存档做记录 */
 /* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
    置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
    置 0 = 回到旧的战斗版本。 */
@@ -61,7 +61,7 @@
 #endif
 /* 用 -DCANITY_SOUND_EVENT=0 可以编译出"旧路径"版本，便于二分定位。 */
 
-#define CANITY_VERSION_STR "2.4"        /* 显示版本，窗口标题 / 主菜单 */
+#define CANITY_VERSION_STR "2.4.1"      /* v2.4.1：流派 / 蜘蛛 / 拾光虫 / 存档补全 */
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -419,6 +419,22 @@ extern SmokeCloud smokes[MAX_SMOKE];
  * 新行为：一局**总量受控**（最多 4 只，随层数递增到 4），
  *         出现时先笑一声 → 躲进角落等你 → 你靠近它才扑。
  * ================================================================ */
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 10 轮）：**生物荧光**
+ * ------------------------------------------------------------------
+ * 用户反馈：「现有道具应该可以获得特殊强化，例如照明棒恢复 SAN」。
+ *
+ * 关键限制：**治疗时间 ≠ 发光时间**。
+ * 一根照明棒能亮 25 秒，但只有前 8 秒能治疗（最多 12 SAN），
+ * 且每层总预算 24 SAN。否则道具流可以靠大量照明棒无限续航。
+ * ================================================================ */
+#define FLARE_HEAL_RADIUS      2.5f   /* 玩家离灯多近才回 */
+#define FLARE_HEAL_RATE        1.5f   /* 每秒回多少 SAN */
+#define FLARE_HEAL_SECONDS     8.0f   /* 每根灯的有效治疗时长 */
+#define FLARE_HEAL_CAP         12.0f  /* 每根灯最多回多少 */
+#define FLARE_HEAL_FLOOR_BUDGET 24.0f /* 每层总预算 */
+#define FLARE_LIFE_SECONDS     25.0f  /* 照明棒发光时长（与投掷物一致） */
+
 #define JUMPER_MAX_PER_RUN   4     /* 一局总量上限 */
 #define JUMPER_LURK_TRIGGER_R 3.2f /* 躲角落时，玩家进到这么近才扑 */
 #define JUMPER_CONTROL_TIME  10.0f /* 失败后控制玩家的秒数 */
@@ -819,7 +835,7 @@ enum {
 #define DECOY_KEY_COOLDOWN 8.0f
 
 /* ---- 局内技能 ---- */
-#define INRUN_COUNT 24    /* v2.0：16→24，池子够大才不重复 */
+#define INRUN_COUNT 25    /* v2.4.1：24→25（新增 IR_BIOLUM） */
 #define INRUN_PICK_EVERY 2      /* 每通关 2 层给一次三选一 */
 #define INRUN_CHOICES 3
 enum {
@@ -829,7 +845,10 @@ enum {
     IR_STATICFIELD, IR_MISDIRECT,
     /* v2.0 新增 8 张（16 -> 24） */
     IR_FIELDREPAIR, IR_NERVESHOT, IR_PACKRAT, IR_OILCAN, IR_LUCKYFUSE,
-    IR_STEADYHAND, IR_SWIFTRELOAD, IR_TIMESTOP
+    IR_STEADYHAND, IR_SWIFTRELOAD, IR_TIMESTOP,
+    /* v2.4.1（第 10 轮）：道具流的核心卡 —— 照明棒变成生存资源。
+       枚举追加在**末尾**，旧存档的 runSkillMask 位含义不变。 */
+    IR_BIOLUM
 };
 
 /* ------------------------------------------------------------------ */

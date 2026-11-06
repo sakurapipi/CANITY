@@ -663,3 +663,60 @@ void UpdateShots(float dt) {
         }
     }
 }
+
+
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 10 轮）：**生物荧光**
+ * ------------------------------------------------------------------
+ * 持有 IR_BIOLUM 时，落到地上的照明棒会缓慢恢复附近玩家的理智。
+ *
+ * 三个限制缺一不可（否则道具流可以无限续航）：
+ *   ① 单根只在**前 8 秒**有效 —— 灯亮 25 秒，但治疗时间更短
+ *   ② 单根最多回 12 点
+ *   ③ 每层总预算 24 点
+ *
+ * 用 "elapsed = FLARE_LIFE - life" 判断有效窗口，
+ * 不需要给每根灯加状态字段（thrown[] 是存档结构，不能随便扩）。
+ * 多根重叠时**只按最近的一根**结算，不叠加速率。
+ * ================================================================== */
+static float s_floorFlareHealed = 0.0f;
+
+void FlareHealReset(void) { s_floorFlareHealed = 0.0f; }
+float FlareHealBudgetLeft(void) { return FLARE_HEAL_FLOOR_BUDGET - s_floorFlareHealed; }
+
+void FlareHealTick(float dt) {
+    extern int   RunSkillOwned(int);
+    extern int   MAX_THROWN_HACK;   /* 占位，实际用 MAX_THROWN */
+    (void)MAX_THROWN_HACK;
+
+    if (!RunSkillOwned(IR_BIOLUM)) return;
+    if (sanity >= SanityMax()) return;
+    if (s_floorFlareHealed >= FLARE_HEAL_FLOOR_BUDGET) return;
+
+    /* 找最近的一根"仍在有效治疗窗口内"的落地照明棒 */
+    int best = -1;
+    float bestD2 = FLARE_HEAL_RADIUS * FLARE_HEAL_RADIUS;
+    for (int i = 0; i < MAX_THROWN; i++) {
+        if (!thrown[i].active) continue;
+        if (thrown[i].type != 0) continue;             /* 0 = 照明棒 */
+        float elapsed = FLARE_LIFE_SECONDS - thrown[i].life;
+        if (elapsed < 0.0f) continue;
+        if (elapsed >= FLARE_HEAL_SECONDS) continue;   /* 只在前 8 秒有效 */
+        float d2 = Dist2(thrown[i].x, thrown[i].y, posX, posY);
+        if (d2 > bestD2) continue;
+        bestD2 = d2;
+        best = i;
+    }
+    if (best < 0) return;
+    (void)best;
+
+    /* 单根上限靠"窗口 + 速率"自然成立：1.5/s × 8s = 12，
+       正好等于 FLARE_HEAL_CAP。这里再用总量封一次顶，防止帧率异常。 */
+    float want = FLARE_HEAL_RATE * dt;
+    if (want > FLARE_HEAL_CAP) want = FLARE_HEAL_CAP;
+    float room = FLARE_HEAL_FLOOR_BUDGET - s_floorFlareHealed;
+    if (want > room) want = room;
+    sanity += want;
+    if (sanity > SanityMax()) sanity = SanityMax();
+    s_floorFlareHealed += want;
+}

@@ -422,6 +422,9 @@ const InRunDef inRunDefs[INRUN_COUNT] = {
     {"QUIET SOLE", "Walk noise -25%", IRK_PASSIVE, 0, "静底", "走路噪音 -25%"},
     {"COLD BLOOD", "Sanity drain -20%", IRK_PASSIVE, 0, "冷血", "理智流失 -20%"},
     {"BLACKOUT", "All hunters blind for 10s", IRK_ULTIMATE, 1, "全黑", "全场追捕者失明 10 秒"},
+    /* v2.4.1 第 10 轮 */
+    {"BIOLUMINESCENCE", "Landed flares heal sanity nearby", IRK_PASSIVE, 0,
+     "生物荧光", "落到地上的照明棒会缓慢恢复附近理智"},
 };
 
 unsigned int runSkillMask = 0u;

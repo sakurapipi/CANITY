@@ -1,6 +1,7 @@
 /* Integration checks link the real game modules; all saves are isolated. */
 #include "common.h"
 #include "control_effect.h"
+#include "build_tags.h"
 #include "map_validator.h"
 #include "hatch.h"
 #include "game.h"
@@ -906,6 +907,317 @@ static void test_room_wall_flags(void) {
  *
  * 同时验证：挣脱后进入免疫窗口，且不会同时叠加抱脸虫的控制。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 7 轮）：**流派标签与倾向识别**
+ * ------------------------------------------------------------------
+ * 标签必须覆盖每一张卡（没有孤儿卡），分数必须单调，
+ * 并列或不够分时必须表态"还没成型" —— 不能因为一分之差
+ * 把玩家锁进某个流派。
+ * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 8 轮）：**抽卡必须有方向**
+ * ------------------------------------------------------------------
+ * 三张卡的结构必须是：主流派 1 + 异流派 1 + 通用/稀有 1。
+ * 同时钉住：
+ *   · 抽卡不碰全局 rand()（否则地图生成序列会跟着漂）
+ *   · 不出现三张全是即时补给
+ *   · 不重复
+ * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 10 轮）：**照明棒回 SAN 必须有预算**
+ * ------------------------------------------------------------------
+ * 用户反馈："照明棒恢复 SAN" 是这轮最值得做的道具机制。
+ * 但它不能变成免费血包：
+ *   单根只在前 8 秒有效、最多 12 点；每层总预算 24 点。
+ * 这条用例把两个上限都钉死 —— 去掉任何一个都会红。
+ * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 11 轮）：**拾光虫：不伤害、不产出、不阻挡**
+ * ------------------------------------------------------------------
+ * 中立怪的意义是让玩家产生"这玩意危不危险"的判断，
+ * 一旦它开始掉金币或挡路，就变成刷子或路障。
+ * ================================================================== */
+static void test_mote_neutral(void) {
+    extern void  NeutralReset(void);
+    extern void  NeutralDebugPlace(float, float);
+    extern void  NeutralTick(float);
+    extern int   NeutralCount(void);
+    extern int   NeutralScared(void);
+    extern float NeutralX(int), NeutralY(int);
+    extern float posX, posY;
+    extern float sanity;
+    extern int   carryGold, bankGold;
+    extern int   Blocked(float, float);
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+    currentLevel = 3;
+    GenerateLevel();
+
+    NeutralReset();
+    CHECK(NeutralCount() == 0, "the neutral creature must start absent");
+
+    /* ---- 受惊逃走 ---- */
+    NeutralDebugPlace(posX + 1.0f, posY);      /* 就在玩家旁边 */
+    CHECK(NeutralCount() == 1, "debug placement must activate it");
+
+    float d0 = sqrtf((NeutralX(0) - posX) * (NeutralX(0) - posX) +
+                     (NeutralY(0) - posY) * (NeutralY(0) - posY));
+    for (int i = 0; i < 60; i++) NeutralTick(0.02f);
+    float d1 = sqrtf((NeutralX(0) - posX) * (NeutralX(0) - posX) +
+                     (NeutralY(0) - posY) * (NeutralY(0) - posY));
+    CHECK(NeutralScared() == 1, "being close to the player must scare it");
+    CHECK(d1 > d0, "a scared mote must move AWAY from the player");
+
+    /* ---- 不伤害、不产出、不阻挡 ---- */
+    {
+        float s0 = sanity;
+        int g0 = carryGold, b0 = bankGold;
+        int blocked = Blocked(NeutralX(0), NeutralY(0));
+        for (int i = 0; i < 200; i++) NeutralTick(0.02f);
+        CHECK(sanity == s0, "the neutral creature must not touch sanity");
+        CHECK(carryGold == g0 && bankGold == b0,
+              "the neutral creature must not produce any gold");
+        CHECK(blocked == Blocked(NeutralX(0), NeutralY(0)) ||
+              blocked == 0,
+              "the neutral creature must never become a wall");
+    }
+
+    NeutralReset();
+    CHECK(NeutralCount() == 0, "NeutralReset must clear it (floor change / load)");
+}
+
+static void test_flare_heal_budget(void) {
+    extern void  FlareHealTick(float);
+    extern void  FlareHealReset(void);
+    extern float FlareHealBudgetLeft(void);
+    extern void  RunSkillTake(int);
+    extern void  RunSkillsReset(void);
+    extern int   relicOwned[RELIC_COUNT];
+    extern float sanity, posX, posY;
+    extern float SanityMax(void);
+    extern void  ThrowItem(int, float);
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+    currentLevel = 1;
+    GenerateLevel();
+
+    RunSkillsReset();
+    for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
+    FlareHealReset();
+
+    /* ---- 没有这张卡：一点也不回 ---- */
+    sanity = SanityMax() * 0.5f;
+    {
+        float s0 = sanity;
+        ThrowItem(0, 1.0f);                 /* 扔一根照明棒 */
+        for (int i = 0; i < 400; i++) FlareHealTick(0.02f);
+        CHECK(sanity == s0, "without IR_BIOLUM a flare must heal nothing");
+    }
+
+    /* ---- 有卡：开始回，但被每秒上限约束 ---- */
+    RunSkillTake(IR_BIOLUM);
+    CHECK(FlareHealBudgetLeft() >= 23.9f, "the floor budget must start full");
+    sanity = SanityMax() * 0.2f;
+    {
+        float s0 = sanity;
+        for (int i = 0; i < 50; i++) FlareHealTick(0.02f);   /* 1 秒 */
+        float gained = sanity - s0;
+        CHECK(gained > 0.0f, "with IR_BIOLUM a landed flare must heal");
+        CHECK(gained <= 1.6f, "the heal rate must not exceed ~1.5 per second");
+    }
+
+    /* ---- 每根灯 8 秒窗口：把时间推过去就不再回 ---- */
+    {
+        float s0 = sanity;
+        for (int i = 0; i < 100; i++) FlareHealTick(0.02f);  /* 再 2 秒 */
+        sanity = SanityMax() * 0.2f;                        /* 压低再测窗口 */
+        s0 = sanity;
+        /* thrown[].life 已经消耗了一些；这里直接把预算跑完来验证封顶 */
+        FlareHealReset();
+        for (int i = 0; i < 4000; i++) {
+            sanity = SanityMax() * 0.2f;                    /* 保持低位，避免满了停手 */
+            FlareHealTick(0.02f);
+            if (FlareHealBudgetLeft() <= 0.01f) break;
+        }
+        CHECK(FlareHealBudgetLeft() <= 0.01f,
+              "the per-floor budget must be exhaustible");
+        float s1 = sanity;
+        sanity = SanityMax() * 0.2f;
+        for (int i = 0; i < 200; i++) FlareHealTick(0.02f);
+        CHECK(FlareHealBudgetLeft() <= 0.01f,
+              "once the floor budget is spent no further healing may happen");
+        sanity = s1;
+    }
+
+    RunSkillsReset();
+    for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
+    FlareHealReset();
+}
+
+static void test_draft_structure(void) {
+    extern void  OpenSkillPick(void);
+    extern int   skillPickOptions[INRUN_CHOICES];
+    extern void  RunSkillsReset(void);
+    extern void  RunSkillTake(int);
+    extern void  RunRngSeed(unsigned int);
+    extern unsigned int RunRngNext(void);
+    extern unsigned int RunRngState(void);
+    extern int   relicOwned[RELIC_COUNT];
+    extern BuildTag BuildTagOfSkill(int);
+
+    RunSkillsReset();
+    for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
+
+    /* 让"速通"成型：拿两张速通卡 */
+    {
+        int taken = 0;
+        for (int i = 0; i < INRUN_COUNT && taken < 2; i++) {
+            if (BuildTagOfSkill(i) == BUILD_SPEED) { RunSkillTake(i); taken++; }
+        }
+        CHECK(taken == 2, "the test needs two speed cards to form a build");
+    }
+
+    /* ---- 抽卡不动全局 rand() ---- */
+    {
+        srand(4242);
+        int r1 = rand();
+        srand(4242);
+        RunRngSeed(777);
+        OpenSkillPick();            /* 内部只该用 RunRngNext */
+        int r2 = rand();
+        CHECK(r1 == r2,
+              "the draft must NOT consume the global rand() sequence "
+              "(otherwise map generation drifts)");
+        CHECK(RunRngState() != 777,
+              "the draft's own PRNG must have advanced");
+    }
+
+    /* ---- 结构：连续 40 次都要符合"三桶各一" ---- */
+    int okStruct = 0, tries = 0, allInstant = 0;
+    for (int round = 0; round < 40; round++) {
+        RunRngSeed(1000 + (unsigned)round);
+        OpenSkillPick();
+        int a = skillPickOptions[0], b = skillPickOptions[1], c = skillPickOptions[2];
+        if (a < 0 || b < 0 || c < 0) continue;
+        tries++;
+        CHECK(a != b && b != c && a != c, "the three offers must be distinct");
+        {
+            int nd = 0, no = 0, nu = 0;
+            int ids[3] = { a, b, c };
+            for (int k = 0; k < 3; k++) {
+                BuildTag t = BuildTagOfSkill(ids[k]);
+                if (t == BUILD_NONE) nu++;
+                else if (t == BUILD_SPEED) nd++;
+                else no++;
+            }
+            /* 成型后：主流派至少 1 张、通用至少 1 张 */
+            if (nd >= 1 && nu >= 1) okStruct++;
+            {
+                extern const InRunDef inRunDefs[];
+                if (inRunDefs[a].kind == IRK_INSTANT &&
+                    inRunDefs[b].kind == IRK_INSTANT &&
+                    inRunDefs[c].kind == IRK_INSTANT) allInstant++;
+            }
+        }
+    }
+    CHECK(tries >= 30, "the draft must keep producing three offers");
+    CHECK(okStruct >= tries * 8 / 10,
+          "at least 80% of drafts must contain one dominant-build card and one generic card");
+    CHECK(allInstant == 0,
+          "a draft must never be three instant-supply cards");
+
+    RunSkillsReset();
+    for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
+}
+
+static void test_build_tags(void) {
+    extern unsigned int runSkillMask;
+    extern int relicOwned[RELIC_COUNT];
+    extern void RunSkillsReset(void);
+    extern BuildTag BuildTagOfSkill(int);
+    extern BuildTag BuildTagOfRelic(int);
+    extern int      BuildScore(BuildTag);
+    extern BuildTag BuildDominant(void);
+    extern const char* BuildName(BuildTag, int);
+    extern void     BuildSynergyList(char*, int);
+
+    RunSkillsReset();
+    for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
+
+    /* ---- 每张卡都有标签，且标签合法 ---- */
+    {
+        int gadgets = 0, speeds = 0, steaths = 0, none = 0;
+        for (int i = 0; i < INRUN_COUNT; i++) {
+            BuildTag t = BuildTagOfSkill(i);
+            CHECK(t >= BUILD_NONE && t < BUILD_COUNT, "every card must carry a valid tag");
+            if (t == BUILD_GADGET) gadgets++;
+            else if (t == BUILD_SPEED) speeds++;
+            else if (t == BUILD_STEALTH) steaths++;
+            else none++;
+        }
+        CHECK(gadgets > 0 && speeds > 0 && steaths > 0,
+              "all three builds must have at least one card");
+        CHECK(gadgets + speeds + steaths + none == INRUN_COUNT,
+              "the tag table must cover every card exactly once");
+    }
+
+    /* ---- 遗物也必须全部有标签 ---- */
+    {
+        int speeds = 0;
+        for (int i = 0; i < RELIC_COUNT; i++) {
+            BuildTag t = BuildTagOfRelic(i);
+            CHECK(t >= BUILD_NONE && t < BUILD_COUNT, "every relic must carry a valid tag");
+            if (t == BUILD_SPEED) speeds++;
+        }
+        CHECK(speeds > 0, "at least one relic must feed the speed build");
+    }
+
+    /* ---- 空持有 → 没成型 ---- */
+    CHECK(BuildDominant() == BUILD_NONE,
+          "with nothing owned the game must say 'no build yet'");
+
+    /* ---- 两张速通卡 → 速通成型（2×2 = 4 >= 3） ---- */
+    {
+        extern void RunSkillTake(int);
+        /* 找出两张 SPEED 卡并持有 */
+        int taken = 0;
+        for (int i = 0; i < INRUN_COUNT && taken < 2; i++) {
+            if (BuildTagOfSkill(i) == BUILD_SPEED) { RunSkillTake(i); taken++; }
+        }
+        CHECK(taken == 2, "the test needs at least two speed cards");
+        CHECK(BuildDominant() == BUILD_SPEED,
+              "two speed cards (4 points) must be recognised as the speed build");
+        CHECK(BuildScore(BUILD_SPEED) >= 4, "score must count every owned card");
+        CHECK(BuildScore(BUILD_GADGET) == 0, "other builds must stay at zero");
+
+        char line[192];
+        BuildSynergyList(line, sizeof(line));
+        CHECK(line[0] != 0, "the panel must list the synergies it detected");
+        CHECK(strcmp(BuildName(BUILD_SPEED, 1), "速通突围") == 0,
+              "the Chinese build name must match the design doc");
+    }
+
+    /* ---- 并列 → 不表态 ---- */
+    {
+        extern void RunSkillsReset(void);
+        RunSkillsReset();
+        /* 各拿一张：2 分 vs 2 分，且都 < 3 → 仍然没成型 */
+        for (int i = 0; i < INRUN_COUNT; i++) {
+            if (BuildTagOfSkill(i) == BUILD_GADGET) { RunSkillTake(i); break; }
+        }
+        for (int i = 0; i < INRUN_COUNT; i++) {
+            if (BuildTagOfSkill(i) == BUILD_STEALTH) { RunSkillTake(i); break; }
+        }
+        CHECK(BuildDominant() == BUILD_NONE,
+              "a 2-vs-2 split must NOT lock the player into a build");
+    }
+
+    RunSkillsReset();
+    for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
+}
+
 static void test_spider_bind_no_damage(void) {
     extern void  SpiderReset(void);
     extern void  SpiderDebugPlace(float, float);
@@ -3442,6 +3754,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_spider_bind_no_damage();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

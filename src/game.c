@@ -18,6 +18,8 @@
 #include "game.h"
 #include "control_effect.h"
 #include "spider.h"
+#include "build_tags.h"
+#include "neutral.h"
 #include "suspicion.h"
 #include "weapons.h"
 #include "shop.h"
@@ -3155,6 +3157,10 @@ void GenerateLevel(void) {
     /* 2026-11-06：用户要求追光怪 +1 只 */
     SpawnLightBeast();
     SpawnLightBeast2();
+    /* 2026-11-06（第 11 轮）：拾光虫 —— 第 2 层起、30%、每层最多 1 只 */
+    { extern void NeutralReset(void); extern int NeutralTrySpawn(int);
+      NeutralReset(); NeutralTrySpawn(currentLevel); }
+
     /* 2026-11-06（第 5 轮）：缚丝蛛 —— 第 4 层起、30%、每层最多 1 只 */
     { extern void SpiderReset(void); extern int SpiderTrySpawn(int);
       SpiderReset(); SpiderTrySpawn(currentLevel); }
@@ -5818,6 +5824,8 @@ void Update(float dt) {
        失焦都不会调用 Update，计时自然停表。 */
     { extern void ControlTick(float); ControlTick(dt); }
     { extern void SpiderTick(float); SpiderTick(dt); }   /* 2026-11-06 第 5 轮 */
+    { extern void FlareHealTick(float); FlareHealTick(dt); }   /* 2026-11-06 第 10 轮 */
+    { extern void NeutralTick(float); NeutralTick(dt); }        /* 2026-11-06 第 11 轮 */
     UpdateLeech(dt);
 
     /* ==================================================================
@@ -6562,6 +6570,8 @@ void StartGame(void) {
     { extern void PhaseReset(void); PhaseReset(); }
     { extern void ControlReset(void); ControlReset(); }   /* 2026-11-06：控制层按局清零 */
     { extern void SpiderReset(void); SpiderReset(); }      /* 2026-11-06：蜘蛛按局清零 */
+    { extern void FlareHealReset(void); FlareHealReset(); } /* 2026-11-06：每局/每层重置治疗预算 */
+    { extern void NeutralReset(void); NeutralReset(); }       /* 2026-11-06：中立怪按局清零 */
     if (trainingMode) {
         /* 2026-11-06：训练营里直接发一批相位投掷物 —— 那里就是拿来试机制的。
            相位装置已经改成投掷物（槽 6/7），不再需要 PhaseGive。 */
@@ -7178,18 +7188,126 @@ void RewardScheduleForLevel(int level) {
     }
 }
 
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 8 轮）：**抽卡专用 PRNG**
+ * ------------------------------------------------------------------
+ * 地图 / 怪物 / 箱子 / 抽卡现在共用 rand()。
+ * 一旦抽卡里多插几次 rand()，整个地图生成序列会跟着漂 ——
+ * 之前用 map_gen_dump 攒的死路/模板覆盖率证据会全部对不上种子。
+ *
+ * 所以抽卡用自己的 xorshift 状态，存在 SaveBlob 末尾（v34 追加）。
+ * 读档时状态为 0 → 重新播种。
+ * ================================================================== */
+static unsigned int s_runRng = 0;
+
+unsigned int RunRngNext(void) {
+    if (s_runRng == 0) s_runRng = 0x9E3779B9u;   /* 兜底，绝不让它恒为 0 */
+    s_runRng ^= s_runRng << 13;
+    s_runRng ^= s_runRng >> 17;
+    s_runRng ^= s_runRng << 5;
+    return s_runRng;
+}
+
+void RunRngSeed(unsigned int seed) {
+    s_runRng = seed ? seed : 0x9E3779B9u;
+}
+
+unsigned int RunRngState(void) { return s_runRng; }
+void RunRngSetState(unsigned int st) { s_runRng = st; }
+
+/* 这张卡现在拿了有没有用。目前只排除"效果尚未实现"的新卡，
+   避免出了拿不到东西的卡（v2.4.1 只做了 3 张新卡的效果）。 */
+static int CardUsableNow(int irId) {
+    extern int BuildCardImplemented(int);
+    return BuildCardImplemented(irId);
+}
+
 /* ---- v1.8 局内技能三选一 ---- */
 void OpenSkillPick(void) {
     int pool[INRUN_COUNT];
     int n = 0;
     for (int i = 0; i < INRUN_COUNT; i++)
-        if (RunSkillPickable(i, currentLevel)) pool[n++] = i;
+        if (RunSkillPickable(i, currentLevel) && CardUsableNow(i)) pool[n++] = i;
     if (n <= 0) return;
-    for (int k = 0; k < INRUN_CHOICES; k++) {
-        if (n <= 0) { skillPickOptions[k] = -1; continue; }
-        int pick = rand() % n;
-        skillPickOptions[k] = pool[pick];
-        pool[pick] = pool[--n];
+
+    /* ==================================================================
+     * 2026-11-06（v2.4.1 第 8 轮）：**有方向的随机**
+     * ------------------------------------------------------------------
+     * 用户要求："局内加点要有明确的流派"，但也不能失去 Roguelike 的
+     * 不可预测性。所以三张卡按结构给：
+     *   ① 主流派 1 张
+     *   ② 异流派 1 张（鼓励混搭）
+     *   ③ 通用或稀有 1 张
+     * 还没成型（BUILD_NONE）时退化成"三桶各抽一张"。
+     *
+     * 全部走 RunRngNext()，**不碰 rand()**。
+     * ================================================================ */
+    {
+        extern BuildTag BuildTagOfSkill(int);
+        extern BuildTag BuildDominant(void);
+        BuildTag dom = BuildDominant();
+
+        int bDom[INRUN_COUNT], nDom = 0;
+        int bOth[INRUN_COUNT], nOth = 0;
+        int bUni[INRUN_COUNT], nUni = 0;
+        for (int i = 0; i < n; i++) {
+            BuildTag t = BuildTagOfSkill(pool[i]);
+            if (t == BUILD_NONE) bUni[nUni++] = pool[i];
+            else if (dom != BUILD_NONE && t == dom) bDom[nDom++] = pool[i];
+            else bOth[nOth++] = pool[i];
+        }
+
+        int out[INRUN_CHOICES];
+        int on = 0;
+
+        /* 从桶里取一张（取走就删掉，避免重复） */
+        #define TAKE_FROM(arr, cnt) \
+            do { if ((cnt) > 0) { \
+                     int _k = (int)(RunRngNext() % (unsigned)(cnt)); \
+                     out[on++] = (arr)[_k]; \
+                     (arr)[_k] = (arr)[--(cnt)]; \
+                 } } while (0)
+
+        if (dom != BUILD_NONE) {
+            TAKE_FROM(bDom, nDom);      /* ① 主流派 */
+            TAKE_FROM(bOth, nOth);      /* ② 异流派 */
+            TAKE_FROM(bUni, nUni);      /* ③ 通用/稀有 */
+        } else {
+            TAKE_FROM(bUni, nUni);
+            TAKE_FROM(bOth, nOth);
+            TAKE_FROM(bDom, nDom);
+        }
+
+        /* 不足就用剩下的补齐（池子被稀有度/等级筛过，可能不够三张） */
+        while (on < INRUN_CHOICES) {
+            if (nUni > 0) { TAKE_FROM(bUni, nUni); continue; }
+            if (nOth > 0) { TAKE_FROM(bOth, nOth); continue; }
+            if (nDom > 0) { TAKE_FROM(bDom, nDom); continue; }
+            break;
+        }
+        #undef TAKE_FROM
+
+        /* 规则：不能三张全是即时补给 —— 那样这一轮等于没得选。 */
+        {
+            int allInstant = (on == INRUN_CHOICES);
+            for (int k = 0; k < on; k++)
+                if (inRunDefs[out[k]].kind != IRK_INSTANT) { allInstant = 0; break; }
+            if (allInstant) {
+                /* 用一张非即时卡换掉最后一张（如果池里还有） */
+                for (int i = 0; i < n; i++) {
+                    int id = pool[i];
+                    int used = 0;
+                    for (int k = 0; k < on; k++) if (out[k] == id) used = 1;
+                    if (used) continue;
+                    if (inRunDefs[id].kind == IRK_INSTANT) continue;
+                    out[on - 1] = id;
+                    break;
+                }
+            }
+        }
+
+        for (int k = 0; k < INRUN_CHOICES; k++)
+            skillPickOptions[k] = (k < on) ? out[k] : -1;
     }
     skillPickSel = 0;
     pickMode = 0;
