@@ -89,6 +89,15 @@ static void WebFrame(void) {
      *
      * 现在补上第二条：这里做 0->1 边沿检测，交给同一个 CanityKeyDown。
      * ================================================================ */
+    /* 鼠标：菜单悬停 + 点击（渲染空间坐标，已由平台层反算） */
+    {
+        extern void CanityMouseMove(int mx, int my);
+        extern void CanityMouseClick(int mx, int my);
+        int mx = 0, my = 0;
+        if (PlatTakeMouseClick(&mx, &my)) CanityMouseClick(mx, my);
+        else if (PlatTakeMouseMove(&mx, &my)) CanityMouseMove(mx, my);
+    }
+
     {
         static int prevKey[256];
         for (int vk = 1; vk < 256; vk++) {
@@ -110,6 +119,15 @@ static void WebFrame(void) {
     }
     if (steps >= 16) s_accum = 0.0;
     ClearKeyEdges();
+
+    /* 渲染前再对齐一次：Update 里可能刚调用过 ApplyDisplayMode 之类
+       会碰窗口尺寸的路径（按 F11、恢复默认设置、切换全屏）。
+       这一行保证"画出来的那一帧"UI 空间和渲染空间一定相等 ——
+       用户报的"退出对局后 UI 又错乱"就是从这类路径漏进来的。 */
+    {
+        extern void SyncWindowSize(void);
+        SyncWindowSize();
+    }
 
     RenderFrame();
 
@@ -151,6 +169,18 @@ EMSCRIPTEN_KEEPALIVE int CanityProbeGameKey(int vk) {
     extern int keyPressed[];
     if (vk < 0 || vk > 255) return -1;
     return (keys[vk] ? 1 : 0) | (keyPressed[vk] ? 2 : 0);
+}
+
+/* UI 布局的关键量：winW/winH 必须等于 renderW/renderH */
+EMSCRIPTEN_KEEPALIVE int CanityProbeLayout(int which) {
+    extern int winW, winH, renderW, renderH;
+    switch (which) {
+    case 0: return winW;
+    case 1: return winH;
+    case 2: return renderW;
+    case 3: return renderH;
+    default: return 0;
+    }
 }
 
 EMSCRIPTEN_KEEPALIVE int CanityProbeUpdates(void) {

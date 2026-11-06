@@ -22,6 +22,10 @@ extern HWND g_hwnd;
  * 网页在主循环里对每个 0->1 边沿调用（repeat 恒 0）。
  * ================================================================== */
 int CanityKeyDown(int vk, int repeat);
+
+/* 鼠标入口（网页端用；坐标是渲染空间像素）。 */
+void CanityMouseMove(int mx, int my);
+void CanityMouseClick(int mx, int my);
 extern GameState currentState, prevState;
 extern int gameWon;                 /* 0=失败结局 1=通关结局（第 10 层逃出生天） */
 

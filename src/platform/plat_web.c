@@ -49,10 +49,35 @@ EM_JS(void, js_plat_init, (void), {
 
         /* 鼠标键：与 Win32 的 VK_LBUTTON(1)/VK_RBUTTON(2)/VK_MBUTTON(4) 对齐，
            这样存档里的键位绑定跨平台通用 */
+        /* 2026-11-06（用户实测：**鼠标没接入**）
+           canvas 用 object-fit: contain 显示，四周可能有黑边，
+           所以要把 clientX/Y 反算回 canvas 的**内部像素坐标**，
+           不能直接拿 CSS 坐标当渲染坐标用。 */
+        function toRender(e) {
+            var r = cv.getBoundingClientRect();
+            var cw = cv.width, ch = cv.height;
+            if (!r.width || !r.height || !cw || !ch) return null;
+            var scale = Math.min(r.width / cw, r.height / ch);
+            if (scale <= 0) return null;
+            var dw = cw * scale, dh = ch * scale;
+            var offX = r.left + (r.width - dw) / 2;
+            var offY = r.top + (r.height - dh) / 2;
+            return { x: (e.clientX - offX) / scale, y: (e.clientY - offY) / scale };
+        }
+        Module._toRender = toRender;
+        Module._pendingMove = null;
+
+        cv.addEventListener('mousemove', function (e) {
+            var p = toRender(e);
+            if (p) Module._pendingMove = p;
+        }, false);
+
         cv.addEventListener('mousedown', function (e) {
             if (e.button === 0) Module._keys[0x01] = 1;
             else if (e.button === 2) Module._keys[0x02] = 1;
             else if (e.button === 1) Module._keys[0x04] = 1;
+            var p = toRender(e);
+            if (p && e.button === 0) Module._pendingClick = p;
         }, false);
         window.addEventListener('mouseup', function (e) {
             if (e.button === 0) Module._keys[0x01] = 0;
@@ -127,6 +152,26 @@ EM_JS(void, js_set_lock, (int on), {
         document.exitPointerLock();
     }
     if (Module.canvas) Module.canvas.style.cursor = on ? 'none' : 'default';
+});
+
+/* 取一次待处理的鼠标移动（没有就返回 0） */
+EM_JS(int, js_take_move, (int* x, int* y), {
+    var p = Module._pendingMove;
+    if (!p) return 0;
+    HEAP32[x >> 2] = p.x | 0;
+    HEAP32[y >> 2] = p.y | 0;
+    Module._pendingMove = null;
+    return 1;
+});
+
+/* 取一次待处理的左键点击 */
+EM_JS(int, js_take_click, (int* x, int* y), {
+    var p = Module._pendingClick;
+    if (!p) return 0;
+    HEAP32[x >> 2] = p.x | 0;
+    HEAP32[y >> 2] = p.y | 0;
+    Module._pendingClick = null;
+    return 1;
 });
 
 EM_JS(int, js_locked, (void), { return (Module._locked || Module._touchLook) ? 1 : 0; });
@@ -338,6 +383,20 @@ void PlatSetCursorPos(int x, int y) { (void)x; (void)y; }
 void PlatRequestQuit(void) {
     /* 浏览器里"退出游戏"= 回到标题；主循环不能自己停掉 */
     emscripten_run_script("window.close && window.close();");
+}
+
+int PlatTakeMouseMove(int* x, int* y) {
+    int a = 0, b = 0;
+    int r = js_take_move(&a, &b);
+    if (r) { if (x) *x = a; if (y) *y = b; }
+    return r;
+}
+
+int PlatTakeMouseClick(int* x, int* y) {
+    int a = 0, b = 0;
+    int r = js_take_click(&a, &b);
+    if (r) { if (x) *x = a; if (y) *y = b; }
+    return r;
 }
 
 void PlatSetCapture(int on) {

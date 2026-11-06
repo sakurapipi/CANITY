@@ -7169,14 +7169,16 @@ void PauseGame(void) {
 
 void ApplyDisplayMode(void) {
 #ifdef CANITY_WEB
-    /* 2026-11-06（R4）：浏览器里没有"窗口模式/分辨率"这回事。
-       canvas 由 CSS 铺满，逻辑尺寸跟着它走。 */
-    {
-        int cw = 0, ch = 0;
-        PlatWindowSize(&cw, &ch);
-        if (cw > 0) winW = cw;
-        if (ch > 0) winH = ch;
-    }
+    /* ==================================================================
+     * 2026-11-06（用户实测：**退出对局后 UI 又错乱**）
+     * ------------------------------------------------------------------
+     * 这里原来把 winW/winH 设成 canvas 的 CSS 尺寸 —— 正是那个
+     * "UI 空间必须等于渲染空间"的坑。任何走到 ApplyDisplayMode 的路径
+     * （按 F11、恢复默认设置、切换全屏）都会把布局比例弄坏。
+     *
+     * 浏览器里没有"窗口模式/分辨率"这回事：canvas 由 CSS 铺满，
+     * winW/winH 的唯一权威是 SyncWindowSize()。这里什么都不改。
+     * ================================================================ */
     uiDirty = 1;
 #else
     if (isFullscreen) {
@@ -7866,7 +7868,7 @@ void SkillDragMove(int mx, int my);
 void SkillDragEnd(void);
 int  SkillIsDragging(void);
 
-static void MouseToLogical(int* mx, int* my) {
+void MouseToLogical(int* mx, int* my) {
     int cw = 0, ch = 0;
     PlatWindowSize(&cw, &ch);
     if (cw <= 0 || ch <= 0) return;
@@ -7874,7 +7876,7 @@ static void MouseToLogical(int* mx, int* my) {
     *my = *my * winH / ch;
 }
 
-static void HitTestMenu(int mx, int my) {
+void HitTestMenu(int mx, int my) {
     MouseToLogical(&mx, &my);
     if (currentState == STATE_GAMEOVER) return;
 
@@ -8141,6 +8143,45 @@ if (currentState == STATE_HUB) {
 /* CanityKeyDown 会调它；实现在下面的窗口分区里，网页端没有这个函数 */
 static void MapCursorRefresh(void);
 #endif
+
+/* ==================================================================
+ * 鼠标入口 —— **平台无关**（2026-11-06）
+ * ------------------------------------------------------------------
+ * 网页端没有窗口消息，菜单的悬停/点击原来全在 WndProc 里，
+ * 于是"鼠标完全没反应"。
+ *
+ * 这里只覆盖**菜单类界面**（主菜单 / 暂停 / 设置等）的悬停与点击，
+ * 那是玩家在浏览器里最先用到鼠标的地方。游戏内的视角仍走
+ * CanityMouseLook（指针锁定后的相对位移），那条路是独立的。
+ * ================================================================== */
+void CanityMouseMove(int mx, int my) {
+    g_mousePos.x = mx;
+    g_mousePos.y = my;
+    if (currentState != STATE_PLAYING) {
+        HitTestMenu(mx, my);
+        uiDirty = 1;
+    }
+}
+
+void CanityMouseClick(int mx, int my) {
+    /* 坐标 -> 逻辑空间 -> 命中 */
+    MouseToLogical(&mx, &my);
+    g_mousePos.x = mx;
+    g_mousePos.y = my;
+
+    if (currentState == STATE_MAIN_MENU || currentState == STATE_PAUSED) {
+        HitTestMenu(mx, my);
+        ActivateMenuItem();
+        uiDirty = 1;
+        return;
+    }
+    if (currentState == STATE_SETTINGS || currentState == STATE_HUB ||
+        currentState == STATE_SAFEHOUSE || currentState == STATE_ACHIEVEMENTS ||
+        currentState == STATE_BESTIARY || currentState == STATE_BANK) {
+        HitTestMenu(mx, my);
+        uiDirty = 1;
+    }
+}
 
 /* ==================================================================
  * 键盘按下处理 —— **平台无关**
