@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "control_effect.h"
 #include "hatch.h"
 #include "map_rooms.h"
 #include "cell_meta.h"
@@ -3763,6 +3764,97 @@ void Render3D(void) {
                     unsigned int gg = ((c >> 8) & 0xFF) * (unsigned int)k >> 8;
                     unsigned int bb = (c & 0xFF) * (unsigned int)k >> 8;
                     pixels[p] = (c & 0xFF000000u) | (rr << 16) | (gg << 8) | bb;
+                }
+            }
+        }
+    }
+
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**被蛛网缠住的屏幕特效**
+     * ------------------------------------------------------------------
+     * 用户原话：「屏幕上会有那种被蛛网缠住的那种特效」。
+     *
+     * 做法：控制类型是蛛网时，在画面上画一层**放射状丝线** + 边缘压白。
+     *   · 放射线从屏幕四角与四边中点向中心汇聚 —— 读起来就是"糊住了"
+     *   · 边缘一圈白雾（越靠边越浓），把视野挤成中间一块
+     *   · 强度跟剩余控制时间挂钩：快挣脱时变淡，给玩家正反馈
+     *
+     * 直接写 pixels：只画少量线段与边缘带，不是全屏逐像素混合。
+     * ================================================================== */
+    {
+        /* 头文件已有原型，这里不要再写一遍（会撞类型） */
+        extern float ControlTimeLeft(void);
+        if (ControlActive() && ControlCurrent() == CTRL_SPIDER_WEB) {
+            /* 越接近挣脱越淡（5 秒起步 -> 2 秒下限） */
+            float t = ControlTimeLeft();
+            float k = (t - 2.0f) / 3.0f;
+            if (k < 0.0f) k = 0.0f;
+            if (k > 1.0f) k = 1.0f;
+            k = 0.45f + 0.55f * k;
+
+            int w = renderW, h = renderH;
+            int cx = w / 2, cy = h / 2;
+
+            /* ① 边缘白雾：距离中心越远越白 */
+            for (int y = 0; y < h; y++) {
+                int dy = (y > cy) ? (y - cy) : (cy - y);
+                /* 只用纵向和横向较大的一维近似，省掉每像素开方 */
+                for (int x = 0; x < w; x++) {
+                    int dx = (x > cx) ? (x - cx) : (cx - x);
+                    int d = (dx > dy) ? dx : dy;            /* 切比雪夫距离 */
+                    int thr = (w < h ? w : h) * 3 / 10;
+                    if (d <= thr) continue;
+                    int a = (d - thr) * 256 / ((w < h ? w : h) / 2);
+                    if (a > 200) a = 200;
+                    a = (int)((float)a * k);
+                    if (a <= 0) continue;
+                    unsigned int c = pixels[(size_t)y * w + x];
+                    unsigned int rr = ((c >> 16) & 0xFF);
+                    unsigned int gg = ((c >> 8) & 0xFF);
+                    unsigned int bb = (c & 0xFF);
+                    rr = rr + ((230u - rr) * (unsigned)a >> 8);
+                    gg = gg + ((230u - gg) * (unsigned)a >> 8);
+                    bb = bb + ((235u - bb) * (unsigned)a >> 8);
+                    pixels[(size_t)y * w + x] = (c & 0xFF000000u) | (rr << 16) | (gg << 8) | bb;
+                }
+            }
+
+            /* ② 放射丝线：从八条边的锚点向中心画 */
+            {
+                static const int ax[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+                for (int i = 0; i < 8; i++) {
+                    int sx, sy;
+                    switch (ax[i]) {
+                    case 0: sx = 0;      sy = 0;      break;
+                    case 1: sx = cx;     sy = 0;      break;
+                    case 2: sx = w - 1;  sy = 0;      break;
+                    case 3: sx = w - 1;  sy = cy;     break;
+                    case 4: sx = w - 1;  sy = h - 1;  break;
+                    case 5: sx = cx;     sy = h - 1;  break;
+                    case 6: sx = 0;      sy = h - 1;  break;
+                    default: sx = 0;     sy = cy;     break;
+                    }
+                    /* 稍微偏离中心，避免 8 条线在同一个点打结 */
+                    int tx = cx + (sx - cx) / 6;
+                    int ty = cy + (sy - cy) / 6;
+                    int steps = (w > h ? w : h);
+                    for (int st = 0; st < steps; st++) {
+                        float f = (float)st / (float)steps;
+                        int px = sx + (int)((tx - sx) * f);
+                        int py = sy + (int)((ty - sy) * f);
+                        if (px < 0 || py < 0 || px >= w || py >= h) continue;
+                        /* 丝线本身只占 1 像素，每 3 像素画 1 个点 = 虚线质感 */
+                        if ((st % 3) != 0) continue;
+                        unsigned int c = pixels[(size_t)py * w + px];
+                        unsigned int rr = ((c >> 16) & 0xFF);
+                        unsigned int gg = ((c >> 8) & 0xFF);
+                        unsigned int bb = (c & 0xFF);
+                        int a = (int)(150.0f * k);
+                        rr = rr + ((245u - rr) * (unsigned)a >> 8);
+                        gg = gg + ((245u - gg) * (unsigned)a >> 8);
+                        bb = bb + ((245u - bb) * (unsigned)a >> 8);
+                        pixels[(size_t)py * w + px] = (c & 0xFF000000u) | (rr << 16) | (gg << 8) | bb;
+                    }
                 }
             }
         }

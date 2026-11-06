@@ -33,10 +33,27 @@ enum {
 #define SPIDER_RANGE          4.5f   /* 射程（格） */
 #define SPIDER_COOLDOWN_TIME  8.0f
 #define SPIDER_MOVE_SPEED     0.85f  /* 远慢于玩家 2.0 */
-#define SPIDER_WEB_MASH       3
-#define SPIDER_WEB_WINDOW     2.0f
+/* ==================================================================
+ * 2026-11-06（用户要求）：**蛛网挣脱重做**
+ * ------------------------------------------------------------------
+ * 用户原话：「可以控制住你 5 秒钟，然后你连续戳的话，每点一次就可以
+ *           减 0.5 秒的控制时间，解除上限是 2 秒钟。就是说你再怎么解除，
+ *           最快也要等 2 秒钟」。
+ *
+ * 所以不是"戳够几下就放"，而是"把 5 秒削到 2 秒，然后只能等"。
+ * ================================================================ */
+#define SPIDER_WEB_WINDOW     5.0f    /* 初始控制时长 */
+#define SPIDER_WEB_REDUCE     0.5f    /* 每次按键削减 */
+#define SPIDER_WEB_MIN        2.0f    /* 下限：再快也要等这么久 */
+
+/* 2026-11-06（用户要求）：扳手砸中蜘蛛 → 它消失，30 秒内不再刷新 */
+#define SPIDER_RESPAWN_COOLDOWN 30.0f
 
 void  SpiderReset(void);
+/* 被扳手砸中：当场消失，并进入 30 秒不刷新冷却 */
+void  SpiderDispel(void);
+/* 是否处于"刚被砸掉"的冷却里（测试与生成用） */
+float SpiderRespawnCd(void);
 int   SpiderTrySpawn(int level);    /* 返回 1 = 本层有蜘蛛 */
 void  SpiderTick(float dt);
 int   SpiderActive(void);

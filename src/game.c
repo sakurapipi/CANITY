@@ -4229,6 +4229,31 @@ static void WrenchApplyHit(float power) {
 
     }
 
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**扳手砸中缚丝蛛 → 它当场消失，30 秒不刷新**
+     * ------------------------------------------------------------------
+     * 用户原话：「也要出一个克制蜘蛛的方法，就是用那个扳手砸中蜘蛛的话，
+     *           蜘蛛会消失，然后 30 秒之内都不会刷新在场上」。
+     *
+     * 蜘蛛不是 Monster（它不在这套猎手数组里），所以单独判一次。
+     * 5 号位留给它，和清道夫的 4 号位并列。
+     * ================================================================ */
+    {
+        extern int   SpiderActive(void);
+        extern float SpiderX(void), SpiderY(void);
+        extern void  SpiderDispel(void);
+        if (SpiderActive() && !(wrenchHitMask & 32u)) {
+            float sdx = SpiderX() - posX, sdy = SpiderY() - posY;
+            float reach = RunUpgWrenchRange() + BenchKnockExtra() + 1.2f;
+            if (sdx * sdx + sdy * sdy < reach * reach) {
+                SpiderDispel();
+                wrenchHitMask |= 32u;
+                knockCountRun++;
+                AddShake(0.18f, 0.16f);
+            }
+        }
+    }
+
     {
         extern int   CollectorActive(void);
         extern float CollectorX(void), CollectorY(void);

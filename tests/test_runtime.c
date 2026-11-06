@@ -1477,6 +1477,54 @@ static void test_jumper_removed_spider_takes_over(void) {
     SpiderReset();
 }
 
+/* ==================================================================
+ * 2026-11-06（用户要求）：**扳手是克制蜘蛛的手段**
+ * ------------------------------------------------------------------
+ * 用户原话：「也要出一个克制蜘蛛的方法，就是用那个扳手砸中蜘蛛的话，
+ *           蜘蛛会消失，然后 30 秒之内都不会刷新在场上」。
+ * ================================================================== */
+static void test_spider_dispel_cooldown(void) {
+    extern void  SpiderReset(void);
+    extern void  SpiderDispel(void);
+    extern int   SpiderActive(void);
+    extern int   SpiderTrySpawn(int);
+    extern float SpiderRespawnCd(void);
+    extern void  SpiderTick(float);
+    extern void  SpiderDebugPlace(float, float);
+    extern float posX, posY;
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+    currentLevel = 6;
+    GenerateLevel();
+
+    SpiderReset();
+    SpiderDebugPlace(posX + 1.0f, posY);
+    CHECK(SpiderActive() == 1, "the spider must be on the floor");
+    CHECK(SpiderRespawnCd() == 0.0f, "no cooldown before it is hit");
+
+    /* ---- 砸中：消失 + 30 秒冷却 ---- */
+    SpiderDispel();
+    CHECK(SpiderActive() == 0, "a wrench hit must remove the spider");
+    CHECK(SpiderRespawnCd() > 29.0f && SpiderRespawnCd() < 31.0f,
+          "removing the spider must start a 30 second respawn cooldown");
+
+    /* ---- 冷却期内不刷新 ---- */
+    CHECK(SpiderTrySpawn(20) == 0,
+          "the spider must NOT respawn while the 30s cooldown is running");
+
+    /* ---- 冷却走完后可以再刷 ---- */
+    for (int i = 0; i < 3200; i++) SpiderTick(0.01f);   /* 32 秒 */
+    CHECK(SpiderRespawnCd() <= 0.001f, "the cooldown must expire");
+    {
+        int ok = 0;
+        for (int i = 0; i < 40 && !ok; i++) ok = SpiderTrySpawn(20);
+        CHECK(ok == 1, "after the cooldown the spider may spawn again");
+    }
+
+    SpiderReset();
+}
+
 static void test_spider_bind_no_damage(void) {
     extern void  SpiderReset(void);
     extern void  SpiderDebugPlace(float, float);
@@ -1516,15 +1564,43 @@ static void test_spider_bind_no_damage(void) {
     CHECK(ControlCurrent() == CTRL_SPIDER_WEB,
           "the web control must still be the active one");
 
-    /* ---- 挣脱：连按三次 ---- */
-    CHECK(ControlPress() == 0, "the first escape press must not free the player");
-    CHECK(ControlPress() == 0, "the second escape press must not free the player");
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**限时挣脱**
+     * ------------------------------------------------------------------
+     * 用户原话：「控制住你 5 秒钟，连续戳每点一次减 0.5 秒，
+     *           解除上限是 2 秒钟 —— 你再怎么解除最快也要等 2 秒」。
+     * 所以不是"戳够几下就放"，而是"把 5 秒削到 2 秒，然后只能等"。
+     * ================================================================== */
     {
-        int freed = ControlPress();
-        CHECK(freed == 1, "the third escape press must free the player");
+        extern float ControlTimeLeft(void);
+        extern void  ControlTick(float);
+
+        float t0 = ControlTimeLeft();
+        CHECK(t0 > 4.9f && t0 < 5.1f, "a web must start at 5 seconds");
+
+        /* 戳一下减 0.5 */
+        ControlPress();
+        CHECK(ControlTimeLeft() < 4.6f && ControlTimeLeft() > 4.4f,
+              "each escape press must shave 0.5 seconds");
+
+        /* 一直戳到底：不能低于 2 秒 */
+        for (int i = 0; i < 20; i++) ControlPress();
+        CHECK(ControlTimeLeft() >= 1.99f,
+              "no amount of mashing may push the control below the 2s floor");
+        CHECK(ControlActive(),
+              "the player must still be controlled even after mashing to the floor");
+
+        /* 再等 2 秒（下限）才真的解除 */
+        for (int i = 0; i < 120; i++) ControlTick(0.02f);   /* 2.4 秒 */
+        CHECK(ControlTimeLeft() <= 0.001f, "the floor must eventually run out");
+        {
+            extern void ControlTimeout(void);
+            ControlTimeout();
+        }
+        CHECK(!ControlActive(), "the control must end once the floor time passes");
     }
     CHECK(ControlImmune() > 0.0f,
-          "escaping a web must grant an immunity window");
+          "ending a web must grant an immunity window");
     CHECK(sanity == san0,
           "escaping must not change sanity either (still zero damage)");
 
@@ -4139,6 +4215,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

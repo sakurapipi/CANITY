@@ -21,6 +21,9 @@ typedef struct {
     float tx, ty;     /* 漫游目标 */
 } Spider;
 
+/* 2026-11-06：被扳手砸掉后的不刷新冷却 */
+static float s_respawnCd = 0.0f;
+
 static Spider s_spider;
 
 /* 外部依赖（都在别处实现） */
@@ -32,7 +35,30 @@ extern int   hiddenIn;
 void SpiderReset(void) {
     memset(&s_spider, 0, sizeof(s_spider));
     s_spider.state = SPIDER_IDLE;
+    s_respawnCd = 0.0f;
 }
+
+/* ==================================================================
+ * 2026-11-06（用户要求）：**扳手砸中 → 蜘蛛消失，30 秒不刷新**
+ * ------------------------------------------------------------------
+ * 用户原话：「也要出一个克制蜘蛛的方法，就是用那个扳手砸中蜘蛛的话，
+ *           蜘蛛会消失，然后 30 秒之内都不会刷新在场上」。
+ * ================================================================== */
+void SpiderDispel(void) {
+    if (!s_spider.active) return;
+    s_spider.active = 0;
+    s_respawnCd = SPIDER_RESPAWN_COOLDOWN;
+    PlaySfx(SFX_GLASS, 0.8f);
+    {
+        extern int g_lang;
+        extern const char* pickupMsg;
+        extern float pickupMsgTimer;
+        pickupMsg = (g_lang == 1) ? "蜘蛛被砸散了" : "THE SPIDER SCATTERS";
+        pickupMsgTimer = 1.6f;
+    }
+}
+
+float SpiderRespawnCd(void) { return s_respawnCd; }
 
 int SpiderActive(void) { return s_spider.active; }
 int SpiderState(void)  { return s_spider.state; }
@@ -56,6 +82,7 @@ static int SpawnCell(float* ox, float* oy) {
 }
 
 int SpiderTrySpawn(int level) {
+    if (s_respawnCd > 0.0f) return 0;      /* 刚被砸掉，本层不再刷新 */
     if (level < SPIDER_MIN_LEVEL) return 0;
     if (rand() % 100 >= SPIDER_APPEAR_CHANCE) return 0;
     float x, y;
@@ -134,6 +161,10 @@ int SpiderSpawnNearPlayer(void) {
 }
 
 void SpiderTick(float dt) {
+    if (s_respawnCd > 0.0f) {
+        s_respawnCd -= dt;
+        if (s_respawnCd < 0.0f) s_respawnCd = 0.0f;
+    }
     if (!s_spider.active) return;
     /* 藏起来的时候蜘蛛也"看不见"玩家 —— 和听声鬼一致 */
     int playerHidden = (hiddenIn >= 0);
@@ -183,8 +214,19 @@ void SpiderTick(float dt) {
         if (hit) {
             /* 交给控制层。被拒（抱脸虫正在生效 / 免疫中）就直接进冷却，
                **绝不**再排队等下一次。 */
-            if (ControlBegin(CTRL_SPIDER_WEB, SPIDER_WEB_MASH, SPIDER_WEB_WINDOW)) {
+            if (ControlBeginTimed(CTRL_SPIDER_WEB,
+                                  SPIDER_WEB_WINDOW,
+                                  SPIDER_WEB_REDUCE,
+                                  SPIDER_WEB_MIN)) {
                 PlaySfx(SFX_GLUE, 0.9f);
+                /* 2026-11-06（用户要求）：命中时屏幕上给明确提示 */
+                extern int g_lang;
+                extern const char* pickupMsg;
+                extern float pickupMsgTimer;
+                pickupMsg = (g_lang == 1)
+                    ? "被蛛网缠住了 —— 连按空格，最快 2 秒"
+                    : "WEBBED - MASH SPACE, 2s MINIMUM";
+                pickupMsgTimer = 2.2f;
             }
         }
         s_spider.state = SPIDER_COOLDOWN;

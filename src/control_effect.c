@@ -11,6 +11,8 @@ static int         s_mashNeed  = 0;
 static float       s_timeLeft  = 0.0f;
 static float       s_immune    = 0.0f;
 static int         s_result    = 0;   /* 0 无 / 1 挣脱 / 2 超时 */
+static float       s_pressReduce = 0.0f;  /* >0 = 限时模式：每次按键削减多少秒 */
+static float       s_minTime     = 0.0f;  /* 限时模式的时间下限 */
 
 int ControlActive(void) { return s_type != CTRL_NONE; }
 ControlType ControlCurrent(void) { return s_type; }
@@ -38,6 +40,27 @@ int ControlBegin(ControlType t, int mashNeeded, float window) {
        等下一次抱脸虫进入 JMP_MASH 时，第一帧就会读到这个陈旧结果，
        表现为"刚贴脸就自动挣脱"或"刚贴脸就直接判失败"。 */
     s_result   = 0;
+    s_pressReduce = 0.0f;      /* 默认走按次模式 */
+    s_minTime     = 0.0f;
+    return 1;
+}
+
+/* 限时模式下开始一次控制（蜘蛛网用这个） */
+int ControlBeginTimed(ControlType t, float window, float pressReduce, float minTime) {
+    if (t == CTRL_NONE) return 0;
+    if (s_type != CTRL_NONE) return 0;
+    if (s_immune > 0.0f) return 0;
+    if (window < 0.1f) window = 0.1f;
+    if (pressReduce < 0.0f) pressReduce = 0.0f;
+    if (minTime < 0.0f) minTime = 0.0f;
+    if (minTime > window) minTime = window;
+    s_type        = t;
+    s_mashNeed    = 0;
+    s_mashLeft    = 0;
+    s_timeLeft    = window;
+    s_result      = 0;
+    s_pressReduce = pressReduce;
+    s_minTime     = minTime;
     return 1;
 }
 
@@ -54,6 +77,19 @@ void ControlTick(float dt) {
 
 int ControlPress(void) {
     if (s_type == CTRL_NONE) return 0;
+
+    /* 限时模式：每按一次削掉 pressReduce 秒，但**不低于 minTime** */
+    if (s_pressReduce > 0.0f) {
+        s_timeLeft -= s_pressReduce;
+        if (s_timeLeft < s_minTime) s_timeLeft = s_minTime;
+        if (s_timeLeft <= 0.0f) {
+            ControlRelease(1);
+            s_result = 1;
+            return 1;
+        }
+        return 0;
+    }
+
     /* ③ 按次计数。调用方用的是 IsActionPressed（边沿），
        所以按住不放不会因为键盘重复而自动完成 —— 这是本层的契约，
        实现上只负责"减一"，不读硬件。 */
@@ -78,6 +114,8 @@ void ControlRelease(int escaped) {
 
 void ControlReset(void) {
     s_result   = 0;
+    s_pressReduce = 0.0f;
+    s_minTime     = 0.0f;
     s_type     = CTRL_NONE;
     s_mashLeft = 0;
     s_mashNeed = 0;
