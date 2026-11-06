@@ -993,7 +993,6 @@ static void DrawLightBeastSprite2(void) { DrawBeastSprite(&lightBeast2, 0x00c8f0
    掉帧就等于「玩家看不清提示」，所以必须预渲染。
 
    纹理格式：高字节 = 颜色索引（1..6），低 24 位 = 原始 RGB。
-   每帧要按「逼近程度」整体调亮度，所以查表 g_jumperShade[色][亮度档]，
    避免逐像素做浮点乘加（脸几乎占满屏幕，这是热路径上的主要开销）。 */
 #define JUMPER_TEX_SIZE 128
 #define JMP_COL_EDGE  1      /* 外缘 */
@@ -1004,203 +1003,6 @@ static void DrawLightBeastSprite2(void) { DrawBeastSprite(&lightBeast2, 0x00c8f0
 #define JMP_COL_EYE   6      /* 眼睛（单独处理亮度） */
 #define JMP_SHADE_STEPS 64   /* 亮度档数 */
 
-static unsigned int g_jumperTex[JUMPER_TEX_SIZE * JUMPER_TEX_SIZE];
-static unsigned int g_jumperShade[8][JMP_SHADE_STEPS];
-static int g_jumperTexReady = 0;
-
-static void BuildJumperTexture(void) {
-    if (g_jumperTexReady) return;
-    int S = JUMPER_TEX_SIZE;
-    float c = (S - 1) * 0.5f;
-    for (int y = 0; y < S; y++) {
-        for (int x = 0; x < S; x++) {
-            float dx = ((float)x - c) / c;
-            float dy = ((float)y - c) / c;
-            float d2 = dx * dx + dy * dy;
-            unsigned int col = 0;
-            unsigned int idx = 0;
-            if (d2 <= 1.0f) {
-                if (d2 > 0.7396f) { col = 0x00140c08; idx = JMP_COL_EDGE; }   /* 外缘 */
-                else if (d2 > 0.5184f) { col = 0x002c1a12; idx = JMP_COL_SKIN; }
-                else { col = 0x003c2418; idx = JMP_COL_DEEP; }
-
-                /* 嘴：中央的大裂口 */
-                float mdy = (dy - 0.12f) * 2.3f;
-                float md2 = dx * dx + mdy * mdy;
-                if (md2 < 0.3025f && dy > -0.15f) {
-                    if (md2 < 0.1764f) { col = 0x00000000; idx = JMP_COL_MOUTH; }  /* 口腔全黑 */
-                    else { col = 0x00201010; idx = JMP_COL_MOUTH; }
-                    /* 牙：上下两排锯齿 */
-                    if (md2 > 0.16f) {
-                        int toothRow = (int)((dy + 0.15f) * 40.0f);
-                        if ((toothRow & 1) == 0) { col = 0x00d8d0b0; idx = JMP_COL_TOOTH; }
-                    }
-                }
-
-                /* 眼睛：两个发光的点 */
-                float edy = (dy + 0.42f) * 1.5f;
-                float edy2 = edy * edy;
-                float ex1 = dx + 0.34f, ex2 = dx - 0.34f;
-                float e1sq = ex1 * ex1 + edy2;
-                float e2sq = ex2 * ex2 + edy2;
-                if (e1sq < 0.0169f || e2sq < 0.0169f) { col = 0x00ff0000u; idx = JMP_COL_EYE; }
-            }
-            g_jumperTex[(size_t)y * S + x] = (idx << 24) | (col & 0x00FFFFFFu);
-        }
-    }
-
-    /* 亮度查表：色 × 亮度档。
-       亮度因子 = 0.45 + 0.55*t，t 在 0..1，分成 64 档。 */
-    {
-        static const unsigned int base[8] = {
-            0,
-            0x00140c08,   /* EDGE */
-            0x002c1a12,   /* SKIN */
-            0x003c2418,   /* DEEP */
-            0x00000000,   /* MOUTH（黑） */
-            0x00d8d0b0,   /* TOOTH */
-            0x00ff0000,   /* EYE（用不到，这里只是占位） */
-            0
-        };
-        for (int ci = 0; ci < 8; ci++) {
-            for (int s = 0; s < JMP_SHADE_STEPS; s++) {
-                float t = (float)s / (float)(JMP_SHADE_STEPS - 1);
-                float k = 0.45f + 0.55f * t;
-                unsigned int b = base[ci];
-                int r = (int)(((b >> 16) & 0xFF) * k);
-                int g = (int)(((b >> 8) & 0xFF) * k);
-                int bl = (int)((b & 0xFF) * k);
-                g_jumperShade[ci][s] = (unsigned int)((r << 16) | (g << 8) | bl);
-            }
-        }
-    }
-    g_jumperTexReady = 1;
-}
-
-/* 跳脸虫：它不是世界里的一个 billboard，而是**扑向镜头的东西**。
-   所以用屏幕空间直接绘制：以画面中心为基准，尺寸随逼近程度放大，
-   阶段二（跿上脸）时几乎占满整个屏幕 —— 这是它最吓人的瞬间。 */
-void DrawParasiteSprite(void) {
-    if (!parasite.active) return;
-    BuildJumperTexture();
-
-    /* 逼近程度 0..1：ramp 在阶段一被用作进度，阶段二恒为 1 */
-    float t = parasite.ramp;
-    if (jumperPhase == JMP_DODGE || jumperPhase == JMP_QTE) t = 1.0f;
-    if (t < 0.0f) t = 0.0f;
-    if (t > 1.0f) t = 1.0f;
-
-    /* 亮度查表的下标（每帧算一次，不是每像素） */
-    int shadeIdx = (int)(t * (float)(JMP_SHADE_STEPS - 1) + 0.5f);
-    if (shadeIdx < 0) shadeIdx = 0;
-    if (shadeIdx >= JMP_SHADE_STEPS) shadeIdx = JMP_SHADE_STEPS - 1;
-    int eyeG = 90 + (int)(165.0f * t);
-    if (eyeG > 255) eyeG = 255;
-
-    /* 尺寸：阶段一从小到大，阶段二几乎铺满屏幕 */
-    float sizeF;
-    if (jumperPhase == JMP_QTE) sizeF = 1.15f;
-    else if (jumperPhase == JMP_DODGE) sizeF = 0.55f + 0.35f * t;
-    else sizeF = 0.18f + 0.37f * t;
-
-    int half = (int)((float)(renderH < renderW ? renderH : renderW) * 0.42f * sizeF);
-    if (half < 4) half = 4;
-    if (half * 2 >= renderH) half = renderH / 2 - 1;
-
-    int cx = renderW / 2;
-    int cy = renderH / 2;
-
-    /* 抖动：逼近时疯狂抖动，制造不安感 */
-    float jitterAmp = (jumperPhase == JMP_QTE) ? 7.0f : (jumperPhase == JMP_DODGE ? 4.0f : 1.5f);
-    float jx = sinf((float)g_timeSec * 47.0f) * jitterAmp;
-    float jy = sinf((float)g_timeSec * 39.0f) * jitterAmp;
-
-    /* 呼吸：整体缓慢缩放，像在喘气 */
-    float breathe = 1.0f + sinf((float)g_timeSec * 12.0f) * 0.05f * (0.4f + t);
-    int h = (int)(half * breathe);
-    if (h < 3) h = 3;
-
-    /* ------------------------------------------------------------ */
-    /* 关键：脸是**预渲染**的纹理，不是逐像素算出来的。            */
-    /* 逐像素画一张脸要 15 次浮点乘加，800x600 下实测 11ms/帧 —— */
-    /* QTE 是实时反应，掉帧就等于「玩家看不见提示」。              */
-    /* 改成：纹理只画一次（64x64），每帧只是采样 + 缩放。          */
-    /* ------------------------------------------------------------ */
-    const unsigned int* src = g_jumperTex;
-    int sw = JUMPER_TEX_SIZE;
-
-    /* 纹理坐标范围：从左上角覆盖到右下角。
-       注意是**双向缩放**：源纹理 128x128 要放大成 (2h+1) 见方，
-       所以必须遍历**目标**像素、反查源纹理。
-       早先写成「遍历源像素、每源像素只画 1 个目标点」，
-       画面只剩 1/81 的内容 —— 性能指标很漂亮，画面全黑。
-       **这就是「光看性能提升不够」的又一个例子。**
-
-       性能：逐像素做 (dx*sw)/side 整数除法，578 见方就是 33 万次除法，
-       实测 4.3ms —— 除法是瓶颈。改成：
-         1) 定点数增量代替除法（sx16 每步加固定值，右移取整）
-         2) 按圆形轮廓裁剪每行的 x 范围（圆外整段跳过） */
-    int side = 2 * h + 1;
-    int x0 = cx - h;
-    int y0 = cy - h;
-    /* 抖动：整块纹理偏移，不逐像素算 */
-    x0 += (int)jx;
-    y0 += (int)jy;
-
-    /* 定点步长：每前进一个目标像素，源纹理坐标前进 (sw/side) */
-    int step16 = (sw << 16) / side;
-    if (step16 < 1) step16 = 1;
-
-    /* 纹理空间的圆形轮廓参数 */
-    float tc = (sw - 1) * 0.5f;
-    float tr2 = tc * tc;
-
-    for (int dy = 0; dy < side; dy++) {
-        int py = y0 + dy;
-        if (py < 0 || py >= renderH) continue;
-
-        /* 反查源纹理行 */
-        int sy = (dy * sw) / side;
-        const unsigned int* srow = src + (size_t)sy * sw;
-
-        /* 按圆裁剪这一行的 x 范围：
-           源行相对圆心的竖直偏移 -> 允许的半宽 -> 换算成目标 x 范围 */
-        float dyS = (float)sy - tc;
-        float rem = tr2 - dyS * dyS;
-        int dxLo = 0, dxHi = side - 1;
-        if (rem > 0.0f) {
-            float halfW = sqrtf(rem);
-            float sxLo = tc - halfW, sxHi = tc + halfW;
-            dxLo = (int)(sxLo * (float)side / (float)sw);
-            dxHi = (int)(sxHi * (float)side / (float)sw);
-            if (dxLo < 0) dxLo = 0;
-            if (dxHi > side - 1) dxHi = side - 1;
-        }
-
-        unsigned int* row = pixels + (size_t)py * renderW;
-        /* 定点源坐标：从 dxLo 对应的源位置开始 */
-        int sx16 = (dxLo * sw / side) << 16;
-
-        for (int dx = dxLo; dx <= dxHi; dx++) {
-            int px = x0 + dx;
-            if (px < 0 || px >= renderW) { sx16 += step16; continue; }
-            unsigned int c = srow[sx16 >> 16];
-            sx16 += step16;
-            unsigned int ci = c >> 24;
-            if (!ci) continue;                  /* 透明 */
-
-            /* 眼睛要随逼近程度变亮：单独处理 */
-            if (ci == JMP_COL_EYE) {
-                row[px] = (unsigned int)(eyeG << 16);   /* 血红的眼睛 */
-                continue;
-            }
-            /* 其余颜色走亮度查表 */
-            row[px] = g_jumperShade[ci][shadeIdx];
-        }
-    }
-}
-
-/* 荧光棒：飞行中/落地发光，按 z 投影 */
 /* ---------------- v1.11：统一弹道精灵（荧光棒 / 玻璃瓶） ----------------
    重写原因：老实现是逐列比 zBuffer，投射物贴墙飞时列与列互相打架，
    看上去就是"时不时消失一下"。这里把规则收敛成三条：
@@ -2709,6 +2511,26 @@ void RenderSprites(void) {
         }
     }
 
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**缚丝蛛的世界模型**
+     * ------------------------------------------------------------------
+     * 用户原话：「蜘蛛怪的建模什么的全部都没有」。
+     * 它之前只有逻辑、没有入渲染列表 —— 玩家完全看不见。
+     * ================================================================ */
+    {
+        extern int SpiderActive(void);
+        extern float SpiderX(void), SpiderY(void);
+        if (SpiderActive()) {
+            if (n < MAX_SPRITES) {
+                float sx = SpiderX(), sy = SpiderY();
+                list[n].d2 = Dist2(sx, sy, posX, posY);
+                list[n].kind = 19;
+                list[n].idx = 0;
+                n++;
+            }
+        }
+    }
+
     /* 2026-11-06：**相位信标的世界模型**（用户要求） */
     {
         extern int phasePlaced;
@@ -2819,6 +2641,11 @@ void RenderSprites(void) {
             case 8: DrawShotSprite(list[i].idx); break;
             case 10: DrawSlashSprite(); break;
             case 12: DrawHideSpotSprite(list[i].idx); break;   /* v3.0 藏身点 */
+        case 19: {   /* 2026-11-06：缚丝蛛 */
+            extern float SpiderX(void), SpiderY(void);
+            DrawBakedPropArt(SPR_PROP_SPIDER, SpiderX(), SpiderY(), 0.0f, 0.30f, 1.0f);
+            break;
+        }
         case 18: {   /* 2026-11-06：相位信标（地面模型） */
             extern float phaseX, phaseY;
             /* 半身高 0.34 -> 0.50：第一版太小，暗场里像块石头 */

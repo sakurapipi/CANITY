@@ -468,6 +468,15 @@ static void test_hatch_screenshot(void) {
         posY = hy + vy * (kDists[k] + 1.0f);
         dirX = -vx; dirY = -vy;
 
+        /* 2026-11-06：放一只缚丝蛛在门旁，让截图里能看到它的建模 */
+        {
+            extern void SpiderDebugPlace(float, float);
+            extern void SpiderReset(void);
+            SpiderReset();
+            SpiderDebugPlace(hx + vx * 1.6f + (vy != 0.0f ? 1.0f : 0.0f),
+                             hy + vy * 1.6f + (vx != 0.0f ? 1.0f : 0.0f));
+        }
+
         /* 2026-11-06：顺便放一个相位信标在门旁边，让截图里能看到它的建模 */
         {
             extern void PhaseGive(void);
@@ -826,18 +835,6 @@ static void test_phase_slots_selectable(void) {
     throwSelected = sSel;
 }
 
-static void test_facehugger_is_brutal(void) {
-    float total = JUMPER_APPROACH_TIME + JUMPER_DODGE_WINDOW;
-    CHECK(total < 1.0f,
-          "the whole jump->judge window must stay under 1 second");
-    CHECK(JUMPER_DODGE_WINDOW <= 0.5f,
-          "the dodge window must be a reflex test, not a decision window");
-    CHECK(JUMPER_DODGE_WINDOW >= 0.25f,
-          "the dodge window must still be humanly reachable (>= 0.25s)");
-    CHECK(JUMPER_APPROACH_TIME < JUMPER_DODGE_WINDOW,
-          "the lunge itself must be faster than the reaction window it opens");
-}
-
 /* ==================================================================
  * 2026-11-06（用户实测）：**训练营不放特殊房间 / 每层上限 / 出口不进房间**
  * ------------------------------------------------------------------
@@ -917,6 +914,11 @@ static void test_rooms_stay_sealed(void) {
     StartGame();
 
     int sealedFloors = 0, roomsSeen = 0;
+    /* 2026-11-06（AD-64）：**自己固定种子**。
+       这条用例要遍历 10 层，而层生成吃全局 rand() ——
+       前面任何用例多调/少调一次 rand()，地图就变，
+       墙上某个门是否接得上也跟着变。第一次跑就因为这个假红过。 */
+    srand(20261106);
     for (int lv = 1; lv <= 10; lv++) {
         currentLevel = lv;
         GenerateLevel();
@@ -1748,87 +1750,6 @@ static void test_control_layer(void) {
     ControlReset();
     CHECK(!ControlActive() && ControlImmune() == 0.0f && ControlMashLeft() == 0,
           "ControlReset must leave no residue (new run / floor change / load)");
-}
-
-static void test_facehugger_rework(void) {
-    extern int jumperPhase, jumperSpawnedRun;
-    extern float jumperControlT;
-    extern Monster parasite;
-    extern Monster monHunters[MON_HUNTER_MAX];
-    extern float posX, posY;
-    extern void SpawnParasite(void);
-    extern void JumperDebugFail(void);
-
-    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
-    currentLevel = 3;
-    GenerateLevel();
-
-    /* ---- ① 生成后蹲角落 ---- */
-    jumperSpawnedRun = 0;
-    jumperControlT = 0.0f;
-    SpawnParasite();
-    CHECK(jumperPhase == JMP_LURK,
-          "a spawned facehugger must LURK in a corner, not jump immediately");
-    CHECK(jumperSpawnedRun == 1, "spawning must count against the per-run budget");
-
-    /* ---- ② 它蹲在离玩家有距离的地方（不是贴脸刷新） ---- */
-    {
-        float dx = parasite.x - posX, dy = parasite.y - posY;
-        float d2 = dx * dx + dy * dy;
-        CHECK(d2 > JUMPER_LURK_TRIGGER_R * JUMPER_LURK_TRIGGER_R,
-              "it must spawn OUTSIDE its own trigger radius (otherwise it attacks instantly)");
-    }
-
-    /* ---- ③ 一局上限 ---- */
-    {
-        int cap = 4;
-        jumperSpawnedRun = cap;
-        CHECK(jumperSpawnedRun >= JUMPER_MAX_PER_RUN,
-              "the per-run budget must be able to reach the 4 cap");
-        jumperSpawnedRun = 0;
-    }
-
-    /* ---- ④⑤ 失败 = 控 10 秒 + 召唤附近怪 ---- */
-    {
-        /* 造两只近距离的怪，一只远的（远的不该被召唤） */
-        monHunters[0].active = 1;
-        monHunters[0].x = posX + 2.0f; monHunters[0].y = posY;
-        monHunters[0].state = 0; monHunters[0].memAge = 99.0f;
-
-        monHunters[1].active = 1;
-        monHunters[1].x = posX - 3.0f; monHunters[1].y = posY;
-        monHunters[1].state = 0; monHunters[1].memAge = 99.0f;
-
-        /* "远"必须按**真实距离**摆 —— 出生点在原点附近，
-           所以 (1.5,1.5) 其实贴着玩家（第一次就是这么红的）。
-           这里取地图对角，并先断言它确实在半径之外。 */
-        monHunters[2].active = 1;
-        monHunters[2].x = (float)(MAP_WIDTH - 3) + 0.5f;
-        monHunters[2].y = (float)(MAP_HEIGHT - 3) + 0.5f;
-        monHunters[2].state = 0;
-        {
-            float fx = monHunters[2].x - posX, fy = monHunters[2].y - posY;
-            CHECK(fx * fx + fy * fy > JUMPER_CONTROL_RADIUS * JUMPER_CONTROL_RADIUS,
-                  "the control radius test needs a hunter that is really far away");
-        }
-
-        jumperControlT = 0.0f;
-        JumperDebugFail();
-
-        CHECK(jumperControlT > 9.9f && jumperControlT < 10.1f,
-              "failing the grab must lock the player for exactly 10 seconds");
-
-        CHECK(monHunters[0].state == 1 && monHunters[1].state == 1,
-              "nearby hunters must be summoned into the chase state");
-        CHECK(monHunters[0].memX == posX && monHunters[0].memY == posY,
-              "a summoned hunter's memory must point at the player");
-        CHECK(monHunters[2].state == 0,
-              "a distant hunter must NOT be summoned");
-    }
-
-    jumperControlT = 0.0f;
-    jumperSpawnedRun = 0;
 }
 
 static void test_phase_price(void) {
@@ -4218,6 +4139,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

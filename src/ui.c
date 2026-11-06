@@ -1767,45 +1767,40 @@ void DrawMenuPanels(void) {
     }
 
     /* ==================================================================
-     * 2026-11-06（用户要求）：**主菜单右侧闪烁提示 F11 全屏**
+     * 2026-11-06（用户要求，第二轮）：**F11 提示只出现一次**
      * ------------------------------------------------------------------
-     * 用户原话：「刚进游戏那个主界面的 UI 右侧新增一栏……
-     *           在右边添加一个闪烁的提醒字幕，风格要跟主界面 UI 一致，
-     *           然后是按 F11 切换全屏还有缩小屏切换状态，
-     *           闪烁 3 秒钟之后消失」。
+     * 用户原话：
+     *   「每次我回主页那个切换键都会跳出来，你就只选择那个登录进去的
+     *     第一次那个 F11 键切换提醒它会出来，而且那个全屏状态下
+     *     那个切换键是不会跳出来的。然后把它的闪烁特效给关了，
+     *     就在那里出现 3 秒钟」
      *
-     * 为什么是"3 秒后消失"而不是常驻：这是个**一次性提示**，
-     * 常驻会变成又一条视觉噪声；但玩家第一次进游戏确实不知道 F11 能全屏。
+     * 三条规则：
+     *   ① **整个进程只显示一次**（第一次进入主菜单开始计时）
+     *   ② `isFullscreen` 为真时完全不显示
+     *   ③ 不闪烁，静态显示 3 秒后消失
      * ================================================================ */
     {
-        static int    s_hintState = -1;   /* 与 currentState 同域比较，用 int */
-        static double s_hintStart = 0.0;
+        static int    s_hintDone  = 0;      /* 已经放过一次了 */
+        static double s_hintStart = -1.0;   /* 第一次进主菜单的时刻 */
         extern double g_timeSec;
-        if (s_hintState != (int)currentState) {
-            s_hintState = (int)currentState;
-            if (currentState == STATE_MAIN_MENU) s_hintStart = g_timeSec;
-        }
-        if (currentState == STATE_MAIN_MENU) {
+        extern int isFullscreen;
+
+        if (!s_hintDone && !isFullscreen &&
+            currentState == STATE_MAIN_MENU) {
+            if (s_hintStart < 0.0) s_hintStart = g_timeSec;
             double age = g_timeSec - s_hintStart;
             if (age >= 0.0 && age < 3.0) {
-                /* 2Hz 闪烁；最后 0.5 秒改成慢闪，读起来像"要消失了" */
-                int on = ((int)(age * 4.0) % 2) == 0;
-                if (age > 2.5) on = ((int)(age * 2.0) % 2) == 0;
-                if (on) {
-                    const char* hint = (g_lang == LANG_ZH)
-                        ? "[F11]  全屏 / 窗口"
-                        : "[F11]  FULLSCREEN / WINDOWED";
-                    int hw = TextWidthWin(hint);
-                    /* 位置试了三处（都截图确认过）：
-                       ① panel.top + 14   -> 压住 CANITY 标题
-                       ② panel.bottom-56  -> 压住 BEST LEVEL
-                       ③ 现在：面板**上方**、右对齐面板右边。
-                          面板外是纯背景，永远不会和任何控件重叠；
-                          窗口太矮时退回面板内顶部。 */
-                    int hy = g.panel.top - UIS(26);
-                    if (hy < UIS(4)) hy = g.panel.top + UIS(4);
-                    DrawTextWin(g.panel.right - hw, hy, hint, 0x00E8C040u);
-                }
+                const char* hint = (g_lang == LANG_ZH)
+                    ? "[F11]  全屏 / 窗口"
+                    : "[F11]  FULLSCREEN / WINDOWED";
+                int hw = TextWidthWin(hint);
+                /* 面板上方、右对齐面板右边 —— 不遮标题、菜单行、BEST LEVEL */
+                int hy = g.panel.top - UIS(26);
+                if (hy < UIS(4)) hy = g.panel.top + UIS(4);
+                DrawTextWin(g.panel.right - hw, hy, hint, 0x00E8C040u);
+            } else if (age >= 3.0) {
+                s_hintDone = 1;             /* 放过一次，之后再也不放 */
             }
         }
     }
@@ -4087,112 +4082,6 @@ void DrawHUD(void) {
     /* ------------------------------------------------------------------ */
     /* 跳脸虫 QTE                                                        */
     /* ------------------------------------------------------------------ */
-    /* 这是整个事件里最关键的一块 UI。玩家只有不到 2 秒的反应时间，
-       所以提示必须：**巨大、居中、带明确的倒计时条**。
-       任何含糊都会让玩家觉得是游戏 bug。 */
-    /* ==================================================================
-     * 2026-11-06（子代理审计·高 2）：**QTE 提示必须和判定一致**
-     * ------------------------------------------------------------------
-     * 原来这里只画 JMP_DODGE（死分支，全工程没有赋值点）和 else（按键 QTE），
-     * 而实际能走到的状态是 LURK / TELL / MASH：
-     *   · 提示画的是**移动键**（W/A/S/D），判定却是 ACT_DODGE（空格）
-     *   · 进度条用 jumperTimer/JUMPER_QTE_WINDOW，而 MASH 里 jumperTimer 不更新
-     *     → 条永远是空的
-     *   · LURK（刚生成、还没发现玩家）就把居中大提示画出来了，提前剧透
-     * 玩家照提示按移动键必失败 → 10 秒锁定 + 全图怪扑过来。
-     * ================================================================== */
-    if (parasite.active && jumperPhase != JMP_IDLE && jumperPhase != JMP_DONE &&
-        jumperPhase != JMP_LURK && jumperPhase != JMP_TELL) {
-        float frac = 0.0f;
-        char prompt[48];
-        unsigned int col = 0x00FFE060u;
-
-        if (jumperPhase == JMP_MASH) {
-            /* 唯一真正的交互窗口：连按 ACT_DODGE */
-            extern float ControlTimeLeft(void);
-            extern int   ControlMashLeft(void);
-            frac = ControlTimeLeft() / JUMPER_MASH_WINDOW;
-            {
-                const char* dodgeName = VkName(g_bindings[ACT_DODGE]);
-                if (!dodgeName) dodgeName = "???";
-                int left = ControlMashLeft();
-                if (left < 0) left = 0;
-                sprintf(prompt, "MASH %s  x%d", dodgeName, left);
-            }
-            col = 0x00FF3030u;
-        } else if (jumperPhase == JMP_DODGE) {
-            frac = jumperTimer / JUMPER_DODGE_WINDOW;
-            /* 提示跟随绑定：改绑后提示和实际按键保持一致 */
-            const char* dodgeName = VkName(g_bindings[ACT_DODGE]);
-            if (!dodgeName) dodgeName = "???";
-            sprintf(prompt, "PRESS %s TO DODGE", dodgeName);
-            col = 0x00FF8040u;
-        } else {
-            frac = jumperTimer / JUMPER_QTE_WINDOW;
-            /* 阶段二的候选键池与 UpdateParasite 同源：取移动四键的绑定 */
-            static const ActionId poolSrc[JMP_KEY_COUNT] = {
-                ACT_MOVE_FWD, ACT_MOVE_BACK, ACT_MOVE_LEFT, ACT_MOVE_RIGHT
-            };
-            int vk = g_bindings[poolSrc[jumperQteKey % JMP_KEY_COUNT]];
-            const char* nm = VkName(vk);
-            sprintf(prompt, "%s", nm ? nm : "???");
-            col = 0x00FF3030u;
-        }
-        if (frac < 0.0f) frac = 0.0f;
-        if (frac > 1.0f) frac = 1.0f;
-
-        /* 阶段二：把要按的键画得非常大，一眼就能看到 */
-        if (jumperPhase == JMP_QTE || jumperPhase == JMP_MASH) {
-            /* 用点阵字放大绘制：把字符画成一个方块阵 */
-            int keyW = TextWidthWin(prompt) * 3;
-            int keyH = TextHeightWin() * 3;
-            int kx = (winW - keyW) / 2;
-            int ky = winH / 2 - keyH / 2;
-            /* 底板 */
-            BlendRectWin(kx - UIS(10), ky - UIS(6), kx + keyW + UIS(10), ky + keyH + UIS(6),
-                         0x00202020, 0.75f);
-            FrameRectWin(kx - UIS(10), ky - UIS(6), kx + keyW + UIS(10), ky + keyH + UIS(6),
-                         col, 0.9f, 2);
-            /* v2.0 修复：原来是 9 次同字号错位绘制 —— 数值上都对不上，
-               屏幕上是一堆小字拼贴，而这是整局最关键的两秒提示。
-               改成居中单次绘制（字号已经是「一格大字」，够醒目）。 */
-            DrawTextCenterWin(winW / 2, ky + (keyH - TextHeightWin()) / 2, prompt, col);
-            /* 英文说明只在 Full 档显示 */
-            if (qteHint >= 1)
-                DrawTextCenterWin(winW / 2, ky - UIS(30), Tr("IT IS ON YOUR FACE", "它趴在你脸上"), 0x00FF6060u);
-        } else {
-            /* 阶段一：Minimal 档只显示一个躲开键图标（跟随绑定），
-               Full 档才显示英文说明。 */
-            if (qteHint >= 1) {
-                DrawTextCenterWin(winW / 2, winH / 2 - UIS(40), prompt, col);
-            } else {
-                const char* dodgeName = VkName(g_bindings[ACT_DODGE]);
-                if (!dodgeName) dodgeName = "???";
-                int keyW = TextWidthWin(dodgeName) * 2;
-                int keyH = TextHeightWin() * 2;
-                int kx = (winW - keyW) / 2;
-                int ky = winH / 2 - keyH / 2;
-                BlendRectWin(kx - UIS(10), ky - UIS(6), kx + keyW + UIS(10), ky + keyH + UIS(6),
-                             0x00202020, 0.75f);
-                FrameRectWin(kx - UIS(10), ky - UIS(6), kx + keyW + UIS(10), ky + keyH + UIS(6),
-                             col, 0.9f, 2);
-                for (int i = 0; i < 2; i++)
-                    for (int j = 0; j < 2; j++)
-                        DrawTextWin(kx + i * (keyW / 2), ky + j * (keyH / 2), dodgeName, col);
-            }
-        }
-
-        /* 倒计时条：屏幕中央下方一条，越短越红 */
-        int barW = UIS(240), barH = UIS(10);
-        int bx = (winW - barW) / 2;
-        int by = winH / 2 + UIS(56);
-        BlendRectWin(bx, by, bx + barW, by + barH, 0x00202020, 0.8f);
-        unsigned int barCol = col;
-        if (frac < 0.35f) barCol = 0x00FF2020u;    /* 快没了 -> 变红 */
-        BlendRectWin(bx, by, bx + (int)(barW * frac), by + barH, barCol, 0.95f);
-        FrameRectWin(bx, by, bx + barW, by + barH, 0x00808080, 0.7f, 1);
-    }
-
     /* ===== v2.4.91 **地上有钱袋 → 提示按 E 拾取** =====
        用户要求：「偷钱罐被打跑之后，地上掉金的时候要多添一行提示词，
        点 E 键拾取。」
@@ -5045,8 +4934,7 @@ void RenderFrame(void) {
         posY = _sy;
         if (currentState == STATE_PLAYING && isMapOpen) RenderMap();
         /* 跳脸虫：屏幕空间 overlay，盖在场景之上、HUD 之下 */
-        if (currentState == STATE_PLAYING) DrawParasiteSprite();
-        if (flashTime > 0.0f)
+            if (flashTime > 0.0f)
             memset(pixels, 0xFF, (size_t)renderW * renderH * sizeof(unsigned int));
 
         /* v2.1：受伤红闪（越靠边缘越红）+ 枪口闪光 */

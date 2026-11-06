@@ -1692,6 +1692,69 @@ static void BakeProp(int id, int kind) {
         cvLine(c - 9, by0 + 30, c - 6, by0 + 26, 2.5f, 0x004A463Eu, 1.0f);
         cvLine(c + 9, by0 + 30, c + 6, by0 + 26, 2.5f, 0x004A463Eu, 1.0f);
 
+    } else if (kind == 16) {    /* 缚丝蛛（2026-11-06） */
+        /* ==================================================================
+         * 用户原话：「蜘蛛怪的建模什么的全部都没有」。
+         *
+         * 造型按实际威胁读：贴地的宽身体 + 八条撑开的腿 + 一对红眼。
+         * 审美法则照旧：5 段明暗 / 左上边缘光 / 右下压暗 / 接地阴影。
+         * 腿用折线而不是直线 —— 直线的蜘蛛读起来像太阳。
+         * ================================================================== */
+        float bodyY = baseY - 20.0f;      /* 身体中心偏低：它是贴地的 */
+        float cxx = c;
+
+        /* 接地阴影 */
+        cvEllipse(cxx, baseY - 2.0f, 30.0f, 6.0f, 0x00000000u, 0.45f);
+
+        /* 八条腿：每条两段折线，向外再向下 */
+        {
+            static const float legDX[4] = { 0.35f, 0.72f, 1.00f, 0.92f };
+            static const float legDY[4] = { 0.95f, 0.82f, 0.46f, 0.02f };
+            for (int side = 0; side < 2; side++) {
+                float sx = side ? 1.0f : -1.0f;
+                for (int k = 0; k < 4; k++) {
+                    float kneeX = cxx + sx * (12.0f + 26.0f * legDX[k]);
+                    float kneeY = bodyY + 6.0f - 18.0f * legDY[k];
+                    float footX = cxx + sx * (18.0f + 40.0f * legDX[k]);
+                    float footY = baseY - 3.0f;
+                    cvLine(cxx + sx * 8.0f, bodyY + 4.0f, kneeX, kneeY, 3.0f, 0x00322C38u, 1.0f);
+                    cvLine(kneeX, kneeY, footX, footY, 2.5f, 0x00241F2Au, 1.0f);
+                }
+            }
+        }
+
+        /* 腹部：横向椭圆，5 段明暗 */
+        {
+            float b[8] = { cxx - 26, bodyY - 12, cxx + 26, bodyY - 12,
+                           cxx + 22, bodyY + 14, cxx - 22, bodyY + 14 };
+            cvPolyGrad(b, 4, 0x00504A5Eu, 0x001C1822u, 1.0f);
+            for (int k = 1; k <= 4; k++) {
+                float y = bodyY - 12 + 26.0f * (float)k / 5.0f;
+                cvLine(cxx - 22, y, cxx + 22, y, 1.0f, 0x00000000u, 0.18f);
+                cvLine(cxx - 22, y + 1, cxx + 22, y + 1, 1.0f, 0x007A748Cu, 0.10f);
+            }
+            cvLine(cxx - 26, bodyY - 12, cxx + 26, bodyY - 12, 2.0f, 0x00908AA4u, 0.75f);
+            cvLine(cxx - 22, bodyY + 14, cxx + 22, bodyY + 14, 2.0f, 0x00000000u, 0.55f);
+        }
+
+        /* 头胸：小一圈，压在上面 */
+        {
+            float hd[8] = { cxx - 14, bodyY - 26, cxx + 14, bodyY - 26,
+                            cxx + 11, bodyY - 8,  cxx - 11, bodyY - 8 };
+            cvPolyGrad(hd, 4, 0x00625C72u, 0x00241F2Au, 1.0f);
+            cvLine(cxx - 14, bodyY - 26, cxx + 14, bodyY - 26, 1.5f, 0x00A8A2BCu, 0.8f);
+        }
+
+        /* 红眼一对 —— 唯一的自发光，暗场里先看到它 */
+        cvEllipse(cxx - 6, bodyY - 19, 3.4f, 3.0f, 0x00FF3020u, 0.95f);
+        cvEllipse(cxx + 6, bodyY - 19, 3.4f, 3.0f, 0x00FF3020u, 0.95f);
+        cvEllipse(cxx - 6, bodyY - 19, 1.6f, 1.4f, 0x00FFC0B0u, 0.9f);
+        cvEllipse(cxx + 6, bodyY - 19, 1.6f, 1.4f, 0x00FFC0B0u, 0.9f);
+
+        /* 腹部花纹：三道浅色横纹，让它不只是个黑团 */
+        cvLine(cxx - 16, bodyY - 2, cxx + 16, bodyY - 2, 2.0f, 0x00807090u, 0.35f);
+        cvLine(cxx - 14, bodyY + 4, cxx + 14, bodyY + 4, 2.0f, 0x00807090u, 0.30f);
+
     } else if (kind == 15) {    /* 相位信标：手持模型（2026-11-06） */
         /* ==================================================================
          * 用户要求：「手持建模也没有做」。
@@ -2124,6 +2187,7 @@ void SpritesInit(void) {
     BakeProp(SPR_PROP_CONSOLE_PANEL, 13);
     BakeProp(SPR_PROP_PHASE, 14);          /* 2026-11-06 相位信标：地面 */
     BakeProp(SPR_PHASE_HAND, 15);          /* 2026-11-06 相位信标：手持 */
+    BakeProp(SPR_PROP_SPIDER, 16);         /* 2026-11-06 缚丝蛛 */
     BakeUiPanel(SPR_UI_PANEL, 0);
     BakeUiPanel(SPR_UI_PANEL_HOT, 1);
     BakeUiCursor();
