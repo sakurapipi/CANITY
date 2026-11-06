@@ -1,78 +1,78 @@
-# 构建产物
+# =====================================================================
+# CANITY .gitignore
+# ---------------------------------------------------------------------
+# 2026-11-07（v2.4.2 / B5）：**从白名单改成黑名单**
+#
+# 原来的写法是
+#     tests/*
+#     tools/*
+#     !tests/test_runtime.c
+#     !tools/build_web.py
+#     ...
+# 也就是"默认忽略，逐条放行"。它已经害了两次：
+#   · tools/build_web.py 没写 ! 行 -> 文件根本没进库，
+#     CI 上 Pages 构建报 "No such file or directory"
+#   · tests/fixtures/ 新目录必须逐级放行，否则 git 不进目录
+#
+# 现在反过来：**默认全部入库，只忽略明确知道的产物**。
+# 新增文件不需要改这里；只有产生垃圾时才需要加一条。
+#
+# 特例：存档夹具要进库，所以 *.sav 之后又把它们放行回来。
+# =====================================================================
+
+# ---- 编译产物 ----
 *.exe
 *.o
 *.obj
 *.dll
 *.pdb
 *.ilk
-*.sav
-*.bak
+*.map
+/app.exe
+
+# ---- 构建 / 缓存目录 ----
 dist/
 build/
+work/
+web/dist/
+__pycache__/
+*.pyc
+.pytest_cache/
 
-# 本地发布工具（自带 git add .，只在本机用，不入库）
-release.exe
-
-# 存档与备份
-*.sav
-*.bak
-
-# 临时分析与调试（下划线前缀、日志）
-_*
+# ---- 本机临时脚本（下划线前缀）与日志 ----
+_*.py
+_*.c
+_*.md
+_*.txt
+_*.json
+_*.exe
 debug.log
 *.log
-*.txt
+ui_layout.txt
 
-# 本地移植暂存（lockbox 已验证并并入 src/）
-port_staging/
+# ---- 验证工具产物 ----
+.verify-artifacts/
+.verify-noise.json
 
-# 系统与编辑器
-.DS_Store
-Thumbs.db
-*.swp
-
-
-# Codex 的构建缓存目录
-work/
-# ==================================================================
-# 2026-11-06：**定向白名单**
-# ------------------------------------------------------------------
-# 注意：`tests/` 这种「忽略整个目录」的写法**无法**用 `!tests/xxx` 解除 ——
-# git 不会进入被忽略的目录，里面的否定规则一律不生效（本轮实测过）。
-# 所以改成忽略**目录内容**（tests/*），git 才会进去应用白名单。
-#
-# 仍然忽略的东西：机器产物、临时脚本、SDK、含本机绝对路径的部署脚本。
-# 入库的四个文件是「可复核」的定义本身 —— 不入库，CI 永远跑不了。
-#
-# 验证：
-#   git check-ignore tests/test_runtime.c        → 无输出
-#   git ls-files tests/ tools/                    → 能看到它们
-# ==================================================================
-# 2026-11-07（B1）：tests/fixtures/ 要进库 ——
-# 它是**历史存档夹具**（5 个真实 .sav + 生成器源码），
-# 旧档迁移测试没有它就跑不了。白名单必须逐级放行目录与内容，
-# 否则 git 不会进入被排除的目录。
-tests/*
-tools/*
-!tests/test_runtime.c
-!tests/fixtures/
-!tests/fixtures/gen_fixture_main.c
-!tests/fixtures/saves/
+# ---- 存档与备份（夹具那 5 个历史真实存档必须入库）----
+*.sav
 !tests/fixtures/saves/*.sav
-!tools/partition_check.py
-!tools/build_validate.py
-!tools/build_sources.py
-!tools/package_release.py
-!tools/build_web.py
-!tools/hatch_stat.c
+*.bak
 
-
-# 忽略 Steamworks SDK（如果是放在本地目录的话）
+# ---- 本地 SDK / 移植暂存 ----
 sdk/
 steam_api64.dll
 steam_api64.lib
-# �������ŵ��������Բ�������汾�⣩
-dump_*.ppm
+port_staging/
+# 本机部署脚本：写死了本机工具链与游戏目录的绝对路径，不入库
+tools/build_deploy.ps1
+release.exe
+
+# ---- 字体导出 / 图像导出 ----
 *.ppm
-.verify-artifacts/
-.verify-noise.json
+dump_*.ppm
+
+# ---- 系统与编辑器 ----
+.DS_Store
+Thumbs.db
+*.swp

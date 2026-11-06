@@ -1,27 +1,59 @@
 name: Build and Release
 
-# 触发条件：只有当推送以 v 开头的标签（比如 v2.4-alpha）时才运行
+# =====================================================================
+# 2026-11-07（v2.4.2 / B5）：**一个提交、三个资产、同一份网页构建**
+# ---------------------------------------------------------------------
+# 原来的发布链有两个工作流：
+#   release.yml  只产 Windows ZIP，web 附件靠人手传
+#   pages.yml    自己再跑一遍 Emscripten 部署到 Pages
+# 后果：
+#   · Release 里的 web.zip / 单文件 HTML 不是 CI 产物（无法从标签复现）
+#   · 线上 Pages 和下载到的 web.zip 来自**两次不同编译**
+#
+# 现在合成一个工作流：
+#   windows job  -> 编译 + 验证 + 打 Windows ZIP
+#   web job      -> 编译 + 验证 + 打 web ZIP + 单文件 HTML（**唯一一份**）
+#   release job  -> 下载上面两个 artifact，算 SHA256，写 manifest，发 Release
+#   pages job    -> 下载**同一个** web artifact 部署 Pages
+#
+# 触发：
+#   · 推 v* 标签  -> 全流程，发 Release + 部署 Pages
+#   · 手动触发    -> 只构建和部署 Pages，不发 Release（避免误发版）
+# =====================================================================
+
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+env:
+  # 工具链版本集中在这里，两个 job 共用。
+  # 注意：'latest' 仍会随上游漂移，所以 web job 会把 emcc --version
+  # 写进 build-manifest.json —— 至少产物是可追溯的。
+  # 待 CI 上确认过一个具体版本号后，把它固定下来。
+  EMSDK_VERSION: 'latest'
+  PYTHON_VERSION: '3.12'
 
 jobs:
-  build-and-release:
+  # ------------------------------------------------------------------
+  # 1) Windows 桌面版
+  # ------------------------------------------------------------------
+  windows:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Setup MSYS2
+      - name: Setup MSYS2 (gcc + windres)
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -30,13 +62,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
           path-type: inherit
 
-      # ================================================================
-      # 2026-11-06：**发布必须建立在测试通过之上**。
-      # 原来这里是手写 `gcc src/*.c src/save/*.c src/steam/*.c` ——
-      # 上一个版本就漏过一次 src/save/。现在改成调用同一个
-      # build_validate.py：编译 + test_canity + test_runtime + 分区检查
-      # 任一失败，这个 job 就红，不会生成 Release。
-      # ================================================================
+      # 发布必须建立在测试通过之上：编译 + test_canity + test_runtime + 分区检查
       - name: Build and validate (gates the release)
         shell: msys2 {0}
         run: |
@@ -44,30 +70,167 @@ jobs:
           python -X utf8 tools/build_validate.py
           cp canity_verify.exe canity.exe
 
-      - name: Package files
+      - name: Package Windows ZIP
         shell: pwsh
         run: |
           $ver = (Select-String -Path include/common.h -Pattern 'CANITY_VERSION_STR\s+"([^"]+)"').Matches[0].Groups[1].Value
-          # 注意：必须写 ${ver}，写成 $ver_win64 会被 PowerShell 当成变量名 ver_win64（为空），
-          # 结果包名变成 CANITY_v.zip，上传步骤的通配符就匹配不到。
           $name = "CANITY_v${ver}_win64"
-          New-Item -ItemType Directory -Path $name | Out-Null
-          Copy-Item canity.exe "$name/canity.exe"
-
+          New-Item -ItemType Directory -Path "stage/$name" -Force | Out-Null
+          Copy-Item canity.exe "stage/$name/canity.exe"
           $readme = Get-Content docs/package_readme.txt -Raw -Encoding UTF8
-          Set-Content -Path "$name/第一次运行请看.txt" -Value ($readme -replace '%VER%', $ver) -Encoding UTF8
+          Set-Content -Path "stage/$name/第一次运行请看.txt" -Value ($readme -replace '%VER%', $ver) -Encoding UTF8
+          Copy-Item docs/解除锁定.bat "stage/$name/解除锁定.bat"
+          Compress-Archive -Path "stage/$name" -DestinationPath "stage/$name.zip"
 
-          Copy-Item docs/解除锁定.bat "$name/解除锁定.bat"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canity-windows
+          path: stage/*.zip
+          if-no-files-found: error
 
-          Compress-Archive -Path $name -DestinationPath "$name.zip"
+  # ------------------------------------------------------------------
+  # 2) 网页版（唯一一次编译，Release 与 Pages 共用）
+  # ------------------------------------------------------------------
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Create Release and Upload Asset
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ env.EMSDK_VERSION }}
+
+      - name: Build web
+        run: |
+          emcc --version | head -1 | tee emcc-version.txt
+          python -X utf8 tools/build_web.py
+          python -X utf8 tools/build_web.py --single
+
+      - name: Stage web assets
+        run: |
+          set -e
+          VER=$(grep -oP 'CANITY_VERSION_STR\s+"\K[^"]+' include/common.h)
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          mkdir -p stage
+          cp web/dist/index.html web/dist/index.js web/dist/index.wasm stage/
+          (cd stage && zip -q "CANITY_v${VER}_web.zip" index.html index.js index.wasm)
+          cp web/dist/standalone.html "stage/CANITY_v${VER}_web_single.html"
+          ls -l stage/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canity-web
+          path: |
+            stage/CANITY_v*_web.zip
+            stage/CANITY_v*_web_single.html
+            web/dist/index.html
+            web/dist/index.js
+            web/dist/index.wasm
+            emcc-version.txt
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # 3) 发 Release（只在推送标签时）
+  # ------------------------------------------------------------------
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [windows, web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: canity-windows
+          path: assets
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: canity-web
+          path: webout
+
+      - name: Collect assets and write manifest
+        run: |
+          set -e
+          mkdir -p assets
+          cp webout/stage/*.zip assets/
+          cp webout/stage/*.html assets/
+          EMCC=$(cat webout/emcc-version.txt || echo unknown)
+          SRC_COUNT=$(python -X utf8 tools/build_sources.py | wc -l)
+          {
+            echo "{"
+            echo "  \"tag\": \"${GITHUB_REF_NAME}\","
+            echo "  \"sha\": \"${GITHUB_SHA}\","
+            echo "  \"run\": \"${GITHUB_RUN_ID}\","
+            echo "  \"emcc\": \"${EMCC}\","
+            echo "  \"source_files\": ${SRC_COUNT},"
+            echo "  \"assets\": {"
+            first=1
+            for f in assets/*; do
+              name=$(basename "$f")
+              size=$(stat -c %s "$f")
+              sum=$(sha256sum "$f" | cut -d' ' -f1)
+              [ $first -eq 1 ] || echo ","
+              first=0
+              printf '    "%s": {"size": %s, "sha256": "%s"}' "$name" "$size" "$sum"
+            done
+            echo ""
+            echo "  }"
+            echo "}"
+          } > assets/build-manifest.json
+          cat assets/build-manifest.json
+
+      - name: Create Release and upload three assets
         uses: softprops/action-gh-release@v2
         with:
-          files: CANITY_v*_win64.zip
-          generate_release_notes: true
-          # v2.4-alpha / beta / rc 是预发布：releases/latest 不会指向它们。
-          # 正式版标签（v2.4、v2.4.0、v2.3.9 这类不带后缀的）不勾。
+          files: |
+            assets/CANITY_v*_win64.zip
+            assets/CANITY_v*_web.zip
+            assets/CANITY_v*_web_single.html
+            assets/build-manifest.json
+          generate_release_notes: false
+          body: |
+            三个版本，同一份源码、同一个提交：
+
+            · `CANITY_v*_win64.zip` —— Windows 桌面版，解压双击 `canity.exe`
+            · `CANITY_v*_web.zip` —— 网页版，解压后在该目录起 HTTP 服务
+            · `CANITY_v*_web_single.html` —— 单文件版，wasm 内联，双击即玩
+
+            `build-manifest.json` 记录本次产物的 SHA256、tag、提交 SHA 与编译器版本。
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ------------------------------------------------------------------
+  # 4) 部署 Pages —— 复用 web job 的同一份产物
+  # ------------------------------------------------------------------
+  pages:
+    needs: [web]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: canity-web
+          path: webout
+
+      - name: Assemble Pages root
+        run: |
+          set -e
+          mkdir -p pagesroot
+          cp webout/web/dist/index.html webout/web/dist/index.js webout/web/dist/index.wasm pagesroot/
+          ls -l pagesroot/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: pagesroot
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
