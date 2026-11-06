@@ -104,13 +104,17 @@ static const char* SavePathCandSlot(int i, int slot, char* buf, size_t n) {
         char dir[MAX_PATH];
         snprintf(dir, sizeof(dir), "%s\\%s", base, sub);
         /* v3.0：sub 里可能带反斜杠（Documents\Canity），逐级建 */
-        CreateDirectoryA(dir, NULL);
+#ifndef CANITY_WEB
+        PlatMakeDir(dir);              /* 网页端是空操作 */
+#else
+        (void)dir;
+#endif
         {
             char* slash = strchr(sub, '\\');
             if (slash) {
                 char lvl1[MAX_PATH];
                 snprintf(lvl1, sizeof(lvl1), "%s\\%.*s", base, (int)(slash - sub), sub);
-                CreateDirectoryA(lvl1, NULL);
+                PlatMakeDir(lvl1);
             }
         }
         char suffix[32]; snprintf(suffix,sizeof(suffix),"\\canity%d.sav",slot);
@@ -784,18 +788,16 @@ void SaveGame(void) {
    原来 g_saveSlot 永远从 0 开始，玩家在槽 2 里改的设置/进度
    重启后会去读槽 0，看起来就是「设置没保存」。
    这里扫一遍 3 个槽的主档和 .bak，取修改时间最新的那个。 */
-static int PathWriteTime(const char* path, FILETIME* out) {
-    WIN32_FILE_ATTRIBUTE_DATA fa;
-    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &fa)) return 0;
-    *out = fa.ftLastWriteTime;
-    return 1;
+/* 2026-11-06（R4）：修改时间改走平台层（桌面 GetFileAttributesExA，
+   网页端 localStorage 里的时间戳）。返回秒，0 = 取不到。 */
+static double PathWriteTime(const char* path) {
+    return PlatFileTime(path);
 }
 
 static int FindNewestSaveSlot(void) {
     int oldSlot = g_saveSlot;
     int bestSlot = -1;
-    FILETIME bestTime;
-    memset(&bestTime, 0, sizeof(bestTime));
+    double bestTime = 0.0;
 
     for (int slot = 0; slot < SAVE_SLOTS; slot++) {
         g_saveSlot = slot;
@@ -806,9 +808,9 @@ static int FindNewestSaveSlot(void) {
                 char path[MAX_PATH];
                 if (bak) { if(strlen(p)+4>=sizeof(path)) continue; strcpy(path,p); strcat(path,".bak"); }
                 else     snprintf(path, sizeof(path), "%s", p);
-                FILETIME ft;
-                if (!PathWriteTime(path, &ft)) continue;
-                if (bestSlot < 0 || CompareFileTime(&ft, &bestTime) > 0) {
+                double ft = PathWriteTime(path);
+                if (ft <= 0.0) continue;
+                if (bestSlot < 0 || ft > bestTime) {
                     bestSlot = slot;
                     bestTime = ft;
                 }
@@ -1107,7 +1109,7 @@ int LoadSettings(void) {
     }
     if (fs <= 0) {
         /* v8：第一次运行按系统语言选中文 —— 中文 Windows 上不用先去设置里找开关。 */
-        if (PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE) g_lang = LANG_ZH;
+        if (PlatSystemLanguageZh()) g_lang = LANG_ZH;
         return 0;
     }
     size_t fileSize = (size_t)fs;
@@ -1741,7 +1743,7 @@ void DeleteSave(void) {
     char p[MAX_PATH];
     for (int i = 0; i < SAVE_CAND_COUNT; i++) {
         const char* cand = SavePathCand(i, p, sizeof(p));
-        DeleteFileA(cand);
+        PlatDeletePath(cand);
         /* v29：**连 .bak / .tmp 一起删** ——
            LoadSettings 在主档读不到时会回退 .bak；
            只删主档的话，「新开一局 → 首次存档前退出/崩溃」
@@ -1749,9 +1751,9 @@ void DeleteSave(void) {
         {
             char side[MAX_PATH + 8];
             snprintf(side, sizeof(side), "%s.bak", cand);
-            DeleteFileA(side);
+            PlatDeletePath(side);
             snprintf(side, sizeof(side), "%s.tmp", cand);
-            DeleteFileA(side);
+            PlatDeletePath(side);
         }
     }
     g_save.hasRun = 0;

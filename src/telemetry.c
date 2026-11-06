@@ -12,6 +12,7 @@
  * 现在改成**exe 所在目录**，跟游戏本体放一起，永远找得到。
  */
 #include "common.h"
+#include "plat.h"
 #include "telemetry.h"
 
 #define TELEM_FILE  "canity_runs.csv"
@@ -22,8 +23,9 @@ static int s_counted = -1;
 /* 拼出 "exe 所在目录\canity_runs.csv" */
 static void buildPath(char* out, int cap) {
     char exe[MAX_PATH];
-    DWORD n = GetModuleFileNameA(NULL, exe, sizeof(exe));
-    if (n == 0 || n >= sizeof(exe)) {
+    int n = PlatExeDir(exe, (int)sizeof(exe));
+    (void)n;
+    if (n == 0 || (size_t)n >= sizeof(exe)) {
         strncpy(out, TELEM_FILE, (size_t)cap - 1);
         out[cap - 1] = '\0';
         return;

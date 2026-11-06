@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<title>CANITY — 浏览器版</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #05070a; color: #c8d0dc;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    overflow: hidden;
+  }
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  #canvas {
+    display: block;
+    width: 100%; height: 100%;
+    object-fit: contain;          /* letterbox 由 CSS 负责，不拉伸 */
+    image-rendering: pixelated;   /* 像素风：放大不糊 */
+    background: #000;
+    cursor: default;
+    touch-action: none;
+  }
+  #boot {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 18px; background: #05070a; z-index: 10;
+    transition: opacity .35s ease;
+  }
+  #boot.hidden { opacity: 0; pointer-events: none; }
+  #boot h1 {
+    margin: 0; font-size: clamp(28px, 7vw, 64px);
+    letter-spacing: .34em; color: #e8c040; font-weight: 700;
+  }
+  #boot .sub { color: #6f7d90; letter-spacing: .18em; font-size: clamp(10px, 2.4vw, 14px); }
+  #bar { width: min(420px, 70vw); height: 4px; background: #141a22; overflow: hidden; }
+  #bar > i { display: block; height: 100%; width: 0%; background: #e8c040; transition: width .2s; }
+  #status { color: #8b98a8; font-size: 12px; letter-spacing: .1em; }
+  #entry {
+    position: fixed; right: 16px; bottom: 14px; z-index: 11;
+    display: flex; gap: 10px; align-items: center;
+    font-size: 12px; letter-spacing: .08em;
+  }
+  #entry a {
+    color: #9fb0c4; text-decoration: none;
+    border: 1px solid #2a3542; padding: 7px 12px; border-radius: 3px;
+    background: rgba(10,16,22,.82);
+  }
+  #entry a:hover { color: #e8c040; border-color: #4a5a6c; }
+  #entry a.primary { color: #e8c040; border-color: #6a5a20; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas></div>
+
+<div id="boot">
+  <h1>CANITY</h1>
+  <div class="sub">RAYCASTER HORROR</div>
+  <div id="bar"><i></i></div>
+  <div id="status">载入中…</div>
+</div>
+
+<div id="entry">
+  <a class="primary" href="https://github.com/sakurapipi/CANITY/releases/latest">下载完整版 (Windows)</a>
+</div>
+
+<script>
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    print: function () {},
+    printErr: function (t) { console.error(t); },
+    setStatus: function (t) {
+      var el = document.getElementById('status');
+      if (el) el.textContent = t || '载入中…';
+    },
+    onRuntimeInitialized: function () {
+      var boot = document.getElementById('boot');
+      if (boot) boot.classList.add('hidden');
+      if (Module.canvas) Module.canvas.focus();
+    },
+    locateFile: function (path) { return path; }
+  };
+  // 进度条：Emscripten 的 download 进度靠 XHR 包装，这里给个粗粒度回退
+  (function () {
+    var bar = document.querySelector('#bar > i');
+    var fake = 0;
+    var timer = setInterval(function () {
+      fake = Math.min(92, fake + (92 - fake) * 0.06 + 0.4);
+      if (bar) bar.style.width = fake.toFixed(1) + '%';
+      if (Module.calledRun) {
+        if (bar) bar.style.width = '100%';
+        clearInterval(timer);
+      }
+    }, 120);
+  })();
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

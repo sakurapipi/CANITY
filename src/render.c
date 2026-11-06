@@ -69,10 +69,11 @@ void InitPixels(void) {
        拉满 16:9 窗口时横向被拉宽，所以墙面/地板看起来"太扁"。
        现在按客户区比例算，并用固定的垂直分辨率（winH*s）反推宽度。 */
     float aspect = (winH > 0) ? (float)winW / (float)winH : 4.0f / 3.0f;
-    if (g_hwnd) {
-        RECT cr;
-        if (GetClientRect(g_hwnd, &cr) && cr.right > 0 && cr.bottom > 0)
-            aspect = (float)cr.right / (float)cr.bottom;
+    {
+        /* 2026-11-06（R4）：客户区尺寸走平台层 —— 网页端返回 canvas 尺寸 */
+        int pw = 0, ph = 0;
+        PlatWindowSize(&pw, &ph);
+        if (pw > 0 && ph > 0) aspect = (float)pw / (float)ph;
     }
     if (aspect < 0.6f) aspect = 0.6f;
     if (aspect > 3.2f) aspect = 3.2f;
@@ -88,11 +89,9 @@ void InitPixels(void) {
        现在只读 GetClientRect，renderH 不再依赖它自己写出去的值。 */
     float baseH;
     {
-        RECT cbase;
-        if (g_hwnd && GetClientRect(g_hwnd, &cbase) && cbase.bottom > 0)
-            baseH = (float)cbase.bottom * s;
-        else
-            baseH = (float)winH * s;      /* 没有窗口时才退回 winH */
+        int pw = 0, ph = 0;
+        PlatWindowSize(&pw, &ph);
+        baseH = (ph > 0) ? (float)ph * s : (float)winH * s;
     }
     renderH = (int)baseH;
     renderW = (int)(baseH * aspect);
@@ -2733,6 +2732,32 @@ void RenderSprites(void) {
 /* 并行渲染：画面切成横带，主线程 + 工作线程一起画                       */
 /* ------------------------------------------------------------------ */
 
+/* 下面这几个是**两个平台都要用**的共享定义：
+   查表（shadeLut）和三个分带绘制函数的前置声明。
+   它们必须留在 #ifdef 之外，否则网页分支看不到。 */
+#define SHADE_LUT_MAX 1024
+static int shadeLut[SHADE_LUT_MAX];
+static void RenderFloorBand(int y0, int y1);
+static void RenderWallBand(int x0, int x1);
+static void RenderPostBand(int y0, int y1);
+
+#ifdef CANITY_WEB
+/* ==================================================================
+ * 2026-11-06（R4）：**网页端单线程渲染**
+ * ------------------------------------------------------------------
+ * WebAssembly 默认不带 pthread，而且 worker 池用的是 Win32 事件对象。
+ * 这里给出同名的单线程实现：三个相位依次在主线程序列执行。
+ * 逻辑与分带函数完全复用（RenderFloorBand/WallBand/PostBand），
+ * 只是不分片 —— 画面结果逐像素相同，只是慢一些。
+ * ================================================================== */
+void InitWorkers(void) { }
+void ShutdownWorkers(void) { }
+void RunPhase(int phase) {
+    if (phase == 1) { RenderFloorBand(0, renderH); return; }
+    if (phase == 2) { RenderWallBand(0, renderW); return; }
+    RenderPostBand(0, renderH);
+}
+#else
 #define MAX_PARTS 9   /* 1 主线程 + 最多 8 个工作线程 */
 typedef struct {
     HANDLE hThread;
@@ -2748,15 +2773,6 @@ static int g_workerCount = 0;   /* 不含主线程 */
 static int g_parts = 1;
 static volatile LONG g_stop = 0;
 
-/* 亮度 → gamma 校正后的亮度，查表代替逐像素 powf。
-   索引是「亮度 × 256」，值域 0..900（对应亮度 0..3.5）。
-   地板与墙体都走这张表，gamma 滑块对整个画面生效。 */
-#define SHADE_LUT_MAX 1024
-static int shadeLut[SHADE_LUT_MAX];
-
-static void RenderFloorBand(int y0, int y1);
-static void RenderWallBand(int x0, int x1);
-static void RenderPostBand(int y0, int y1);
 static DWORD WINAPI WorkerMain(LPVOID param) {
     Worker* w = (Worker*)param;
     for (;;) {
@@ -2860,6 +2876,8 @@ void RunPhase(int phase) {
         else RenderPostBand(0, renderH);
     }
 }
+#endif /* CANITY_WEB */
+
 
 /* 亮度 → gamma 校正后的亮度，查表代替逐像素 powf。
    索引是「亮度 × 256」，值域 0..1023（对应亮度 0..4.0）。

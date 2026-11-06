@@ -640,9 +640,9 @@ float SlipAwaySeconds(void) {
 
 /* 假死：技能树或改造树，任一拥有即可 */
 int PlayDeadAvailable(void) {
-    extern float BenchPlayDead(void);
+    extern int BenchPlayDead(void);   /* 2026-11-06（R4）：声明与 bench.h 对齐（返回 int） */
     if (SkillOwned(SK_PLAYDEAD)) return 1;
-    if (BenchPlayDead() > 0.5f) return 1;
+    if (BenchPlayDead()) return 1;
     return 0;
 }
 

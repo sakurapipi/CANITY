@@ -278,7 +278,7 @@ static void UiTrack(int x, int y, int w, int h, const char* label) {
 void DumpUILayout(const char* path) {
     /* 写到 exe 所在目录，避免受工作目录影响 */
     char full[MAX_PATH];
-    GetModuleFileNameA(NULL, full, MAX_PATH);
+    PlatExeDir(full, MAX_PATH);
     char* slash = strrchr(full, '\\');
     if (slash) slash[1] = 0; else full[0] = 0;
     strncat(full, path, MAX_PATH - strlen(full) - 1);
@@ -2373,7 +2373,7 @@ void DrawSkillTree(void) {
                     snprintf(m, sizeof(m),
                              "[CANITY] SKILL DATA SELF-TEST FAILED: code=%d "
                              "(SKILL_TOTAL_COST vs real table)", r);
-                    OutputDebugStringA(m);
+                    PlatLog(m);
                 }
             }
         }

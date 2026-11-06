@@ -59,6 +59,17 @@ void PlatWindowSize(int* w, int* h) {
     if (h) *h = ch;
 }
 
+int PlatFocused(void) {
+    return (g_hwnd && GetForegroundWindow() == g_hwnd) ? 1 : 0;
+}
+
+void PlatRestoreWindow(void) {
+    if (!g_hwnd) return;
+    ShowWindow(g_hwnd, SW_RESTORE);
+    SetForegroundWindow(g_hwnd);
+    SetFocus(g_hwnd);
+}
+
 int PlatMinimized(void) {
     return (g_hwnd && IsIconic(g_hwnd)) ? 1 : 0;
 }
@@ -276,6 +287,14 @@ void PlatCursorPos(int* x, int* y) {
     }
 }
 
+void PlatRequestQuit(void) { PostQuitMessage(0); }
+
+void PlatSetCapture(int on) {
+    if (!g_hwnd) return;
+    if (on) SetCapture(g_hwnd);
+    else ReleaseCapture();
+}
+
 void PlatSetCursorPos(int x, int y) {
     POINT p;
     p.x = x;
@@ -368,6 +387,28 @@ int PlatWriteFileAtomic(const char* path, const void* data, int len) {
     return 0;
 }
 
+void PlatMakeDir(const char* path) {
+    if (path && path[0]) CreateDirectoryA(path, NULL);
+}
+
+int PlatDeletePath(const char* path) {
+    if (!path || !path[0]) return -1;
+    return DeleteFileA(path) ? 0 : -1;
+}
+
+int PlatSystemLanguageZh(void) {
+    return (PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE) ? 1 : 0;
+}
+
+double PlatFileTime(const char* path) {
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    if (!path || !GetFileAttributesExA(path, GetFileExInfoStandard, &fa)) return 0.0;
+    ULARGE_INTEGER u;
+    u.LowPart = fa.ftLastWriteTime.dwLowDateTime;
+    u.HighPart = fa.ftLastWriteTime.dwHighDateTime;
+    return (double)u.QuadPart / 10000000.0;   /* 100ns -> 秒 */
+}
+
 int PlatCopyPath(const char* from, const char* to) {
     if (!from || !to) return -1;
     return CopyFileA(from, to, FALSE) ? 0 : -1;
@@ -381,6 +422,10 @@ int PlatRenamePath(const char* from, const char* to) {
 /* ---------------------------------------------------------------------
  * 音频（R3 接线）
  * ------------------------------------------------------------------- */
+void PlatLog(const char* msg) {
+    if (msg) OutputDebugStringA(msg);
+}
+
 void PlatSfx(int id, float gain) {
     (void)id;
     (void)gain;

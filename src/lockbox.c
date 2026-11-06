@@ -121,7 +121,7 @@ void LockOpenFor(int idx, int type) {
         isCharging = 0;          /* 开锁时不能带着投掷蓄力 */
         mouseCharge = 0.0f;
         ForceCursor(1);
-        SetCursor(LoadCursor(NULL, IDC_ARROW));
+        ForceCursor(1);   /* 2026-11-06（R4）：光标样式归平台层 */
         firstMouseMove = 1;
         PlaySfx(SFX_SEARCH, 0.4f);
     }

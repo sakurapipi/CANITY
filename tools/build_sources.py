@@ -17,7 +17,13 @@ import sys
 # 两边都叫 plat_*.c，靠文件名区分。
 PLATFORM_FILES = {
     'win32': {'plat_web.c'},
-    'web':   {'plat_win32.c'},
+    # 网页构建额外排除：
+    #   audio.c  —— waveOut + 线程，R7 换成 WebAudio 后端
+    #   gamepad.c —— XInput 走 LoadLibrary/GetProcAddress，浏览器用 Gamepad API
+    #   music.c  —— mciSendStringW 播 BGM，网页端暂时不放音乐
+    'web':   {'plat_win32.c', 'audio.c', 'gamepad.c',
+              'music.c', 'music_proc.c',
+              'steam_zone.c'},   # Steamworks 在浏览器里不存在
 }
 
 

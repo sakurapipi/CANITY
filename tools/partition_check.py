@@ -37,7 +37,8 @@ SYS = {
 # "#ifdef __EMSCRIPTEN__" 撒满整个工程，正是这层要消除的东西。
 # 界限仍然清晰：plat_*.c 之外一个系统头都不许有。
 ALLOW = {'common.h'}
-ALLOW_DIRS = (os.path.join('src', 'platform'),)
+ALLOW_DIRS = (os.path.join('src', 'platform'),
+              os.path.join('include', 'compat'))   # 网页端的 Win32 兼容垫片
 
 
 def iter_files():

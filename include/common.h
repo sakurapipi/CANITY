@@ -19,8 +19,16 @@
 #ifndef CANITY_COMMON_H
 #define CANITY_COMMON_H
 
+/* 2026-11-06（网页版 R4）：**系统头按平台分流**。
+   桌面构建拿 windows.h；网页构建拿 compat/web_compat.h ——
+   后者只提供类型与键码常量，不提供任何函数，
+   因为平台层之外本来就不许调用 Win32。 */
+#ifdef CANITY_WEB
+#include "compat/web_compat.h"
+#else
 #include <windows.h>
 #include <mmsystem.h>
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

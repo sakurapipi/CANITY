@@ -663,6 +663,12 @@ int GenerateThemeRooms(int wantCount) {
  * 默认关闭；设了环境变量 CANITY_ROOM_DUMP=<路径> 才写，每层追加一段。
  * ================================================================ */
 static void RoomDumpIfRequested(int placed) {
+#ifdef CANITY_WEB
+    /* 2026-11-06（R4）：房间 ASCII dump 是桌面调试工具（要往 exe 旁边写文件），
+       网页构建整段跳过 —— 注意用 #else 而不是 return：
+       后面那些 Win32 调用在网页端**根本不能被编译**。 */
+    (void)placed;
+#else
     char path[MAX_PATH];
     DWORD got = GetEnvironmentVariableA("CANITY_ROOM_DUMP", path, (DWORD)sizeof(path));
     if (got == 0 || got >= sizeof(path)) return;
@@ -691,6 +697,7 @@ static void RoomDumpIfRequested(int placed) {
     DWORD written = 0;
     WriteFile(h, buf, (DWORD)n, &written, NULL);
     CloseHandle(h);
+#endif
 }
 
 int roomSeedUsed = 0;

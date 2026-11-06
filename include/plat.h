@@ -29,6 +29,10 @@ void PlatSleepMs(int ms);
 /* 客户区尺寸（不含边框）。网页后端返回 canvas 的 CSS 尺寸。 */
 void PlatWindowSize(int* w, int* h);
 int  PlatMinimized(void);
+/* 窗口/画布是否处于前台（没有焦点时不采样按键）。 */
+int  PlatFocused(void);
+/* 从最小化恢复并抢回前台（Win32 有；网页端是空操作）。 */
+void PlatRestoreWindow(void);
 void PlatSetTitle(const char* utf8);
 
 /* ---------------------------------------------------------------------
@@ -81,6 +85,12 @@ int  PlatCursorLocked(void);
 void PlatCursorPos(int* x, int* y);
 void PlatSetCursorPos(int x, int y);
 
+/* 请求退出主循环（菜单里的 Quit）。 */
+void PlatRequestQuit(void);
+
+/* 鼠标捕获：拖出窗口/画布也能继续收到移动（滑条、拖拽用）。 */
+void PlatSetCapture(int on);
+
 /* ---------------------------------------------------------------------
  * 文件
  * -------------------------------------------------------------------
@@ -102,6 +112,13 @@ int PlatExeDir(char* out, int cap);                                /* 返回写�
 int PlatReadFilePath(const char* path, void* buf, int cap);         /* 字节数，失败 <0 */
 /* 原子写：先写临时文件 + 落盘 + 改名。0 = 成功，否则平台错误码。 */
 int PlatWriteFileAtomic(const char* path, const void* data, int len);
+/* 文件最后修改时间（秒，越大越新）。取不到返回 0。 */
+double PlatFileTime(const char* path);
+void PlatMakeDir(const char* path);                                 /* 失败静默 */
+int  PlatDeletePath(const char* path);                              /* 0 = 成功 */
+
+/* 系统语言是否中文（首次运行时用来决定默认语言）。 */
+int  PlatSystemLanguageZh(void);
 int PlatCopyPath(const char* from, const char* to);                 /* 0 = 成功 */
 int PlatRenamePath(const char* from, const char* to);               /* 0 = 成功 */
 
@@ -109,6 +126,9 @@ int PlatRenamePath(const char* from, const char* to);               /* 0 = 成�
  * 音频
  * ------------------------------------------------------------------- */
 /* 播放一次音效。实体数据仍在 audio.c，这里只负责"送出去"。 */
+/* 调试日志（桌面走 OutputDebugString / 网页走 console.error）。 */
+void PlatLog(const char* msg);
+
 void PlatSfx(int id, float gain);
 
 #endif /* CANITY_PLAT_H */

@@ -123,7 +123,7 @@ void SaveBackendSyncAll(void) {
             snprintf(bak, sizeof(bak), "%s.pre-cloud.bak", p);
             /* v2.4-alpha R6：备份失败要显式知道。
                备份没生成 = 一旦下面是覆盖，玩家就没有本地的上一份了。 */
-            BOOL backed = CopyFileA(p, bak, FALSE);
+            int backed = (PlatCopyPath(p, bak) == 0) ? 1 : 0;
             int werr = SaveBackendWrite(p, buf, (size_t)len);   /* ← 用 len，不是 n */
             if (werr != 0) {
                 g_saveState = 2;
@@ -132,8 +132,11 @@ void SaveBackendSyncAll(void) {
                    之后再调 GetLastError 拿到的可能不是它。 */
                 g_saveError = werr;
             } else if (!backed) {
-                /* 写成功了，但备份没成 —— 记一个可诊断的状态，不改写结果 */
-                g_saveError = (int)GetLastError();
+                /* 写成功了，但备份没成 —— 记一个可诊断的状态，不改写结果。
+                   2026-11-06（R4）：GetLastError 是 Win32 的；
+                   平台层的 PlatCopyPath 只回 -1，这里就用一个统一的哨兵值，
+                   语义仍是"备份失败"，不再依赖系统错误码。 */
+                g_saveError = 5;   /* ERROR_ACCESS_DENIED：备份不可写 */
             }
         } else if (sync == STEAM_SYNC_CONFLICT) {
             /* ============================================================

@@ -894,14 +894,12 @@ void PollInput(void) {
     /* v1.8：窗口最小化时收不到任何键盘消息（F11 也就救不回来）。
        这里用 GetAsyncKeyState 直接读物理按键：最小化状态下按 F11 或 Enter
        就能把自己还原 —— 不注册全局热键，也不会在正常游戏时抢键。 */
-    if (IsIconic(g_hwnd)) {
+    if (PlatMinimized()) {
         static int prevF11 = 0, prevEnter = 0;
         int f11 = PlatKeyDown(VK_F11);
         int ent = PlatKeyDown(VK_RETURN);
         if ((f11 && !prevF11) || (ent && !prevEnter)) {
-            ShowWindow(g_hwnd, SW_RESTORE);
-            SetForegroundWindow(g_hwnd);
-            SetFocus(g_hwnd);
+            PlatRestoreWindow();
             resetInputState = 1;
             firstMouseMove = 1;
             uiDirty = 1;
@@ -911,7 +909,7 @@ void PollInput(void) {
         return;
     }
 
-    if (GetForegroundWindow() != g_hwnd) {
+    if (!PlatFocused()) {
         memset(keys, 0, sizeof(keys));
         memset(prevDown, 0, sizeof(prevDown));
         return;
@@ -4659,7 +4657,7 @@ void Update(float dt) {
         currentState = STATE_GAMEOVER;
         menuSelection = 0;
         ForceCursor(1);
-        SetCursor(LoadCursor(NULL, IDC_ARROW));
+        /* 2026-11-06（R4）：光标样式归平台层；ForceCursor(1) 已处理可见性 */
         uiDirty = 1;
         return;
     }
@@ -6365,7 +6363,7 @@ void Update(float dt) {
             currentState = STATE_GAMEOVER;
             menuSelection = 0;
             ForceCursor(1);
-            SetCursor(LoadCursor(NULL, IDC_ARROW));
+            /* 2026-11-06（R4）：光标样式归平台层；ForceCursor(1) 已处理可见性 */
             /* 通关时检查成就 */
             {
                 /* v1.8：主线固定分 + 通关给 1 个核心 */
@@ -6765,12 +6763,12 @@ void CalibTick(float dt) {
 }
 
 void SyncWindowSize(void) {
-    if (!g_hwnd) return;
-    RECT cr;
-    if (!GetClientRect(g_hwnd, &cr)) return;
-    if (cr.right > 0 && cr.bottom > 0) {
-        clientW = (int)cr.right;
-        clientH = (int)cr.bottom;
+    /* 2026-11-06（R4）：客户区尺寸由平台层给（网页端 = canvas CSS 尺寸） */
+    int cw = 0, ch = 0;
+    PlatWindowSize(&cw, &ch);
+    if (cw > 0 && ch > 0) {
+        clientW = cw;
+        clientH = ch;
     }
     /* UI 空间 = 渲染空间 */
     if (winW != renderW || winH != renderH) {
@@ -7217,11 +7215,22 @@ void PauseGame(void) {
     mapFullScreen = 0;
     mapHeld = 0;
     ForceCursor(1);
-    SetCursor(LoadCursor(NULL, IDC_ARROW));
+    /* 2026-11-06（R4）：光标样式归平台层；ForceCursor(1) 已处理可见性 */
     uiDirty = 1;
 }
 
 void ApplyDisplayMode(void) {
+#ifdef CANITY_WEB
+    /* 2026-11-06（R4）：浏览器里没有"窗口模式/分辨率"这回事。
+       canvas 由 CSS 铺满，逻辑尺寸跟着它走。 */
+    {
+        int cw = 0, ch = 0;
+        PlatWindowSize(&cw, &ch);
+        if (cw > 0) winW = cw;
+        if (ch > 0) winH = ch;
+    }
+    uiDirty = 1;
+#else
     if (isFullscreen) {
         winW = GetSystemMetrics(SM_CXSCREEN);
         winH = GetSystemMetrics(SM_CYSCREEN);
@@ -7293,6 +7302,7 @@ void ApplyDisplayMode(void) {
     }
     firstMouseMove = 1;
     uiDirty = 1;
+#endif
 }
 
 void ApplySetting(int item, int value) {
@@ -7437,7 +7447,7 @@ void ActivateMenuItem(void) {
             uiDirty = 1;
         } else {
             SaveGame();
-            PostQuitMessage(0);
+            PlatRequestQuit();
         }
     } else if (currentState == STATE_SAFEHOUSE) {
         ShopActivate();
@@ -7912,10 +7922,8 @@ void SkillDragEnd(void);
 int  SkillIsDragging(void);
 
 static void MouseToLogical(int* mx, int* my) {
-    if (!g_hwnd) return;
-    RECT cr;
-    GetClientRect(g_hwnd, &cr);
-    int cw = cr.right - cr.left, ch = cr.bottom - cr.top;
+    int cw = 0, ch = 0;
+    PlatWindowSize(&cw, &ch);
     if (cw <= 0 || ch <= 0) return;
     *mx = *mx * winW / cw;
     *my = *my * winH / ch;
@@ -8096,7 +8104,7 @@ if (currentState == STATE_HUB) {
                 if (my >= t.top - UIS(16) && my <= t.bottom + UIS(16)) {
                     *it->fvalue = SliderXToValue(p, mx, it->fmin, it->fmax, it->fstep);
                     sliderDragging = 1;
-                    SetCapture(g_hwnd);          /* 拖出窗口也能继续拖 */
+                    PlatSetCapture(1);           /* 拖出窗口也能继续拖 */
                     uiDirty = 1;
                     return;
                 }
@@ -8184,12 +8192,13 @@ if (currentState == STATE_HUB) {
         }
     }
 }
+#ifndef CANITY_WEB
 /* 地图形态变了之后刷新鼠标状态：**只有全屏图**才释放光标。
    小地图是角落叠层，鼠标继续锁在中心，边走边看。 */
 static void MapCursorRefresh(void) {
     int wantCursor = (isMapOpen && mapFullScreen) ? 1 : 0;
     ForceCursor(wantCursor);
-    if (wantCursor) SetCursor(LoadCursor(NULL, IDC_ARROW));
+    if (wantCursor) /* 2026-11-06（R4）：光标样式归平台层；ForceCursor(1) 已处理可见性 */
     firstMouseMove = 1;
     uiDirty = 1;
 }
@@ -8273,7 +8282,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 int mouseFree = (currentState != STATE_PLAYING) ||
                                 (isMapOpen && mapFullScreen) || lockActive;
                 if (!mouseFree) SetCursor(NULL);
-                else SetCursor(LoadCursor(NULL, IDC_ARROW));
+                else /* 2026-11-06（R4）：光标样式归平台层；ForceCursor(1) 已处理可见性 */
                 return TRUE;
             }
             break;
@@ -8606,7 +8615,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             }
             BenchDragEnd();   /* v2.9：结束画布拖拽 */
             if (sliderDragging) {
-                ReleaseCapture();
+                PlatSetCapture(0);
                 SaveGame();   /* 拖动滑块松手就落盘 */
             }
             sliderDragging = 0;
@@ -9219,6 +9228,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
+#endif
+
 
 /* 编译期守卫：表项数必须与 common.h 里的常量一致。
    常见坑：往 settings[] 里加了一项却忘了改 SETTING_COUNT，
