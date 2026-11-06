@@ -8184,6 +8184,18 @@ void CanityMouseClick(int mx, int my) {
         uiDirty = 1;
         return;
     }
+    /* 技能树的 + / - 缩放按钮优先命中（点它们不该去选节点） */
+    if (currentState == STATE_HUB) {
+        extern int HubZoomButtonAt(int mx, int my);
+        extern void SkillZoomAt(float factor, int mx, int my);
+        int hit = HubZoomButtonAt(mx, my);
+        if (hit != 0) {
+            SkillZoomAt(hit > 0 ? 1.25f : (1.0f / 1.25f), winW / 2, winH / 2);
+            uiDirty = 1;
+            return;
+        }
+    }
+
     if (currentState == STATE_SETTINGS || currentState == STATE_HUB ||
         currentState == STATE_SAFEHOUSE || currentState == STATE_ACHIEVEMENTS ||
         currentState == STATE_BESTIARY || currentState == STATE_BANK) {

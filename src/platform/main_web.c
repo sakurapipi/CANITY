@@ -51,9 +51,32 @@ static void WebFrame(void) {
      *
      * 正确做法：调同一个 SyncWindowSize()，别自己维护一套。
      * ================================================================ */
+    /* ==================================================================
+     * 2026-11-06（用户实测：**手机横屏后画面只有中间窄窄一条**）
+     * ------------------------------------------------------------------
+     * InitPixels 只在启动时算一次内部渲染尺寸。手机先竖屏打开、
+     * 再横过来时没人重算 —— 渲染缓冲还是竖的，canvas 用
+     * object-fit: contain 一缩，就变成屏幕正中一条竖着的窄带，
+     * 左右全黑。
+     *
+     * 这里每帧比对 canvas 尺寸，变了就重新分配渲染缓冲。
+     * InitPixels 内部会走 PlatAcquireTarget，指针会自动更新。
+     * ================================================================ */
     {
-        extern void SyncWindowSize(void);
-        SyncWindowSize();
+        static int lastW = -1, lastH = -1;
+        int cw = 0, ch = 0;
+        PlatWindowSize(&cw, &ch);
+        if (cw != lastW || ch != lastH) {
+            lastW = cw;
+            lastH = ch;
+            extern void InitPixels(void);
+            InitPixels();          /* 按新宽高比重算 renderW/renderH */
+            extern void SyncWindowSize(void);
+            SyncWindowSize();
+        } else {
+            extern void SyncWindowSize(void);
+            SyncWindowSize();
+        }
     }
 
     /* 时间基准：桌面端在 WinMain 里维护 g_timeSec，网页端也得给。 */

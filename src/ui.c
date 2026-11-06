@@ -2068,6 +2068,53 @@ void SkillZoomAt(float factor, int mx, int my) {
     skVK = k2;
     uiDirty = 1;
 }
+/* ==================================================================
+ * 2026-11-06（用户实测）：**技能树只用鼠标调不了缩放**
+ * ------------------------------------------------------------------
+ * 桌面端靠滚轮（WM_MOUSEWHEEL），网页端没有滚轮消息 ——
+ * 于是"用鼠标根本调不了倍率"。
+ *
+ * 这里加一对固定的 + / - 按钮：
+ *   · 桌面与网页都能点（走同一个 CanityMouseClick）
+ *   · 也顺手给纯键盘用户一个可见提示
+ * ================================================================== */
+void HubZoomButtonRect(int which /* 0=+ 1=- */, int* x0, int* y0, int* x1, int* y1) {
+    int sz = UIS(44);
+    int gap = UIS(10);
+    /* 放**左下角**：右下角是节点详情（价格等），会压住 */
+    int bx = UIS(24);
+    int by = winH - UIS(24) - sz;
+    if (which == 0) {              /* + 在上面 */
+        by -= (sz + gap);
+    }
+    if (x0) *x0 = bx;
+    if (y0) *y0 = by;
+    if (x1) *x1 = bx + sz;
+    if (y1) *y1 = by + sz;
+}
+
+void DrawHubZoomButtons(void) {
+    for (int which = 0; which < 2; which++) {
+        int x0, y0, x1, y1;
+        HubZoomButtonRect(which, &x0, &y0, &x1, &y1);
+        BlendRectWin(x0, y0, x1, y1, 0x00101418u, 0.88f);
+        FrameRectWin(x0, y0, x1, y1, 0x00607080u, 0.95f, UIS(2));
+        DrawTextCenterWin((x0 + x1) / 2, (y0 + y1) / 2 - TextHeightWin() / 2,
+                          which == 0 ? "+" : "-", 0x00E8C040u);
+    }
+}
+
+/* 命中返回：1 = 放大键，-1 = 缩小键，0 = 没点到 */
+int HubZoomButtonAt(int mx, int my) {
+    for (int which = 0; which < 2; which++) {
+        int x0, y0, x1, y1;
+        HubZoomButtonRect(which, &x0, &y0, &x1, &y1);
+        if (mx >= x0 && mx <= x1 && my >= y0 && my <= y1)
+            return which == 0 ? 1 : -1;
+    }
+    return 0;
+}
+
 void SkillDragStart(int mx, int my) {
     skDragging = 1;
     skDragMouseX = (float)mx; skDragMouseY = (float)my;
@@ -2631,6 +2678,9 @@ void DrawSkillTree(void) {
                       Tr("R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY",
                          "滚轮缩放   拖拽平移   HOME 复位   回车购买"),
                       0x00707070u);
+
+    /* 2026-11-06：右下角 + / - 缩放按钮（鼠标 / 触屏都能点） */
+    DrawHubZoomButtons();
 }
 
 /* 逻辑画布坐标 -> 节点 id（没点中 -1）。
