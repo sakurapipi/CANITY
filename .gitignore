@@ -63,3 +63,5 @@ steam_api64.lib
 # 精灵样张导出（调试产物，不进版本库）
 dump_*.ppm
 *.ppm
+.verify-artifacts/
+.verify-noise.json
