@@ -147,7 +147,7 @@ static int fixture_copy(const char* from, const char* to) {
     return 1;
 }
 
-static void test_legacy_fixture_one(const char* file, int* ok, int* total) {
+static void test_legacy_fixture_one(const char* file, int oldVer, int* ok, int* total) {
     extern const char* SavePathForSlot(int, int, char*, size_t);
     char dst[MAX_PATH];
     char src[MAX_PATH];
@@ -175,6 +175,17 @@ static void test_legacy_fixture_one(const char* file, int* ok, int* total) {
     if (fabsf(sanity - 61.5f) >= 0.5f) same = 0;
     if (fabsf(posX - 12.5f) >= 0.05f || fabsf(posY - 9.5f) >= 0.05f) same = 0;
 
+    /* 迁移前必须留下原件：<存档>.v<旧版本>.bak。
+       这条比"读出来对"更基础 —— 读错还能回滚，没备份就只能认栽。 */
+    if (oldVer > 0 && oldVer <= 30) {
+        char bk[MAX_PATH + 24];
+        FILE* fp;
+        snprintf(bk, sizeof(bk), "%s.v%d.bak", dst, oldVer);
+        fp = fopen(bk, "rb");
+        if (!fp) { same = 0; fprintf(stderr, "  [fixture] %-20s 缺少备份 %s\n", file, bk); }
+        else fclose(fp);
+    }
+
     fprintf(stderr, "  [fixture] %-20s %s  level=%d sanity=%.1f pos=(%.1f,%.1f)\n",
             file, same ? "OK  " : "错位", currentLevel, sanity, posX, posY);
     if (same) ++(*ok);
@@ -183,21 +194,22 @@ static void test_legacy_fixture_one(const char* file, int* ok, int* total) {
 static void test_legacy_fixtures(void) {
     /* 裸档（v27）与四个 CSAV 信封档（v29 / v30 / v33 / v34）。
        每个夹具录入时的状态都是 level=3 / sanity=61.5 / pos=(12.5,9.5)。 */
-    const char* files[] = {
-        "sav_v2_3_6.sav",
-        "sav_v2_3_9.sav",
-        "sav_v2_4-rc.sav",
-        "sav_v2_4.sav",
-        "sav_v2_4_1.sav"
+    static const struct { const char* file; int ver; } files[] = {
+        { "sav_v2_3_6.sav",   27 },
+        { "sav_v2_3_9.sav",   29 },
+        { "sav_v2_4-rc.sav",  30 },
+        { "sav_v2_4.sav",     33 },
+        { "sav_v2_4_1.sav",   34 }
     };
     int ok = 0, total = 0;
     size_t i;
 
     fprintf(stderr, "  ---- 历史存档迁移（tests/fixtures/saves）----\n");
     for (i = 0; i < sizeof(files) / sizeof(files[0]); i++)
-        test_legacy_fixture_one(files[i], &ok, &total);
+        test_legacy_fixture_one(files[i].file, files[i].ver, &ok, &total);
 
     fprintf(stderr, "  ---- 迁移结果: %d/%d 正确 ----\n", ok, total);
+    checks += total;   /* 每个夹具都算一次检查，别让汇总把覆盖数吃掉 */
     CHECK(ok == total, "every historical save must migrate with identical key state");
 }
 

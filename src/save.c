@@ -409,6 +409,76 @@ static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelo
      >0  = **逻辑**文件字节数（信封格式返回 sizeof(SaveBlob)，
            裸档返回真实字节数 —— 后面的前缀迁移全靠这个数）
      -1  = 读不到 / 认不出 */
+/* ==================================================================
+ * 2026-11-07（v2.4.2 / B1）：**取出真正的旧载荷字节**
+ * ------------------------------------------------------------------
+ * 缺陷（用真实历史存档实测复现）：
+ *   v2.3.9（v29）与 v2.4-rc（v30）的存档是 CSAV 信封格式，
+ *   而迁移路径原来是：
+ *       ReadWholeFile(usedPath, raw, ...);
+ *       LoadLegacyBlob(raw, rn, ...);          // 拿整份文件当裸 blob
+ *   前 20 字节是信封 + 后面是块表，LoadLegacyBlob 必然解析失败
+ *   -> migrated = 0 -> version 归零 -> 走归档拒绝。
+ *   玩家表现：**v2.3.9 / v2.4-rc 的存档升级后读不进来**。
+ *
+ * 为什么 v27 没坏：v2.3.6 写的是裸档，整份文件正好就是 blob。
+ * 为什么 v33/v34 没坏：不在 25..30 的迁移区间，走正常信封解码。
+ *
+ * 本函数把两种格式统一成「旧载荷字节 + 真实长度」：
+ *   信封档 -> SC_LEGACY29 块的字节
+ *   裸  档 -> 整份文件字节
+ * ================================================================== */
+static long ExtractLegacyPayload(const char* path, unsigned char* out, long cap,
+                                 int* isEnvelope) {
+    unsigned char* raw;
+    long n;
+
+    if (isEnvelope) *isEnvelope = 0;
+    if (!path || !path[0] || !out || cap <= 0) return 0;
+
+    raw = (unsigned char*)malloc((size_t)cap);
+    if (!raw) return 0;
+    n = ReadWholeFile(path, raw, (size_t)cap);
+    if (n <= 0) { free(raw); return 0; }
+
+    /* ---- 信封档：只取 SC_LEGACY29 块 ---- */
+    if (n > (long)sizeof(SaveEnvelope)) {
+        SaveEnvelope h;
+        memcpy(&h, raw, sizeof(h));
+        if (h.magic == SAVE_ENVELOPE_MAGIC) {
+            int payLen = (int)(n - (long)sizeof(SaveEnvelope));
+            const void* b = NULL;
+            int sz = 0;
+            if (SaveEnvelopeValid(&h, raw + sizeof(h), payLen) &&
+                SaveContainerFind(raw + sizeof(h), payLen, SC_LEGACY29, &b, &sz) &&
+                b && sz > 0) {
+                long copy = ((long)sz < cap) ? (long)sz : cap;
+                memcpy(out, b, (size_t)copy);
+                if (isEnvelope) *isEnvelope = 1;
+                free(raw);
+                return copy;
+            }
+            free(raw);
+            return 0;
+        }
+    }
+
+    /* ---- 裸档 ---- */
+    {
+        unsigned int magic = 0;
+        if (n >= (long)sizeof(magic)) memcpy(&magic, raw, sizeof(magic));
+        if (magic == SAVE_MAGIC) {
+            long copy = (n < cap) ? n : cap;
+            memcpy(out, raw, (size_t)copy);
+            free(raw);
+            return copy;
+        }
+    }
+
+    free(raw);
+    return 0;
+}
+
 static long ReadSaveFile(const char* path, SaveBlob* out) {
     if (!path || !out) return -1;
     size_t cap = sizeof(SaveEnvelope) + sizeof(SaveBlob) + 65536;
@@ -1195,8 +1265,18 @@ int LoadSettings(void) {
          * ================================================================ */
         unsigned char* raw = (unsigned char*)malloc(sizeof(SaveBlob) + 4096);
         int migrated = 0;
+        /* 2026-11-07（B1）：迁移前先在盘上留一份原件。
+           迁移是"读旧布局 -> 写成新布局"，一旦哪里算错，玩家进度就没了；
+           留一份 .v<旧版本>.bak 才能人工回滚。已存在就不覆盖。 */
+        if (usedPath[0]) {
+            char bk[MAX_PATH + 24];
+            snprintf(bk, sizeof(bk), "%s.v%d.bak", usedPath, g_save.version);
+            { FILE* probe = fopen(bk, "rb");
+              if (probe) fclose(probe);
+              else if (!PlatCopyPath(usedPath, bk)) { /* 备份失败不阻断，下面仍会拒绝写入 */ } }
+        }
         if (raw && usedPath[0]) {
-            long rn = ReadWholeFile(usedPath, raw, sizeof(SaveBlob) + 4096);
+            long rn = ExtractLegacyPayload(usedPath, raw, (long)sizeof(SaveBlob) + 4096, NULL);
             if (rn > 0) {
                 migrated = LoadLegacyBlob(raw, (size_t)rn, legacyCont,
                                           LEGACY_CONTAINER_COUNT,
