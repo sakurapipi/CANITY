@@ -212,6 +212,77 @@ static void test_legacy_fixture_one(const char* file, int oldVer, int wantPayloa
  *   ① LoadSettings() 必须失败（不能把垃圾当成功）
  *   ② 原始字节必须还能在盘上找到（主档或 .v*.bak），逐字节一致
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-07（v2.4.2 / B2）：**回主菜单改设置不能吃掉待继续的对局**
+ * ------------------------------------------------------------------
+ * 场景（真实玩家路径）：
+ *   局内探索到一半 -> 回主菜单 -> 改画质/音量/键位 -> 继续 >> Continue
+ *
+ * 保存流程在"没有活动对局"时（runInProgress=0）会把运行段从上一份
+ * g_save 复制回来。原来的复制范围是
+ *     offsetof(hasRun) .. offsetof(hudDetail)
+ * 于是 hudDetail **之后**的运行态字段全部丢失：
+ *     roomSeed / roomCount / hatchUsedMask / echoBolts / decoys /
+ *     phaseBeacons / jumperSpawnedRun
+ * 表现为：房间重新生成、用过的舱门复位、三类投掷物与爆脸怪计数清零。
+ *
+ * 这条用例把运行时全局清空（模拟真的回到主菜单），再保存，
+ * 然后读回来逐项核对 —— 只要有一项被清零就是失败。
+ * ================================================================== */
+static void test_menu_save_keeps_run(void) {
+    extern int echoBolts, decoys, phaseBeacons, jumperSpawnedRun;
+    extern int hudDetail;
+    int hudBefore;
+
+    clear_meta();
+    StartGame();
+
+    /* ① 造一个"正在进行"的局面，并记下特征值 */
+    currentLevel = 5;
+    sanity  = 42.0f;
+    battery = 33.0f;
+    posX = 7.25f; posY = 11.75f; dirX = 0.6f; dirY = 0.8f;
+    flares = 3;
+    /* 注意 CLAMP_ITEM_RARE 上限是 4、CLAMP_ITEM 是 8，
+       测试值必须落在合法区间，否则读回时被夹取是**正确行为**。 */
+    echoBolts = 4; decoys = 3; phaseBeacons = 2; jumperSpawnedRun = 2;
+    runInProgress = 1;
+    SaveGame();
+    CHECK(g_saveState == 1, "menu-save: the in-run save is written");
+
+    /* ② 模拟回到主菜单：运行时全局被清空，runInProgress 归零 */
+    currentLevel = 1;
+    sanity = 100.0f;
+    battery = 100.0f;
+    posX = 0.0f; posY = 0.0f;
+    flares = 0;
+    echoBolts = 0; decoys = 0; phaseBeacons = 0; jumperSpawnedRun = 0;
+    runInProgress = 0;
+    currentState = STATE_MAIN_MENU;
+
+    /* ③ 改一个设置项再保存（这就是"菜单存档"那条路径） */
+    hudBefore = hudDetail;
+    hudDetail = hudDetail ? 0 : 1;          /* 随便改一个设置字段 */
+    SaveGame();
+    CHECK(g_saveState == 1, "menu-save: the menu save is written");
+
+    /* ④ 读回来核对：运行段必须一模一样 */
+    CHECK(LoadSettings(), "menu-save: save can be reloaded");
+    ContinueRun();
+
+    CHECK(currentLevel == 5,          "menu-save: level survives a menu save");
+    CHECK(fabsf(sanity - 42.0f) < 0.5f,   "menu-save: sanity survives a menu save");
+    CHECK(fabsf(posX - 7.25f) < 0.05f && fabsf(posY - 11.75f) < 0.05f,
+                                      "menu-save: position survives a menu save");
+    CHECK(flares == 3,                "menu-save: flares survive a menu save");
+    CHECK(echoBolts == 4,             "menu-save: echo bolts survive a menu save");
+    CHECK(decoys == 3,                "menu-save: decoys survive a menu save");
+    CHECK(phaseBeacons == 2,          "menu-save: phase beacons survive a menu save");
+    CHECK(jumperSpawnedRun == 2,      "menu-save: facehugger budget survives a menu save");
+    CHECK(hudDetail == (hudBefore ? 0 : 1),
+                                      "menu-save: the setting change itself is kept");
+}
+
 static void test_corrupt_save_is_never_overwritten(void) {
     extern const char* SavePathForSlot(int, int, char*, size_t);
     char dst[MAX_PATH];
@@ -4517,6 +4588,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_legacy_fixtures();test_corrupt_save_is_never_overwritten();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_legacy_fixtures();test_corrupt_save_is_never_overwritten();test_menu_save_keeps_run();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

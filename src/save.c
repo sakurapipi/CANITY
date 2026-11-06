@@ -639,8 +639,50 @@ void SaveGame(void) {
          prev.saveSlot == g_saveSlot &&   /* 刚切换存档槽时不要把旧槽的进度带过来 */
          currentState != STATE_PLAYING && currentState != STATE_PAUSED &&
          currentState != STATE_GAMEOVER);
-    size_t runOff = offsetof(SaveBlob, hasRun);
-    size_t runLen = offsetof(SaveBlob, hudDetail) - runOff;
+    /* ==================================================================
+     * 2026-11-07（v2.4.2 / B2）：**运行段用显式区段表，不再靠一个偏移范围**
+     * ------------------------------------------------------------------
+     * 原来的写法是
+     *     runLen = offsetof(hudDetail) - offsetof(hasRun)
+     * 也就是「从 hasRun 到 hudDetail 之间的字节都算运行态」。
+     * 问题：这个范围是**隐式**的，任何追加在 hudDetail 之后的运行态字段
+     * 都会自动逃出保护，而且没有编译期报错。
+     *
+     * 实测没被保护的是（偏移来自 offsetof）：
+     *     11600  isEndlessRunSaved
+     *     12400  roomSeed           ← 房间布局种子
+     *     12404  roomCount
+     *     12408  hatchUsedMask      ← 哪些舱门用过
+     *     12412  echoBolts / decoys / phaseBeacons / jumperSpawnedRun
+     * 后果：玩家回主菜单改个设置再 Continue，房间会重新生成、
+     *       已用舱门复位、三类投掷物与爆脸怪计数清零。
+     * ================================================================ */
+    enum { RUN_SPAN_COUNT = 3 };
+    typedef struct { size_t off, len; } RunSpan;
+    RunSpan runSpans[RUN_SPAN_COUNT];
+    runSpans[0].off = offsetof(SaveBlob, hasRun);
+    runSpans[0].len = offsetof(SaveBlob, hudDetail) - runSpans[0].off;
+    runSpans[1].off = offsetof(SaveBlob, isEndlessRunSaved);
+    runSpans[1].len = sizeof(int);
+    runSpans[2].off = offsetof(SaveBlob, roomSeed);
+    runSpans[2].len = (offsetof(SaveBlob, jumperSpawnedRun) + sizeof(int)) - runSpans[2].off;
+
+    /* 编译期守卫：区段表的假设一旦被结构体改动打破，这里会编译失败。
+       roomSeed..jumperSpawnedRun 目前正好是 7 个 int：
+         roomSeed / roomCount / hatchUsedMask / echoBolts / decoys /
+         phaseBeacons / jumperSpawnedRun
+       以后往这段里插字段，长度对不上就会编译失败，逼人重新核对区段表。 */
+    typedef char assert_run_block_size[
+        (((offsetof(SaveBlob, jumperSpawnedRun) + (int)sizeof(int))
+          - offsetof(SaveBlob, roomSeed)) == 7 * (int)sizeof(int)) ? 1 : -1];
+    typedef char assert_run_span0_ends_at_hud[
+        (offsetof(SaveBlob, hasRun) < offsetof(SaveBlob, hudDetail)) ? 1 : -1];
+    typedef char assert_endless_flag_before_run_block[
+        (offsetof(SaveBlob, isEndlessRunSaved) < offsetof(SaveBlob, roomSeed)) ? 1 : -1];
+    /* 上面三个 typedef 是编译期断言，故意不引用；显式标明免得 -Wunused 报错。 */
+    (void)sizeof(assert_run_block_size);
+    (void)sizeof(assert_run_span0_ends_at_hud);
+    (void)sizeof(assert_endless_flag_before_run_block);
     memset(&g_save, 0, sizeof(g_save));
     g_save.magic = SAVE_MAGIC;
     g_save.version = SAVE_VERSION;
@@ -833,8 +875,15 @@ void SaveGame(void) {
 
     /* v28：没有活动对局（在菜单里改设置/买东西）→ 进度段沿用上一份存档，
        不要让空的运行时世界把 Continue 覆盖掉。 */
-    if (keepPendingRun)
-        memcpy((char*)&g_save + runOff, (const char*)&prev + runOff, runLen);
+    if (keepPendingRun) {
+        int si;
+        for (si = 0; si < RUN_SPAN_COUNT; si++) {
+            if (runSpans[si].len == 0) continue;
+            memcpy((char*)&g_save + runSpans[si].off,
+                   (const char*)&prev + runSpans[si].off,
+                   runSpans[si].len);
+        }
+    }
 
     /* 逐个候选试写，第一个成功的就用它 */
     char p[MAX_PATH];
