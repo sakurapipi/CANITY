@@ -177,6 +177,10 @@
 
 <div id="entry">
   <a class="primary" href="https://github.com/sakurapipi/CANITY/releases/latest">下载完整版 (Windows)</a>
+  <a href="javascript:void(0)" id="savExport">导出存档</a>
+  <a href="javascript:void(0)" id="savImport">导入存档</a>
+  <input type="file" id="savFile" accept=".sav,application/octet-stream"
+         style="display:none">
 </div>
 
 <script>
@@ -195,6 +199,114 @@
     },
     locateFile: function (path) { return path; }
   };
+  // ==================================================================
+  // 存档导出 / 导入（v2.4.2 / B4）
+  // ------------------------------------------------------------------
+  // 网页端存档就是 localStorage 里的 base64 —— 解出来就是**原始 CSAV 字节**，
+  // 和桌面版的 canity0.sav 完全同构。所以不需要经过 C 层：
+  // 导出的文件可以直接丢进桌面版存档目录，反之亦然。
+  //
+  // 安全原则：导入之前先把现有存档复制成 .bak。
+  // 导入的是坏档时，游戏自己的"坏档不覆盖"逻辑会回退 .bak。
+  // ==================================================================
+  (function () {
+    var KEY = 'canity:canity0.sav';
+    var TS  = 'canity:canity0.sav#ts';
+    var BAK = 'canity:canity0.sav.bak';
+    var BAK_TS = 'canity:canity0.sav.bak#ts';
+
+    function b64ToBytes(b64) {
+      var bin = atob(b64);
+      var out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+    function bytesToB64(arr) {
+      var s = '';
+      for (var i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
+      return btoa(s);
+    }
+
+    /* 返回当前存档的原始字节（没有存档返回 null）。测试直接调它。 */
+    function exportBytes() {
+      var v = localStorage.getItem(KEY);
+      if (!v) return null;
+      return b64ToBytes(v);
+    }
+
+    /* 写入存档字节。返回：
+         1  成功（并已备份旧档）
+         0  成功（原本没有旧档）
+        -1  不是可识别的存档（不写入）
+        -2  浏览器存储失败（配额 / 隐私模式） */
+    function importBytes(arr) {
+      if (!arr || arr.length < 16) return -1;
+      /* 只做最外层的魔数检查：CSAV 信封 或 裸档 'CAN2'/'2NAC' */
+      var m = String.fromCharCode(arr[0], arr[1], arr[2], arr[3]);
+      var ok = (m === 'CSAV') ||
+               (m === 'CAN2') || (m === '2NAC') || (m === 'CANT');
+      if (!ok) return -1;
+      try {
+        var had = localStorage.getItem(KEY);
+        if (had) {
+          localStorage.setItem(BAK, had);
+          localStorage.setItem(BAK_TS,
+            localStorage.getItem(TS) || String(Date.now()));
+        }
+        localStorage.setItem(KEY, bytesToB64(arr));
+        localStorage.setItem(TS, String(Date.now()));
+        return had ? 1 : 0;
+      } catch (e) {
+        return -2;
+      }
+    }
+
+    /* ---- 供自动化测试调用 ---- */
+    window.__canityExportBytes = exportBytes;
+    window.__canityImportBytes = importBytes;
+
+    /* ---- 界面 ---- */
+    var eBtn = document.getElementById('savExport');
+    var iBtn = document.getElementById('savImport');
+    var file = document.getElementById('savFile');
+
+    function toast(msg) {
+      var el = document.getElementById('status');
+      if (el) { el.textContent = msg; el.style.color = '#e8c040'; }
+    }
+
+    if (eBtn) eBtn.addEventListener('click', function () {
+      var b = exportBytes();
+      if (!b) { toast('还没有存档可导出'); return; }
+      var blob = new Blob([b], { type: 'application/octet-stream' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'canity0.sav';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { document.body.removeChild(a); }, 200);
+      toast('已导出 canity0.sav（可直接放进桌面版存档目录）');
+    });
+
+    if (iBtn && file) {
+      iBtn.addEventListener('click', function () { file.click(); });
+      file.addEventListener('change', function () {
+        var f = file.files && file.files[0];
+        if (!f) return;
+        var rd = new FileReader();
+        rd.onload = function () {
+          var arr = new Uint8Array(rd.result);
+          var r = importBytes(arr);
+          if (r === -1) { toast('这不是 CANITY 存档（魔数不符）'); return; }
+          if (r === -2) { toast('浏览器拒绝写入（存储已满或隐私模式）'); return; }
+          toast('存档已导入，正在重新载入…');
+          setTimeout(function () { location.reload(); }, 600);
+        };
+        rd.readAsArrayBuffer(f);
+      });
+    }
+  })();
+
   // ==================================================================
   // 竖屏守卫 + 自动横屏（2026-11-06 第二版）
   // ------------------------------------------------------------------
