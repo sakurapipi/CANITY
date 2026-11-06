@@ -54,13 +54,15 @@ tools/*
 !tools/partition_check.py
 !tools/build_validate.py
 !tools/build_sources.py
+!tools/package_release.py
+!tools/build_web.py
 
 
 # å¿½ç•¥ Steamworks SDKï¼ˆå¦‚æœæ˜¯æ”¾åœ¨æœ¬åœ°ç›®å½•çš„è¯ï¼‰
 sdk/
 steam_api64.dll
 steam_api64.lib
-# ¾«ÁéÑùÕÅµ¼³ö£¨µ÷ÊÔ²úÎï£¬²»½ø°æ±¾¿â£©
+# ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Åµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô²ï¿½ï¿½ï£¬ï¿½ï¿½ï¿½ï¿½ï¿½æ±¾ï¿½â£©
 dump_*.ppm
 *.ppm
 .verify-artifacts/
