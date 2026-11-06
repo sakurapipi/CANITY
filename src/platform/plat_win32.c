@@ -301,6 +301,8 @@ void PlatCursorPos(int* x, int* y) {
 
 void PlatRequestQuit(void) { PostQuitMessage(0); }
 
+int PlatTakeWheel(int* d, int* x, int* y) { (void)d; (void)x; (void)y; return 0; }
+
 int PlatTakeMouseMove(int* x, int* y) { (void)x; (void)y; return 0; }
 int PlatTakeMouseClick(int* x, int* y) { (void)x; (void)y; return 0; }
 

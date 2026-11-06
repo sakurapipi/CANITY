@@ -138,6 +138,11 @@ static void WebFrame(void) {
         int mx = 0, my = 0;
         if (PlatTakeMouseClick(&mx, &my)) CanityMouseClick(mx, my);
         else if (PlatTakeMouseMove(&mx, &my)) CanityMouseMove(mx, my);
+        {
+            extern void CanityMouseWheel(int delta, int mx, int my);
+            int d = 0, wx = 0, wy = 0;
+            if (PlatTakeWheel(&d, &wx, &wy)) CanityMouseWheel(d, wx, wy);
+        }
     }
 
     {
@@ -196,6 +201,16 @@ void CanityProbeSampleKeys(void) {
  * 直接读到游戏内部状态，判断"按键到底有没有进到游戏里"。
  * 只读、无副作用，正式构建里留着也无害（不画、不写）。
  * ================================================================ */
+/* 触屏按钮直接调这两个，不合成按键 */
+EMSCRIPTEN_KEEPALIVE void CanityActionPause(void) { CanityPauseToggle(); }
+EMSCRIPTEN_KEEPALIVE void CanityActionFlashlight(void) { CanityToggleFlashlight(); }
+
+EMSCRIPTEN_KEEPALIVE int CanityProbeFlashlight(void) {
+    extern int flashlightOn;
+    extern float battery;
+    return (flashlightOn ? 1 : 0) * 1000 + (int)battery;
+}
+
 EMSCRIPTEN_KEEPALIVE int CanityProbeState(void) {
     return (int)currentState;      /* currentState 在 game.h 里已有正确类型 */
 }

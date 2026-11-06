@@ -89,6 +89,17 @@ EM_JS(void, js_plat_init, (void), {
         }, false);
         cv.addEventListener('mouseleave', function () { haveLast = false; }, false);
 
+        /* 2026-11-06（用户实测：**电脑版滚轮失效，切不了投掷物**）
+           浏览器里没有 WM_MOUSEWHEEL，这里自己收 wheel 事件，
+           累加成一个"待处理滚轮量"，由主循环交给 CanityMouseWheel。 */
+        cv.addEventListener('wheel', function (e) {
+            Module._pendingWheel = (Module._pendingWheel || 0) +
+                                   (e.deltaY < 0 ? 120 : -120);
+            var p = toRender(e);
+            if (p) { Module._wheelX = p.x | 0; Module._wheelY = p.y | 0; }
+            e.preventDefault();
+        }, { passive: false });
+
         cv.addEventListener('mousedown', function (e) {
             if (e.button === 0) Module._keys[0x01] = 1;
             else if (e.button === 2) Module._keys[0x02] = 1;
@@ -192,6 +203,15 @@ EM_JS(int, js_take_click, (int* x, int* y), {
     HEAP32[y >> 2] = p.y | 0;
     Module._pendingClick = null;
     return 1;
+});
+
+EM_JS(int, js_take_wheel, (int* x, int* y), {
+    var d = Module._pendingWheel | 0;
+    if (!d) return 0;
+    HEAP32[x >> 2] = Module._wheelX | 0;
+    HEAP32[y >> 2] = Module._wheelY | 0;
+    Module._pendingWheel = 0;
+    return d;
 });
 
 EM_JS(int, js_locked, (void), { return (Module._locked || Module._touchLook) ? 1 : 0; });
@@ -410,6 +430,16 @@ int PlatTakeMouseMove(int* x, int* y) {
     int r = js_take_move(&a, &b);
     if (r) { if (x) *x = a; if (y) *y = b; }
     return r;
+}
+
+int PlatTakeWheel(int* delta, int* x, int* y) {
+    int a = 0, b = 0;
+    int d = js_take_wheel(&a, &b);
+    if (!d) return 0;
+    if (delta) *delta = d;
+    if (x) *x = a;
+    if (y) *y = b;
+    return 1;
 }
 
 int PlatTakeMouseClick(int* x, int* y) {

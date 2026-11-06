@@ -7862,6 +7862,7 @@ void ActivateSettingRow(void) {
    所有命中测试前统一走这个换算。 */
 /* v6：技能树相机（实现在 ui.c） */
 void SkillZoomAt(float factor, int mx, int my);
+int  CanityKeyDown(int vk, int repeat);
 void SkillResetView(void);
 void SkillDragStart(int mx, int my);
 void SkillDragMove(int mx, int my);
@@ -8153,6 +8154,91 @@ if (currentState == STATE_HUB) {
 /* CanityKeyDown 会调它；实现在下面的窗口分区里，网页端没有这个函数 */
 static void MapCursorRefresh(void);
 #endif
+
+/* ==================================================================
+ * 滚轮 —— **平台无关**（2026-11-06）
+ * ------------------------------------------------------------------
+ * 用户实测：「电脑版滚轮失效，导致切换不了投掷物」。
+ * 桌面端滚轮走 WM_MOUSEWHEEL（浏览器里没有这个消息）。
+ * 这里把三种用途抽出来共用：
+ *   · 局内：切换投掷槽位（带阻尼：累加 60 才切一格，切完 90ms 冷却）
+ *   · 技能树：缩放
+ *   · 改造树：缩放
+ * ================================================================== */
+void SkillZoomAt(float factor, int mx, int my);
+void BenchZoomAt(float factor, int mx, int my);
+int  itemHasStock(void);
+
+/* ==================================================================
+ * 直接动作入口（2026-11-06 触屏用）
+ * ------------------------------------------------------------------
+ * 用户实测：「手电开关没什么用」「暂停键没有用」。
+ * 原因不是游戏逻辑坏，而是浏览器里这两个键最容易被吞：
+ *   · Esc 在全屏时被浏览器拿去退出全屏，页面根本收不到
+ *   · F 之类的短按可能落在两次轮询之间
+ * 所以触屏不合成按键了，直接调游戏函数。
+ * ================================================================== */
+void CanityPauseToggle(void) {
+    if (currentState == STATE_PLAYING) {
+        extern void PauseGame(void);
+        PauseGame();
+        uiDirty = 1;
+    } else if (currentState == STATE_PAUSED) {
+        currentState = STATE_PLAYING;
+        uiDirty = 1;
+    }
+}
+
+void CanityToggleFlashlight(void) {
+    /* 复用键盘那条完整规则（每日限制 / 战役锁定 / 电量） */
+    CanityKeyDown((int)g_bindings[ACT_FLASHLIGHT], 0);
+    uiDirty = 1;
+}
+
+void CanityMouseWheel(int delta, int mx, int my) {
+    if (delta == 0) return;
+
+    if (currentState == STATE_HUB) {
+        float f = (delta > 0) ? 1.12f : (1.0f / 1.12f);
+        SkillZoomAt(f, mx, my);
+        uiDirty = 1;
+        return;
+    }
+    if (currentState == STATE_SAFEHOUSE && shopPage == SHP_TREE) {
+        float f = (delta > 0) ? 1.12f : (1.0f / 1.12f);
+        BenchZoomAt(f, mx, my);
+        uiDirty = 1;
+        return;
+    }
+    if (currentState == STATE_PLAYING) {
+        static int wheelAcc = 0;
+        static double wheelCd = 0.0;
+        extern double g_timeSec;
+        wheelAcc += delta;
+        if (wheelAcc >= 60 || wheelAcc <= -60) {
+            if (g_timeSec - wheelCd > 0.09) {
+                int dir = (wheelAcc > 0) ? +1 : -1;
+                wheelAcc = 0;
+                wheelCd = g_timeSec;
+                {
+                    int n = ITEM_SLOT_COUNT;
+                    int s = throwSelected + dir;
+                    if (s < 0) s += n;
+                    if (s >= n) s -= n;
+                    throwSelected = s;
+                    /* 落到空槽就继续找下一个有货的，避免"HUD 高亮但拿不出来" */
+                    for (int k = 0; k < n && !itemHasStock(); k++) {
+                        s = throwSelected + dir;
+                        if (s < 0) s += n;
+                        if (s >= n) s -= n;
+                        throwSelected = s;
+                    }
+                    uiDirty = 1;
+                }
+            }
+        }
+    }
+}
 
 /* ==================================================================
  * 鼠标入口 —— **平台无关**（2026-11-06）

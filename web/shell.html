@@ -176,10 +176,12 @@
     <button data-key="77">地图</button>
   </div>
 
-  <!-- 右上：系统键 -->
+  <!-- 右上：系统键（直接调游戏函数，不合成按键） -->
   <div id="btns2">
-    <button data-key="70">手电</button>
-    <button data-key="27">暂停</button>
+    <button data-action="flashlight">手电</button>
+    <button data-key="82">摇电</button>
+    <button data-action="pause">暂停</button>
+    <button data-key="13">确认</button>
   </div>
 </div>
 
@@ -270,10 +272,25 @@
     if (!layer) return;
     layer.classList.add('on');
 
+    /* 2026-11-06（用户实测：**手电/挥击这类短按没反应**）
+       轮询式输入有个天然缺陷：按下与松开如果落在同一帧里，
+       主循环永远看不到那次按下。真实手机的快速点按就有这个问题。
+       所以按下后**至少保持 120ms**，让轮询一定采到。 */
     function key(vk, on) {
       if (!Module._keys) return;
-      Module._keys[vk] = on ? 1 : 0;
+      if (on) {
+        Module._keys[vk] = 1;
+        clearTimeout(Module['_kt' + vk]);
+        Module['_kt' + vk] = setTimeout(function () {
+          Module._keys[vk] = 0;
+        }, 120);
+      } else {
+        /* 松开：如果还没到 120ms 就让它自然到期，避免被吞 */
+        clearTimeout(Module['_kt' + vk]);
+        Module['_kt' + vk] = setTimeout(function () { Module._keys[vk] = 0; }, 40);
+      }
     }
+    Module._key = key;
 
     // 右侧半屏拖动 = 转视角
     var look = document.getElementById('look');
@@ -316,6 +333,9 @@
       var r = stick.getBoundingClientRect();
       cx = r.left + r.width / 2; cy = r.top + r.height / 2;
       stickId = t.identifier;
+      /* 2026-11-06：按下就按接触点算方向 —— 原来只在 touchmove 里更新，
+         手指按上去不动就完全走不了（用户说的"刚进游戏动不了"）。 */
+      applyMove(t.clientX - cx, t.clientY - cy);
       e.preventDefault();
     }, { passive: false });
     stick.addEventListener('touchmove', function (e) {
@@ -337,7 +357,25 @@
     }, false);
 
     // 动作按钮
-    Array.prototype.forEach.call(document.querySelectorAll('#btns button'), function (b) {
+    Array.prototype.forEach.call(document.querySelectorAll('#btns button, #btns2 button'), function (b) {
+      var act = b.getAttribute('data-action');
+      if (act) {
+        /* 直接调游戏函数：手机上没有"按键码"这层，最可靠 */
+        b.addEventListener('touchstart', function (e) {
+          try {
+            if (act === 'pause' && Module._CanityActionPause) Module._CanityActionPause();
+            else if (act === 'flashlight' && Module._CanityActionFlashlight) Module._CanityActionFlashlight();
+          } catch (err) { }
+          e.preventDefault();
+        }, { passive: false });
+        b.addEventListener('click', function (e) {
+          try {
+            if (act === 'pause' && Module._CanityActionPause) Module._CanityActionPause();
+            else if (act === 'flashlight' && Module._CanityActionFlashlight) Module._CanityActionFlashlight();
+          } catch (err) { }
+        });
+        return;
+      }
       var vk = parseInt(b.getAttribute('data-key'), 10);
       b.addEventListener('touchstart', function (e) { key(vk, 1); e.preventDefault(); }, { passive: false });
       b.addEventListener('touchend', function (e) { key(vk, 0); e.preventDefault(); }, { passive: false });

@@ -110,6 +110,9 @@ void PlatSetCapture(int on);
 int PlatTakeMouseMove(int* x, int* y);
 int PlatTakeMouseClick(int* x, int* y);
 
+/* 取一次待处理的滚轮量（120 = 一格）。返回 1 表示有。 */
+int PlatTakeWheel(int* delta, int* x, int* y);
+
 /* ---------------------------------------------------------------------
  * 文件
  * -------------------------------------------------------------------

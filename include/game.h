@@ -26,6 +26,13 @@ int CanityKeyDown(int vk, int repeat);
 /* 鼠标入口（网页端用；坐标是渲染空间像素）。 */
 void CanityMouseMove(int mx, int my);
 void CanityMouseClick(int mx, int my);
+
+/* 滚轮：局内切投掷槽 / 技能树与改造树缩放（网页端没有 WM_MOUSEWHEEL）。 */
+void CanityMouseWheel(int delta, int mx, int my);
+
+/* 触屏直接动作（不合成按键）：暂停切换 / 手电开关。 */
+void CanityPauseToggle(void);
+void CanityToggleFlashlight(void);
 extern GameState currentState, prevState;
 extern int gameWon;                 /* 0=失败结局 1=通关结局（第 10 层逃出生天） */
 
