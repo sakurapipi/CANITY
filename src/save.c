@@ -337,8 +337,10 @@ static int SaveFileBytes(const SaveBlob* blob, unsigned char** out) {
    返回 1 = 成功（*isEnvelope = 1 表示是新格式），0 = 不是可识别的存档。
    兼容：没有信封的裸档（SAVE_MAGIC）也认，交给老路径继续处理。
    失败时把具体原因写进 g_saveError。 */
-static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelope) {
+static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelope,
+                           int* payloadLen) {
     if (isEnvelope) *isEnvelope = 0;
+    if (payloadLen) *payloadLen = 0;
     /* ==================================================================
      * 2026-11-06（v2.4-rc）：**每次读档都重新判定只读**
      * ------------------------------------------------------------------
@@ -382,6 +384,11 @@ static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelo
             memset(out, 0, sizeof(*out));
             int copy = (sz < (int)sizeof(*out)) ? sz : (int)sizeof(*out);
             memcpy(out, b, (size_t)copy);
+            /* 2026-11-07（B1 / S-04）：**报告真实块长度**，不是 sizeof(SaveBlob)。
+               v33 档的 SC_LEGACY29 比当前结构短 16 字节，
+               若这里一律返回 sizeof，下游会认为"字段齐全"，
+               于是 v34 新增的四项不会被当成"文件里没有"。 */
+            if (payloadLen) *payloadLen = sz;
             if (isEnvelope) *isEnvelope = 1;
             g_saveError = 0;
             return 1;
@@ -397,6 +404,7 @@ static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelo
             int copy = ((int)n < (int)sizeof(*out)) ? (int)n : (int)sizeof(*out);
             memset(out, 0, sizeof(*out));
             memcpy(out, p, (size_t)copy);
+            if (payloadLen) *payloadLen = copy;
             g_saveError = 0;
             return 1;
         }
@@ -479,6 +487,9 @@ static long ExtractLegacyPayload(const char* path, unsigned char* out, long cap,
     return 0;
 }
 
+/* 最近一次读档的真实载荷长度（S-04：信封档不能报 sizeof） */
+static long s_lastPayloadLen = 0;
+
 static long ReadSaveFile(const char* path, SaveBlob* out) {
     if (!path || !out) return -1;
     size_t cap = sizeof(SaveEnvelope) + sizeof(SaveBlob) + 65536;
@@ -490,10 +501,16 @@ static long ReadSaveFile(const char* path, SaveBlob* out) {
 
     long ret = -1;
     int isEnv = 0;
-    if (ExtractSaveFile(raw, n, out, &isEnv)) {
-        /* 信封格式：载荷就是当前版本的完整 SaveBlob → 逻辑长度取 sizeof
-           （否则 isOldSave 会误判成老档，把 bindings 重置成出厂值）。 */
-        ret = isEnv ? (long)sizeof(SaveBlob) : n;
+    int payLen = 0;
+    if (ExtractSaveFile(raw, n, out, &isEnv, &payLen)) {
+        /* 2026-11-07（B1 / S-04）：返回**真实载荷长度**。
+           原来信封档一律返回 sizeof(SaveBlob)，等于宣称"所有字段都在文件里"。
+           对 v33 档（载荷比当前结构短 16 字节）这个谎会让 isOldSave 恒假，
+           新字段的"缺失默认值"逻辑永远不会触发。
+           注：bindings 的重置判据用的是 bindNeed（远小于 v29 载荷），
+           所以返回真实长度不会误伤键位表。 */
+        ret = (payLen > 0) ? (long)payLen : (long)sizeof(SaveBlob);
+        s_lastPayloadLen = ret;
     }
     free(raw);
     return ret;
@@ -512,6 +529,9 @@ static long ReadSaveFile(const char* path, SaveBlob* out) {
    所以验证迁移结果必须看这份数据。 */
 const SaveBlob* SaveTestBlob(void) { return &g_save; }
 
+/* 仅测试用：最近一次读档的**真实载荷长度**（S-04 的验收点）。 */
+long SaveTestPayloadLen(void) { return s_lastPayloadLen; }
+
 void SaveTestClearReadOnly(void) {
     s_saveReadOnly = 0;
     SaveCarryClear();
@@ -522,7 +542,7 @@ int SaveTestSerialize(const SaveBlob* blob, unsigned char** out) {
 }
 int SaveTestDeserialize(const void* buf, long n, SaveBlob* out) {
     int isEnv = 0;
-    int ok = ExtractSaveFile(buf, n, out, &isEnv);
+    int ok = ExtractSaveFile(buf, n, out, &isEnv, NULL);
     return ok ? (isEnv ? 2 : 1) : 0;
 }
 

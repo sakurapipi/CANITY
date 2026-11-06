@@ -147,7 +147,8 @@ static int fixture_copy(const char* from, const char* to) {
     return 1;
 }
 
-static void test_legacy_fixture_one(const char* file, int oldVer, int* ok, int* total) {
+static void test_legacy_fixture_one(const char* file, int oldVer, int wantPayload,
+                                    int* ok, int* total) {
     extern const char* SavePathForSlot(int, int, char*, size_t);
     char dst[MAX_PATH];
     char src[MAX_PATH];
@@ -167,6 +168,18 @@ static void test_legacy_fixture_one(const char* file, int oldVer, int* ok, int* 
     if (!loaded) {
         fprintf(stderr, "  [fixture] %-20s 读档被拒\n", file);
         return;
+    }
+
+    /* S-04：读档必须报告**真实载荷长度**，不是 sizeof(SaveBlob)。
+       期望值来自夹具里 SC_LEGACY29 块的实际字节数。 */
+    {
+        extern long SaveTestPayloadLen(void);
+        long got = SaveTestPayloadLen();
+        if (wantPayload > 0 && got != (long)wantPayload) {
+            same = 0;
+            fprintf(stderr, "  [fixture] %-20s 载荷长度 %ld != 期望 %d\n",
+                    file, got, wantPayload);
+        }
     }
 
     ContinueRun();
@@ -191,22 +204,113 @@ static void test_legacy_fixture_one(const char* file, int oldVer, int* ok, int* 
     if (same) ++(*ok);
 }
 
+/* ==================================================================
+ * 2026-11-07（v2.4.2 / B1）：**坏档不许被静默覆盖**
+ * ------------------------------------------------------------------
+ * 迁移/读档失败时最坏的结果不是"读不出来"，而是"读不出来还把原件写没了"。
+ * 这条用例把一份 v34 夹具截断一半，然后：
+ *   ① LoadSettings() 必须失败（不能把垃圾当成功）
+ *   ② 原始字节必须还能在盘上找到（主档或 .v*.bak），逐字节一致
+ * ================================================================== */
+static void test_corrupt_save_is_never_overwritten(void) {
+    extern const char* SavePathForSlot(int, int, char*, size_t);
+    char dst[MAX_PATH];
+    char src[MAX_PATH];
+    char bak[MAX_PATH + 24];
+    unsigned char orig[64];
+    long n;
+    long cut;
+    FILE* f;
+    int sameBytes = 0;
+
+    snprintf(src, sizeof(src), "tests/fixtures/saves/sav_v2_4_1.sav");
+    SavePathForSlot(0, 0, dst, sizeof(dst));
+
+    /* 先清场：LoadSettings 在主档读不出来时会回退 .bak，
+       上一轮用例留下的 .bak 会让"坏档"看起来能读 —— 那是测试污染，不是产品行为。 */
+    {
+        int v;
+        char side[MAX_PATH + 24];
+        remove(dst);
+        snprintf(side, sizeof(side), "%s.bak", dst);
+        remove(side);
+        for (v = 0; v <= 40; v++) {
+            snprintf(side, sizeof(side), "%s.v%d.bak", dst, v);
+            remove(side);
+        }
+    }
+    CHECK(fixture_copy(src, dst), "corrupt-save test: fixture copied");
+
+    /* 读原文件长度并备份一份原始字节用于比对 */
+    f = fopen(dst, "rb");
+    CHECK(f != NULL, "corrupt-save test: can open fixture");
+    fseek(f, 0, SEEK_END);
+    n = ftell(f);
+    fclose(f);
+    CHECK(n > 200, "corrupt-save test: fixture is large enough");
+
+    /* 截断到一半：信封校验和必然对不上 */
+    cut = n / 2;
+    f = fopen(dst, "rb");
+    CHECK(fread(orig, 1, sizeof(orig), f) == sizeof(orig), "corrupt-save test: head read");
+    fclose(f);
+
+    {
+        unsigned char* all = (unsigned char*)malloc((size_t)cut);
+        CHECK(all != NULL, "corrupt-save test: alloc");
+        f = fopen(dst, "rb");
+        CHECK(fread(all, 1, (size_t)cut, f) == (size_t)cut, "corrupt-save test: read half");
+        fclose(f);
+        f = fopen(dst, "wb");
+        CHECK(fwrite(all, 1, (size_t)cut, f) == (size_t)cut, "corrupt-save test: truncate");
+        fclose(f);
+        free(all);
+    }
+
+    CHECK(!LoadSettings(), "corrupt save must not load as if it were fine");
+
+    /* 原件要么还在原处，要么被改名成 .v*.bak —— 两种都接受，但字节必须一致 */
+    f = fopen(dst, "rb");
+    if (f) {
+        unsigned char now[64];
+        if (fread(now, 1, sizeof(now), f) == sizeof(now) &&
+            memcmp(now, orig, sizeof(now)) == 0) sameBytes = 1;
+        fclose(f);
+    }
+    if (!sameBytes) {
+        int v;
+        for (v = 0; v <= 40 && !sameBytes; v++) {
+            snprintf(bak, sizeof(bak), "%s.v%d.bak", dst, v);
+            f = fopen(bak, "rb");
+            if (!f) continue;
+            {
+                unsigned char now[64];
+                if (fread(now, 1, sizeof(now), f) == sizeof(now) &&
+                    memcmp(now, orig, sizeof(now)) == 0) sameBytes = 1;
+            }
+            fclose(f);
+        }
+    }
+    CHECK(sameBytes, "corrupt save bytes must still exist on disk (never silently overwritten)");
+}
+
 static void test_legacy_fixtures(void) {
     /* 裸档（v27）与四个 CSAV 信封档（v29 / v30 / v33 / v34）。
        每个夹具录入时的状态都是 level=3 / sanity=61.5 / pos=(12.5,9.5)。 */
-    static const struct { const char* file; int ver; } files[] = {
-        { "sav_v2_3_6.sav",   27 },
-        { "sav_v2_3_9.sav",   29 },
-        { "sav_v2_4-rc.sav",  30 },
-        { "sav_v2_4.sav",     33 },
-        { "sav_v2_4_1.sav",   34 }
+    /* wantPayload = 该夹具里 SC_LEGACY29 块的真实字节数（裸档取文件长度） */
+    static const struct { const char* file; int ver; int payload; } files[] = {
+        { "sav_v2_3_6.sav",   27,  6404 },
+        { "sav_v2_3_9.sav",   29,  6480 },
+        { "sav_v2_4-rc.sav",  30,  6488 },
+        { "sav_v2_4.sav",     33, 12412 },
+        { "sav_v2_4_1.sav",   34, 12428 }
     };
     int ok = 0, total = 0;
     size_t i;
 
     fprintf(stderr, "  ---- 历史存档迁移（tests/fixtures/saves）----\n");
     for (i = 0; i < sizeof(files) / sizeof(files[0]); i++)
-        test_legacy_fixture_one(files[i].file, files[i].ver, &ok, &total);
+        test_legacy_fixture_one(files[i].file, files[i].ver, files[i].payload, &ok, &total);
 
     fprintf(stderr, "  ---- 迁移结果: %d/%d 正确 ----\n", ok, total);
     checks += total;   /* 每个夹具都算一次检查，别让汇总把覆盖数吃掉 */
@@ -4413,6 +4517,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_legacy_fixtures();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_legacy_fixtures();test_corrupt_save_is_never_overwritten();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
