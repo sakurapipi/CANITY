@@ -349,7 +349,27 @@ void PlatWindowSize(int* w, int* h) {
 
 int PlatMinimized(void) { return 0; }
 
-EM_JS(int, js_focused, (void), { return document.hasFocus() ? 1 : 0; });
+/* ==================================================================
+ * 2026-11-06（用户实测：**手机端移动 / 挥击 / 摇电全部失效**）
+ * ------------------------------------------------------------------
+ * 根因在游戏侧的 PollInput：
+ *     if (!PlatFocused()) { memset(keys,0); return; }
+ * 手机上 document.hasFocus() 经常是 false（地址栏激活、软键盘、
+ * 或 iOS 对后台标签的处理），于是**每一帧都把 keys[] 清空**。
+ *
+ * 表现差异正好对上：投掷走鼠标键的 PlatKeyDown 直读，不受影响；
+ * 地图/菜单/手电走 CanityKeyDown，也不受影响；
+ * 而移动/挥击/摇电都读 keys[] —— 全废。
+ *
+ * 网页端没有"窗口焦点"这回事，页面可见就等于能接收输入。
+ * ================================================================ */
+EM_JS(int, js_focused, (void), {
+    if (document.visibilityState === 'hidden') return 0;
+    if (document.hasFocus()) return 1;
+    /* hasFocus 在手机上不可靠：只要页面还能收到触摸/键盘事件，
+       就当成有焦点（触屏层本身就在监听触摸）。 */
+    return 1;
+});
 
 int PlatFocused(void) { return js_focused(); }
 
