@@ -1,9 +1,14 @@
 /*
+
  * Canity — UI 层实现：点阵字库 / 文字 / 菜单与弹窗 / HUD / 最终呈现
  *
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+
+/* 商店/改造树的返回按钮（实现在本文件靠后，这里先声明） */
+void ShopBackButtonRect(int* x0, int* y0, int* x1, int* y1);
+int  ShopBackButtonAt(int mx, int my);
 #include "campaign.h"
 #include "daily.h"
 #include "economy.h"
@@ -1756,6 +1761,21 @@ void DrawMenuPanels(void) {
         FrameRectWin(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, PAL_PANEL, 0.85f, UIS(2));
     }
 
+    /* ==================================================================
+     * 2026-11-06（用户实测：**局内商店/改造树退不出去**）
+     * ------------------------------------------------------------------
+     * 手机上 esc 可能被浏览器吞、菜单键也可能按不到，
+     * 所以给一块**画在界面上的返回按钮**（和技能树那个同一套）。
+     * ================================================================ */
+    if (currentState == STATE_SAFEHOUSE) {
+        int bx0, by0, bx1, by1;
+        ShopBackButtonRect(&bx0, &by0, &bx1, &by1);
+        BlendRectWin(bx0, by0, bx1, by1, 0x00101418u, 0.90f);
+        FrameRectWin(bx0, by0, bx1, by1, 0x00607080u, 0.95f, UIS(2));
+        DrawTextCenterWin((bx0 + bx1) / 2, (by0 + by1) / 2 - TextHeightWin() / 2,
+                          Tr("BACK", "返回"), 0x00E8C040u);
+    }
+
     /* v2.8：安全屋的**所有**页都要显示页签（不只改造树那一页） */
     if (currentState == STATE_SAFEHOUSE) {
         DrawPageTabs();
@@ -2104,6 +2124,21 @@ void HubBackButtonRect(int* x0, int* y0, int* x1, int* y1) {
     if (y0) *y0 = by;
     if (x1) *x1 = bx + w;
     if (y1) *y1 = by + h;
+}
+
+/* 商店/改造树的返回按钮（左上角，和技能树同位置） */
+void ShopBackButtonRect(int* x0, int* y0, int* x1, int* y1) {
+    int w = UIS(104), h = UIS(40);
+    if (x0) *x0 = UIS(16);
+    if (y0) *y0 = UIS(16);
+    if (x1) *x1 = UIS(16) + w;
+    if (y1) *y1 = UIS(16) + h;
+}
+
+int ShopBackButtonAt(int mx, int my) {
+    int x0, y0, x1, y1;
+    ShopBackButtonRect(&x0, &y0, &x1, &y1);
+    return (mx >= x0 && mx <= x1 && my >= y0 && my <= y1) ? 1 : 0;
 }
 
 int HubBackButtonAt(int mx, int my) {
@@ -5356,6 +5391,7 @@ void RenderFrame(void) {
 /* v2.2 UI 主题实现（合并进 ui.c，因为要用到本文件的 static 绘制原语）    */
 /* ================================================================== */
 #include "ui_theme.h"
+
 
 #define UI_INSET 20
 

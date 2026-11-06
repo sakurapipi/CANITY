@@ -163,6 +163,8 @@
   <div id="btns2">
     <button data-key="77">地图</button>
     <button data-action="flashlight">手电</button>
+    <button data-key="82">摇电</button>
+    <button data-key="84">商店</button>
     <button data-action="menu">菜单</button>
   </div>
 </div>
@@ -317,13 +319,37 @@
 
     function clearMove() {
       key(87, 0); key(83, 0); key(65, 0); key(68, 0);
+      moveState.up = moveState.down = moveState.left = moveState.right = 0;
+    }
+    /* 2026-11-06（用户实测：**移动一卡一卡**）
+       原来每次 touchmove 都无条件重写 4 个键，手指在死区边缘抖动时
+       keys 会反复 0/1 翻转 -> 走一下停一下。
+       现在：① 死区带回滞（进入 14、退出 7）② 只有状态真的变了才写。 */
+    var moveState = { up: 0, down: 0, left: 0, right: 0 };
+    function setMove(vk, cur, next) {
+      if (cur === next) return cur;
+      key(vk, next ? 1 : 0);
+      return next;
+    }
+    function axis(pos, neg, d) {
+      /* 上下各用一个回滞阈值 */
+      if (d < -14) return 1;
+      if (d > -7)  return 0;
+      return pos;
     }
     function applyMove(dx, dy) {
-      var dead = 12;
-      key(87, dy < -dead);   /* W 前 */
-      key(83, dy > dead);    /* S 后 */
-      key(65, dx < -dead);   /* A 左 */
-      key(68, dx > dead);    /* D 右 */
+      var up, down;
+      // 前：负 dy
+      if (dy < -14) up = 1; else if (dy > -7) up = 0; else up = moveState.up;
+      if (dy > 14) down = 1; else if (dy < 7) down = 0; else down = moveState.down;
+      var left, right;
+      if (dx < -14) left = 1; else if (dx > -7) left = 0; else left = moveState.left;
+      if (dx > 14) right = 1; else if (dx < 7) right = 0; else right = moveState.right;
+
+      moveState.up    = setMove(87, moveState.up, up);
+      moveState.down  = setMove(83, moveState.down, down);
+      moveState.left  = setMove(65, moveState.left, left);
+      moveState.right = setMove(68, moveState.right, right);
     }
     function moveStickKnob(dx, dy) {
       if (!knob) return;

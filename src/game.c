@@ -4315,10 +4315,24 @@ void WrenchStartSwing(float charge) {
     float cdMax = RunUpgWrenchCooldown();
 
     if (cdMax < 0.0f) {
-        if (wrenchLastUsed >= wrenchCharges) return;
+        if (wrenchLastUsed >= wrenchCharges) {
+            /* 2026-11-06：**用完/冷却必须给提示** ——
+               原来静默 return，玩家以为键没反应（手机端尤其明显）。 */
+            extern const char* pickupMsg;
+            extern float pickupMsgTimer;
+            pickupMsg = (g_lang == LANG_ZH) ? "扳手次数用完了" : "WRENCH USES SPENT";
+            pickupMsgTimer = 1.2f;
+            return;
+        }
         wrenchLastUsed++;
     } else {
-        if (wrenchCd > 0.0f) return;
+        if (wrenchCd > 0.0f) {
+            extern const char* pickupMsg;
+            extern float pickupMsgTimer;
+            pickupMsg = (g_lang == LANG_ZH) ? "扳手冷却中" : "WRENCH ON COOLDOWN";
+            pickupMsgTimer = 1.0f;
+            return;
+        }
         wrenchCd = cdMax;
     }
 
@@ -4326,7 +4340,12 @@ void WrenchStartSwing(float charge) {
     wrenchSwingPower = 0.70f + 0.30f * charge;
     wrenchSwingHit   = 0;
     wrenchHitMask = 0;
-    PlaySfx(SFX_STEP, 0.50f);
+    /* 2026-11-06：**挥击要有看得见/听得见的结果**。
+       手持模型早就删了，原来只有一声 SFX_STEP（脚步），
+       玩家根本分不清"挥了"还是"没挥"。
+       现在换成挥空的风声 + 一下轻微屏幕冲击。 */
+    PlaySfx(SFX_THROW, 0.55f);
+    AddShake(0.12f, 0.07f);
 }
 
 /* ---- 每帧推进挥击动画，在命中帧结算 ---- */
@@ -8224,6 +8243,12 @@ int  itemHasStock(void);
  * 这样少一个键，也不会出现"点暂停没反应、点返回又不知道会去哪"。
  * ================================================================== */
 void CanityMenuAction(void) {
+    /* 从任何界面回到局内之前，先退出藏身状态 ——
+       否则玩家会觉得"出来了但动不了"。 */
+    if (currentState == STATE_SAFEHOUSE && currentState != STATE_PLAYING) {
+        extern int hiddenIn;
+        hiddenIn = -1;
+    }
     switch (currentState) {
     case STATE_PLAYING:
         { extern void PauseGame(void); PauseGame(); }
@@ -8363,6 +8388,16 @@ void CanityMouseClick(int mx, int my) {
             menuSelection = 0;
             ForceCursor(1);
             uiDirty = 1;
+            return;
+        }
+    }
+
+    /* 商店/改造树左上角的返回按钮：点了就 ShopLeave（用户报退不出去） */
+    if (currentState == STATE_SAFEHOUSE) {
+        extern int ShopBackButtonAt(int mx, int my);
+        if (ShopBackButtonAt(mx, my)) {
+            extern void ShopLeave(void);
+            ShopLeave();
             return;
         }
     }
