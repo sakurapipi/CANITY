@@ -110,6 +110,29 @@ void SpiderDebugPlace(float x, float y) {
     s_spider.wanderT = 999.0f;   /* 不让它自己乱走 */
 }
 
+/* ==================================================================
+ * 2026-11-06（用户要求）：**F3 召唤一只缚丝蛛**
+ * ------------------------------------------------------------------
+ * 用户原话：「把 F3 键改成召唤那个吐丝怪物」。
+ * 跳脸怪已经删除，这个调试键改成召唤蜘蛛，放在玩家前方 3~5 格。
+ * ================================================================ */
+int SpiderSpawnNearPlayer(void) {
+    for (int tries = 0; tries < 200; tries++) {
+        float d = 3.0f + (float)(rand() % 3);
+        float ang = (float)(rand() % 63) * 0.1f;
+        float cx = posX + cosf(ang) * d;
+        float cy = posY + sinf(ang) * d;
+        int mx = (int)cx, my = (int)cy;
+        if (mx < 1 || my < 1 || mx >= MAP_WIDTH - 1 || my >= MAP_HEIGHT - 1) continue;
+        if (worldMap[my][mx]) continue;
+        SpiderDebugPlace(cx, cy);
+        return 1;
+    }
+    /* 找不到就放在玩家脚下（至少能召唤出来，方便调试） */
+    SpiderDebugPlace(posX + 0.6f, posY);
+    return 1;
+}
+
 void SpiderTick(float dt) {
     if (!s_spider.active) return;
     /* 藏起来的时候蜘蛛也"看不见"玩家 —— 和听声鬼一致 */

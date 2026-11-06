@@ -705,7 +705,18 @@ void FlareHealTick(float dt) {
     extern int   MAX_THROWN_HACK;   /* 占位，实际用 MAX_THROWN */
     (void)MAX_THROWN_HACK;
 
-    if (!RunSkillOwned(IR_BIOLUM)) return;
+    /* ==================================================================
+     * 2026-11-06（用户实测：「闪光弹不能回理智，你没有做好」）
+     * ------------------------------------------------------------------
+     * 原来这一行是 `if (!RunSkillOwned(IR_BIOLUM)) return;` ——
+     * 也就是说**必须先抽到那张卡**才生效。玩家扔了照明弹发现不回理智，
+     * 完全合理：他根本没有那张卡。
+     *
+     * 现在：**基础效果对所有人生效**，抽到 IR_BIOLUM 则是强化
+     * （回得更快、单根上限更高）。这样"照明弹能回理智"是稳定预期，
+     * 卡牌负责把它变成值得专门去构筑的方向。
+     * ================================================================ */
+    int boosted = RunSkillOwned(IR_BIOLUM);
     if (sanity >= SanityMax()) return;
     if (s_floorFlareHealed >= FLARE_HEAL_FLOOR_BUDGET) return;
 
@@ -728,8 +739,10 @@ void FlareHealTick(float dt) {
 
     /* 单根上限靠"窗口 + 速率"自然成立：1.5/s × 8s = 12，
        正好等于 FLARE_HEAL_CAP。这里再用总量封一次顶，防止帧率异常。 */
-    float want = FLARE_HEAL_RATE * dt;
-    if (want > FLARE_HEAL_CAP) want = FLARE_HEAL_CAP;
+    float rate = FLARE_HEAL_RATE * (boosted ? 2.0f : 1.0f);
+    float cap  = FLARE_HEAL_CAP  * (boosted ? 2.0f : 1.0f);
+    float want = rate * dt;
+    if (want > cap) want = cap;
     float room = FLARE_HEAL_FLOOR_BUDGET - s_floorFlareHealed;
     if (want > room) want = room;
     sanity += want;

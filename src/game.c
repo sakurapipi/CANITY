@@ -1051,6 +1051,7 @@ SettingItem settings[] = {
     /* ========== 分类: KEY BINDINGS / ACTIONS ========== */
     /* 2026-11-06：相位信标（用户要求 Q 传送 / C 放置） */
     {"Phase: Teleport", SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PHASE_TELE],    NULL, 0, 0, 0, 4},
+    {"Debug: Spider",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DEBUG_SPAWN],   NULL, 0, 0, 0, 4},
     {"Interact",        SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_INTERACT],      NULL, 0, 0, 0, 4},
     {"Crank Battery",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_CRANK],         NULL, 0, 0, 0, 4},
     {"Flashlight",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_FLASHLIGHT],    NULL, 0, 0, 0, 4},
@@ -3458,7 +3459,8 @@ void GenerateLevel(void) {
       BestiaryMarkSeen(0); BestiaryNoteFloor(0, currentLevel); }   /* 寻声鬼：每层都有 */
     if (lightBeast.active) { BestiaryMarkSeen(1); BestiaryNoteFloor(1, currentLevel); }           /* 追光鬼 */
     if (currentLevel >= LEECH_MIN_LEVEL) { BestiaryMarkSeen(2); BestiaryNoteFloor(2, currentLevel); }   /* 偷电怪 */
-    if (jumperTrigger >= 0.0f) { BestiaryMarkSeen(3); BestiaryNoteFloor(3, currentLevel); }       /* 跳脸虫 */
+    { extern int SpiderActive(void);
+      if (SpiderActive()) { BestiaryMarkSeen(3); BestiaryNoteFloor(3, currentLevel); } }       /* 跳脸虫 */
 
     /* 记录本局见过的词条种类（算难度乘子用） */
     if (levelMod >= 0) {
@@ -3482,14 +3484,16 @@ void GenerateLevel(void) {
      *   已经出过的数量达到上限 → 本层不再安排
      * ================================================================ */
     {
-        int cap = 1 + currentLevel / 2;
-        if (cap > JUMPER_MAX_PER_RUN) cap = JUMPER_MAX_PER_RUN;
-        extern int jumperSpawnedRun;
-        if (currentLevel >= JUMPER_MIN_LEVEL && jumperSpawnedRun < cap) {
-            jumperTrigger = 8.0f + (float)(rand() % 13);
-        } else {
-            jumperTrigger = -1.0f;
-        }
+        /* ==================================================================
+         * 2026-11-06（用户要求）：**跳脸怪彻底删除**
+         * ------------------------------------------------------------------
+         * 用户原话：「把那个跳脸怪给彻底删除」。
+         *
+         * 这里原来按"一局总量"排程（min(4, 1+层数/2) 只）。
+         * 现在恒为 -1 —— 本层不会出现爆脸怪。
+         * 它的角色由缚丝蛛接管（第 4 层起、30%、每层最多 1 只）。
+         * ================================================================ */
+        jumperTrigger = -1.0f;
     }
     jumperPhase = JMP_IDLE;
     jumperTimer = 0.0f;
@@ -5299,6 +5303,23 @@ void Update(float dt) {
      * ------------------------------------------------------------------
      * 放在按骰子之前：它们和投掷物无关，不该被蓄力/投掷状态影响。
      * ================================================================ */
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**F3 召唤缚丝蛛**
+     * ------------------------------------------------------------------
+     * 用户原话：「把那个 F3 键改成召唤那个吐丝怪物」。
+     * 跳脸怪已删，这个调试键改成召唤蜘蛛，放在玩家前方 3~5 格。
+     * ================================================================ */
+    if (IsActionPressed(ACT_DEBUG_SPAWN)) {
+        keyPressed[g_bindings[ACT_DEBUG_SPAWN]] = 0;
+        {
+            extern int SpiderSpawnNearPlayer(void);
+            SpiderSpawnNearPlayer();
+            pickupMsg = (g_lang == LANG_ZH) ? "召唤缚丝蛛" : "DEBUG: SPIDER SUMMONED";
+            pickupMsgTimer = 1.6f;
+            uiDirty = 1;
+        }
+    }
+
     if (IsActionPressed(ACT_PHASE_TELE)) {
         keyPressed[g_bindings[ACT_PHASE_TELE]] = 0;
         if (!phaseOwned || phaseCharges <= 0) {
@@ -6041,7 +6062,8 @@ void Update(float dt) {
     { extern void FlankUpdate(float); FlankUpdate(dt); }   /* v2.4.95 包夹（必须在 AI 之后，否则目标被覆盖） */
     UpdateLightBeast(dt);
         { extern void UpdateLightBeast2(float); UpdateLightBeast2(dt); }   /* 第二只 */
-    UpdateParasite(dt);
+    /* 2026-11-06：跳脸怪已删除，UpdateParasite 不再调用。
+       （控制层的每帧推进在下面，与它无关。） */
     /* 2026-11-06（第 4 轮）：控制效果层每帧推进。
        放在这里意味着**只有真正游玩时**才走 —— 暂停 / 设置界面 /
        失焦都不会调用 Update，计时自然停表。 */

@@ -1212,25 +1212,39 @@ static void test_flare_heal_budget(void) {
     for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
     FlareHealReset();
 
-    /* ---- 没有这张卡：一点也不回 ---- */
+    /* ==================================================================
+     * 2026-11-06（用户实测：「闪光弹不能回理智，你没有做好」）
+     * ------------------------------------------------------------------
+     * 契约改了：**基础效果对所有人无条件生效**，抽到 IR_BIOLUM 是强化。
+     * 原来这张卡是闸门，没抽到就完全无效 —— 玩家扔了照明弹发现没用，
+     * 那是合理的抱怨。
+     * ================================================================ */
+
+    /* ---- 没有这张卡：也要回（基础速率） ---- */
     sanity = SanityMax() * 0.5f;
     {
         float s0 = sanity;
         ThrowItem(0, 1.0f);                 /* 扔一根照明棒 */
-        for (int i = 0; i < 400; i++) FlareHealTick(0.02f);
-        CHECK(sanity == s0, "without IR_BIOLUM a flare must heal nothing");
+        for (int i = 0; i < 300; i++) FlareHealTick(0.02f);
+        CHECK(sanity > s0, "a landed flare must heal sanity even WITHOUT IR_BIOLUM");
+        CHECK(sanity - s0 <= 1.6f * 6.5f,
+              "the baseline heal must respect its own cap");
     }
 
-    /* ---- 有卡：开始回，但被每秒上限约束 ---- */
+    /* ---- 有卡：回得更快 ---- */
+    FlareHealReset();
     RunSkillTake(IR_BIOLUM);
     CHECK(FlareHealBudgetLeft() >= 23.9f, "the floor budget must start full");
+    /* 有卡时速率翻倍：同样的帧数应该回得更多 */
     sanity = SanityMax() * 0.2f;
     {
         float s0 = sanity;
         for (int i = 0; i < 50; i++) FlareHealTick(0.02f);   /* 1 秒 */
         float gained = sanity - s0;
         CHECK(gained > 0.0f, "with IR_BIOLUM a landed flare must heal");
-        CHECK(gained <= 1.6f, "the heal rate must not exceed ~1.5 per second");
+        /* 有卡时速率翻倍（1.5 -> 3.0/s），所以上限相应放宽 */
+        CHECK(gained <= 3.2f, "the boosted heal rate must not exceed ~3 per second");
+        CHECK(gained > 1.6f, "IR_BIOLUM must heal noticeably faster than the baseline");
     }
 
     /* ---- 每根灯 8 秒窗口：把时间推过去就不再回 ---- */
@@ -1421,6 +1435,44 @@ static void test_build_tags(void) {
 
     RunSkillsReset();
     for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
+}
+
+/* ==================================================================
+ * 2026-11-06（用户要求）：**跳脸怪彻底删除，缚丝蛛接管它的位置**
+ * ------------------------------------------------------------------
+ * 用户原话：
+ *   「把那个跳脸怪给彻底删除，把那个吐丝怪物的代码改到那个跳脸怪的
+ *     代码上面」
+ *   「把那个 F3 键改成召唤那个吐丝怪物」
+ *
+ * 这条要同时证明两件事：
+ *   ① 任何层都不会再排程跳脸怪（jumperTrigger 恒为 -1）
+ *   ② F3 那条路径（SpiderSpawnNearPlayer）真的能召唤出蜘蛛
+ * ================================================================== */
+static void test_jumper_removed_spider_takes_over(void) {
+    extern float jumperTrigger;
+    extern int   SpiderActive(void);
+    extern void  SpiderReset(void);
+    extern int   SpiderSpawnNearPlayer(void);
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    /* ---- ① 再也不会出现跳脸怪 ---- */
+    for (int lv = 1; lv <= 15; lv++) {
+        currentLevel = lv;
+        GenerateLevel();
+        CHECK(jumperTrigger < 0.0f,
+              "the facehugger must never be scheduled again (it was removed)");
+    }
+
+    /* ---- ② F3 的召唤路径能真的叫出蜘蛛 ---- */
+    SpiderReset();
+    CHECK(SpiderActive() == 0, "no spider before summoning");
+    CHECK(SpiderSpawnNearPlayer() == 1, "the debug summon must report success");
+    CHECK(SpiderActive() == 1, "F3 must actually put a spider on the floor");
+
+    SpiderReset();
 }
 
 static void test_spider_bind_no_damage(void) {
@@ -4166,6 +4218,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
