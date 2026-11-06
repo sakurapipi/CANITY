@@ -1249,6 +1249,32 @@ int PhaseTryPlace(void) {
     return 1;
 }
 
+/* ==================================================================
+ * 2026-11-06（用户实测「藏身柜传送 bug」/「相位传送 bug」）
+ * ------------------------------------------------------------------
+ * 玩家位置有两个地方会被**直接瞬移赋值**：
+ *   · 相位传送  posX = phaseX
+ *   · 躲藏身柜  posX = hideSpots[i].x
+ * 一旦落点被判为阻塞（家具边界、半径擦墙、地图改动），
+ * 人就卡死在原地 —— 表现就是"传过去了但动不了"。
+ *
+ * 统一走这个函数：落点阻塞就在周围 1~4 格里找一个能站的。
+ * ================================================================== */
+void UnstickPlayer(void) {
+    if (!Blocked(posX, posY)) return;
+    static const float ND[8][2] = {
+        { 0.5f, 0.0f }, { -0.5f, 0.0f }, { 0.0f, 0.5f }, { 0.0f, -0.5f },
+        { 0.5f, 0.5f }, { -0.5f, 0.5f }, { 0.5f, -0.5f }, { -0.5f, -0.5f }
+    };
+    for (int step = 1; step <= 4; step++) {
+        for (int k = 0; k < 8; k++) {
+            float nx = posX + ND[k][0] * (float)step;
+            float ny = posY + ND[k][1] * (float)step;
+            if (!Blocked(nx, ny)) { posX = nx; posY = ny; return; }
+        }
+    }
+}
+
 int PhaseTryTeleport(void) {
     if (!phaseOwned || phaseCharges <= 0 || !phasePlaced) return 0;
     /* ==================================================================
@@ -1262,15 +1288,23 @@ int PhaseTryTeleport(void) {
      * 真的变成墙（比如期间塌过）才拒绝。
      * ================================================================ */
     {
+        extern int PropBlocksAt(int x, int y);
         int cx = (int)floorf(phaseX), cy = (int)floorf(phaseY);
         if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) return 0;
         if (worldMap[cy][cx]) return 0;
+        /* 2026-11-06（用户实测「传送 bug」）：**只挡墙不挡家具**。
+           信标落在货架/木箱堆那一格时，人是能传过去，
+           但会卡在家具体积里 —— 表现为"传过去以后动不了/卡住"。
+           这里把家具也当成不可落点。 */
+        if (PropBlocksAt(cx, cy)) return 0;
     }
     posX = phaseX;
     posY = phaseY;
     phasePlaced = 0;
     phaseCharges--;
     if (phaseCharges <= 0) phaseOwned = 0;   /* 用完即消失 */
+
+    UnstickPlayer();
     return 1;
 }
 
@@ -4834,6 +4868,7 @@ void Update(float dt) {
                 hideCount++;   /* v3.3：逃生向成就用 */
                 posX = hideSpots[hiddenIn].x;
                 posY = hideSpots[hiddenIn].y;
+                UnstickPlayer();   /* 柜子中心被判阻塞时别卡死 */
 
                 /* v3.0：**当着他的面钻进去 = 他会来翻** ——
                    原来钻进柜子怪物 100% 立刻丢目标，太安全了。
@@ -8198,8 +8233,19 @@ void CanityMenuAction(void) {
         currentState = STATE_PLAYING;
         uiDirty = 1;
         break;
-    case STATE_HUB:
     case STATE_SAFEHOUSE:
+        /* ==================================================================
+         * 2026-11-06（用户实测：**局内商店点进技能树就退不出来**）
+         * ------------------------------------------------------------------
+         * SAFEHOUSE 是**局内商店**，它的正确出口是 ShopLeave() ——
+         * 回到 PLAYING 继续这一局。
+         * 我上一版把 SAFEHOUSE 和 HUB 并在一起、一律回主菜单：
+         * 那等于一进商店就等于放弃本局，是错的。
+         * ================================================================ */
+        { extern void ShopLeave(void); ShopLeave(); }
+        uiDirty = 1;
+        break;
+    case STATE_HUB:
     case STATE_ACHIEVEMENTS:
     case STATE_BESTIARY:
     case STATE_BANK:
