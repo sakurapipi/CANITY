@@ -229,6 +229,69 @@ static void test_legacy_fixture_one(const char* file, int oldVer, int wantPayloa
  * 这条用例把运行时全局清空（模拟真的回到主菜单），再保存，
  * 然后读回来逐项核对 —— 只要有一项被清零就是失败。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-07（v2.4.2 / B3）：**一枚信标 = 一次传送**
+ * ------------------------------------------------------------------
+ * 旧规则：投出给 2 次充电，传送成功即清 placed。
+ *   第一次 Q 传送后：placed=0 但 charges=1 —— 剩下那次永远用不出来。
+ * 新规则：投出 -> 1 个锚点 -> 传送 1 次 -> 锚点消失。再传要再投一枚。
+ * ================================================================== */
+static void test_phase_beacon_one_use(void) {
+    extern int phaseOwned, phaseCharges, phasePlaced, phaseBeacons;
+    extern int PhaseTryPlace(void), PhaseTryTeleport(void);
+
+    clear_meta(); StartGame();
+    phaseBeacons = 1;
+    phaseOwned = 1;
+    phaseCharges = 1;
+    phasePlaced = 0;
+
+    /* 站在一个确定可站的位置，然后原地放锚 */
+    posX = 12.5f; posY = 9.5f;
+    CHECK(PhaseTryPlace(), "phase: place succeeds with a charge left");
+    CHECK(phasePlaced == 1, "phase: beacon is on the map");
+    CHECK(phaseCharges == 1, "phase: placing does not consume the charge");
+
+    /* 走到别处再传回来 */
+    posX = 9.5f; posY = 9.5f;
+    CHECK(PhaseTryTeleport(), "phase: teleport succeeds once");
+    CHECK(fabsf(posX - 12.5f) < 0.05f && fabsf(posY - 9.5f) < 0.05f,
+                                "phase: player lands on the beacon");
+    CHECK(phasePlaced == 0, "phase: the beacon is consumed");
+    CHECK(phaseCharges == 0, "phase: the charge is spent");
+    CHECK(phaseOwned == 0, "phase: the device is gone after its single use");
+
+    /* 再按一次必须失败 —— 这就是旧版"第二次永远用不出来"的守卫 */
+    CHECK(!PhaseTryTeleport(), "phase: a second teleport is refused");
+}
+
+/* ==================================================================
+ * 2026-11-07（v2.4.2 / B3）：**训练场物资不许带进正式局**
+ * ------------------------------------------------------------------
+ * StartGame 里原来只有 if (trainingMode) phaseBeacons = 5;，
+ * 普通新局从不重置它。同一进程先玩训练场、再开正式局就会带过去。
+ * ================================================================== */
+static void test_training_items_do_not_leak(void) {
+    extern int phaseBeacons;
+
+    /* trainingMode / pendingStartMode 都是 game.c 的内部状态，
+       测试不去伪造入口，而是直接验证**不变量**：
+       StartGame 必须无条件重置本局库存，再按模式发放。
+
+       旧实现的缺陷正是"只在训练场赋值、普通局从不重置"：
+       同一个进程里先玩训练场（发 5 枚），再开正式局 —— 5 枚被带过去。
+       所以这里手工把库存摆成 5，再走一次普通开局。 */
+    clear_meta();
+    phaseBeacons = 5;
+    StartGame();
+    CHECK(phaseBeacons == 0, "training: stock must not leak into a normal run");
+
+    /* 再来一次，确认不是偶发（上一局残留也不允许带） */
+    phaseBeacons = 3;
+    StartGame();
+    CHECK(phaseBeacons == 0, "training: a second normal start also resets the stock");
+}
+
 static void test_menu_save_keeps_run(void) {
     extern int echoBolts, decoys, phaseBeacons, jumperSpawnedRun;
     extern int hudDetail;
@@ -1066,7 +1129,7 @@ static void test_phase_landing_near_wall(void) {
 
     CHECK(phasePlaced == 1,
           "a beacon must still be placed when the projectile lands against a wall");
-    CHECK(phaseCharges == 2, "placing the beacon must arm two charges");
+    CHECK(phaseCharges == 1, "placing the beacon must arm its single charge");
 
     /* 坐标必须被吸附到**可站立**的格子中心，不是原来那个墙格 */
     CHECK(!Blocked(phaseX, phaseY),
@@ -2125,7 +2188,7 @@ static void test_beacon_cleared_between_floors(void) {
     StartGame();
 
     PhaseGive();
-    CHECK(phaseOwned == 1 && phaseCharges == 2, "device granted");
+    CHECK(phaseOwned == 1 && phaseCharges == 1, "device granted (one use)");
 
     PhaseTryPlace();                 /* 放在脚下 */
     CHECK(phasePlaced == 1, "beacon placed on this floor");
@@ -2135,7 +2198,7 @@ static void test_beacon_cleared_between_floors(void) {
     CHECK(phasePlaced == 0, "changing floors must clear the placed beacon");
     CHECK(phaseX == 0.0f && phaseY == 0.0f, "the stale coordinates must be wiped");
     CHECK(phaseOwned == 1, "the DEVICE is inventory and must survive a floor change");
-    CHECK(phaseCharges == 2, "charges must survive a floor change too");
+    CHECK(phaseCharges == 1, "charges must survive a floor change too");
     (void)posX; (void)posY;
 }
 
@@ -2393,40 +2456,43 @@ static void test_phase_beacon(void) {
     CHECK(PhaseTryPlace() == 0, "cannot place without the device");
     CHECK(PhaseTryTeleport() == 0, "cannot teleport without the device");
 
-    /* ---- 发放：2 次，未放置 ---- */
+    /* ==================================================================
+     * 2026-11-07（v2.4.2 / B3）：规则改成「一枚信标 = 一次传送」
+     * ------------------------------------------------------------------
+     * 旧规则是"投一次给 2 次充电，传送成功就清 placed"，
+     * 于是第一次传送后剩 1 次充能却没有锚点 —— 第二次永远用不出来。
+     * 现在：放一个锚点 -> 传一次 -> 锚点消失；要再传就再放一个。
+     * ================================================================== */
+
+    /* ---- 发放：1 次，未放置 ---- */
     PhaseGive();
     CHECK(phaseOwned == 1, "PhaseGive must mark it owned");
-    CHECK(phaseCharges == 2, "the device carries exactly 2 teleport charges");
+    CHECK(phaseCharges == 1, "one beacon carries exactly one teleport charge");
     CHECK(phasePlaced == 0, "a fresh device has no beacon on the field");
     CHECK(PhaseTryTeleport() == 0,
           "teleporting before placing must fail (and must not eat a charge)");
-    CHECK(phaseCharges == 2, "a failed teleport must not consume a charge");
+    CHECK(phaseCharges == 1, "a failed teleport must not consume a charge");
 
     /* ---- 放置：一次，且只能有一个 ---- */
     posX = fX[0]; posY = fY[0];
     CHECK(PhaseTryPlace() == 1, "placing on a walkable cell must succeed");
     CHECK(phasePlaced == 1, "the beacon must be marked as on the field");
     CHECK(phaseX == fX[0] && phaseY == fY[0], "the beacon must record the exact spot");
+    CHECK(phaseCharges == 1, "placing must not consume the charge");
 
     posX = fX[1]; posY = fY[1];
     PhaseTryPlace();
     CHECK(phaseX == fX[1] && phaseY == fY[1],
           "placing again must MOVE the same beacon, never stack a second one");
 
-    /* ---- 传送：回到信标，消耗 1 次 ---- */
+    /* ---- 传送：回到信标，锚点与充能一起用完 ---- */
     posX = fX[2]; posY = fY[2];
     CHECK(PhaseTryTeleport() == 1, "teleporting to a placed beacon must succeed");
     CHECK(posX == fX[1] && posY == fY[1], "teleport must put the player on the beacon");
-    CHECK(phaseCharges == 1, "one teleport consumes exactly one charge");
+    CHECK(phaseCharges == 0, "the single teleport consumes the charge");
     CHECK(phasePlaced == 0, "the beacon is consumed by the teleport");
-
-    /* ---- 第二次：再放一次再传一次，用完消失 ---- */
-    posX = fX[0]; posY = fY[0];
-    PhaseTryPlace();
-    posX = fX[2];
-    CHECK(PhaseTryTeleport() == 1, "the second teleport must still work");
-    CHECK(phaseCharges == 0, "charges must be exhausted after two teleports");
     CHECK(phaseOwned == 0, "with no charges left the device must disappear");
+    CHECK(PhaseTryTeleport() == 0, "a second teleport must be refused");
     CHECK(PhaseTryPlace() == 0, "an exhausted device can no longer be placed");
 
     /* ---- 目标格被占：拒绝，不能把玩家塞进墙里 ---- */
@@ -4588,6 +4654,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_legacy_fixtures();test_corrupt_save_is_never_overwritten();test_menu_save_keeps_run();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_legacy_fixtures();test_corrupt_save_is_never_overwritten();test_menu_save_keeps_run();test_phase_beacon_one_use();test_training_items_do_not_leak();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

@@ -1147,7 +1147,22 @@ int   phaseCharges = 0;   /* 剩余传送次数（上限 2） */
 int   phasePlaced  = 0;   /* 场上是否已有信标 */
 float phaseX = 0.0f, phaseY = 0.0f;
 
-#define PHASE_MAX_CHARGES 2
+/* ==================================================================
+ * 2026-11-07（v2.4.2 / B3）：**一枚信标 = 一次传送**
+ * ------------------------------------------------------------------
+ * 原来的规则是"投一次给 2 次充电，传送成功就清 placed"：
+ *     投出 -> phasePlaced=1, phaseCharges=2
+ *     按 Q -> 传送成功 -> phasePlaced=0, phaseCharges-- (剩 1)
+ * 剩下 1 次充能但场上已经没有锚点 —— **第二次传送永远用不出来**。
+ *
+ * 更麻烦的是数字语义打架：HUD 显示「相位信标 ×2」指的是**库存**，
+ * 而 phaseCharges 是"传送次数"。玩家看到 2，实际能传 4 次（旧规则下
+ * 如果锚点不清的话），中间态完全无法解释。
+ *
+ * 现在统一成：投出消耗 1 枚库存 -> 场上 1 个锚点 -> 传送 1 次 -> 锚点消失。
+ * 想再传就再投一枚。语义一行说得清，也少一套计数。
+ * ================================================================ */
+#define PHASE_MAX_CHARGES 1
 
 void PhaseGive(void) {
     phaseOwned = 1;
@@ -1210,12 +1225,13 @@ void PhaseOnThrowLanded(int kind, float lx, float ly) {
     }
 
     if (kind == 12) {
-        /* 信标：设定回溯点，给 2 次传送 */
+        /* 信标：设定回溯点，可供**一次**传送（见 PHASE_MAX_CHARGES 的注释） */
         phaseX = lx; phaseY = ly;
         phasePlaced = 1;
         phaseOwned = 1;
         phaseCharges = PHASE_MAX_CHARGES;
-        pickupMsg = (g_lang == LANG_ZH) ? "信标已固定 - 按 Q 传送回来" : "BEACON SET - PRESS Q TO RETURN";
+        pickupMsg = (g_lang == LANG_ZH) ? "信标已固定 - 按 Q 传送回来（一次）"
+                                        : "BEACON SET - PRESS Q TO RETURN (ONE USE)";
         pickupMsgTimer = 2.0f;
         PlaySfx(SFX_POWER, 0.7f);
     }
@@ -1240,12 +1256,16 @@ void PhaseResetPlacement(void) {
     phaseY = 0.0f;
 }
 
+/* 2026-11-07（B3）：这个入口目前没有玩家可达路径（信标已改成投掷物），
+   保留是为了测试与将来的"原地放置"。语义必须和新规则一致：
+   放一个 = 一次传送。 */
 int PhaseTryPlace(void) {
     if (!phaseOwned || phaseCharges <= 0) return 0;
     /* 场上只允许一个：重复按 C 就挪到脚下，不叠第二个 */
     phaseX = posX;
     phaseY = posY;
     phasePlaced = 1;
+    phaseCharges = PHASE_MAX_CHARGES;
     return 1;
 }
 
@@ -6908,11 +6928,18 @@ void StartGame(void) {
     { extern void FlareHealReset(void); FlareHealReset(); } /* 2026-11-06：每局/每层重置治疗预算 */
     { extern void NeutralReset(void); NeutralReset(); }       /* 2026-11-06：中立怪按局清零 */
     { extern void PhaseResetPlacement(void); PhaseResetPlacement(); } /* 2026-11-06：信标换层失效 */
-    if (trainingMode) {
-        /* 2026-11-06：训练营里直接发一批相位投掷物 —— 那里就是拿来试机制的。
-           相位装置已经改成投掷物（槽 6/7），不再需要 PhaseGive。 */
+    /* ==================================================================
+     * 2026-11-07（v2.4.2 / B3）：**训练营物资不许带进正常对局**
+     * ------------------------------------------------------------------
+     * 原来是 if (trainingMode) phaseBeacons = 5; —— 只有训练场赋值，
+     * 普通新局**从不重置** phaseBeacons。玩家在同一个进程里先玩训练场、
+     * 再开正式局，就会带着训练场的 5 枚信标进正式局。
+     * 现在无条件先归零，再按模式发放。
+     * ================================================================ */
+    {
         extern int phaseBeacons;
-        phaseBeacons = 5;
+        phaseBeacons = 0;
+        if (trainingMode) phaseBeacons = 5;
     }
     /* 2026-11-05：新局同样要重置鼠标基准 ——
        从菜单/商店直接开局时，lastMousePos 还是上一次的位置，
