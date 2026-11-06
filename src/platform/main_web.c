@@ -239,6 +239,31 @@ static const ActionNameRow kActionNames[] = {
     { "SELECT_3",     ACT_SELECT_3 }
 };
 
+/* ==================================================================
+ * 2026-11-07（B6）：**声像运行期探针**
+ * ------------------------------------------------------------------
+ * AudioPlayWorld 里的"算 pan -> StereoPannerNode"这条链，
+ * 只读代码没法证明它真的通了。这里直接在世界坐标放一声，
+ * 再把 js_play 实际下发的 pan 取回来。
+ *
+ * 返回值：-1（完全偏左）.. +1（完全偏右）
+ * ================================================================== */
+EM_JS(float, js_last_pan, (void), {
+    return (Module._lastPan === undefined) ? 99.0 : Module._lastPan;
+});
+EM_JS(int, js_panner_supported, (void), {
+    return Module._pannerSupported ? 1 : 0;
+});
+
+EMSCRIPTEN_KEEPALIVE float CanityProbeWorldSound(float dx, float dy) {
+    extern void AudioPlayWorld(int, float, float, float, float, int);
+    extern float posX, posY;
+    AudioPlayWorld(SFX_STEP, posX + dx, posY + dy, 1.0f, 20.0f, 3);
+    return js_last_pan();
+}
+
+EMSCRIPTEN_KEEPALIVE int CanityProbePanner(void) { return js_panner_supported(); }
+
 EMSCRIPTEN_KEEPALIVE int CanityActionVk(const char* name) {
     int i;
     if (!name) return -1;

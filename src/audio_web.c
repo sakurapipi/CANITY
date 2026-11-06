@@ -67,11 +67,19 @@ EM_JS(void, js_play, (int id, float vol, float pan), {
      * （老 Safari）退回单声道，功能不缺失、只是没有方向。
      * ================================================================== */
     var sink = Module._master;
+    var clamped = (pan < -1) ? -1 : (pan > 1 ? 1 : pan);
+    /* 2026-11-07（B6）：把实际下发的 pan 记下来，给运行期探针用。
+       没有它，"真立体声"就只是读代码得出的结论，没法验证。 */
+    Module._lastPan = clamped;
+    Module._lastVol = vol;
     if (ctx.createStereoPanner) {
         var p = ctx.createStereoPanner();
-        p.pan.value = (pan < -1) ? -1 : (pan > 1 ? 1 : pan);
+        p.pan.value = clamped;
         p.connect(Module._master);
         sink = p;
+        Module._pannerSupported = true;
+    } else {
+        Module._pannerSupported = false;
     }
     out.connect(sink);
 
