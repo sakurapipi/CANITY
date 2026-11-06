@@ -98,13 +98,15 @@ def main() -> int:
     #   SaveBackendRead / SaveBackendWrite / SaveBackendUpload /
     #   SaveEnvelopeValid / SaveContainerAt ...
     # build_validate 和 build_deploy 都是递归的，只有打包这步会炸。
-    sources = []
-    for _dp, _dn, _fn in os.walk(os.path.join(ROOT, "src")):
-        for _f in sorted(_fn):
-            if _f.endswith(".c"):
-                _rel = os.path.relpath(_dp, os.path.join(ROOT, "src"))
-                sources.append(os.path.join("src", _f) if _rel == "."
-                               else os.path.join("src", _rel, _f))
+    # 2026-11-06：**改用唯一的源清单**（tools/build_sources.py）。
+    # 原来这里自己 os.walk 全部 src/**/*.c，会把网页后端
+    # （plat_web.c / audio_web.c / music_web.c / gamepad_web.c /
+    #   steam_zone_web.c）一起拉进 Win32 构建 ——
+    # 那些文件要 emscripten.h，直接编译失败。
+    # build_validate / build_deploy 早就用 game_sources() 了，只有打包这步漏了。
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    from build_sources import game_sources
+    sources = [os.path.relpath(p, ROOT) for p in game_sources(ROOT, platform="win32")]
     sources.sort()
     exe = os.path.join(out_dir, "canity.exe")
     run([tool("gcc")] + sources + [obj, "-Iinclude", "-o", exe, "-O2", "-Wall", "-Wextra",
