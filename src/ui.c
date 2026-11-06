@@ -5,6 +5,7 @@
  */
 #include "common.h"
 #include "build_tags.h"
+#include "cell_meta.h"
 #include "hatch.h"
 #include "map_rooms.h"
 #include "art_direction.h"
@@ -4399,6 +4400,32 @@ void DrawHUD(void) {
                小地图虽然已经缩小，但状态行和小地图之间仍偏挤，
                再上移 24 像素留出呼吸空间。 */
             DrawTextWin(winW - UIS(24) - tw3, winH - UIS(394), st, sc);
+
+            /* ==================================================================
+             * 2026-11-06（用户要求）：**右上角显示当前主题房间**
+             * ------------------------------------------------------------------
+             * 用户原话：「右上角新增一行字幕，告诉我当前的主题房间是什么」。
+             *
+             * 只在玩家**站在房间内部**时显示（roomId != 0）——
+             * 站在走廊里写"砖墙"没有意义，反而像是坏了。
+             * 画在敌人状态那一行**上面**，两者互不遮挡。
+             * ================================================================ */
+            {
+                extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+                extern const char* ThemeName(int, int);
+                extern float posX, posY;
+                int cxp = (int)posX, cyp = (int)posY;
+                if (cxp >= 0 && cyp >= 0 && cxp < MAP_WIDTH && cyp < MAP_HEIGHT &&
+                    cellMeta[cyp][cxp].roomId != 0) {
+                    const char* tn = ThemeName((int)cellMeta[cyp][cxp].themeId,
+                                               g_lang == LANG_ZH);
+                    if (tn && tn[0]) {
+                        int tw4 = TextWidthWin(tn);
+                        DrawTextWin(winW - UIS(24) - tw4, winH - UIS(394) - UIS(30),
+                                    tn, 0x00C090E0u);
+                    }
+                }
+            }
         }
     }
 

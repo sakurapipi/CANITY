@@ -77,6 +77,10 @@ int CellTintRGB(int cx, int cy, int* r, int* g, int* b);
 /* 2026-11-06：房间外墙（CELLFLAG_ROOMWALL）查询，带回主题色 */
 int CellIsRoomWall(int cx, int cy, int* r, int* g, int* b);
 
+/* 2026-11-06（用户要求）：主题房间的显示名（HUD 用）。
+   zh != 0 返回中文名，否则英文名。越界返回空串。 */
+const char* ThemeName(int themeId, int zh);
+
 /* 按主题编号直接取补光色（R/G/B 三个通道，0..255）。
    给逐像素的地板循环用 —— 那条路径上不能有函数调用开销。 */
 int CellThemeTintR(int themeId);

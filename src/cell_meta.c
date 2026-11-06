@@ -75,6 +75,26 @@ static const unsigned char kRoomTintRGB[THEME_COUNT][3] = {
     { 32, 12, 24 }    /* 6 血肉洞窟 紫红 */
 };
 
+/* ==================================================================
+ * 2026-11-06（用户要求）：**主题房间的显示名**
+ * ------------------------------------------------------------------
+ * 用户：「右上角新增一行字幕，告诉我当前的主题房间是什么」。
+ *
+ * 名字和 kRoomTintRGB 的注释一一对应 —— 以后加主题时两边一起改。
+ * ================================================================ */
+const char* ThemeName(int themeId, int zh) {
+    switch (themeId) {
+    case 0: return zh ? "砖墙"     : "BRICKWORKS";
+    case 1: return zh ? "监狱"     : "THE CELLS";
+    case 2: return zh ? "地狱"     : "INFERNO";
+    case 3: return zh ? "病房"     : "WARD";
+    case 4: return zh ? "冰窖"     : "ICE VAULT";
+    case 5: return zh ? "锈工厂"   : "RUSTWORKS";
+    case 6: return zh ? "血肉洞窟" : "FLESH CAVE";
+    default: return zh ? "" : "";
+    }
+}
+
 /* 逐像素路径上不能走函数调用（地板循环每帧几十万次），
    所以把主题色拆成三个内联查询，让 render 直接取。 */
 int CellThemeTintR(int themeId) {

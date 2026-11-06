@@ -846,6 +846,56 @@ static void test_facehugger_is_brutal(void) {
  *   「你给每一层都加一个特殊房间上限，不然特殊房间太多了」
  *   「有一些出口会刷在那个特殊房间里面，导致也只有一条路可以先往出口」
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**右上角主题房间字幕**
+ * ------------------------------------------------------------------
+ * 用户：「右上角新增一行字幕，告诉我当前的主题房间是什么」。
+ * 覆盖两件事：
+ *   ① 7 个主题都有名字（中英各一），没有空名
+ *   ② 玩家站在房间里能读到 roomId / themeId（HUD 据此决定显示什么）
+ * ================================================================== */
+static void test_theme_room_label(void) {
+    extern const char* ThemeName(int, int);
+    extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+
+    /* ---- ① 每个主题都有名字 ---- */
+    for (int t = 0; t < THEME_COUNT; t++) {
+        const char* en = ThemeName(t, 0);
+        const char* zh = ThemeName(t, 1);
+        CHECK(en && en[0], "every theme needs an English name");
+        CHECK(zh && zh[0], "every theme needs a Chinese name");
+    }
+    /* 越界要安全返回空串，不能是 NULL */
+    {
+        const char* o1 = ThemeName(-1, 0);
+        const char* o2 = ThemeName(THEME_COUNT + 5, 0);
+        CHECK(o1 && o1[0] == 0, "an invalid theme id must return an empty string");
+        CHECK(o2 && o2[0] == 0, "an out-of-range theme id must return an empty string");
+    }
+
+    /* ---- ② 站在房间里能读出主题 ---- */
+    {
+        clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+        StartGame();
+        int found = 0;
+        for (int lv = 1; lv <= 8 && !found; lv++) {
+            currentLevel = lv;
+            GenerateLevel();
+            for (int y = 1; y < MAP_HEIGHT - 1 && !found; y++)
+                for (int x = 1; x < MAP_WIDTH - 1 && !found; x++)
+                    if (cellMeta[y][x].roomId != 0) {
+                        int th = (int)cellMeta[y][x].themeId;
+                        CHECK(th >= 0 && th < THEME_COUNT,
+                              "a room cell must carry a valid theme id");
+                        CHECK(ThemeName(th, 1)[0] != 0,
+                              "the theme of a real room must have a display name");
+                        found = 1;
+                    }
+        }
+        CHECK(found == 1, "at least one floor must contain a theme room");
+    }
+}
+
 static void test_room_budget_and_exit(void) {
     extern int roomCount;
     extern float exitX, exitY;
@@ -4012,6 +4062,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
