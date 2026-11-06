@@ -11,10 +11,24 @@ from pathlib import Path
 import sys
 
 
-def game_sources(root):
-    """递归收集 src/**/*.c —— 子目录（src/save、src/steam）自动包含。"""
+# 平台层只有一个后端能参与某一次构建：
+#   桌面构建排除 plat_web.c（它要 emscripten.h）
+#   网页构建排除 plat_win32.c（它要 windows.h）
+# 两边都叫 plat_*.c，靠文件名区分。
+PLATFORM_FILES = {
+    'win32': {'plat_web.c'},
+    'web':   {'plat_win32.c'},
+}
+
+
+def game_sources(root, platform='win32'):
+    """递归收集 src/**/*.c —— 子目录（src/save、src/steam、src/platform）自动包含。
+
+    platform 决定排除哪个平台后端；默认 win32，保持既有调用方不变。
+    """
     root = Path(root)
-    return sorted((root / 'src').rglob('*.c'))
+    skip = PLATFORM_FILES.get(platform, {'plat_web.c'})
+    return [p for p in sorted((root / 'src').rglob('*.c')) if p.name not in skip]
 
 
 def test_canity_sources(root):

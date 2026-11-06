@@ -6,6 +6,7 @@
 #include "common.h"
 #include "build_tags.h"
 #include "cell_meta.h"
+#include "plat.h"
 #include "spider.h"
 #include "control_effect.h"
 #include "hatch.h"
@@ -4953,8 +4954,6 @@ void DrawPickupToast(void) {
 
 void RenderFrame(void) {
     UiLayoutBegin();
-    HDC hdc = GetDC(g_hwnd);
-    if (!hdc) return;
 
     int showScene = (currentState == STATE_PLAYING) ||
                     (currentState == STATE_PAUSED) ||
@@ -5242,102 +5241,51 @@ void RenderFrame(void) {
     }
 
 
-    /* v1.8：等比呈现 + 黑边（letterbox）。
-       原来把图直接拉满客户区，在 21:9 / 16:9 宽屏上文字会被横向拉胖。
-       现在按逻辑画布比例等比缩放并居中，其余填黑 —— 任何分辨率都不变形。 */
+    /* ==================================================================
+     * 2026-11-06（网页版 R1）：**呈现整体交给平台层**
+     * ------------------------------------------------------------------
+     * letterbox 几何仍在这里算（纯数学，不碰任何系统类型），
+     * 真正的 StretchBlt / StretchDIBits 由 plat_win32.c 负责；
+     * 网页后端的同一份几何会变成 canvas 的绘制矩形。
+     * ================================================================== */
     {
-        RECT cr;
-        GetClientRect(g_hwnd, &cr);
-        int cw = cr.right - cr.left;
-        int ch = cr.bottom - cr.top;
-        if (cw <= 0 || ch <= 0) { ReleaseDC(g_hwnd, hdc); return; }
+        int cw = 0, ch = 0;
+        PlatWindowSize(&cw, &ch);
+        if (cw <= 0 || ch <= 0) return;
 
-        /* v3.0：**等比 + 黑边**（回退 v1.8 的「真铺满」）——
-           玩家实测：「最大化后 4:3 画面被横向拉满 16:9，墙都变扁」。
-           轻微拉伸在恐怖游戏里非常出戏（透视全乱），所以恢复等比缩放。
-           宽屏两侧留黑边，这才是正确做法。 */
-        int dw, dh, dx, dy;
+        PlatPresentRect pr;
+        memset(&pr, 0, sizeof(pr));
+        pr.cw = cw;
+        pr.ch = ch;
+
+        /* 目标比例 = 渲染缓冲的宽高比；不匹配时留黑边，绝不拉伸变形 */
         {
-            /* 目标比例 = 渲染缓冲的宽高比 */
             double wantR = (double)renderW / (double)renderH;
             double haveR = (double)cw / (double)ch;
             if (haveR > wantR) {
-                dh = ch;
-                dw = (int)((double)ch * wantR + 0.5);
+                pr.dh = ch;
+                pr.dw = (int)((double)ch * wantR + 0.5);
             } else {
-                dw = cw;
-                dh = (int)((double)cw / wantR + 0.5);
+                pr.dw = cw;
+                pr.dh = (int)((double)cw / wantR + 0.5);
             }
-            if (dw < 1) dw = 1;
-            if (dh < 1) dh = 1;
-            /* v3.0：**兜底** —— 等比算出来的画面如果不到窗口的 70%，
-               说明 renderW/renderH 和当前客户区严重不匹配（缩放中/切换分辨率），
-               这时宁愿拉满也不要留一条细带（那种情况比拉伸更难玩）。 */
-            if (dw < cw * 7 / 10 || dh < ch * 7 / 10) {
-                dw = cw; dh = ch;
+            if (pr.dw < 1) pr.dw = 1;
+            if (pr.dh < 1) pr.dh = 1;
+            /* 兜底：等比算出来不到窗口 70% 说明分辨率正在切换，宁可拉满 */
+            if (pr.dw < cw * 7 / 10 || pr.dh < ch * 7 / 10) {
+                pr.dw = cw;
+                pr.dh = ch;
             }
-            dx = (cw - dw) / 2;
-            dy = (ch - dh) / 2;
+            pr.dx = (cw - pr.dw) / 2;
+            pr.dy = (ch - pr.dh) / 2;
         }
 
-        /* ===== v2.4.24 **拾取/事件提示：最顶层（但在呈现之前）** =====
-           上一版插错了位置 —— 插在 StretchDIBits 之后，
-           那时 pixels 已经贴到屏幕了，再画像素没有任何效果，
-           所以黄字直接消失（用户：「连黄字都不见了」）。
-           现在放在**藏身遮罩之后、呈现之前**，既压住所有遮罩，又能真的显示。 */
+        /* 拾取/事件提示：最顶层，但必须**在呈现之前**画进像素缓冲 */
         DrawPickupToast();
 
-
-        /* 离屏合成：黑底 + 缩放后的画面先在内存 DC 里拼好，
-           再一次性 BitBlt 到窗口。直接往窗口 DC 先填黑再画内容会闪
-           （两次呈现之间屏幕上看得到黑底）。 */
-        static HDC g_bufDC = NULL;
-        static HBITMAP g_bufBmp = NULL;
-        static int g_bufW = -1, g_bufH = -1;
-        if (!g_bufDC || g_bufW != cw || g_bufH != ch) {
-            if (g_bufBmp) { DeleteObject(g_bufBmp); g_bufBmp = NULL; }
-            if (g_bufDC) { DeleteDC(g_bufDC); g_bufDC = NULL; }
-            g_bufDC = CreateCompatibleDC(hdc);
-            if (g_bufDC) {
-                g_bufBmp = CreateCompatibleBitmap(hdc, cw, ch);
-                SelectObject(g_bufDC, g_bufBmp);
-                g_bufW = cw; g_bufH = ch;
-            }
-        }
-        /* v2.0 性能：画面已经铺满整个客户区（dw==cw、dh==ch、dx==dy==0），
-           那么"填黑 + 画进离屏 + 整屏 BitBlt"三步里，填黑 100% 被覆盖、
-           BitBlt 又是一次整屏拷贝 —— 1080p 下光这两步就 ~10ms。
-           直接画到窗口 DC。只有真出现黑边（未来若恢复等比缩放）才走离屏路径。 */
-        int fullBleed = (dx == 0 && dy == 0 && dw == cw && dh == ch);
-        if (fullBleed) {
-            /* v2.9：HALFTONE 双线性缩放。
-               原来用默认 BLACKONWHITE（块复制），16x24 的字按 1.31/1.82/2.73
-               非整数放大时，2px 笔画会变 2/3px 或 5/6px 交替 → 字发毛
-               （清晰度审查 #7）。 */
-            /* v2.9：**COLORONCOLOR（近邻）**，不再用 HALFTONE。
-               HALFTONE 在 GDI 里是 4x4 抖动，1080p 全屏每帧要 10~20ms ——
-               这就是「全屏帧数严重下降」的原因。近邻缩放快 30 倍，
-               而且点阵字保持硬边，符合像素风。 */
-            SetStretchBltMode(hdc, COLORONCOLOR);
-            if (g_useDIB)
-                StretchBlt(hdc, 0, 0, cw, ch, g_memDC, 0, 0, renderW, renderH, SRCCOPY);
-            else
-                StretchDIBits(hdc, 0, 0, cw, ch, 0, 0, renderW, renderH,
-                              pixels, &bmi, DIB_RGB_COLORS, SRCCOPY);
-        } else if (g_bufDC) {
-            RECT all = { 0, 0, cw, ch };
-            HBRUSH blk = (HBRUSH)GetStockObject(BLACK_BRUSH);
-            FillRect(g_bufDC, &all, blk);
-            if (g_useDIB)
-                StretchBlt(g_bufDC, dx, dy, dw, dh, g_memDC, 0, 0, renderW, renderH, SRCCOPY);
-            else
-                StretchDIBits(g_bufDC, dx, dy, dw, dh, 0, 0, renderW, renderH,
-                              pixels, &bmi, DIB_RGB_COLORS, SRCCOPY);
-            BitBlt(hdc, 0, 0, cw, ch, g_bufDC, 0, 0, SRCCOPY);
-        }
+        pr.fullBleed = (pr.dx == 0 && pr.dy == 0 && pr.dw == cw && pr.dh == ch);
+        PlatPresentFrame(&pr, pixels, renderW, renderH);
     }
-
-    ReleaseDC(g_hwnd, hdc);
 }
 
 

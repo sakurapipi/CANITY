@@ -20,12 +20,12 @@
 #include "mimic.h"
 #include "entity.h"
 #include "ui.h"
+#include "plat.h"
 
 int renderW = 800, renderH = 600;    /* 内部渲染分辨率 */
 static const float fovPlaneLen[5] = {0.6494f, 0.7673f, 0.9163f, 1.0926f, 1.2972f};
 unsigned int* pixels = NULL;
 unsigned char* vignetteMask = NULL;
-BITMAPINFO bmi;
 
 unsigned int texture[TEX_HEIGHT][TEX_WIDTH];
 unsigned int floorTexture[TEX_HEIGHT][TEX_WIDTH];
@@ -56,15 +56,9 @@ void GenerateVignette(void) {
     }
 }
 
-/* 像素缓冲直接建在 DIB Section 上：GDI 走共享内存快路径，
-   呈现时用 BitBlt 而不是每次从用户内存 StretchDIBits */
-HDC g_memDC = NULL;
-HBITMAP g_dib = NULL;
-void* g_dibBits = NULL;
-/* v2.7：pixels 是 malloc 出来的（1）还是 GDI DIB 的 bits（0）。
-   只有 1 的时候才能 free —— 对 DIB bits 调 free 会把 GDI 内存交给 CRT。 */
-static int g_pixelsOwned = 0;
-int g_useDIB = 0;
+/* 2026-11-06（网页版 R1）：**像素缓冲的所有权移交给平台层**。
+   Win32 后端把它建在 DIB Section 上（GDI 共享内存，呈现时 BitBlt）；
+   网页后端就是一片普通内存。render.c 只拿到一个可写指针。 */
 
 /* 按当前设置重新分配内部渲染缓冲 */
 void InitPixels(void) {
@@ -122,38 +116,8 @@ void InitPixels(void) {
         }
     }
 
-    memset(&bmi, 0, sizeof(bmi));
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = renderW;
-    bmi.bmiHeader.biHeight = -renderH;   /* 负数 = 自上而下 */
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    if (g_memDC) { DeleteDC(g_memDC); g_memDC = NULL; }
-    if (g_dib) { DeleteObject(g_dib); g_dib = NULL; }
-    g_dibBits = NULL;
-    /* v2.7：pixels 的来源必须记清楚。上一轮如果是 GDI 的 DIB bits，
-       它已经被 DeleteObject 一起释放了，**不能再 free()** —— 那是把 GDI 内存
-       交给 CRT 分配器，堆直接坏掉。InitPixels 会被 WM_SIZE / 改渲染比例 /
-       动态分辨率反复调用，只要哪次 CreateDIBSection 失败就踩中。 */
-    if (g_pixelsOwned) { free(pixels); g_pixelsOwned = 0; }
-    pixels = NULL;
-
-    g_memDC = CreateCompatibleDC(NULL);
-    if (g_memDC) g_dib = CreateDIBSection(g_memDC, &bmi, DIB_RGB_COLORS, &g_dibBits, NULL, 0);
-    if (g_memDC && g_dib && g_dibBits) {
-        SelectObject(g_memDC, g_dib);
-        pixels = (unsigned int*)g_dibBits;
-        g_useDIB = 1;
-        g_pixelsOwned = 0;          /* 归 GDI 管，不能 free */
-    } else {
-        if (g_memDC) { DeleteDC(g_memDC); g_memDC = NULL; }
-        if (g_dib) { DeleteObject(g_dib); g_dib = NULL; }
-        g_useDIB = 0;
-        pixels = (unsigned int*)malloc((size_t)renderW * renderH * sizeof(unsigned int));
-        g_pixelsOwned = (pixels != NULL);
-    }
+    /* 2026-11-06（R1）：分配与呈现都归平台层，这里只要一个可写指针。 */
+    pixels = PlatAcquireTarget(renderW, renderH);
     if (pixels) memset(pixels, 0, (size_t)renderW * renderH * sizeof(unsigned int));
 
     GenerateVignette();

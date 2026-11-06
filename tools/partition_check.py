@@ -27,10 +27,17 @@ SYS = {
     'stdarg.h', 'limits.h', 'float.h', 'assert.h', 'ctype.h',
 }
 
-# 只有这两个文件允许直接碰系统头：
-#   common.h —— 唯一入口
-#   （没有第二个）
+# 允许直接碰系统头的位置：
+#   common.h        —— 唯一入口
+#   src/platform/*  —— 平台层（2026-11-06 网页版移植时新增）
+#
+# 为什么平台层要例外：这一层的**唯一职责**就是把系统 API 关在笼子里。
+# Win32 后端要用 windows.h / gdi32，Emscripten 后端要用 emscripten.h，
+# 两边的系统头根本不兼容 —— 强迫它们都塞进 common.h 会把
+# "#ifdef __EMSCRIPTEN__" 撒满整个工程，正是这层要消除的东西。
+# 界限仍然清晰：plat_*.c 之外一个系统头都不许有。
 ALLOW = {'common.h'}
+ALLOW_DIRS = (os.path.join('src', 'platform'),)
 
 
 def iter_files():
@@ -89,6 +96,9 @@ def main():
         if name in ALLOW:
             continue
         rel = os.path.relpath(p, ROOT)
+        # 平台层文件豁免（见 ALLOW_DIRS 的说明）
+        if any(os.path.normpath(rel).startswith(os.path.normpath(d) + os.sep) for d in ALLOW_DIRS):
+            continue
         try:
             txt = io.open(p, encoding='utf-8', errors='replace').read()
         except OSError:
@@ -102,7 +112,7 @@ def main():
     save_bad = check_save_partition([])
 
     if not bad and not save_bad:
-        print('partition: OK  (系统头只在 common.h 里出现；存档文件只在 save 后端读写)')
+        print('partition: OK  (系统头只在 common.h 与 src/platform/ 里出现；存档文件只在 save 后端读写)')
         return 0
 
     if bad:

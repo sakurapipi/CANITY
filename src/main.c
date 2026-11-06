@@ -12,6 +12,7 @@
 #include "common.h"
 #include "entity.h"
 #include "game.h"
+#include "plat.h"
 #include "sprites.h"
 #include "render.h"
 #include "ui.h"
@@ -184,9 +185,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
       }
     }
 
-    LARGE_INTEGER freq, now, t0;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&t0);
+    /* 2026-11-06（R1）：时钟归平台层，主循环只拿单调秒数 */
 
     double accum = 0.0;       /* 逻辑累加器 */
     double clock = 0.0;       /* 呈现排程时钟（秒，绝对；睡眠处会刷新） */
@@ -210,8 +209,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
         if (!running) break;
 
-        QueryPerformanceCounter(&now);
-        double absNow = (double)(now.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
+        double absNow = PlatNow();
         /* dt 必须基于「上一次循环顶部」的采样：睡眠/自旋里刷新的 clock 不能参与，
            否则一帧的真实时长会被算少，逻辑就变慢动作 */
         double dt = absNow - clockPrev;
@@ -262,11 +260,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         if (doRender) {
             /* 最小化时只清脏标记，避免 uiDirty 常挂导致忙等空转 */
             if (!IsIconic(g_hwnd)) {
-                LARGE_INTEGER t0, t1;
-                QueryPerformanceCounter(&t0);
+                /* 2026-11-06（R1）：渲染耗时也走平台时钟 */
+                double rt0 = PlatNow();
                 RenderFrame();
-                QueryPerformanceCounter(&t1);
-                lastRenderMs = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)freq.QuadPart;
+                lastRenderMs = (PlatNow() - rt0) * 1000.0;
                 if (lastRenderMs > frameMsMax) frameMsMax = lastRenderMs;
                 fpsFrames++;
             }
@@ -314,13 +311,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             if (interval > 0.0) {
                 double remain = nextRender - clock;
                 if (remain > 0.007) {
-                    Sleep((DWORD)((remain - 0.004) * 1000.0));
-                    QueryPerformanceCounter(&now);
-                    clock = (double)(now.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
+                    /* 2026-11-06（R1）：把阻塞睡眠交给平台层。
+                       网页后端里这是"让出一帧"，不能真睡。 */
+                    PlatSleepMs((int)((remain - 0.004) * 1000.0));
+                    clock = PlatNow();
                 }
                 while (clock < nextRender) {
-                    QueryPerformanceCounter(&now);
-                    clock = (double)(now.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
+                    clock = PlatNow();
                 }
             } else {
                 Sleep(0); /* 不限制帧数时也要让出时间片 */
@@ -331,9 +328,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     if (currentState == STATE_PLAYING || currentState == STATE_PAUSED) SaveGame();
-    if (g_memDC) DeleteDC(g_memDC);
-    if (g_dib) DeleteObject(g_dib);
-    if (!g_useDIB) free(pixels);
+    PlatShutdown();
     free(vignetteMask);
     MusicShutdown();
     SteamZoneStoreStats();

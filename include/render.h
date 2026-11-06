@@ -16,7 +16,6 @@ extern int horizon;           /* v1.12：地平线偏移像素 */
 extern int dynamicRes;       /* v1.9：自动画质开关 */
 extern unsigned int* pixels;
 extern unsigned char* vignetteMask;
-extern BITMAPINFO bmi;
 
 /* ---- 贴图 ---- */
 extern unsigned int texture[TEX_HEIGHT][TEX_WIDTH];
@@ -30,10 +29,6 @@ extern int ceilTab[MAX_SCREEN];
 extern float floorGain[MAX_SCREEN];   /* 0.52 + cone*1.30，按列预计算 */
 
 /* ---- GDI 双缓冲 ---- */
-extern HDC g_memDC;
-extern HBITMAP g_dib;
-extern void* g_dibBits;
-extern int g_useDIB;
 
 /* ---- 主题 ---- */
 extern unsigned int floorBaseA, floorBaseB;
