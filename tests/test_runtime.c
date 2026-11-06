@@ -1526,6 +1526,58 @@ static void test_spider_dispel_cooldown(void) {
     SpiderReset();
 }
 
+/* ==================================================================
+ * 2026-11-06（用户实测 BUG）：**到下限之后按空格不能把它抬回去**
+ * ------------------------------------------------------------------
+ * 用户原话：「倒计时剩 0.4 / 0.5 的时候我再戳，它又变回一秒钟了，
+ *           再戳又变回一秒……到一秒钟的时候直接无视我的空格键，
+ *           不然它每次都会重置」。
+ *
+ * 根因：自然倒计时会减到下限**以下**（1.0 -> 0.7），
+ * 而按键后又把结果钳回 1.0 —— 每按一次就抬回 1 秒。
+ * ================================================================== */
+static void test_web_floor_ignores_press(void) {
+    extern int   ControlPress(void);
+    extern void  ControlTick(float);
+    extern float ControlTimeLeft(void);
+    extern void  ControlReset(void);
+    extern int   ControlActive(void);
+
+    ControlReset();
+    CHECK(ControlBeginTimed(CTRL_SPIDER_WEB, 5.0f, 0.5f, 1.0f) == 1,
+          "timed web control must start");
+
+    /* 戳到下限 */
+    for (int i = 0; i < 20; i++) ControlPress();
+    CHECK(ControlTimeLeft() <= 1.001f,
+          "mashing must reach the floor");
+
+    /* 自然倒计时继续往下走（下限只限制按键，不限制时间） */
+    ControlTick(0.30f);
+    float t = ControlTimeLeft();
+    CHECK(t < 0.95f, "the natural countdown must keep running below the floor");
+
+    /* ★ 关键：此刻按键必须**完全无效**，不能把它抬回 1.0 */
+    ControlPress();
+    CHECK(ControlTimeLeft() <= t + 0.001f,
+          "pressing at/below the floor must NOT reset the timer upward");
+
+    ControlPress();
+    ControlPress();
+    CHECK(ControlTimeLeft() <= t + 0.001f,
+          "repeated presses below the floor must stay ignored");
+
+    /* 走完就解除 */
+    ControlTick(2.0f);
+    {
+        extern void ControlTimeout(void);
+        ControlTimeout();
+    }
+    CHECK(!ControlActive(), "the control must end once the clock runs out");
+
+    ControlReset();
+}
+
 static void test_spider_bind_no_damage(void) {
     extern void  SpiderReset(void);
     extern void  SpiderDebugPlace(float, float);
@@ -4219,6 +4271,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
