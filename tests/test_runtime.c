@@ -1,5 +1,6 @@
 /* Integration checks link the real game modules; all saves are isolated. */
 #include "common.h"
+#include "control_effect.h"
 #include "map_validator.h"
 #include "hatch.h"
 #include "game.h"
@@ -883,6 +884,78 @@ static void test_room_wall_flags(void) {
             }
         }
     }
+}
+
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 4 轮）：**控制效果层**
+ * ------------------------------------------------------------------
+ * 抱脸虫与缚丝蛛共用同一套"抓住 → 连按 → 挣脱/超时"。
+ * 这里钉住四条硬规则：
+ *   ① 单占：已有控制时新控制被拒（不排队、不叠加）
+ *   ② 按次计数：mashLeft 逐次递减，不是按住自动完成
+ *   ③ 超时释放 + 释放后免疫窗口
+ *   ④ ControlReset 之后完全干净
+ * ================================================================== */
+static void test_control_layer(void) {
+    extern int   ControlBegin(ControlType, int, float);
+    extern void  ControlTick(float);
+    extern int   ControlPress(void);
+    extern void  ControlRelease(int);
+    extern void  ControlReset(void);
+    extern int   ControlActive(void);
+    extern ControlType ControlCurrent(void);
+    extern int   ControlMashLeft(void);
+    extern float ControlTimeLeft(void);
+    extern float ControlImmune(void);
+
+    ControlReset();
+    CHECK(!ControlActive(), "the control layer must start idle");
+
+    /* ---- ① 单占 ---- */
+    CHECK(ControlBegin(CTRL_FACEHUGGER, 3, 2.0f) == 1,
+          "the first control request must be accepted");
+    CHECK(ControlActive(), "the control layer must report active");
+    CHECK(ControlBegin(CTRL_SPIDER_WEB, 3, 2.0f) == 0,
+          "a second control must be REJECTED while one is running (no stacking)");
+    CHECK(ControlCurrent() == CTRL_FACEHUGGER,
+          "the running control must not be replaced");
+
+    /* ---- ② 按次计数 ---- */
+    CHECK(ControlMashLeft() == 3, "mash count must start at the requested value");
+    CHECK(ControlPress() == 0, "first press must not finish a 3-press control");
+    CHECK(ControlMashLeft() == 2, "each press must decrement exactly one");
+    CHECK(ControlPress() == 0, "second press must not finish it either");
+
+    /* ---- ③ 第三次按下完成，并进入免疫 ---- */
+    CHECK(ControlPress() == 1, "the third press must finish the control");
+    CHECK(!ControlActive(), "finishing must clear the control slot");
+    CHECK(ControlImmune() > 0.0f, "releasing must open an immunity window");
+    CHECK(ControlBegin(CTRL_SPIDER_WEB, 3, 2.0f) == 0,
+          "a new control must be blocked while immune");
+
+    /* 免疫走完后可以再次被控 */
+    ControlTick(CONTROL_IMMUNE_TIME + 0.1f);
+    CHECK(ControlImmune() <= 0.0f, "immunity must expire");
+    CHECK(ControlBegin(CTRL_SPIDER_WEB, 3, 2.0f) == 1,
+          "after immunity expires a new control must be accepted");
+
+    /* ---- 超时：时间走完但没挣脱 ---- */
+    {
+        float t0 = ControlTimeLeft();
+        ControlTick(t0 * 0.5f);
+        CHECK(ControlTimeLeft() > 0.0f, "time must tick down but not expire yet");
+        ControlTick(t0);
+        CHECK(ControlTimeLeft() <= 0.0f, "time must expire");
+        CHECK(ControlActive(), "expiry alone must NOT auto-clear the slot "
+                               "(the owner decides and calls ControlRelease)");
+        ControlRelease(0);
+        CHECK(!ControlActive(), "ControlRelease must clear the slot");
+    }
+
+    /* ---- ④ 重置 ---- */
+    ControlReset();
+    CHECK(!ControlActive() && ControlImmune() == 0.0f && ControlMashLeft() == 0,
+          "ControlReset must leave no residue (new run / floor change / load)");
 }
 
 static void test_facehugger_rework(void) {
@@ -3304,6 +3377,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

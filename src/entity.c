@@ -8,6 +8,7 @@
 #include "sound_event.h"
 #include "music.h"
 #include "entity.h"
+#include "control_effect.h"
 /* v6：威胁值接口 */
 float ThreatChaseBonus(void);
 float ThreatSpawnAdvance(void);
@@ -738,6 +739,8 @@ static void JumperFinish(void) {
     jumperTimer = 0.0f;
     jumperResolved = 1;
     parasite.active = 0;
+    /* 2026-11-06：无论成功失败，都要把控制层的槽清掉并开免疫 */
+    if (ControlCurrent() == CTRL_FACEHUGGER) ControlRelease(1);
 }
 
 /* 阶段一成功：躲开 */
@@ -885,10 +888,16 @@ void UpdateParasite(float dt) {
         parasite.x = posX + dirX * d;
         parasite.y = posY + dirY * d;
         if (jumperTimer <= 0.0f) {
-            jumperPhase = JMP_MASH;
-            jumperMashLeft = JUMPER_MASH_COUNT;
-            jumperMashTimer = JUMPER_MASH_WINDOW;
-            if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
+            /* 2026-11-06（第 4 轮）：前摇结束 → 通过**控制层**接管，
+               不再自己维护一份计时/计数。 */
+            if (ControlBegin(CTRL_FACEHUGGER, JUMPER_MASH_COUNT, JUMPER_MASH_WINDOW)) {
+                jumperPhase = JMP_MASH;
+                if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
+            } else {
+                /* 控制层被别的效果占着（例如蛛网）→ 这次抓不到，
+                   直接结算为"被躲开"，不叠加两层控制。 */
+                JumperDodged();
+            }
         }
         break;
     }
@@ -900,18 +909,17 @@ void UpdateParasite(float dt) {
      * 窗口走完还没戳满就失败（控 10 秒 + 召唤附近所有怪）。
      * ================================================================ */
     case JMP_MASH: {
-        jumperMashTimer -= dt;
+        /* 2026-11-06（第 4 轮）：**不再自己计时/计数**。
+           计时由 Update() 每帧调用的 ControlTick 推进（暂停自然停表），
+           这里只负责"读一次按键边沿"和"读计时是否走完"。 */
         parasite.x = posX + dirX * 0.75f;
         parasite.y = posY + dirY * 0.75f;
         if (IsActionPressed(ACT_DODGE)) {
-            jumperMashLeft--;
             PlaySfx(SFX_GLASS, 0.55f);
-            if (jumperMashLeft <= 0) {
-                JumperDodged();
-                return;
-            }
+            if (ControlPress()) { JumperDodged(); return; }
         }
-        if (jumperMashTimer <= 0.0f) {
+        if (ControlTimeLeft() <= 0.0f) {
+            ControlRelease(0);
             if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
             JumperFail();
             JumperFinish();

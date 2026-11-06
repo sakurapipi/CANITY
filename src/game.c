@@ -16,6 +16,7 @@
 #include "warden.h"
 #include "hints.h"
 #include "game.h"
+#include "control_effect.h"
 #include "suspicion.h"
 #include "weapons.h"
 #include "shop.h"
@@ -5807,6 +5808,10 @@ void Update(float dt) {
     UpdateLightBeast(dt);
         { extern void UpdateLightBeast2(float); UpdateLightBeast2(dt); }   /* 第二只 */
     UpdateParasite(dt);
+    /* 2026-11-06（第 4 轮）：控制效果层每帧推进。
+       放在这里意味着**只有真正游玩时**才走 —— 暂停 / 设置界面 /
+       失焦都不会调用 Update，计时自然停表。 */
+    { extern void ControlTick(float); ControlTick(dt); }
     UpdateLeech(dt);
 
     /* ==================================================================
@@ -6549,6 +6554,7 @@ void StartGame(void) {
      * 于是 PhaseGive 永远不执行，训练营里根本没有装置，按 C 当然没反应。
      * ================================================================ */
     { extern void PhaseReset(void); PhaseReset(); }
+    { extern void ControlReset(void); ControlReset(); }   /* 2026-11-06：控制层按局清零 */
     if (trainingMode) {
         /* 2026-11-06：训练营里直接发一批相位投掷物 —— 那里就是拿来试机制的。
            相位装置已经改成投掷物（槽 6/7），不再需要 PhaseGive。 */
