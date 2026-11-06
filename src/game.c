@@ -1201,16 +1201,29 @@ void PhaseOnThrowLanded(int kind, float lx, float ly) {
     {
         int cx = (int)floorf(lx), cy = (int)floorf(ly);
         int ok = 0;
-        if (cx >= 1 && cy >= 1 && cx < MAP_WIDTH - 1 && cy < MAP_HEIGHT - 1 && !worldMap[cy][cx]) {
-            ok = 1;
-        } else {
-            /* 贴墙落点：往四邻各试一格 */
-            static const int dx4[4] = { 1, -1, 0, 0 };
-            static const int dy4[4] = { 0, 0, 1, -1 };
-            for (int k = 0; k < 4 && !ok; k++) {
-                int nx = cx + dx4[k], ny = cy + dy4[k];
+        /* ================================================================
+         * 2026-11-07（v2.4.2）：**落地判据必须和传送判据一致**
+         * ----------------------------------------------------------------
+         * 原来落地只查 worldMap（是不是墙），传送却还要查 PropBlocksAt
+         * （那格有没有家具）。于是"信标落得下、但传不过去"成为可能：
+         * 投出去看着成功了，按 Q 却提示"信标位置已失效"并把信标清掉。
+         * 玩家感受就是"相位传送有时候不生效"。
+         *
+         * 现在落地时就用**同一套判据**挑格子；四邻找不到再扩到 8 邻、
+         * 半径 2 格。真的没有可站格才拒绝（并明确提示）。
+         * ============================================================== */
+        extern int PropBlocksAt(int px, int py);
+        static const int dx8[8] = { 1, -1, 0, 0, 1, 1, -1, -1 };
+        static const int dy8[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+        int step, k;
+        ok = 0;
+        for (step = 0; step <= 2 && !ok; step++) {
+            for (k = 0; k < 8 && !ok; k++) {
+                int nx = cx + dx8[k] * step;
+                int ny = cy + dy8[k] * step;
                 if (nx < 1 || ny < 1 || nx >= MAP_WIDTH - 1 || ny >= MAP_HEIGHT - 1) continue;
                 if (worldMap[ny][nx]) continue;
+                if (PropBlocksAt(nx, ny)) continue;     /* 和传送同一判据 */
                 cx = nx; cy = ny; ok = 1;
             }
         }
@@ -1312,11 +1325,13 @@ int PhaseTryTeleport(void) {
         int cx = (int)floorf(phaseX), cy = (int)floorf(phaseY);
         if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) return 0;
         if (worldMap[cy][cx]) return 0;
-        /* 2026-11-06（用户实测「传送 bug」）：**只挡墙不挡家具**。
-           信标落在货架/木箱堆那一格时，人是能传过去，
-           但会卡在家具体积里 —— 表现为"传过去以后动不了/卡住"。
-           这里把家具也当成不可落点。 */
+        /* 2026-11-06：家具也算不可落点（否则人会卡在家具体积里）。
+           2026-11-07：落地时已经用**同一判据**挑过格子，
+           所以这里判到为真只可能是"投出之后地形变了"（比如塌方）。 */
         if (PropBlocksAt(cx, cy)) return 0;
+        /* 注意：这里**不做邻近找格**。
+           早先试过"目标被占就往旁边挪一格"，但那会让人穿到墙的另一侧 ——
+           等于免费穿墙。目标不可用就明确失败，让玩家重掷一枚信标。 */
     }
     posX = phaseX;
     posY = phaseY;

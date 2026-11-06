@@ -292,6 +292,78 @@ void ThrowItem(int type, float charge) {
     PlaySfx(SFX_THROW, 0.6f);  /* 投掷专用音效：呼啸+出手闷响 */
 }
 
+/* ==================================================================
+ * 2026-11-07（v2.4.2）：**落点结算只有一份实现**
+ * ------------------------------------------------------------------
+ * 用户实测：「回声投掷物有时候不生效」「相位传送有时候不生效」。
+ *
+ * 根因是同一个投掷物有**三条落点分支**，各自写了不同的效果：
+ *   ① 全局落地（vd 积分后 z<=0）—— 最全：烟雾/胶水/回声全有
+ *   ② 子步落地（分段推进里 z<=0）—— 只有碎片和相位
+ *   ③ 撞墙                        —— 有烟雾/胶水，回声只做了半套
+ *                                （没揭地形、没 EchoMarksScan）
+ *
+ * 撞到哪条分支取决于这一帧的步进几何 —— 所以表现为"有时候生效"。
+ *
+ * 现在三处都走 ShotImpact()，投掷物不管在哪落地/撞墙，效果都一致。
+ * ================================================================ */
+static void ShotImpact(int i, float x, float y) {
+    int kind = shot[i].kind;
+
+    /* 任何投掷物落点都留一个"可疑位置"给听声怪 */
+    EchoTryTrigger(x, y);
+
+    if (kind == 4) {
+        SpawnSmoke(x, y);
+        return;
+    }
+    if (kind == 8) {
+        SpawnGlue(x, y);
+        PlaySfx(SFX_GLUE, 0.85f);
+        SpawnShards(x, y, shot[i].vx, shot[i].vy, shot[i].charge);
+        return;
+    }
+    if (kind == 10) {
+        /* 回声弹：声呐扫描 —— 揭地形 + 标记资源 + 暴露活物 */
+        extern float echoScanT;
+        extern float echoScanX, echoScanY;
+        extern int explored[MAP_HEIGHT][MAP_WIDTH];
+        int cx0 = (int)x, cy0 = (int)y;
+        int rad = 14;
+        int gy, gx;
+
+        echoScanT = 6.0f;
+        echoScanX = x;
+        echoScanY = y;
+
+        for (gy = cy0 - rad; gy <= cy0 + rad; gy++) {
+            if (gy < 0 || gy >= MAP_HEIGHT) continue;
+            for (gx = cx0 - rad; gx <= cx0 + rad; gx++) {
+                int ddx, ddy;
+                if (gx < 0 || gx >= MAP_WIDTH) continue;
+                ddx = gx - cx0; ddy = gy - cy0;
+                if (ddx * ddx + ddy * ddy > rad * rad) continue;
+                explored[gy][gx] = 1;
+            }
+        }
+        { extern void EchoMarksScan(float, float, float);
+          EchoMarksScan(x, y, ECHO_RADIUS); }
+        pickupMsg = (g_lang == LANG_ZH) ? "声呐扫描：资源已标出（有声）"
+                                        : "SONAR: RESOURCES MARKED (LOUD)";
+        pickupMsgTimer = 1.8f;
+        { extern void AudioPlayWorld(int, float, float, float, float, int);
+          AudioPlayWorld(SFX_ECHO, x, y, 0.85f, 22.0f, 2); }
+        return;
+    }
+    if (kind == 12 || kind == 13) {
+        extern void PhaseOnThrowLanded(int kind, float lx, float ly);
+        PhaseOnThrowLanded(kind, x, y);
+        return;
+    }
+
+    SpawnShards(x, y, shot[i].vx, shot[i].vy, shot[i].charge);
+}
+
 /* 推进所有飞行中的玻璃瓶，结算命中 + 抛物线 + 金币 */
 void UpdateShots(float dt) {
     /* v2.3.2：8 秒不扔就断链 */
@@ -329,69 +401,8 @@ void UpdateShots(float dt) {
                你扔出去的每个东西，落点都会留下一个「可疑位置」。
                它**自己不发声**（发声反而会分散怪物注意力），
                而是给听声怪一条「玩家刚才在这」的坐标，10 秒后消散。 */
-            /* v2.3.6：任何投掷物落地都走统一入口 */
-            EchoTryTrigger(shot[i].x, shot[i].y);
-            if (shot[i].kind == 4) {
-                SpawnSmoke(shot[i].x, shot[i].y);
-            } else if (shot[i].kind == 8) {
-                SpawnGlue(shot[i].x, shot[i].y);
-                PlaySfx(SFX_GLUE, 0.85f);   /* v3.3：黏稠噗叽 */
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-            } else if (shot[i].kind == 10) {
-                /* ===== v2.4.58 **回声弹重做：声呐扫描** =====
-                   原来只是「把 15 格内怪物位置暴露 5 秒」——
-                   可怪本来就在屏幕上看得见（而且有声音提示），
-                   这个效果等于什么都没有。用户说的「没什么用」就是它。
-
-                   新定位：**它是唯一的"信息道具"，负责揭开迷雾。**
-                     ① 把落点周围 14 格的地图**永久标记为已探索**
-                        （小地图从此显示那一块的地形）
-                     ② 小地图上**高亮所有箱子 / 配电箱 / 出口** 6 秒
-                     ③ 仍然暴露怪物位置（免费附赠）
-
-                   为什么这样有用：
-                     这游戏的核心是「没有地图 → 找不到保险丝 → 待太久 → 出怪」。
-                     回声弹把"找路"的时间压下来，直接对抗那套压力循环。 */
-                extern float echoScanT;
-                extern float echoScanX, echoScanY;
-                extern int explored[MAP_HEIGHT][MAP_WIDTH];   /* 真实类型：int，见 game.c:91 */
-
-                echoScanT = 6.0f;
-                echoScanX = shot[i].x;
-                echoScanY = shot[i].y;
-
-                /* ① 揭示落点周围 14 格地形 */
-                {
-                    int cx0 = (int)shot[i].x, cy0 = (int)shot[i].y;
-                    int rad = 14;
-                    for (int gy = cy0 - rad; gy <= cy0 + rad; gy++) {
-                        if (gy < 0 || gy >= MAP_HEIGHT) continue;
-                        for (int gx = cx0 - rad; gx <= cx0 + rad; gx++) {
-                            if (gx < 0 || gx >= MAP_WIDTH) continue;
-                            int ddx = gx - cx0, ddy = gy - cy0;
-                            if (ddx * ddx + ddy * ddy > rad * rad) continue;
-                            explored[gy][gx] = 1;
-                        }
-                    }
-                }
-
-                /* 2026-11-05：**回声弹改成资源雷达**
-                   半径 3 → 10 格，容器标 30 秒（保险丝金 / 宝箱怪红闪），
-                   活物标 5 秒，落地自带 20 格噪音。
-                   详细设计见 game.c 的 EchoMarksScan 注释。 */
-                {
-                    extern void EchoMarksScan(float, float, float);
-                    EchoMarksScan(shot[i].x, shot[i].y, ECHO_RADIUS);
-                }
-                pickupMsg = (g_lang == LANG_ZH) ? "声呐扫描：资源已标出（有声）"
-                                                : "SONAR: RESOURCES MARKED (LOUD)";
-                pickupMsgTimer = 1.8f;
-                /* B05：回声弹落点有声源 —— 你能听出它落在哪一侧 */
-                { extern void AudioPlayWorld(int, float, float, float, float, int);
-                  AudioPlayWorld(SFX_ECHO, shot[i].x, shot[i].y, 0.85f, 22.0f, 2); }
-            } else {
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-            }
+            /* 2026-11-07：落地效果统一走 ShotImpact（见函数注释） */
+            ShotImpact(i, shot[i].x, shot[i].y);
 
             /* ===== v2.4.58 **投石（瓶子）打拾荒者 → 赃款直接爆出来** =====
                用户要求：「拾荒者被瓶子命中，也会把钱爆出来」。
@@ -465,12 +476,10 @@ void UpdateShots(float dt) {
                 /* 2026-11-05：**破门石** —— 落在锁箱旁边就把锁砸开。 */
                 int brokeGround = 0;
                 if (shot[i].kind == 1) brokeGround = StoneBreakLockAt(shot[i].x, shot[i].y);
-                /* 2026-11-06：相位投掷物落地结算 */
-                if (shot[i].kind == 12 || shot[i].kind == 13) {
-                    extern void PhaseOnThrowLanded(int kind, float lx, float ly);
-                    PhaseOnThrowLanded(shot[i].kind, shot[i].x, shot[i].y);
-                }
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+                /* 2026-11-07：子步落地原来只结算相位，烟雾/胶水/回声全丢 ——
+                   和"全局落地"两套分派就是用户说的"有时候不生效"。
+                   现在统一走 ShotImpact。 */
+                ShotImpact(i, shot[i].x, shot[i].y);
                 PlaySfx(SFX_GLASS, 0.7f);
                 /* v2.4-alpha：**一次物理撞击只结算一次逻辑噪音**。
                    破锁时 StoneBreakLockAt 已经发过 20 格冲击声，
@@ -491,29 +500,9 @@ void UpdateShots(float dt) {
                    所以撞墙分支也要试一次，否则「贴着墙的锁箱永远砸不开」。 */
                 int brokeWall = 0;
                 if (shot[i].kind == 1) brokeWall = StoneBreakLockAt(shot[i].x, shot[i].y);
-                if (shot[i].kind == 12 || shot[i].kind == 13) {
-                    extern void PhaseOnThrowLanded(int kind, float lx, float ly);
-                    PhaseOnThrowLanded(shot[i].kind, shot[i].x, shot[i].y);
-                }
-                /* 2026-11-05 修「回响触发机制」：撞墙也算一次投掷结束。
-                   见下面 EchoTryTrigger 的说明。 */
-                EchoTryTrigger(shot[i].x, shot[i].y);
-                if (shot[i].kind == 4) {
-                    SpawnSmoke(shot[i].x, shot[i].y);
-                } else if (shot[i].kind == 8) {
-                    SpawnGlue(shot[i].x, shot[i].y);
-                    PlaySfx(SFX_GLUE, 0.85f);
-                } else if (shot[i].kind == 10) {
-                    extern float echoScanT;
-                    extern float echoScanX, echoScanY;
-                    echoScanT = 5.0f;
-                    echoScanX = shot[i].x;
-                    echoScanY = shot[i].y;
-                    /* B05：撞墙也算落点，同样带位置 */
-                    { extern void AudioPlayWorld(int, float, float, float, float, int);
-                      AudioPlayWorld(SFX_ECHO, shot[i].x, shot[i].y, 0.80f, 22.0f, 2); }
-                }
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+                /* 2026-11-07：撞墙也走 ShotImpact —— 原来这里的回声只做了半套
+                   （没揭地形、没 EchoMarksScan），和落地不是一回事。 */
+                ShotImpact(i, shot[i].x, shot[i].y);
                 PlaySfx(SFX_GLASS, 0.7f);
                 /* 同地面：破锁时这里不再叠一次 */
                 if (!brokeWall) MakeNoise(shot[i].x, shot[i].y, 15.0f);

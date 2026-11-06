@@ -444,7 +444,120 @@ static void BakeItem(int id, int kind) {
         cvLine(c + 25, cy + 54, c + 33, cy + 34, 3.0f, gloveHi, 0.4f);
     }
 
-    if (kind == 8) {
+    if (kind == 0) {
+        /* ==================================================================
+         * 2026-11-07（v2.4.2）：**照明弹重画**
+         * ------------------------------------------------------------------
+         * 用户原话：「闪光弹的左手小物品建模有点不符合审美铁律」。
+         * 旧版是一个**红色圆棒 + 橙色圆球** —— 填黑之后是"棒棒糖"，
+         * 靠颜色才能认出是火，正好撞在铁律一（AD-01 用剪影确认身份）上。
+         *
+         * 主要特征（AD-03 只保留三个）：
+         *   ① 火焰：**不规则泪滴 + 左右缺口**，核心近白、外焰橙、顶上一缕暗烟
+         *      —— 这是唯一的地标，填黑也读得出"在烧"
+         *   ② 棒身：**上窄下宽的锥形**（透视），左亮右暗（AD-07 明暗解释厚度）
+         *   ③ 底部黄铜箍：两道横箍，把"工业品"和"火把"区分开
+         *
+         * 负空间（AD-02）：火焰与棒身之间留**有描边的颈**，不是裸缺口。
+         * ================================================================ */
+        unsigned int stickHi  = 0x00E4603A;   /* 受光面 */
+        unsigned int stickMid = 0x00A82C14;   /* 主体 */
+        unsigned int stickLo  = 0x00521208;   /* 背光面 */
+        unsigned int stickEdge= 0x00200A04;   /* 外描边 */
+        unsigned int capHi    = 0x00E8C060;
+        unsigned int capMid   = 0x00A87C24;
+        unsigned int capEdge  = 0x00402C08;
+        unsigned int smokeCol = 0x00704A3C;
+        unsigned int flameOut = 0x00C43A0Cu;
+        unsigned int flameMid = 0x00FF8A1Eu;
+        unsigned int flameCore= 0x00FFF2C0;
+
+        /* ---- ① 顶上那缕暗烟：先画，压在火焰后面 ---- */
+        cvLine(c + 5.0f, cy - 56.0f, c + 12.0f, cy - 74.0f, 7.0f, smokeCol, 0.20f);
+        cvLine(c + 11.0f, cy - 72.0f, c + 17.0f, cy - 86.0f, 4.0f, smokeCol, 0.10f);
+        cvSpeckle((int)c + 12, (int)cy - 80, 12, 4, smokeCol, 0.14f);
+
+        /* ---- ② 棒身：上窄下宽的锥形 ---- */
+        {
+            float body[8] = {
+                c - 15.0f, cy + 50.0f,     /* 左下 */
+                c + 15.0f, cy + 50.0f,     /* 右下 */
+                c + 11.0f, cy - 22.0f,     /* 右上 */
+                c - 11.0f, cy - 22.0f      /* 左上 */
+            };
+            cvPoly(body, 4, stickEdge, 1.0f);                 /* 外描边 */
+        }
+        {
+            float body[8] = {
+                c - 12.5f, cy + 48.0f,
+                c + 12.5f, cy + 48.0f,
+                c + 8.5f,  cy - 21.0f,
+                c - 8.5f,  cy - 21.0f
+            };
+            cvPolyGrad(body, 4, stickHi, stickLo, 1.0f);      /* 上亮下暗 */
+        }
+        /* 受光侧的高光条：一条竖线就够，多了会花 */
+        cvLine(c - 6.0f, cy + 44.0f, c - 5.0f, cy - 18.0f, 3.0f, stickHi, 0.55f);
+        /* 背光侧的暗面：让圆柱有转过去的体积 */
+        cvLine(c + 8.0f, cy + 44.0f, c + 6.5f, cy - 18.0f, 4.0f, stickLo, 0.55f);
+
+        /* ---- ③ 中段纸带：把"棒"切成工业品的比例 ---- */
+        cvLine(c - 13.0f, cy + 10.0f, c + 13.0f, cy + 10.0f, 11.0f, capEdge, 0.55f);
+        cvLine(c - 12.0f, cy + 9.0f,  c + 12.0f, cy + 9.0f,  8.0f, stickMid, 1.0f);
+        cvLine(c - 12.0f, cy + 6.0f,  c + 12.0f, cy + 6.0f,  2.0f, stickHi, 0.5f);
+
+        /* ---- ④ 底部黄铜箍：两道 ---- */
+        cvLine(c - 15.0f, cy + 46.0f, c + 15.0f, cy + 46.0f, 12.0f, capEdge, 1.0f);
+        cvLine(c - 14.0f, cy + 45.0f, c + 14.0f, cy + 45.0f, 8.0f, capMid, 1.0f);
+        cvLine(c - 14.0f, cy + 41.0f, c + 14.0f, cy + 41.0f, 2.5f, capHi, 0.7f);
+        cvLine(c - 15.0f, cy + 33.0f, c + 15.0f, cy + 33.0f, 5.0f, capEdge, 0.75f);
+        cvLine(c - 14.0f, cy + 32.0f, c + 14.0f, cy + 32.0f, 3.0f, capMid, 0.9f);
+
+        /* ---- ⑤ 火焰：不规则泪滴，左右带缺口（地标） ---- */
+        /* 外焰：从棒口向外扩，尖端偏右 —— 不对称才有"被风带"的感觉 */
+        {
+            float f1[20] = {
+                c - 11.0f, cy - 19.0f,
+                c - 19.0f, cy - 36.0f,
+                c - 10.0f, cy - 44.0f,
+                c - 16.0f, cy - 58.0f,
+                c -  3.0f, cy - 76.0f,      /* 焰尖 */
+                c + 10.0f, cy - 60.0f,
+                c +  6.0f, cy - 48.0f,
+                c + 19.0f, cy - 42.0f,
+                c + 13.0f, cy - 28.0f,
+                c + 10.0f, cy - 19.0f
+            };
+            cvPoly(f1, 10, flameOut, 0.92f);
+        }
+        /* 中焰：比外焰小一圈，形状不同，避免"同心圆" */
+        {
+            float f2[18] = {
+                c -  8.0f, cy - 20.0f,
+                c - 11.0f, cy - 36.0f,
+                c -  3.0f, cy - 46.0f,
+                c -  8.0f, cy - 56.0f,
+                c +  0.0f, cy - 68.0f,
+                c +  9.0f, cy - 54.0f,
+                c +  4.0f, cy - 42.0f,
+                c + 12.0f, cy - 34.0f,
+                c +  8.0f, cy - 21.0f
+            };
+            cvPoly(f2, 9, flameMid, 1.0f);
+        }
+        /* 焰芯：偏左下的白热点，不是正圆 */
+        cvEllipse(c - 1.0f, cy - 36.0f, 6.0f, 11.0f, flameCore, 0.92f);
+        cvEllipse(c - 1.0f, cy - 28.0f, 4.0f, 6.0f, flameCore, 1.0f);
+
+        /* 棒口与焰底之间：一道暗颈，封住负空间（AD-02） */
+        cvLine(c - 11.0f, cy - 20.0f, c + 9.0f, cy - 20.0f, 5.0f, stickEdge, 1.0f);
+        cvLine(c -  9.0f, cy - 21.0f, c + 7.0f, cy - 21.0f, 2.0f, capMid, 0.55f);
+
+        /* ---- ⑥ 火星：三两点就够，多了会变成噪点 ---- */
+        cvSpeckle((int)c + 2, (int)cy - 70, 24, 6, 0x00FFC050u, 0.62f);
+        cvSpeckle((int)c + 1, (int)cy - 58, 14, 3, flameCore, 0.45f);
+
+    } else if (kind == 8) {
         /* ===== v2.4.59 **投石（石弹）** =====
            地标：**不规则的多边形石头 + 手心里的裂口**
            旧版是一根绿玻璃瓶 —— 和"投石"两个字完全没关系，
