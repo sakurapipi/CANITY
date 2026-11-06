@@ -3442,7 +3442,23 @@ static void RenderWallBand(int x0, int x1) {
             extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
             extern int CellIsRoomWall(int, int, int*, int*, int*);
             int tr2 = 0, tg2 = 0, tb2 = 0;
-            if (CellIsRoomWall(mapX, mapY, &tr2, &tg2, &tb2)) {
+            /* ==================================================================
+             * 2026-11-06（用户实测）：**只有房间**内**侧该是主题色**
+             * ------------------------------------------------------------------
+             * 用户原话：「房间里面是蓝的，然后外墙什么都看不出来，跟普通墙差不多」，
+             * 并且指出「有一部分墙体是双面墙体，里面是蓝色的，外面是迷宫的时候
+             * 也可以看到里面是蓝色的」。
+             *
+             * 根因：房间外墙是**一格**，从房间内和从迷宫里看到的是同一格。
+             * 现在按"观察者那一侧"判断：只有视点这一侧的邻格是房间内部
+             * （roomId != 0）时才上主题色，外面看就是普通墙。
+             * ================================================================ */
+            int nbX = mapX, nbY = mapY;
+            if (side == 0) nbX -= stepX; else nbY -= stepY;
+            int fromInsideRoom = 0;
+            if (nbX >= 0 && nbY >= 0 && nbX < MAP_WIDTH && nbY < MAP_HEIGHT)
+                fromInsideRoom = (cellMeta[nbY][nbX].roomId != 0);
+            if (fromInsideRoom && CellIsRoomWall(mapX, mapY, &tr2, &tg2, &tb2)) {
                 /* 腰线色 = 主题色 × 3.2，并给一个下限，暗主题也能看出来 */
                 bandR = tr2 * 26 / 10; if (bandR < 26) bandR = 26;
                 bandG = tg2 * 26 / 10; if (bandG < 22) bandG = 22;

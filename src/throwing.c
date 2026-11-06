@@ -103,6 +103,13 @@ void EchoTryTrigger(float x, float y) {
 
 /* 落点 x,y 附近有没有锁箱；有就砸开。返回 1 = 砸开了。
    ⚠ 只处理 `locked`，不碰 `mimicHost`（宝箱怪不是锁箱）。 */
+/* 2026-11-06 仅测试用：StoneBreakLockAt 原来是 static，
+   而"一次落点只解一把锁"这条契约必须能被直接验证（弹道落点不可控）。
+   沿用 SaveTestBlob / SpiderDebugPlace 的先例，只导出不改行为。 */
+static int StoneBreakLockAt(float x, float y);
+
+int StoneBreakLockAtTest(float x, float y) { return StoneBreakLockAt(x, y); }
+
 static int StoneBreakLockAt(float x, float y) {
     extern Container containers[];
     extern int containerCount;

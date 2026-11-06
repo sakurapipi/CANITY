@@ -838,6 +838,57 @@ static void test_facehugger_is_brutal(void) {
           "the lunge itself must be faster than the reaction window it opens");
 }
 
+/* ==================================================================
+ * 2026-11-06（用户实测）：**训练营不放特殊房间 / 每层上限 / 出口不进房间**
+ * ------------------------------------------------------------------
+ * 用户原话：
+ *   「训练营的时候不要把那个特殊地形给加进去，或者你可以重做训练营」
+ *   「你给每一层都加一个特殊房间上限，不然特殊房间太多了」
+ *   「有一些出口会刷在那个特殊房间里面，导致也只有一条路可以先往出口」
+ * ================================================================== */
+static void test_room_budget_and_exit(void) {
+    extern int roomCount;
+    extern float exitX, exitY;
+    extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+
+    /* ---- ① 训练营：预算为 0 ---- */
+    {
+        extern int ThemeRoomBudgetForLevel(int, int);
+        CHECK(ThemeRoomBudgetForLevel(1, 1) == 0,
+              "training mode must budget ZERO theme rooms");
+        CHECK(ThemeRoomBudgetForLevel(20, 1) == 0,
+              "training mode must stay at zero on any level");
+    }
+
+    /* ---- ② 普通局：不超过每层上限 ---- */
+    {
+        extern int ThemeRoomBudgetForLevel(int, int);
+        for (int lv = 1; lv <= 30; lv++)
+            CHECK(ThemeRoomBudgetForLevel(lv, 0) <= MAX_THEME_ROOMS_PER_FLOOR,
+                  "no floor may exceed MAX_THEME_ROOMS_PER_FLOOR theme rooms");
+        CHECK(ThemeRoomBudgetForLevel(1, 0) == 1, "floor 1 gets a single room");
+        CHECK(ThemeRoomBudgetForLevel(9, 0) == 2, "deep floors get two");
+    }
+
+    /* ---- ③ 出口不能落在房间内部（否则到出口只剩一条路） ---- */
+    {
+        int checked = 0, bad = 0;
+        for (int lv = 1; lv <= 12; lv++) {
+            currentLevel = lv;
+            GenerateLevel();
+            int ex = (int)exitX, ey = (int)exitY;
+            if (ex < 0 || ey < 0 || ex >= MAP_WIDTH || ey >= MAP_HEIGHT) continue;
+            checked++;
+            if (cellMeta[ey][ex].roomId != 0) bad++;
+        }
+        CHECK(checked >= 10, "the exit test must have run on enough floors");
+        CHECK(bad == 0,
+              "the exit must never spawn inside a theme room");
+    }
+
+    trainingMode = 0;
+}
+
 static void test_room_wall_flags(void) {
     extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
     extern int CellIsRoomWall(int, int, int*, int*, int*);
@@ -3888,6 +3939,14 @@ static void test_stone_break_single_event(void) {
         containers[i].searched = 0;
         containers[i].content = 0;
     }
+    /* ==================================================================
+     * 2026-11-06（AD-64）：**玩家位置也要钉死**
+     * ------------------------------------------------------------------
+     * 前面的用例会把玩家挪到别处（这次读到 posY 正好 = 12.0，
+     * 站在格线上，投石一出手就撞墙，落点离箱子太远 → 一个锁都没砸开）。
+     * 测试自己定位置，然后按这个位置摆箱子和通道。
+     * ================================================================ */
+    posX = 1.5f; posY = 1.5f;
     {
         static const float dist[6] = { 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f };
         for (int i = 0; i < 6 && i < MAX_CONTAINERS; i++) {
@@ -3901,11 +3960,40 @@ static void test_stone_break_single_event(void) {
         containerCount = 6;
     }
 
-    SuspicionReset();
-    ThrowItem(1, 0.10f);                    /* kind 1 = 投石/破门石 */
+    /* ==================================================================
+     * 2026-11-06（AD-64）：**自己清出通道，不要赌地图**
+     * ------------------------------------------------------------------
+     * 这条用例原来默认"玩家正前方 2 格内没有墙"。
+     * 死路算法改成 4 个回合之后地图变了，投石撞在更近的墙上，
+     * 落点离箱子太远 → 一个锁都没砸开，用例红了。
+     * 测试要自己造地形，不能依赖生成结果。
+     * ================================================================ */
+    {
+        extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+        int cy = (int)posY;
+        for (int dx = 1; dx <= 9; dx++) {
+            int cx = (int)posX + dx;
+            if (cx >= 1 && cx < MAP_WIDTH - 1 && cy >= 1 && cy < MAP_HEIGHT - 1)
+                worldMap[cy][cx] = 0;
+        }
+    }
 
-    /* 固定步进 2.5 秒：比任何一次抛掷的滞空时间都长 */
-    for (int f = 0; f < 300; f++) UpdateShots(1.0f / 120.0f);
+    SuspicionReset();
+    /* ==================================================================
+     * 2026-11-06（AD-64）：**改成直接调用落点结算**
+     * ------------------------------------------------------------------
+     * 原来靠"扔一块投石、赌它落在第一只箱子旁边"。
+     * 但 StoneBreakLockAt 有固定半径（STONE_LOCK_RADIUS），
+     * 落点由弹道决定 —— 地图/物理任何变化都会让落点漂出半径，
+     * 用例就红（本次改死路算法后正是如此）。
+     *
+     * 这个用例真正要验的是**契约**："一次落点只解一把锁"，
+     * 不是弹道物理。所以直接喂精确落点。
+     * ================================================================ */
+    {
+        extern int StoneBreakLockAtTest(float, float);
+        StoneBreakLockAtTest(containers[0].x, containers[0].y);
+    }
 
     int unlocked = 0;
     for (int i = 0; i < containerCount; i++) {
@@ -3924,6 +4012,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

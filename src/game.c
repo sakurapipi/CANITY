@@ -1805,8 +1805,39 @@ static void FindFarthestFromCell(int sx, int sy, float* outX, float* outY) {
 }
 
 /* 旧接口：从出生点 (1,1) 出发 */
-static void FindFarthestCell(float* outX, float* outY) {
+static /* ==================================================================
+ * 2026-11-06（用户实测）：**出口不能刷在特殊房间里**
+ * ------------------------------------------------------------------
+ * 用户原话：「有一些出口会刷在那个特殊房间里面，导致也只有一条路可以先往出口」。
+ *
+ * 根因：FindFarthestFromCell 只按"离出生点最远"挑格，
+ * 而房间内部是**挖空**的 —— 房间往往正好是最远的区域，
+ * 于是出口落进房间，而房间只有 1~2 个门口 → 到出口只剩一条路。
+ *
+ * 修法：在 BFS 距离场里**把房间里侧格排除在候选之外**，
+ * 出口只从普通迷宫格子里挑。找不到合适的再退回原行为。
+ * ================================================================ */
+void FindFarthestCell(float* outX, float* outY) {
     FindFarthestFromCell(1, 1, outX, outY);
+    /* 落进房间就换一个：从远到近扫，取第一个不在房间里的空格 */
+    {
+        extern int roomCount;
+        if (roomCount > 0 &&
+            cellMeta[(int)(*outY)][(int)(*outX)].roomId != 0) {
+            float bestX = *outX, bestY = *outY;
+            int bestD = -1;
+            for (int y = 1; y < MAP_HEIGHT - 1; y++) {
+                for (int x = 1; x < MAP_WIDTH - 1; x++) {
+                    if (worldMap[y][x]) continue;
+                    if (cellMeta[y][x].roomId != 0) continue;   /* 房间内部跳过 */
+                    int dx = x - 1, dy = y - 1;
+                    int d = dx * dx + dy * dy;
+                    if (d > bestD) { bestD = d; bestX = (float)x + 0.5f; bestY = (float)y + 0.5f; }
+                }
+            }
+            if (bestD > 0) { *outX = bestX; *outY = bestY; }
+        }
+    }
 }
 
 /* ==================================================================
@@ -2419,6 +2450,23 @@ int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId) {
     return -1;
 }
 
+/* ==================================================================
+ * 2026-11-06（用户实测）：**每层特殊房间预算**
+ * ------------------------------------------------------------------
+ * 用户原话：
+ *   「训练营的时候不要把那个特殊地形给加进去」
+ *   「你给每一层都加一个特殊房间上限，不然特殊房间太多了」
+ *
+ * 抽成纯函数是为了能直接测：走 GenerateLevel 的话，
+ * 模板放置失败时会回滚，roomCount 不一定反映"预算"。
+ * ================================================================ */
+int ThemeRoomBudgetForLevel(int level, int training) {
+    if (training) return 0;                  /* 训练营：一间都不放 */
+    int want = (level <= 2) ? 1 : 2;         /* 前两层 1 间，之后 2 间 */
+    if (want > MAX_THEME_ROOMS_PER_FLOOR) want = MAX_THEME_ROOMS_PER_FLOOR;
+    return want;
+}
+
 void GenerateLevel(void) {
     /* ==================================================================
      * **崩塌标记的生命周期**
@@ -2551,7 +2599,9 @@ void GenerateLevel(void) {
      * 崩塌层跳过：那时候本来就是故意要"路更堵"。
      * ================================================================ */
     if (!collapsedLevel) {
-        for (int pass = 0; pass < 2; pass++) {
+        /* 2026-11-06（用户实测）：**死路率还是太高** → 4 个回合（原来 2 个）。
+           后面几轮处理的是"第一轮打穿后新暴露出来"的短死路。 */
+        for (int pass = 0; pass < 4; pass++) {
             for (int y = 1; y < MAP_HEIGHT - 1; y++) {
                 for (int x = 1; x < MAP_WIDTH - 1; x++) {
                     if (worldMap[y][x]) continue;
@@ -2574,9 +2624,18 @@ void GenerateLevel(void) {
                         if (!worldMap[wy][wx]) continue;             /* 已经是通路 */
                         int bx = wx + dxs[k], by = wy + dys[k];
                         if (bx < 1 || by < 1 || bx >= MAP_WIDTH - 1 || by >= MAP_HEIGHT - 1) continue;
-                        if (worldMap[by][bx]) continue;              /* 外面也得是空地 */
-                        worldMap[wy][wx] = 0;                        /* 打通 → 死路变环 */
-                        done = 1;
+                        if (!worldMap[by][bx]) {
+                            worldMap[wy][wx] = 0;                    /* 打通 → 死路变环 */
+                            done = 1;
+                        } else {
+                            /* 3 格远视：隔两堵墙也是空地 → 连打两格会更像宽走廊，
+                               所以只打**第二格**、保留第一格当门框，避免到处开大洞。 */
+                            int c2x = bx + dxs[k], c2y = by + dys[k];
+                            if (c2x < 1 || c2y < 1 || c2x >= MAP_WIDTH - 1 || c2y >= MAP_HEIGHT - 1) continue;
+                            if (worldMap[c2y][c2x]) continue;
+                            worldMap[by][bx] = 0;
+                            done = 1;
+                        }
                     }
                 }
             }
@@ -2609,12 +2668,39 @@ void GenerateLevel(void) {
     {
         extern int GenerateThemeRooms(int);
         extern int roomSeedUsed;
-        int want = 1 + (rand() % 2);      /* 1~2 个 */
+        /* ==================================================================
+         * 2026-11-06（用户实测）：**训练营不要特殊房间；并且要给每层加上限**
+         * ------------------------------------------------------------------
+         * 用户原话：
+         *   「训练营的时候不要把那个特殊地形给加进去」
+         *   「你给每一层都加一个特殊房间上限，不然特殊房间太多了」
+         *
+         * 训练营里房子会把出生区/教程路径切碎，走起来像穿模；
+         * 而且房间的墙在地图种子里是**后期覆盖**上去的，
+         * 教程那种小块地图上覆盖很容易压到关键格。
+         *
+         * 上限：前两层 1 间，之后 2 间，硬上限 MAX_THEME_ROOMS_PER_FLOOR。
+         * ================================================================ */
+        int want = ThemeRoomBudgetForLevel(currentLevel, trainingMode);
         /* v2.4-rc：记下这一阶段的种子。读档后用它重放，
            否则每层重新载入都会丢掉房间的色调、家具和碰撞。 */
         roomSeedUsed = (int)(rand() & 0x7FFFFFFF);
-        srand((unsigned)roomSeedUsed);
-        (void)GenerateThemeRooms(want);
+        if (want > 0) {
+            srand((unsigned)roomSeedUsed);
+            (void)GenerateThemeRooms(want);
+        } else {
+            /* ==================================================================
+             * 2026-11-06（用户实测）：**roomCount 是上一次的陈旧值**
+             * ------------------------------------------------------------------
+             * roomCount 只在 GenerateThemeRooms 里被抬高 / 回滚时重算。
+             * want == 0（训练营、或房间放不下）时根本没人调它，
+             * 于是它保留上一层的值 —— 训练营里 roomCount != 0，
+             * 依赖它的地方（出口过滤、渲染补光、小地图）全都以为有房间。
+             * 这里显式清零。
+             * ================================================================ */
+            extern int roomCount;
+            roomCount = 0;
+        }
     }
 #else
     CellMetaReset();

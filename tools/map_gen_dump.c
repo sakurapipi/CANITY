@@ -71,7 +71,7 @@ static void CarveMaze(void) {
         }
 
     /* 死路连通（与 game.c 同步，2026-11-06） */
-    for (int dpass = 0; dpass < 2; dpass++) {
+    for (int dpass = 0; dpass < 4; dpass++) {
         for (int y = 1; y < MAP_HEIGHT - 1; y++) {
             for (int x = 1; x < MAP_WIDTH - 1; x++) {
                 if (worldMap[y][x]) continue;
@@ -90,9 +90,17 @@ static void CarveMaze(void) {
                     if (!worldMap[wy][wx]) continue;
                     int bx = wx + dxs2[k], by = wy + dys2[k];
                     if (bx < 1 || by < 1 || bx >= MAP_WIDTH - 1 || by >= MAP_HEIGHT - 1) continue;
-                    if (worldMap[by][bx]) continue;
-                    worldMap[wy][wx] = 0;
-                    done = 1;
+                    if (!worldMap[by][bx]) {
+                        worldMap[wy][wx] = 0;
+                        done = 1;
+                    } else {
+                        /* 3 格远视：隔两堵墙也是空地 → 打第二格，保留门框 */
+                        int c2x = bx + dxs2[k], c2y = by + dys2[k];
+                        if (c2x < 1 || c2y < 1 || c2x >= MAP_WIDTH - 1 || c2y >= MAP_HEIGHT - 1) continue;
+                        if (worldMap[c2y][c2x]) continue;
+                        worldMap[by][bx] = 0;
+                        done = 1;
+                    }
                 }
             }
         }
@@ -239,6 +247,7 @@ static long g_deadEnds = 0;   /* 只有 1 个开口的空地格 */
 static long g_deadEndSeeds = 0;
 static long g_theme[8] = { 0 };   /* 主题出现次数（0..7） */
 static long g_props = 0;
+static long g_deadRoom = 0;   /* 房间内部的凹角 */
 static long g_valFail = 0;
 static long g_valRooms = 0;
 static long g_valRoomCells = 0;
@@ -260,9 +269,11 @@ static int GenerateOne(int seed) {
     int r = GenerateThemeRooms(want);
     g_props += roomPropCount;
 
-    /* 死路：四邻里只有 1 个是空地的位置。这是"迷宫难走"的直接指标。 */
+    /* 死路：四邻里只有 1 个是空地的位置。
+       2026-11-06：**拆成"迷宫格"和"房间内"两项** ——
+       房间模板里的柱子会自然形成凹角，混在一起数会看不清问题在哪。 */
     {
-        int dead = 0;
+        int dead = 0, deadRoom = 0;
         for (int y = 1; y < MAP_HEIGHT - 1; y++) {
             for (int x = 1; x < MAP_WIDTH - 1; x++) {
                 if (worldMap[y][x]) continue;
@@ -271,10 +282,13 @@ static int GenerateOne(int seed) {
                 if (!worldMap[y][x + 1]) openN++;
                 if (!worldMap[y - 1][x]) openN++;
                 if (!worldMap[y + 1][x]) openN++;
-                if (openN == 1) dead++;
+                if (openN != 1) continue;
+                if (cellMeta[y][x].roomId != 0) deadRoom++;
+                else dead++;
             }
         }
         g_deadEnds += dead;
+        g_deadRoom += deadRoom;
         if (dead > 20) g_deadEndSeeds++;
     }
 
@@ -347,6 +361,9 @@ static int GenerateOne(int seed) {
  * 这个工具只验证地形与房间，不链 game.c —— 所以给一个桩。
  * 返回 -1 = "放不下"，对地形统计没有任何影响。
  * ================================================================ */
+/* 2026-11-06：家具已改成可穿透（用户要求），dump 里的可达性判断也要跟上 */
+
+
 int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId) {
     (void)fx; (void)fy; (void)w; (void)h; (void)themeId;
     return -1;
@@ -394,6 +411,9 @@ int main(int argc, char** argv) {
             if (g_theme[k] > 0) printf("t%d=%.1f%% ", k, 100.0 * (double)g_theme[k] / (double)statN);
         }
         printf("\n");
+        printf("dead-ends(maze): avg=%.1f per level | dead-ends(in rooms): avg=%.1f\n",
+               (double)g_deadEnds / (double)statN,
+               (double)g_deadRoom / (double)statN);
         printf("dead-ends: avg=%.1f per level, seeds with >20: %ld/%d\n",
                (double)g_deadEnds / (double)statN, g_deadEndSeeds, statN);
         printf("room-props=%ld  avg-per-level=%.1f\n", g_props,
@@ -418,8 +438,8 @@ int main(int argc, char** argv) {
     PickExitLikeGame();
 
     CellMetaReset();
-    int want = 1 + (rand() % 2);
-    (void)GenerateThemeRooms(want);
+    /* 2026-11-06：跟游戏同步 —— 前两层 1 间，之后 2 间 */
+    { int want = 2; (void)GenerateThemeRooms(want); }
 
     PrintMap(seed, roomsOnly);
     return 0;
