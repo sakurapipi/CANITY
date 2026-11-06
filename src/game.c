@@ -7876,8 +7876,18 @@ void MouseToLogical(int* mx, int* my) {
     *my = *my * winH / ch;
 }
 
+/* ==================================================================
+ * 2026-11-06（用户实测：**主页鼠标漂移约三格**）
+ * ------------------------------------------------------------------
+ * 这个函数原来第一行自己做 MouseToLogical（客户区像素 -> 逻辑空间）。
+ * 但网页端传进来的**已经是渲染空间坐标**（而且 winW==renderW 是硬约定，
+ * 渲染空间就是逻辑空间），于是被换了两次 —— 悬停"银行"却落到"新游戏"。
+ *
+ * 现在契约写死：**入参是逻辑坐标**。
+ *   · Win32：WndProc 负责先 MouseToLogical 再调它（客户区坐标 -> 逻辑）
+ *   · 网页：JS 已经把 client 坐标按 letterbox 反算成渲染(=逻辑)坐标
+ * ================================================================== */
 void HitTestMenu(int mx, int my) {
-    MouseToLogical(&mx, &my);
     if (currentState == STATE_GAMEOVER) return;
 
     /* v1.8：主菜单 / 暂停菜单也支持鼠标悬停（之前只有 HUB 和设置接了） */
@@ -8155,6 +8165,7 @@ static void MapCursorRefresh(void);
  * CanityMouseLook（指针锁定后的相对位移），那条路是独立的。
  * ================================================================== */
 void CanityMouseMove(int mx, int my) {
+    /* 入参已是渲染(=逻辑)空间，见 HitTestMenu 的契约 */
     g_mousePos.x = mx;
     g_mousePos.y = my;
     if (currentState != STATE_PLAYING) {
@@ -8164,8 +8175,6 @@ void CanityMouseMove(int mx, int my) {
 }
 
 void CanityMouseClick(int mx, int my) {
-    /* 坐标 -> 逻辑空间 -> 命中 */
-    MouseToLogical(&mx, &my);
     g_mousePos.x = mx;
     g_mousePos.y = my;
 
@@ -8964,7 +8973,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
                 g_mousePos.x = mx;
                 g_mousePos.y = my;
-                HitTestMenu(mx, my);
+                {
+                    /* HitTestMenu 现在要逻辑坐标（见它的注释） */
+                    int hmx = mx, hmy = my;
+                    MouseToLogical(&hmx, &hmy);
+                    HitTestMenu(hmx, hmy);
+                }
                 return 0;
             }
             /* 全屏地图：鼠标交给菜单（此时鼠标是释放的，可以点东西）。

@@ -1,34 +1,45 @@
 /*
- * Canity — 音频分区的网页后端（WebAudio）
+ * Canity — 音频分区的网页后端（WebAudio 实时合成）
  * ---------------------------------------------------------------------
- * 2026-11-06（用户实测：**音频没接入**）。
+ * 2026-11-06：第一版按 id % 8 分类，用户实测「音频差距很大」。
+ * 现在按 **audio.h 里真实的 SFX 枚举**逐个配音，每种音效有自己的
+ * 波形/频率/包络，尽量贴近桌面版的语义（脚步闷、心跳低频、
+ * 拾取清脆、守门人极低频、清道夫刺耳…）。
  *
- * 桌面端 audio.c 是 waveOut + 自研合成 + 混音线程，整块搬到浏览器不现实。
- * 这里走另一条同样"零素材"的路：**用 WebAudio 现场合成**。
- * 每个音效按类别映射到一组振荡器/噪声参数，播放时现算包络。
+ * 仍然遵循本作约束：**零素材**，全部现场合成。
+ * 与桌面波形不逐样本一致，但音色语义对齐。
  *
- * 与桌面版不保证逐波形一致 —— 但**有反馈**比"完全没声音"重要得多，
- * 而且这套合成同样是程序化的，符合本作"零外部素材"的约束。
- *
- * 分区规则：audio 的符号只住在 audio 分区（见 partition_check 规则 S3）。
+ * 分区规则：audio 的符号只住在 audio 分区（partition_check 规则 S3）。
  */
 #include "common.h"
 #include "audio.h"
 
-/* ---------------------------------------------------------------------
- * JS 侧：一个极简的合成器
- * ------------------------------------------------------------------- */
+/* =====================================================================
+ * JS 侧合成器
+ * =================================================================== */
 EM_JS(void, js_audio_init, (void), {
     if (Module._actx) return;
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     Module._actx = new AC();
+
+    /* 主链：source -> master(音量) -> comp(限幅) -> destination
+       限幅器很关键：并发的噪声爆发不加限幅会刺耳、破音，
+       这正是"和桌面差距很大"的一部分。 */
     Module._master = Module._actx.createGain();
-    Module._master.gain.value = 0.85;
-    Module._master.connect(Module._actx.destination);
+    Module._master.gain.value = 0.75;
+    var comp = Module._actx.createDynamicsCompressor();
+    comp.threshold.value = -18;
+    comp.knee.value = 24;
+    comp.ratio.value = 8;
+    comp.attack.value = 0.004;
+    comp.release.value = 0.18;
+    Module._master.connect(comp);
+    comp.connect(Module._actx.destination);
+
+    // 一个共享低通，给"闷"的音色用，避免高频毛刺
     Module._noiseBuf = null;
 
-    // 浏览器自动播放策略：首次用户手势后才允许出声
     function unlock() {
         if (Module._actx && Module._actx.state === 'suspended') Module._actx.resume();
     }
@@ -41,85 +52,170 @@ EM_JS(void, js_play, (int id, float vol), {
     var ctx = Module._actx;
     if (ctx.state === 'suspended') ctx.resume();
 
-    // ---- 按音效 id 归类成几种音色 ----
-    // 桌面版的 SFX 枚举是连续的；这里只按区间粗分，
-    // 保证"不同类型的动作听起来不一样"。
-    var cat = id % 8;
-    var t0 = ctx.currentTime;
-    var g = ctx.createGain();
-    g.connect(Module._master);
-    var peak = Math.max(0.02, Math.min(1.0, vol)) * 0.5;
+    var t0 = ctx.currentTime + 0.001;
+    var out = ctx.createGain();
+    out.connect(Module._master);
+    var peak = Math.max(0.02, Math.min(1.0, vol));
 
-    function tone(freq, dur, type, slideTo) {
+    function osc(type, f0, f1, dur, gain, detune) {
         var o = ctx.createOscillator();
-        o.type = type || 'square';
-        o.frequency.setValueAtTime(freq, t0);
-        if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(30, slideTo), t0 + dur);
-        o.connect(g);
-        o.start(t0);
-        o.stop(t0 + dur + 0.02);
+        o.type = type;
+        if (detune) o.detune.value = detune;
+        o.frequency.setValueAtTime(f0, t0);
+        if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + dur);
+        var g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(Math.max(0.001, gain * peak), t0 + Math.min(0.012, dur * 0.3));
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        o.connect(g); g.connect(out);
+        o.start(t0); o.stop(t0 + dur + 0.02);
         return o;
     }
 
-    function noise(dur, bp) {
+    function noiseBurst(dur, lo, hi, gain, delay) {
         if (!Module._noiseBuf) {
-            var n = ctx.sampleRate * 0.5;
-            var buf = ctx.createBuffer(1, n, ctx.sampleRate);
-            var d = buf.getChannelData(0);
+            var n = Math.floor(ctx.sampleRate * 1.0);
+            var b = ctx.createBuffer(1, n, ctx.sampleRate);
+            var d = b.getChannelData(0);
             for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
-            Module._noiseBuf = buf;
+            Module._noiseBuf = b;
         }
+        var t = t0 + (delay || 0);
         var s = ctx.createBufferSource();
         s.buffer = Module._noiseBuf;
         s.loop = true;
         var f = ctx.createBiquadFilter();
         f.type = 'bandpass';
-        f.frequency.value = bp || 1200;
-        f.Q.value = 0.8;
-        s.connect(f); f.connect(g);
-        s.start(t0); s.stop(t0 + dur + 0.02);
+        f.frequency.setValueAtTime(lo, t);
+        if (hi && hi !== lo) f.frequency.exponentialRampToValueAtTime(Math.max(60, hi), t + dur);
+        f.Q.value = 1.1;
+        var g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(Math.max(0.001, gain * peak), t + Math.min(0.008, dur * 0.3));
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        s.connect(f); f.connect(g); g.connect(out);
+        s.start(t); s.stop(t + dur + 0.02);
         return s;
     }
 
-    var dur = 0.12;
-    switch (cat) {
-    case 0:  // 挥击 / 打击：短促噪声 + 低频碰撞
-        dur = 0.14; noise(0.10, 1800); tone(180, 0.12, 'square', 90); break;
-    case 1:  // 拾取 / 金币：上行两声
-        dur = 0.16; tone(660, 0.07, 'square'); tone(990, 0.09, 'square'); break;
-    case 2:  // 受伤 / 尖叫：下滑锯齿
-        dur = 0.32; tone(420, 0.30, 'sawtooth', 120); noise(0.14, 900); break;
-    case 3:  // 通电 / 机械：低方波
-        dur = 0.26; tone(110, 0.24, 'square', 160); break;
-    case 4:  // 玻璃 / 碎裂：高频噪声
-        dur = 0.18; noise(0.16, 3200); break;
-    case 5:  // 脚步 / 闷响：极短低频
-        dur = 0.09; noise(0.07, 320); tone(90, 0.08, 'sine', 60); break;
-    case 6:  // 提示 / 门：中频三角
-        dur = 0.20; tone(520, 0.18, 'triangle', 380); break;
-    default: // 其它：中性短音
-        dur = 0.10; tone(300, 0.09, 'sine'); break;
-    }
+    switch (id) {
+    // ---- 0 SFX_STEP 脚步：极短闷响 ----
+    case 0:
+        noiseBurst(0.055, 220, 140, 0.30);
+        osc('sine', 95, 55, 0.06, 0.18);
+        break;
 
-    // 包络：快起慢落，避免爆音
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.05);
+    // ---- 1 SFX_HEART 心跳：两下低频 ----
+    case 1:
+        osc('sine', 62, 38, 0.18, 0.55);
+        osc('sine', 58, 36, 0.14, 0.35);
+        break;
+
+    // ---- 2 SFX_PICKUP 拾取：上行两声方波 ----
+    case 2:
+        osc('square', 780, 780, 0.055, 0.28);
+        setTimeout(function () {}, 0);
+        osc('square', 1180, 1180, 0.075, 0.26);
+        break;
+
+    // ---- 3 SFX_POWER 通电：低锯齿爬升 + 电流噪声 ----
+    case 3:
+        osc('sawtooth', 70, 150, 0.28, 0.30);
+        noiseBurst(0.20, 2400, 1200, 0.10, 0.02);
+        break;
+
+    // ---- 4 SFX_GATE 闸门：金属闷响 ----
+    case 4:
+        noiseBurst(0.22, 320, 160, 0.34);
+        osc('sine', 72, 44, 0.26, 0.40);
+        osc('triangle', 145, 120, 0.16, 0.12);
+        break;
+
+    // ---- 5 SFX_CRANK 摇柄：三下棘轮 ----
+    case 5:
+        noiseBurst(0.035, 1600, 1600, 0.22, 0.00);
+        noiseBurst(0.035, 1500, 1500, 0.20, 0.09);
+        noiseBurst(0.045, 1400, 1400, 0.18, 0.18);
+        break;
+
+    // ---- 6 SFX_SCREAM 尖叫：下滑锯齿 + 破音噪声 ----
+    case 6:
+        osc('sawtooth', 520, 130, 0.34, 0.42, 12);
+        osc('sawtooth', 545, 140, 0.34, 0.22, -14);
+        noiseBurst(0.26, 1800, 700, 0.14, 0.01);
+        break;
+
+    // ---- 7 SFX_GLASS 玻璃：高频短爆 ----
+    case 7:
+        noiseBurst(0.13, 4200, 2600, 0.30);
+        osc('triangle', 2400, 1800, 0.06, 0.10);
+        break;
+
+    // ---- 8 SFX_SEARCH 翻找：布料摩擦 ----
+    case 8:
+        noiseBurst(0.11, 1300, 900, 0.16);
+        noiseBurst(0.08, 1900, 1500, 0.10, 0.07);
+        break;
+
+    // ---- 9 SFX_THROW 投掷：挥空的风声 ----
+    case 9:
+        noiseBurst(0.16, 3000, 700, 0.20);
+        break;
+
+    // ---- 10 SFX_GLUE 胶水：黏稠下滑 ----
+    case 10:
+        osc('sine', 200, 70, 0.20, 0.35);
+        noiseBurst(0.12, 700, 350, 0.16);
+        break;
+
+    // ---- 11 SFX_ECHO 回声：清脆叮 + 尾音 ----
+    case 11:
+        osc('sine', 1500, 1500, 0.10, 0.30);
+        osc('sine', 2250, 2250, 0.14, 0.10);
+        break;
+
+    // ---- 12 SFX_DECOY 诱饵：木头吱呀 ----
+    case 12:
+        osc('sawtooth', 210, 150, 0.22, 0.18, 6);
+        noiseBurst(0.10, 900, 600, 0.10, 0.05);
+        break;
+
+    // ---- 13 SFX_WARDEN 守门人：极低频压迫 ----
+    case 13:
+        osc('sine', 44, 34, 0.55, 0.60);
+        osc('sine', 66, 52, 0.45, 0.20);
+        break;
+
+    // ---- 14 SFX_SCAVENGER 清道夫：刺耳刮擦 ----
+    case 14:
+        noiseBurst(0.20, 2800, 2200, 0.26);
+        osc('square', 900, 700, 0.12, 0.10);
+        break;
+
+    // ---- 15 SFX_SCAV_STEP 清道夫脚步：高速摩擦 ----
+    case 15:
+        noiseBurst(0.06, 2200, 1800, 0.16);
+        break;
+
+    default:
+        osc('triangle', 420, 380, 0.09, 0.16);
+        break;
+    }
 });
 
 EM_JS(void, js_set_volume, (float v), {
-    if (Module._master) Module._master.gain.value = Math.max(0, Math.min(1, v)) * 0.85;
+    if (Module._master) Module._master.gain.value = Math.max(0, Math.min(1, v)) * 0.75;
 });
 
-/* ---------------------------------------------------------------------
+/* =====================================================================
  * 公开接口
- * ------------------------------------------------------------------- */
+ * =================================================================== */
 void InitAudio(void) { js_audio_init(); }
 void ShutdownAudio(void) { }
 
 void PlaySfx(int id, float vol) { js_play(id, vol); }
 
-/* 世界音效：按听者朝向算声像与距离衰减，再交给合成器。
+/* 世界音效：先按听者朝向算声像与距离衰减，再交给合成器。
    这样"背后的脚步"和"正前方的脚步"听起来不一样。 */
 void AudioPlayWorld(int id, float x, float y, float vol, float maxDist, int priority) {
     (void)priority;
@@ -128,7 +224,7 @@ void AudioPlayWorld(int id, float x, float y, float vol, float maxDist, int prio
     extern float posX, posY, dirX, dirY;
     float l = 0.0f, r = 0.0f;
     AudioComputeGains(posX, posY, dirX, dirY, x, y, maxDist, &l, &r);
-    float gain = (l > r ? l : r) * 2.0f;      /* 等功率左右合成成单声道 */
+    float gain = (l > r ? l : r) * 2.0f;
     if (gain <= 0.001f) return;
     PlaySfx(id, vol * gain);
 }
@@ -152,7 +248,7 @@ void AudioComputeGains(float lisX, float lisY, float lisDirX, float lisDirY,
     float pan = 0.0f;
     if (dist > 0.01f) {
         float nx = dx / dist, ny = dy / dist;
-        pan = nx * (-lisDirY) + ny * lisDirX;   /* 右向量 = (-dirY, dirX) */
+        pan = nx * (-lisDirY) + ny * lisDirX;
         if (pan < -1.0f) pan = -1.0f;
         if (pan > 1.0f) pan = 1.0f;
     }

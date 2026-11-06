@@ -70,14 +70,33 @@ static void WebFrame(void) {
     extern void ClearKeyEdges(void);
     extern void Update(float dt);
 
-    /* 2026-11-06（R4）：**鼠标视角**。
-       桌面版这段长在 WM_MOUSEMOVE 里；网页端没有窗口消息，
-       所以在主循环里取一次位移，交给同一个 CanityMouseLook。 */
+    /* ==================================================================
+     * 2026-11-06（用户实测：**局内鼠标左右滑没反应**）
+     * ------------------------------------------------------------------
+     * 桌面端的视角旋转只在"光标被锁在窗口中心"时才生效。
+     * 网页端原来根本没人去要 Pointer Lock —— Module.requestLock 一直是
+     * 假，_locked 永远 false，于是 CanityMouseLook 一次都没被调用。
+     *
+     * 现在：进入局内就请求锁定（浏览器要求用户手势，所以真正的
+     * requestPointerLock 由 canvas 的 click 处理器触发），
+     * 离开局内就释放。
+     * ================================================================ */
+    {
+        static int s_lockWanted = -1;   /* currentState 在 game.h 里已有正确类型 */
+        int want = (currentState == STATE_PLAYING) ? 1 : 0;
+        if (want != s_lockWanted) {
+            PlatSetCursorLock(want);
+            s_lockWanted = want;
+        }
+    }
     {
         extern void CanityMouseLook(int dx, int dy);
         int mdx = 0, mdy = 0;
         PlatMouseDelta(&mdx, &mdy);
-        if ((mdx || mdy) && PlatCursorLocked()) CanityMouseLook(mdx, mdy);
+        /* 局内就转，不要求 Pointer Lock 已生效（见上面那段注释） */
+        if ((mdx || mdy) && currentState == STATE_PLAYING) {
+            CanityMouseLook(mdx, mdy);
+        }
     }
 
     /* ==================================================================
@@ -181,6 +200,14 @@ EMSCRIPTEN_KEEPALIVE int CanityProbeLayout(int which) {
     case 3: return renderH;
     default: return 0;
     }
+}
+
+/* 朝向探针：验证鼠标视角是否真的改了方向 */
+EMSCRIPTEN_KEEPALIVE int CanityProbeDir(int which) {
+    extern float dirX, dirY;
+    if (which == 0) return (int)(dirX * 1000.0f);
+    if (which == 1) return (int)(dirY * 1000.0f);
+    return 0;
 }
 
 EMSCRIPTEN_KEEPALIVE int CanityProbeUpdates(void) {

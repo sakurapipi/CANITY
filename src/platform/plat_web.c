@@ -67,10 +67,27 @@ EM_JS(void, js_plat_init, (void), {
         Module._toRender = toRender;
         Module._pendingMove = null;
 
+        /* 2026-11-06（用户实测：**局内左右滑没反应**）
+           Pointer Lock 不是随时都拿得到（浏览器策略、iframe 权限、
+           无头环境都会失败）。所以位移**不管锁没锁都要累计**：
+             · 锁定后优先用 movementX/Y（无限位移，最好用）
+             · 没锁就用相邻两次 clientX/Y 的差值
+           这样"能转视角"不再取决于 Pointer Lock 成不成功。 */
+        var lastCx = 0, lastCy = 0, haveLast = false;
         cv.addEventListener('mousemove', function (e) {
             var p = toRender(e);
             if (p) Module._pendingMove = p;
+
+            if (Module._locked) {
+                Module._mouseDX = (Module._mouseDX || 0) + (e.movementX | 0);
+                Module._mouseDY = (Module._mouseDY || 0) + (e.movementY | 0);
+            } else if (haveLast) {
+                Module._mouseDX = (Module._mouseDX || 0) + (e.clientX - lastCx);
+                Module._mouseDY = (Module._mouseDY || 0) + (e.clientY - lastCy);
+            }
+            lastCx = e.clientX; lastCy = e.clientY; haveLast = true;
         }, false);
+        cv.addEventListener('mouseleave', function () { haveLast = false; }, false);
 
         cv.addEventListener('mousedown', function (e) {
             if (e.button === 0) Module._keys[0x01] = 1;
@@ -91,10 +108,13 @@ EM_JS(void, js_plat_init, (void), {
         document.addEventListener('pointerlockchange', function () {
             Module._locked = (document.pointerLockElement === cv);
         }, false);
+        /* 指针锁定期间 canvas 上收不到事件时，由 document 兜底 */
         document.addEventListener('mousemove', function (e) {
             if (!Module._locked) return;
-            Module._mouseDX += (e.movementX | 0);
-            Module._mouseDY += (e.movementY | 0);
+            /* 已经在 canvas 处理器里累计过，这里只吃"移出 canvas 之后"的位移 */
+            if (e.target === cv) return;
+            Module._mouseDX = (Module._mouseDX || 0) + (e.movementX | 0);
+            Module._mouseDY = (Module._mouseDY || 0) + (e.movementY | 0);
         }, false);
 
         function measure() {
