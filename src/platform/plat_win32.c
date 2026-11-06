@@ -29,6 +29,13 @@ static void PlatClockInit(void) {
 
 void PlatInit(void) { }   /* 桌面端在 WinMain 里建窗，这里无事可做 */
 
+int PlatShowPerf(double pixMs, double sprMs, double texMs, double totalMs) {
+    (void)pixMs; (void)sprMs; (void)texMs; (void)totalMs;
+    return 0;
+}
+
+void PlatMarkReady(void) { }
+
 int PlatSelfTestRequested(void) { return 0; }
 
 void PlatSleepMs(int ms) {

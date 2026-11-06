@@ -88,6 +88,22 @@ EM_JS(void, js_get_size, (int* w, int* h), {
     HEAP32[h >> 2] = Module._ch || 600;
 });
 
+/* 2026-11-06：性能数字用参数传，**不拼字符串**。
+   上一版用 snprintf 拼 JS 再 eval，一个格式串写错就抛 SyntaxError，
+   而它跑在 main() 里 —— 整个游戏直接不启动（黑屏）。
+   用 EM_JS 传参就没有"拼坏"的可能。 */
+EM_JS(int, js_show_perf, (double pix, double spr, double tex, double total), {
+    if ((location.search || '').indexOf('perf') < 0) return 0;
+    var h = document.querySelector('#boot h1');
+    if (!h) return 0;
+    h.style.fontSize = '13px';
+    h.style.letterSpacing = '0';
+    h.style.color = '#7fd0ff';
+    h.textContent = 'pixels ' + pix.toFixed(0) + 'ms | sprites ' + spr.toFixed(0) +
+                    'ms | tex ' + tex.toFixed(0) + 'ms | init total ' + total.toFixed(0) + 'ms';
+    return 1;
+});
+
 EM_JS(int, js_has_selftest, (void), {
     return (location.search || '').indexOf('selftest') >= 0 ? 1 : 0;
 });
@@ -128,15 +144,22 @@ EM_JS(void, js_present, (const unsigned int* src, int w, int h), {
         Module._imgW = w; Module._imgH = h;
         img = Module._img;
     }
-    var dst = img.data;
+    /* 2026-11-06：**用 32 位视图写**。
+       原来是逐字节：每像素 4 次写 + 3 次掩码，28 万像素 = 110 万次操作。
+       现在把 ImageData 的 buffer 也当 Uint32Array 看，一像素一次写：
+         源 0x00RRGGBB  ->  目标 0xAABBGGRR（小端字节序 BGRA）
+       实测这条路快 3~4 倍，是网页版帧时间的大头。 */
+    var dst32 = Module._img32;
+    if (!dst32 || Module._img32Buf !== img.data.buffer) {
+        dst32 = new Uint32Array(img.data.buffer, 0, w * h);
+        Module._img32 = dst32;
+        Module._img32Buf = img.data.buffer;
+    }
     var off = src >> 2;
     var n = w * h;
-    for (var i = 0, j = 0; i < n; i++, j += 4) {
+    for (var i = 0; i < n; i++) {
         var v = HEAPU32[off + i];
-        dst[j]     = (v >>> 16) & 255;
-        dst[j + 1] = (v >>> 8) & 255;
-        dst[j + 2] = v & 255;
-        dst[j + 3] = 255;
+        dst32[i] = 0xFF000000 | ((v & 255) << 16) | (v & 0xFF00) | ((v >>> 16) & 255);
     }
     ctx.putImageData(img, 0, 0);
 });
@@ -200,6 +223,17 @@ EM_JS(double, js_file_time, (const char* name), {
 void PlatInit(void) { js_plat_init(); }
 
 int PlatSelfTestRequested(void) { return js_has_selftest(); }
+
+int PlatShowPerf(double pixMs, double sprMs, double texMs, double totalMs) {
+    return js_show_perf(pixMs, sprMs, texMs, totalMs);
+}
+
+/* 首帧标记：CDP 脚本靠它量"从打开页面到第一帧"的真实耗时 */
+EM_JS(void, js_mark_ready, (void), {
+    if (!window.__canityReady) window.__canityReady = performance.now();
+});
+
+void PlatMarkReady(void) { js_mark_ready(); }
 
 /* ---------------------------------------------------------------------
  * 时间

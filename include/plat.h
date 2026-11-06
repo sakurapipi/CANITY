@@ -23,6 +23,11 @@ void PlatInit(void);
 /* 是否请求了存档自检（?selftest=1；桌面端恒为 0）。 */
 int PlatSelfTestRequested(void);
 
+/* 把初始化各阶段耗时报到页面上（?perf=1 时使用；桌面端空实现）。 */
+int  PlatShowPerf(double pixMs, double sprMs, double texMs, double totalMs);
+/* 第一帧真正画出来的时刻（网页端用它标记性能基线）。 */
+void PlatMarkReady(void);
+
 /* 单调递增秒数，首次调用返回 0 附近。用于主循环累加与排程。 */
 double PlatNow(void);
 

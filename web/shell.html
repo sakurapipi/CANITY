@@ -216,6 +216,60 @@
     });
   })();
 
+  // ==================================================================
+  // file:// 守卫（2026-11-06）
+  // ------------------------------------------------------------------
+  // 双击 index.html 打开时，浏览器会用 file:// 协议，
+  // fetch(index.wasm) 被 CORS 拦掉 —— 页面会一直卡在"载入中…"，
+  // 而且控制台里只有一条不起眼的 CORS 报错。
+  // 这是玩家最可能踩的坑，所以直接给一句能照做的话。
+  // ==================================================================
+  if (location.protocol === 'file:') {
+    document.addEventListener('DOMContentLoaded', function () {
+      var b = document.getElementById('boot');
+      if (b) b.classList.remove('hidden');
+      var s = document.getElementById('status');
+      if (s) {
+        s.style.color = '#ff6b5a';
+        s.style.maxWidth = '80vw';
+        s.style.textAlign = 'center';
+        s.style.lineHeight = '1.9';
+        s.innerHTML =
+          '不能直接双击打开（file:// 会被浏览器拦掉 wasm）<br>' +
+          '在 dist 目录开一个本地服务再访问：<br>' +
+          '<b style="color:#e8c040">python -m http.server 8080</b><br>' +
+          '然后打开 <b style="color:#e8c040">http://127.0.0.1:8080/</b>';
+      }
+      var bar = document.querySelector('#bar > i');
+      if (bar) { bar.style.background = '#ff6b5a'; bar.style.width = '100%'; }
+    });
+    window.__canityFileGuard = true;
+  }
+
+  // ==================================================================
+  // 错误上屏（2026-11-06）
+  // ------------------------------------------------------------------
+  // 网页版出问题时，控制台在手机上根本看不到。把错误直接画到加载层里，
+  // 用户截一张图就能把问题描述清楚，我也能直接定位。
+  // ==================================================================
+  window.__canityFail = function (msg) {
+    try {
+      var b = document.getElementById('boot');
+      var s = document.getElementById('status');
+      if (b) { b.classList.remove('hidden'); b.style.display = 'flex'; }
+      if (s) { s.textContent = String(msg).slice(0, 220); s.style.color = '#ff6b5a'; }
+      var bar = document.querySelector('#bar > i');
+      if (bar) bar.style.background = '#ff6b5a';
+    } catch (e) { /* 连错误显示都失败就算了 */ }
+  };
+  window.addEventListener('error', function (e) {
+    window.__canityFail('JS ERROR: ' + (e.message || e.type) +
+                        (e.filename ? ' @' + e.filename.split('/').pop() + ':' + e.lineno : ''));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    window.__canityFail('PROMISE: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+
   // 进度条：Emscripten 的 download 进度靠 XHR 包装，这里给个粗粒度回退
   (function () {
     var bar = document.querySelector('#bar > i');

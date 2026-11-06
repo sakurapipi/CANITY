@@ -71,6 +71,11 @@ static void WebFrame(void) {
     ClearKeyEdges();
 
     RenderFrame();
+
+    {
+        static int s_first = 0;
+        if (!s_first) { s_first = 1; PlatMarkReady(); }
+    }
 }
 
 int main(void) {
@@ -101,10 +106,27 @@ int main(void) {
         if (cw > 0 && ch > 0) { winW = cw; winH = ch; }
     }
 
-    InitPixels();
-    SpritesInit();
-    GenerateThemeTextures(0);
+    /* 2026-11-06：**分步计时** —— 网页版加载慢必须先知道慢在哪。
+       ?perf=1 时把各阶段耗时写进页面标题，截图就能读。 */
+    double tPix = 0.0, tSpr = 0.0, tTex = 0.0;
+    {
+        double t0 = PlatNow();
+        InitPixels();
+        tPix = PlatNow() - t0;
+
+        t0 = PlatNow();
+        SpritesInit();
+        tSpr = PlatNow() - t0;
+
+        t0 = PlatNow();
+        GenerateThemeTextures(0);
+        tTex = PlatNow() - t0;
+    }
     InitWorkers();
+    if (PlatShowPerf(tPix * 1000.0, tSpr * 1000.0, tTex * 1000.0,
+                     (tPix + tSpr + tTex) * 1000.0)) {
+        g_selftest = 1;   /* 复用"别收遮罩"这条：perf 模式下要让数字可见 */
+    }
 
     s_prev = PlatNow();
     s_booted = 1;
