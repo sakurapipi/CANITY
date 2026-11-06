@@ -17,6 +17,7 @@
 #include "hints.h"
 #include "game.h"
 #include "control_effect.h"
+#include "spider.h"
 #include "suspicion.h"
 #include "weapons.h"
 #include "shop.h"
@@ -3154,6 +3155,10 @@ void GenerateLevel(void) {
     /* 2026-11-06：用户要求追光怪 +1 只 */
     SpawnLightBeast();
     SpawnLightBeast2();
+    /* 2026-11-06（第 5 轮）：缚丝蛛 —— 第 4 层起、30%、每层最多 1 只 */
+    { extern void SpiderReset(void); extern int SpiderTrySpawn(int);
+      SpiderReset(); SpiderTrySpawn(currentLevel); }
+
     /* v1.8 偷电怪：第 3 层起出现。主线每层 1 只；无尽每 5 层 +1，最多 3 只。 */
     ResetLeeches();
     if (currentLevel >= LEECH_MIN_LEVEL) {
@@ -5812,6 +5817,7 @@ void Update(float dt) {
        放在这里意味着**只有真正游玩时**才走 —— 暂停 / 设置界面 /
        失焦都不会调用 Update，计时自然停表。 */
     { extern void ControlTick(float); ControlTick(dt); }
+    { extern void SpiderTick(float); SpiderTick(dt); }   /* 2026-11-06 第 5 轮 */
     UpdateLeech(dt);
 
     /* ==================================================================
@@ -6555,6 +6561,7 @@ void StartGame(void) {
      * ================================================================ */
     { extern void PhaseReset(void); PhaseReset(); }
     { extern void ControlReset(void); ControlReset(); }   /* 2026-11-06：控制层按局清零 */
+    { extern void SpiderReset(void); SpiderReset(); }      /* 2026-11-06：蜘蛛按局清零 */
     if (trainingMode) {
         /* 2026-11-06：训练营里直接发一批相位投掷物 —— 那里就是拿来试机制的。
            相位装置已经改成投掷物（槽 6/7），不再需要 PhaseGive。 */

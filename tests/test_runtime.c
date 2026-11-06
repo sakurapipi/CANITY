@@ -896,6 +896,71 @@ static void test_room_wall_flags(void) {
  *   ③ 超时释放 + 释放后免疫窗口
  *   ④ ControlReset 之后完全干净
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（v2.4.1 第 6 轮）：**缚丝蛛只束缚，零伤害**
+ * ------------------------------------------------------------------
+ * 用户方案里的硬约束：
+ *   「蜘蛛怪物不会造成任何伤害，也不能杀死玩家」
+ * 这条不能靠"看起来没写伤害"来保证 —— 用 sanity 差值钉死：
+ * 从被束缚到挣脱，sanity 必须一分不动。
+ *
+ * 同时验证：挣脱后进入免疫窗口，且不会同时叠加抱脸虫的控制。
+ * ================================================================== */
+static void test_spider_bind_no_damage(void) {
+    extern void  SpiderReset(void);
+    extern void  SpiderDebugPlace(float, float);
+    extern void  SpiderTick(float);
+    extern int   SpiderActive(void);
+    extern void  ControlReset(void);
+    extern int   ControlActive(void);
+    extern ControlType ControlCurrent(void);
+    extern int   ControlPress(void);
+    extern float ControlImmune(void);
+    extern float posX, posY;
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+    currentLevel = 5;
+    GenerateLevel();
+
+    ControlReset();
+    SpiderReset();
+
+    /* 放到玩家身上：视线必然通，距离必然在射程内 → 一定会走完前摇并吐丝 */
+    SpiderDebugPlace(posX + 0.4f, posY);
+    CHECK(SpiderActive(), "the debug placement must activate the spider");
+
+    float san0 = sanity;
+    int bound = 0;
+    for (int i = 0; i < 200 && !bound; i++) {
+        SpiderTick(0.02f);      /* 4 秒，够走完 0.8s 前摇 */
+        if (ControlActive() && ControlCurrent() == CTRL_SPIDER_WEB) bound = 1;
+    }
+    CHECK(bound == 1, "a spider in range with line of sight must web the player");
+
+    /* ---- 零伤害：束缚期间 sanity 一分不动 ---- */
+    for (int i = 0; i < 20; i++) SpiderTick(0.02f);
+    CHECK(sanity == san0,
+          "the spider must deal ZERO damage: sanity must not change at all");
+    CHECK(ControlCurrent() == CTRL_SPIDER_WEB,
+          "the web control must still be the active one");
+
+    /* ---- 挣脱：连按三次 ---- */
+    CHECK(ControlPress() == 0, "the first escape press must not free the player");
+    CHECK(ControlPress() == 0, "the second escape press must not free the player");
+    {
+        int freed = ControlPress();
+        CHECK(freed == 1, "the third escape press must free the player");
+    }
+    CHECK(ControlImmune() > 0.0f,
+          "escaping a web must grant an immunity window");
+    CHECK(sanity == san0,
+          "escaping must not change sanity either (still zero damage)");
+
+    SpiderReset();
+    ControlReset();
+}
+
 static void test_control_layer(void) {
     extern int   ControlBegin(ControlType, int, float);
     extern void  ControlTick(float);
@@ -3377,6 +3442,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_room_wall_flags();test_spider_bind_no_damage();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
