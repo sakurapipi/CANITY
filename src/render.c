@@ -5,6 +5,7 @@
  */
 #include "common.h"
 #include "control_effect.h"
+#include "spider.h"
 #include "hatch.h"
 #include "map_rooms.h"
 #include "cell_meta.h"
@@ -3786,8 +3787,12 @@ void Render3D(void) {
         extern float ControlTimeLeft(void);
         if (ControlActive() && ControlCurrent() == CTRL_SPIDER_WEB) {
             /* 越接近挣脱越淡（5 秒起步 -> 2 秒下限） */
+            /* 强度归一化**直接引用常量** ——
+               之前写死 (t-2)/3，下限从 2 改到 1 之后公式就不同步了。 */
+            extern float ControlTimeLeft(void);
             float t = ControlTimeLeft();
-            float k = (t - 2.0f) / 3.0f;
+            float span = SPIDER_WEB_WINDOW - SPIDER_WEB_MIN;
+            float k = (span > 0.01f) ? (t - SPIDER_WEB_MIN) / span : 0.0f;
             if (k < 0.0f) k = 0.0f;
             if (k > 1.0f) k = 1.0f;
             k = 0.45f + 0.55f * k;

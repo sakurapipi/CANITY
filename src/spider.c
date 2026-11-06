@@ -224,8 +224,8 @@ void SpiderTick(float dt) {
                 extern const char* pickupMsg;
                 extern float pickupMsgTimer;
                 pickupMsg = (g_lang == 1)
-                    ? "被蛛网缠住了 —— 连按空格，最快 2 秒"
-                    : "WEBBED - MASH SPACE, 2s MINIMUM";
+                    ? "被蛛网缠住了 —— 连按空格，最快 1 秒"
+                    : "WEBBED - MASH SPACE, 1s MINIMUM";
                 pickupMsgTimer = 2.2f;
             }
         }

@@ -6,6 +6,8 @@
 #include "common.h"
 #include "build_tags.h"
 #include "cell_meta.h"
+#include "spider.h"
+#include "control_effect.h"
 #include "hatch.h"
 #include "map_rooms.h"
 #include "art_direction.h"
@@ -4542,6 +4544,38 @@ void DrawHUD(void) {
     }
 #endif
 
+
+    /* ==================================================================
+     * 2026-11-06（用户实测）：**被蛛网缠住时的屏内倒计时**
+     * ------------------------------------------------------------------
+     * 用户原话：「你要保证那个倒计时跟那个每次减 0.5 秒是同步的，
+     *           不然我好不容易戳到只剩 1 秒钟，我还要再等就很烦」。
+     *
+     * 做法：屏幕上直接显示**同一个时间源**（ControlTimeLeft），
+     * 每次戳下去数字立刻掉 0.5 —— 看到的和判定的永远是同一个值。
+     * 同时显示"还要按/还要等"，让玩家知道是被卡住了还是在推进。
+     * ================================================================ */
+    {
+        /* 原型在 control_effect.h，这里不要再写（会撞类型） */
+        if (currentState == STATE_PLAYING && ControlActive() &&
+            ControlCurrent() == CTRL_SPIDER_WEB) {
+            float t = ControlTimeLeft();
+            static char wbuf[64];
+            int atFloor = (t <= SPIDER_WEB_MIN + 0.02f);
+            if (atFloor)
+                snprintf(wbuf, sizeof(wbuf), "%s  %.1fs",
+                         (g_lang == LANG_ZH) ? "只能等" : "WAIT", (double)t);
+            else
+                snprintf(wbuf, sizeof(wbuf), "%s %s  %.1fs",
+                         (g_lang == LANG_ZH) ? "连按" : "MASH",
+                         VkName(g_bindings[ACT_DODGE]), (double)t);
+            {
+                int tw = TextWidthWin(wbuf);
+                unsigned int col = atFloor ? 0x00A0A0A0u : 0x00FFE060u;
+                DrawTextWin((winW - tw) / 2, winH / 2 + UIS(46), wbuf, col);
+            }
+        }
+    }
 
     /* 交互提示 + 长按进度 */
     if (hoverKind != 0) {

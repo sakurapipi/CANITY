@@ -1,5 +1,6 @@
 /* Integration checks link the real game modules; all saves are isolated. */
 #include "common.h"
+#include "spider.h"
 #include "control_effect.h"
 #include "build_tags.h"
 #include "map_validator.h"
@@ -1583,15 +1584,18 @@ static void test_spider_bind_no_damage(void) {
         CHECK(ControlTimeLeft() < 4.6f && ControlTimeLeft() > 4.4f,
               "each escape press must shave 0.5 seconds");
 
-        /* 一直戳到底：不能低于 2 秒 */
+        /* 一直戳到底：不能低于**下限**（用常量，改参数时这条自动跟随） */
         for (int i = 0; i < 20; i++) ControlPress();
-        CHECK(ControlTimeLeft() >= 1.99f,
-              "no amount of mashing may push the control below the 2s floor");
+        CHECK(ControlTimeLeft() >= SPIDER_WEB_MIN - 0.001f,
+              "no amount of mashing may push the control below the floor");
+        CHECK(ControlTimeLeft() <= SPIDER_WEB_MIN + 0.001f,
+              "mashing to the floor must LAND ON the floor, not above it "
+              "(countdown and per-press reduction must share one clock)");
         CHECK(ControlActive(),
               "the player must still be controlled even after mashing to the floor");
 
-        /* 再等 2 秒（下限）才真的解除 */
-        for (int i = 0; i < 120; i++) ControlTick(0.02f);   /* 2.4 秒 */
+        /* 再等满下限时间才真的解除 */
+        for (int i = 0; i < 120; i++) ControlTick(0.02f);   /* 2.4 秒，够 1 秒下限 */
         CHECK(ControlTimeLeft() <= 0.001f, "the floor must eventually run out");
         {
             extern void ControlTimeout(void);
