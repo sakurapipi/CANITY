@@ -23,9 +23,42 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from build_sources import game_sources  # noqa: E402
 
-EMSDK_HOME = Path(os.environ.get('CANITY_EMSDK', str(Path.home() / '.dsh' / 'tools' / 'emsdk')))
-EMCC = EMSDK_HOME / 'upstream' / 'emscripten' / 'emcc.py'
-EM_CONFIG_DEFAULT = EMSDK_HOME / 'upstream' / 'emscripten' / '.emscripten'
+# =====================================================================
+# 工具链定位（本地 / CI 都走这里）
+# ---------------------------------------------------------------------
+# 2026-11-06：CI 上 Pages 工作流失败 —— build_web.py 硬写了
+#   ~/.dsh/tools/emsdk/...，而 GitHub Actions 里 emsdk 是
+#   mymindstorm/setup-emsdk 装的，路径完全不同（emcc 在 PATH 上）。
+#
+# 优先级：
+#   ① CANITY_EMSDK 环境变量（本地覆盖）
+#   ② EMSDK 环境变量（CI 的 setup-emsdk 会设）
+#   ③ ~/.dsh/tools/emsdk（本机默认）
+#   ④ 直接找 PATH 上的 emcc
+# =====================================================================
+def _resolve_emcc():
+    cands = []
+    if os.environ.get('CANITY_EMSDK'):
+        cands.append(Path(os.environ['CANITY_EMSDK']))
+    if os.environ.get('EMSDK'):
+        cands.append(Path(os.environ['EMSDK']))
+    cands.append(Path.home() / '.dsh' / 'tools' / 'emsdk')
+
+    for home in cands:
+        py = home / 'upstream' / 'emscripten' / 'emcc.py'
+        if py.is_file():
+            cfg = home / 'upstream' / 'emscripten' / '.emscripten'
+            return ([sys.executable, '-X', 'utf8', str(py)], cfg if cfg.is_file() else None)
+
+    exe = shutil.which('emcc')
+    if exe:
+        return ([exe], None)
+    return (None, None)
+
+
+EMCC_CMD, EM_CONFIG_DEFAULT = _resolve_emcc()
+EMCC = Path(EMCC_CMD[-1]) if EMCC_CMD else None
+
 
 DIST = ROOT / 'web' / 'dist'
 SHELL = ROOT / 'web' / 'shell.html'
@@ -35,8 +68,8 @@ def main(argv):
     debug = '--debug' in argv
     single = '--single' in argv
 
-    if not EMCC.is_file():
-        print('ERROR: 找不到 emcc: %s' % EMCC, file=sys.stderr)
+    if not EMCC_CMD:
+        print('ERROR: 找不到 emcc（试过 CANITY_EMSDK / EMSDK / ~/.dsh/tools/emsdk / PATH）', file=sys.stderr)
         print()
         print('装法（一次性）：')
         print('  git clone --depth 1 https://github.com/emscripten-core/emsdk.git %s' % EMSDK_HOME)
@@ -47,7 +80,7 @@ def main(argv):
         return 2
 
     env = dict(os.environ)
-    if 'EM_CONFIG' not in env and EM_CONFIG_DEFAULT.is_file():
+    if 'EM_CONFIG' not in env and EM_CONFIG_DEFAULT and EM_CONFIG_DEFAULT.is_file():
         env['EM_CONFIG'] = str(EM_CONFIG_DEFAULT)
 
     srcs = [str(p) for p in game_sources(ROOT, platform='web')]
@@ -58,7 +91,7 @@ def main(argv):
     DIST.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        sys.executable, '-X', 'utf8', str(EMCC),
+        *EMCC_CMD,
         *srcs,
         '-Iinclude',
         '-std=c99',
@@ -84,7 +117,7 @@ def main(argv):
         cmd += ['-g', '-sASSERTIONS=2']
 
     print('sources: %d 个 .c（已排除桌面后端与 Win32 音频）' % len(srcs))
-    print('emcc   : %s' % EMCC)
+    print('emcc   : %s' % ' '.join(EMCC_CMD))
     print('config : %s' % env.get('EM_CONFIG', '(默认)'))
     print('output : %s' % (DIST / 'index.html'))
     print(flush=True)
