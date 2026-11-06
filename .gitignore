@@ -64,6 +64,7 @@ tools/*
 !tools/build_sources.py
 !tools/package_release.py
 !tools/build_web.py
+!tools/hatch_stat.c
 
 
 # 忽略 Steamworks SDK（如果是放在本地目录的话）

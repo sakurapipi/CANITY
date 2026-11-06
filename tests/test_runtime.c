@@ -236,6 +236,54 @@ static void test_legacy_fixture_one(const char* file, int oldVer, int wantPayloa
  *   第一次 Q 传送后：placed=0 但 charges=1 —— 剩下那次永远用不出来。
  * 新规则：投出 -> 1 个锚点 -> 传送 1 次 -> 锚点消失。再传要再投一枚。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-07（v2.4.2 / B3）：**同层同类舱门只放一扇**
+ * ------------------------------------------------------------------
+ * hatchUsedMask 按 HatchKind 存（一扇门一位）。同层两扇同类门时，
+ * "只用过其中一扇"无法表达 —— 读档会把两扇都标成已用。
+ *
+ * 实测（tools/hatch_stat.c，300 种子真实路径）：
+ *   真实关卡每层 1 扇、0% 重复；强制两层房间时 1.7% 能放下两扇，
+ *   其中 60% 同类 => 约 1% 的层踩中。
+ * 频率低但会静默错判，所以生成侧直接禁止同类叠放。
+ * ================================================================== */
+static void test_hatch_no_duplicate_kind_per_floor(void) {
+    extern int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId);
+    extern int HatchKindForTheme(int themeId);
+    extern int hatchCount;
+    extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
+    int theme;
+    int kind;
+    int second;
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    /* 找一个能把门放下的主题（房间号 0..6 里总有一个能映射） */
+    theme = -1;
+    for (kind = 0; kind < 8; kind++) {
+        if (HatchKindForTheme(kind) >= 0) { theme = kind; break; }
+    }
+    CHECK(theme >= 0, "hatch: at least one theme maps to a hatch kind");
+
+    /* 清空并手工铺一块空地，保证放置有位置 */
+    {
+        extern void HatchReset(void);
+        int x, y;
+        HatchReset();
+        for (y = 2; y < 8; y++)
+            for (x = 2; x < 8; x++)
+                worldMap[y][x] = 0;
+    }
+
+    CHECK(HatchPlaceInRoom(2, 2, 4, 4, theme) >= 0, "hatch: the first door is placed");
+    CHECK(hatchCount == 1, "hatch: exactly one door after the first placement");
+
+    second = HatchPlaceInRoom(2, 2, 4, 4, theme);
+    CHECK(second == -1, "hatch: a second door of the SAME kind on one floor is refused");
+    CHECK(hatchCount == 1, "hatch: the floor still has exactly one door");
+}
+
 static void test_phase_beacon_one_use(void) {
     extern int phaseOwned, phaseCharges, phasePlaced, phaseBeacons;
     extern int PhaseTryPlace(void), PhaseTryTeleport(void);
@@ -4654,6 +4702,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_legacy_fixtures();test_corrupt_save_is_never_overwritten();test_menu_save_keeps_run();test_phase_beacon_one_use();test_training_items_do_not_leak();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_legacy_fixtures();test_corrupt_save_is_never_overwritten();test_menu_save_keeps_run();test_hatch_no_duplicate_kind_per_floor();test_phase_beacon_one_use();test_training_items_do_not_leak();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
