@@ -260,6 +260,7 @@ static long g_sealCells = 0, g_sealBad = 0;
 static int  g_sealSeeds = 0;
 
 /* 生成一层（不含打印），统计用 */
+int currentLevel = 5;   /* dump 用固定层数，让主题分层可复现 */
 static int collapsedLevelStub = 0;   /* dump 不做崩塌层 */
 
 static int GenerateOne(int seed) {

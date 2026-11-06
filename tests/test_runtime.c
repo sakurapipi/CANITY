@@ -866,6 +866,49 @@ static void test_facehugger_is_brutal(void) {
  *
  * 这条断言检查：**所有带 CELLFLAG_ROOMWALL 的格子必须是墙**。
  * ================================================================== */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**主题按深度分层**
+ * ------------------------------------------------------------------
+ * 用户原话：「不同的主题应该只能刷在那些特定的主题的风格，
+ *           而不是每一层都有多种不同的主题房间」。
+ *
+ * 这条断言检查**主题和层数的对应关系**：
+ *   1~3 层   只能出 砖墙(0) / 监狱(1)
+ *   4~6 层   只能出 冰窖(4) / 病房(3)
+ *   7~9 层   只能出 锈工厂(5) / 地狱(2)
+ *   10 层起  只能出 血肉(6) / 锈工厂(5)
+ * ================================================================== */
+static void test_theme_depth_bands(void) {
+    extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+
+    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
+    StartGame();
+
+    int checkedFloors = 0;
+    for (int lv = 1; lv <= 12; lv++) {
+        currentLevel = lv;
+        GenerateLevel();
+        checkedFloors++;
+
+        int allowed[7] = { 0 };
+        if (lv <= 3)      { allowed[0] = allowed[1] = 1; }
+        else if (lv <= 6) { allowed[4] = allowed[3] = 1; }
+        else if (lv <= 9) { allowed[5] = allowed[2] = 1; }
+        else              { allowed[6] = allowed[5] = 1; }
+
+        int bad = 0;
+        for (int y = 1; y < MAP_HEIGHT - 1; y++)
+            for (int x = 1; x < MAP_WIDTH - 1; x++) {
+                if (cellMeta[y][x].roomId == 0) continue;
+                int th = (int)cellMeta[y][x].themeId;
+                if (th < 0 || th >= 7) { bad++; continue; }
+                if (!allowed[th]) bad++;
+            }
+        CHECK(bad == 0, "a floor must only contain the themes allowed at that depth");
+    }
+    CHECK(checkedFloors == 12, "the depth-band test must cover 12 floors");
+}
+
 static void test_rooms_stay_sealed(void) {
     extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
     extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
@@ -4123,6 +4166,6 @@ static void test_stone_break_single_event(void) {
 int main(void) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
-    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
+    test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_wallet_save();test_stone_break_single_event();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_stone_hearing_range();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_hatch_screenshot();test_global_balance_invariants();test_phase_landing_near_wall();test_phase_slots_selectable();test_facehugger_is_brutal();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_flare_heal_budget();test_draft_structure();test_build_tags();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_beacon_cleared_between_floors();test_control_layer();test_facehugger_rework();test_phase_price();test_double_reward_rounds();test_shop_full_bag_no_charge();test_phase_beacon();test_two_light_beasts();test_all_hatch_effects();test_hatch_end_to_end();test_hatch_state_and_mask();test_collapse_layer_params();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

@@ -1974,6 +1974,32 @@ const char* HatchTitle(int idx) {
  * 返回值：1 = 可以开；0 = 不行，why 里写清**具体缺什么**。
  * 文案必须给数字（"你有 87 金"），不能只说"条件不足"。
  * ================================================================ */
+/* ==================================================================
+ * 2026-11-06（用户要求）：**说清楚拉下去会发生什么**
+ * ------------------------------------------------------------------
+ * 用户原话：「里面那个主题房间的控制闸也不是特别明显，
+ *           就是不知道拉了有什么用，感觉效果都差不多，
+ *           而且没什么特点」。
+ *
+ * 实测七种效果**完全不一样**（塌方重掷 / 买断整仓 / 通电 / 医疗 /
+ * 破墙 / 血祭加速 / 全场静止），问题是玩家看不到。
+ * 这里给每种闸门一句**后果**描述，悬停时显示在标题下面一行。
+ * ================================================================ */
+const char* HatchEffectLine(int idx) {
+    if (idx < 0 || idx >= hatchCount) return "";
+    int zh = (g_lang == LANG_ZH);
+    switch (hatches[idx].kind) {
+    case HATCH_BOILER:  return zh ? "拉下 -> 塌方：本层地图重掷" : "PULL -> COLLAPSE: REROLL FLOOR";
+    case HATCH_STORAGE: return zh ? "拉下 -> 买断整仓：家具重填 + 60 秒金币翻倍" : "PULL -> BUY OUT: REFILL + 60s GOLD x2";
+    case HATCH_POWER:   return zh ? "拉下 -> 全厂通电 20 秒" : "PULL -> POWER ON FOR 20s";
+    case HATCH_WARD:    return zh ? "拉下 -> 回满理智与体力，但留下 60 秒血迹" : "PULL -> HEAL, BUT LEAVE A 60s BLOOD TRAIL";
+    case HATCH_BRICK:   return zh ? "拉下 -> 砸穿一堵墙（消耗 25 体力）" : "PULL -> SMASH A WALL (-25 STAMINA)";
+    case HATCH_HELL:    return zh ? "拉下 -> 血祭：30 秒加速，代价是 15 理智" : "PULL -> PACT: 30s SPEED, -15 SANITY";
+    case HATCH_FLESH:   return zh ? "拉下 -> 全场敌人静止 20 秒（消耗 1 个投掷物）" : "PULL -> ALL ENEMIES FROZEN 20s (-1 THROWABLE)";
+    default: return "";
+    }
+}
+
 int HatchGateCheck(int idx, char* why, int cap) {
     if (idx < 0 || idx >= hatchCount) return 0;
     const Hatch* h = &hatches[idx];
@@ -2332,6 +2358,8 @@ int CollapseUnstickPlayer(void) {
 
 void CollapseBegin(void) {
     collapseArmed = 1;
+    /* 起手就抖一下，告诉玩家"出事了" */
+    AddShake(0.35f, 0.45f);
     collapseT = 0.0f;
     screenBlackout = 0.0f;
     s_collapseRerolled = 0;
@@ -2344,9 +2372,19 @@ int CollapseTick(float dt) {
     collapseT += dt;
 
     if (collapseT < 0.8f) {
-        /* 阶段 A：淡出 */
+        /* 阶段 A：淡出 —— 顺便**疯狂抖动**
+         * 2026-11-06（用户要求）：
+         *   「崩塌的时候你可以再做一点震撼一点的特效，
+         *     比如屏幕疯狂抖动，然后再黑屏」
+         *
+         * 抖动幅度跟着黑屏进度递增（越黑越猛），每帧续期，
+         * 所以它不会衰减 —— 读起来像结构在持续崩解。 */
         screenBlackout = collapseT / 0.8f;
         if (screenBlackout > 1.0f) screenBlackout = 1.0f;
+        {
+            float mag = 0.10f + 0.55f * screenBlackout * screenBlackout;
+            AddShake(0.06f, mag);
+        }
         return 1;
     }
 
@@ -3001,6 +3039,22 @@ void GenerateLevel(void) {
         int idx = rand() % emptyCount;
         float cx = cells[idx][0] + 0.5f, cy = cells[idx][1] + 0.5f;
         if (Dist2(cx, cy, exitX, exitY) < 9.0f) continue;
+        /* ==================================================================
+         * 2026-11-06（用户要求）：**主题房间里不再刷箱子**
+         * ------------------------------------------------------------------
+         * 用户原话：「里面家具有很多，导致那个资源溢出，导致通货膨胀」。
+         *
+         * 房间本来就有 3~6 件家具，再叠上箱子，一间房就是一个补给站。
+         * 现在房间只作**场景与危险**（含控制闸），不产资源；
+         * 箱子一律刷在普通迷宫里。箱子总数不变（fusesNeeded + 3），
+         * 只是不再堆在房间里。
+         * ================================================================ */
+        {
+            extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+            int mx = (int)cx, my = (int)cy;
+            if (mx >= 0 && my >= 0 && mx < MAP_WIDTH && my < MAP_HEIGHT &&
+                cellMeta[my][mx].roomId != 0) continue;
+        }
         if (!SpotClear(cx, cy, 1.6f, 1, -1)) continue;
 
         int ok = 1;

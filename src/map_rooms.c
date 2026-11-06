@@ -171,7 +171,9 @@ static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
     if (!t) return;
     int innerX = fx + ROOM_BORDER;
     int innerY = fy + ROOM_BORDER;
-    int want = 3 + (int)(rand() % 2);          /* 每间 3~4 件（含木箱堆） */
+    /* 2026-11-06（用户要求）：3~4 件 → 2~3 件。
+       家具是**布景**，不是资源；堆太多既挡视线又显得每间房都一样满。 */
+    int want = 2 + (int)(rand() % 2);          /* 每间 2~3 件（含木箱堆） */
     int placed = 0;
 
     /* 2026-11-06：新三种房间的家具搭配。
@@ -186,7 +188,7 @@ static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
     }
     /* C：再放 1~2 个木箱堆 —— 房间不能只有货架一种东西。
        它们走同一套"放一件→验连通→不行就撤"的流程。 */
-    int crates = 1 + (int)(rand() % 2);
+    int crates = 1;   /* 2026-11-06：固定 1 堆，不再随机 1~2 */
 
     /* ==================================================================
      * 2026-11-06：**家具只放角落**
@@ -410,17 +412,33 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
     int midX = fw / 2;
     int midY = fh / 2;
     int okA, okB;
+    /* ==================================================================
+     * 2026-11-06（用户实测）：**挖不通的门要重新封死**
+     * ------------------------------------------------------------------
+     * 门洞在调用隧道之前就被挖开了。如果隧道挖 8 格没接上迷宫
+     * （房间贴地图边界时很常见），隧道会回填，但**门洞留在环上** ——
+     * 外面是实心岩，里面是房间，等于墙上开了个洞通向石头。
+     *
+     * test_rooms_stay_sealed 抓到的 (33,18) roomId=0 就是这个。
+     * ================================================================ */
+    int doorAX, doorAY, doorBX, doorBY;
     if (doorRot == 0) {
-        worldMap[fy][fx + midX] = 0;
-        worldMap[fy + fh - 1][fx + midX] = 0;
-        okA = CarveDoorTunnel(fx + midX, fy, 0, -1);
-        okB = CarveDoorTunnel(fx + midX, fy + fh - 1, 0, 1);
+        doorAX = fx + midX;       doorAY = fy;
+        doorBX = fx + midX;       doorBY = fy + fh - 1;
+        worldMap[doorAY][doorAX] = 0;
+        worldMap[doorBY][doorBX] = 0;
+        okA = CarveDoorTunnel(doorAX, doorAY, 0, -1);
+        okB = CarveDoorTunnel(doorBX, doorBY, 0, 1);
     } else {
-        worldMap[fy + midY][fx] = 0;
-        worldMap[fy + midY][fx + fw - 1] = 0;
-        okA = CarveDoorTunnel(fx, fy + midY, -1, 0);
-        okB = CarveDoorTunnel(fx + fw - 1, fy + midY, 1, 0);
+        doorAX = fx;              doorAY = fy + midY;
+        doorBX = fx + fw - 1;     doorBY = fy + midY;
+        worldMap[doorAY][doorAX] = 0;
+        worldMap[doorBY][doorBX] = 0;
+        okA = CarveDoorTunnel(doorAX, doorAY, -1, 0);
+        okB = CarveDoorTunnel(doorBX, doorBY, 1, 0);
     }
+    if (!okA) { worldMap[doorAY][doorAX] = 1; explored[doorAY][doorAX] = 0; }
+    if (!okB) { worldMap[doorBY][doorBX] = 1; explored[doorBY][doorBX] = 0; }
 
     /* ---- ④ 登记属性（只登记内圈，外圈是普通墙）---- */
     CellMetaFillRoom(fx + ROOM_BORDER, fy + ROOM_BORDER, t->w, t->h, roomId,
@@ -519,8 +537,46 @@ static int ReservationsOk(int fx, int fy, int fw, int fh) {
 int RoomTplTried[ROOM_TEMPLATE_COUNT];
 int RoomTplPlaced[ROOM_TEMPLATE_COUNT];
 
+/* ==================================================================
+ * 2026-11-06（用户要求）：**主题按深度分层，不再每层都可能出任何一种**
+ * ------------------------------------------------------------------
+ * 用户原话：
+ *   「不同的主题应该只能刷在那些特定的主题的风格，而不是每一层都有
+ *     多种不同的主题房间」
+ *
+ * 模板 → 主题（见 room_template.c）：
+ *   0 锈工厂(5) / 1 监狱(1) / 2 冰窖(4) / 3 病房(3)
+ *   4 砖墙(0)   / 5 地狱(2) / 6 血肉洞窟(6)
+ *
+ * 分层（越深越凶）：
+ *   第 1~3 层   砖墙、监狱           —— 像废弃生活区
+ *   第 4~6 层   冰窖、病房           —— 像医疗/冷藏区
+ *   第 7~9 层   锈工厂、地狱         —— 像工业/仪式区
+ *   第 10 层起  血肉洞窟（+ 锈工厂） —— 像生物质核心
+ *
+ * 这样每一段深度的"房间长相"是统一的，玩家能感觉到自己在地下越走越深，
+ * 而不是每层随机抽一个完全无关的场景。
+ * ================================================================ */
+static int ThemeTemplateAllowed(int tpl, int level) {
+    if (level <= 3)  return (tpl == 4 || tpl == 1);
+    if (level <= 6)  return (tpl == 2 || tpl == 3);
+    if (level <= 9)  return (tpl == 0 || tpl == 5);
+    return (tpl == 6 || tpl == 0);
+}
+
+/* 在 [idMin,idMax] 里挑一个本层允许的模板；挑不到返回 -1 */
+static int PickAllowedTemplate(int idMin, int idMax, int level) {
+    int cand[ROOM_TEMPLATE_COUNT], n = 0;
+    for (int i = idMin; i <= idMax && i < ROOM_TEMPLATE_COUNT; i++)
+        if (i >= 0 && ThemeTemplateAllowed(i, level)) cand[n++] = i;
+    if (n <= 0) return -1;
+    return cand[rand() % n];
+}
+
 static int TryPlace(int placed, int idMin, int idMax) {
-    int id = idMin + (int)(rand() % (unsigned)(idMax - idMin + 1));
+    extern int currentLevel;
+    int id = PickAllowedTemplate(idMin, idMax, currentLevel);
+    if (id < 0) return 0;                 /* 本层这一档没有允许的主题 */
     if (id >= 0 && id < ROOM_TEMPLATE_COUNT) RoomTplTried[id]++;
     int rot = rand() % 4;
     RoomTemplate t;
@@ -534,6 +590,17 @@ static int TryPlace(int placed, int idMin, int idMax) {
 
     int fx = 1 + (int)(rand() % (unsigned)spanX);
     int fy = 1 + (int)(rand() % (unsigned)spanY);
+
+    /* ==================================================================
+     * 2026-11-06：**房间不许压出生区**
+     * ------------------------------------------------------------------
+     * GenerateLevel 最后会把 (1..3, 1..3) 强行挖空作出生点。
+     * 如果房间的围墙正好落在这块里，那面墙会被挖穿 ——
+     * 表现为"房间漏了"（test_rooms_stay_sealed 就是被这个红的）。
+     * ================================================================ */
+    if (fx <= 3 && fy <= 3) return 0;
+    if (fx + fw - 1 < 4 && fy <= 3) return 0;
+    if (fy + fh - 1 < 4 && fx <= 3) return 0;
 
     if (!ReservationsOk(fx, fy, fw, fh)) return 0;
 
@@ -571,18 +638,12 @@ int GenerateThemeRooms(int wantCount) {
      * 现在：第一间房有 45% 概率直接从扩展档（3..6）里挑，
      * 保证跨种子一定能看到全部 7 种。第二间房全范围随机。
      * ================================================================ */
-    if (wantCount > 0) {
-        int lo = 0, hi = 2;
-        if ((rand() % 100) < 45) { lo = 3; hi = 6; }
-        while (placed < 1 && attempts < 120) {
-            attempts++;
-            if (TryPlace(placed, lo, hi)) placed++;
-        }
-    }
-    /* 其余房间：全范围，允许和第一间同主题（一层两间同款不奇怪） */
+    /* 2026-11-06：档位不再按"大/小模板"分，而是由 ThemeTemplateAllowed
+       按深度过滤；这里只要把**全部模板**交给 TryPlace，
+       它自己会在允许集合里挑。分档保留是为了让失败重试有不同位置。 */
     while (placed < wantCount && attempts < 360) {
         attempts++;
-        if (TryPlace(placed, 0, 6)) placed++;
+        if (TryPlace(placed, 0, ROOM_TEMPLATE_COUNT - 1)) placed++;
     }
     RoomDumpIfRequested(placed);
     return placed;

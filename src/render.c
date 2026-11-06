@@ -3438,6 +3438,7 @@ static void RenderWallBand(int x0, int x1) {
          * 每列算一次，不进像素循环 —— 循环里只多两次比较。
          * ================================================================ */
         int bandR = 0, bandG = 0, bandB = 0, hasBand = 0;
+        int bandLo1 = 17, bandHi1 = 22, bandLo2 = -1, bandHi2 = -1;
         {
             extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
             extern int CellIsRoomWall(int, int, int*, int*, int*);
@@ -3459,6 +3460,41 @@ static void RenderWallBand(int x0, int x1) {
             if (nbX >= 0 && nbY >= 0 && nbX < MAP_WIDTH && nbY < MAP_HEIGHT)
                 fromInsideRoom = (cellMeta[nbY][nbX].roomId != 0);
             if (fromInsideRoom && CellIsRoomWall(mapX, mapY, &tr2, &tg2, &tb2)) {
+                /* ==================================================================
+                 * 2026-11-06（用户要求）：**七种主题不能长一个样**
+                 * ------------------------------------------------------------------
+                 * 用户原话：「大多数都长得差不多……每一个特色也不是很明确，
+                 *           里面的设计审美概念都不是很明确」。
+                 *
+                 * 之前所有主题共用同一条腰线（vy 17..22）。现在按主题给
+                 * **不同的腰线剖面**：位置、宽度、条数都不同，
+                 * 于是站在房间里一眼能分清这是哪种空间。
+                 *
+                 * vy 是 0..63 的墙面竖直坐标（0 = 天花，63 = 地面）：
+                 *   砖墙   踢脚线：低、窄           (54..58)
+                 *   监狱   两道横栏：中上 + 中下    (14..17, 34..37)
+                 *   地狱   顶部压边：高、厚         (6..14)
+                 *   病房   腰线 + 踢脚：双细线      (28..31, 56..58)
+                 *   冰窖   细腰线：极高             (20..23)
+                 *   锈工厂 粗腰带：中、最宽         (26..36)
+                 *   血肉   无腰线，改成底部渐暗     (56..63)
+                 * ================================================================ */
+                extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+                int th = (int)cellMeta[mapY][mapX].themeId;
+                if (th < 0 || th >= THEME_COUNT) th = 0;
+                bandLo1 = 54; bandHi1 = 58; bandLo2 = -1; bandHi2 = -1;
+                switch (th) {
+                case 0: bandLo1 = 54; bandHi1 = 58; break;            /* 砖墙：踢脚 */
+                case 1: bandLo1 = 14; bandHi1 = 17;                   /* 监狱：双横栏 */
+                        bandLo2 = 34; bandHi2 = 37; break;
+                case 2: bandLo1 = 6;  bandHi1 = 14; break;            /* 地狱：顶部压边 */
+                case 3: bandLo1 = 28; bandHi1 = 31;                   /* 病房：双细线 */
+                        bandLo2 = 56; bandHi2 = 58; break;
+                case 4: bandLo1 = 20; bandHi1 = 23; break;            /* 冰窖：高细线 */
+                case 5: bandLo1 = 26; bandHi1 = 36; break;            /* 锈工厂：宽腰带 */
+                case 6: bandLo1 = 56; bandHi1 = 63; break;            /* 血肉：底部压暗 */
+                default: break;
+                }
                 /* 腰线色 = 主题色 × 3.2，并给一个下限，暗主题也能看出来 */
                 bandR = tr2 * 26 / 10; if (bandR < 26) bandR = 26;
                 bandG = tg2 * 26 / 10; if (bandG < 22) bandG = 22;
@@ -3515,9 +3551,11 @@ static void RenderWallBand(int x0, int x1) {
             /* 房间腰线：vy 0..63 的竖直坐标，26%~34% 处一条亮带，
                紧贴它上下各一格暗边 —— 有明暗对比才读得出"这是装饰" */
             if (hasBand) {
-                if (vy >= 17 && vy <= 22) {
+                int inBand = (vy >= bandLo1 && vy <= bandHi1);
+                if (bandLo2 >= 0 && vy >= bandLo2 && vy <= bandHi2) inBand = 1;
+                if (inBand) {
                     r += bandR; g += bandG; b += bandB;
-                } else if (vy == 16 || vy == 23) {
+                } else if (vy == bandLo1 - 1 || vy == bandHi1 + 1) {
                     r -= 18; g -= 18; b -= 18;
                     if (r < 0) r = 0;
                     if (g < 0) g = 0;

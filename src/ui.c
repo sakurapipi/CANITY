@@ -4640,6 +4640,17 @@ void DrawHUD(void) {
             sprintf(pbuf, "HOLD %s  POWER ON", VkName(g_bindings[ACT_INTERACT]));
         else sprintf(pbuf, "NEED %d MORE FUSE", fusesNeeded - fusesHeld);
 
+        /* 2026-11-06（用户要求）：舱门再画一行**后果说明** */
+        if (hoverKind == 4) {
+            extern const char* HatchEffectLine(int idx);
+            const char* eff = HatchEffectLine(hoverIndex);
+            if (eff && eff[0]) {
+                int tw2 = TextWidthWin(eff);
+                DrawTextWin((winW - tw2) / 2, winH - UIS(214) + UIS(26),
+                            eff, 0x00E0B050u);
+            }
+        }
+
         int tw = TextWidthWin(pbuf);
         int px = (winW - tw) / 2;
         /* 2026-11-05：原来和「拾取 / 藏身」提示同在 winH-150，会叠字。
