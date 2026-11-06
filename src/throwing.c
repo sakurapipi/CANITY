@@ -399,8 +399,6 @@ void UpdateShots(float dt) {
                代价是瓶子要花一个投掷格。
                命中半径 1.2 格（比扳手的 0.7 宽），因为瓶子有溅射。 */
             if (shot[i].kind == 1) {
-                extern int   CollectorActive(void);
-                extern float CollectorX(void), CollectorY(void);
                 extern void  CollectorBurstBounty(void);
                 if (CollectorActive()) {
                     float cdx = CollectorX() - shot[i].x;
@@ -701,7 +699,6 @@ void FlareHealReset(void) { s_floorFlareHealed = 0.0f; }
 float FlareHealBudgetLeft(void) { return FLARE_HEAL_FLOOR_BUDGET - s_floorFlareHealed; }
 
 void FlareHealTick(float dt) {
-    extern int   RunSkillOwned(int);
     extern int   MAX_THROWN_HACK;   /* 占位，实际用 MAX_THROWN */
     (void)MAX_THROWN_HACK;
 

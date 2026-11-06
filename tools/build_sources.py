@@ -16,14 +16,25 @@ import sys
 #   网页构建排除 plat_win32.c（它要 windows.h）
 # 两边都叫 plat_*.c，靠文件名区分。
 PLATFORM_FILES = {
-    'win32': {'plat_web.c'},
-    # 网页构建额外排除：
-    #   audio.c  —— waveOut + 线程，R7 换成 WebAudio 后端
-    #   gamepad.c —— XInput 走 LoadLibrary/GetProcAddress，浏览器用 Gamepad API
-    #   music.c  —— mciSendStringW 播 BGM，网页端暂时不放音乐
-    'web':   {'plat_win32.c', 'audio.c', 'gamepad.c',
-              'music.c', 'music_proc.c',
-              'steam_zone.c'},   # Steamworks 在浏览器里不存在
+    'win32': {
+        # 网页后端
+        'plat_web.c',
+        'main_web.c',
+        'audio_web.c',
+        'music_web.c',
+        'gamepad_web.c',
+        'steam_zone_web.c',
+    },
+    'web': {
+        # 桌面后端与 Win32 专属实现
+        'plat_win32.c',
+        'main.c',           # WinMain + 消息循环
+        'audio.c',          # waveOut + 线程
+        'music.c',          # MCI
+        'music_proc.c',     # Interlocked*
+        'gamepad.c',        # XInput 动态加载
+        'steam_zone.c',     # Steamworks
+    },
 }
 
 

@@ -23,6 +23,7 @@
  *  · **可以重来**：走掉之后 25 秒冷却，冷却完 hideStreak 归零，可再次触发
  */
 #include "state.h"
+#include "economy.h"
 #include "common.h"
 #include "game.h"
 #include "entity.h"
@@ -65,7 +66,6 @@
 /* 算出本次要扣多少**点**理智 */
 static float scavSanityLoss(void) {
     extern int carryGold;
-    extern int GoldTier(void);
 
     float pct = SCAV_SAN_PCT_BASE;
 

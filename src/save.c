@@ -4,6 +4,7 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "campaign.h"
 #include "achievements.h"
 #include "save.h"
 #include "plat.h"
@@ -146,10 +147,6 @@ char g_savePath[MAX_PATH] = "";/* 最近一次写入成功的路径 */
 
    下面这两个薄壳只为让本文件其余代码不用整段改名。 */
 #include "save_format.h"
-extern int  SaveBackendWrite(const char* path, const void* data, size_t n);
-extern long SaveBackendRead(const char* path, void* buf, size_t cap);
-extern void SaveBackendUpload(const char* path);
-extern void SaveBackendSyncAll(void);
 
 static int WriteWholeFile(const char* path, const void* data, size_t n) {
     return SaveBackendWrite(path, data, n);
@@ -1539,8 +1536,6 @@ void ContinueRun(void) {
        每日“不能开手电”/ SALVAGE keystone 读档后必须保持关闭；
        战役第 1 关“关不掉”读档后必须保持开启。 */
     {
-        extern int DailyForbidLight(void);
-        extern int CampaignFlashlightLocked(void);
         if (DailyForbidLight() || HasKeystone(SK_SALVAGE)) flashlightOn = 0;
         else if (CampaignFlashlightLocked()) flashlightOn = 1;
     }

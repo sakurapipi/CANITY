@@ -4,6 +4,13 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "campaign.h"
+#include "daily.h"
+#include "economy.h"
+#include "threat.h"
+#include "upgrade_run.h"
+#include "wallet.h"
+#include "warden.h"
 #include "build_tags.h"
 #include "cell_meta.h"
 #include "plat.h"
@@ -922,7 +929,6 @@ MenuGeo GetMenuGeo(void) {
                而不是只看到一排技能名。 */
             {
                 extern BuildTag BuildDominant(void);
-                extern const char* BuildName(BuildTag, int);
                 BuildTag d = BuildDominant();
                 const char* bn = (d != BUILD_NONE) ? BuildName(d, g_lang == LANG_ZH) : NULL;
                 if (skillPickTotal > 1 && bn)
@@ -1323,7 +1329,6 @@ static const char* MenuLabel(int i) {
             /* v6：**按分类筛选 + 用表里的真实奖励**
                原来这里写着 "+1C/250S" —— 那是已删除的「核心 / 金币」，
                玩家看到的是两个不存在的货币。现在从 kAchDefs 读。 */
-            extern int  AchVisibleCount(void), AchIdAtRow(int);
             extern const AchDef kAchDefs[ACH_COUNT];
             if (i >= AchVisibleCount()) return "Back";
             int id = AchIdAtRow(i);
@@ -2358,7 +2363,6 @@ void DrawSkillTree(void) {
         static int skTested = 0;
         if (!skTested) {
             skTested = 1;
-            extern int SkillsSelfTest(void);
             /* v6 **自检失败不再弹窗给玩家** ——
                这是给开发看的护栏，玩家看到 "SKILL DATA ERROR: 35"
                只会以为游戏坏了。改成静默（需要排查时加 DSH_SKILL_DEBUG）。 */
@@ -2616,7 +2620,6 @@ void DrawSkillTree(void) {
 
         {
             const char* st; unsigned int sc;
-            extern int WalletCanPayBank(int);
             if (skillRank[sel] >= d->maxRank) { st = Tr("ALREADY MAXED", "已满级"); sc = 0x0060FF90u; }
             else if (!(d->prereq < 0 || skillRank[d->prereq] > 0)) { st = Tr("REQUIRES THE NODE ABOVE IT", "需要先点亮上面的节点"); sc = 0x00FF8080u; }
             else if (!WalletCanPayBank(costNow)) { st = Tr("NOT ENOUGH GOLD", "金币不够"); sc = 0x00FF8080u; }
@@ -3169,7 +3172,6 @@ static void DrawMenuText(void) {
 /* ============================================================
  * 成就页面专用渲染：精确布局
  * ============================================================ */
-extern int AchIdAtRow(int row);
 static void DrawAchievementsWindow(MenuGeo g) {
     AchGeo A;
     AchCompute(&A);
@@ -3202,7 +3204,6 @@ static void DrawAchievementsWindow(MenuGeo g) {
      * ================================================================ */
     {
         extern int achFilter, AchVisibleCount(void), AchUnlockedInFilter(void);
-        extern const char* AchCatNameEn(int);
         static char cnt[48];
 
         /* 左：分类名（短，不会被挤） */
@@ -3552,7 +3553,6 @@ void DrawHUD(void) {
 
            颜色：正常灰青；超过 12 时用品红呼吸（警告） */
         {
-            extern float ThreatValue(void);
             static char tbuf[32];
             float tv = ThreatValue();
             int tx0 = gx0 + TextWidthWin(gbuf) + UIS(14);
@@ -3606,9 +3606,6 @@ void DrawHUD(void) {
          * 现在：中文用中文名；横幅放不下时，把说明塞进底部提示行。
          * ================================================================ */
         extern int g_lang;
-        extern const char* EventNameZh(int);
-        extern const char* EventDescZh(int);
-        extern const char* EventDescEn(int);
 
         int avail = winW - ex - UIS(12);
         {
@@ -3625,8 +3622,6 @@ void DrawHUD(void) {
         {
             extern int campaignMode, campaignStage;
             extern float levelBanner;
-            extern const char* CampaignRule(int);
-            extern const char* CampaignRuleZh(int);
             if (campaignMode && levelBanner > 3.0f) {
                 const char* r = (g_lang == LANG_ZH) ? CampaignRuleZh(campaignStage)
                                                     : CampaignRule(campaignStage);
@@ -3689,9 +3684,6 @@ void DrawHUD(void) {
          * 这里用 PENDING 行删掉后腾出的位置，不占新空间。
          * ================================================================ */
         if (dailyMode) {
-            extern int DailyCurrent(void), DailyGoalParam(void), DailyDone(void);
-            extern const char* DailyGoalTextEn(void);
-            extern const char* DailyGoalTextZh(void);
             extern int g_lang;
             if (DailyDone()) {
                 sprintf(buf, "DAILY  COMPLETE");
@@ -3788,7 +3780,6 @@ void DrawHUD(void) {
         */
         {
             extern int   ScavengerRifling(void);
-            extern int   WardenActive(void), WardenBlocking(void);
             const char* st = NULL;
             unsigned int stc = 0x00D0D0D0u;
 
@@ -3817,7 +3808,6 @@ void DrawHUD(void) {
         }
         /* v7：CARRY 后面跟当前强度档位 —— 玩家必须看得见「我跨档了」 */
         {
-            extern int GoldTier(void);
             int tier = GoldTier();
             sprintf(buf, Tr("CARRY  %d   TIER %d", "带入  %d   强度档 %d"), carryGold, tier);
             /* 档位越高颜色越烫：0~4 灰 / 5~9 黄 / 10~15 红 */
@@ -3841,8 +3831,6 @@ void DrawHUD(void) {
        但界面上从来没告诉玩家「还剩几次 / 冷却多久」。
        放在 BOOST 下面一行，和左侧 HUD 同一列。 */
     {
-        extern int   RunUpgWrenchLevel(void);
-        extern float RunUpgWrenchCooldown(void);
         extern int   wrenchCharges, wrenchLastUsed;
         extern float wrenchCd;
 
@@ -3895,9 +3883,6 @@ void DrawHUD(void) {
      * 放在顶部正中，配一条消耗中的进度条。
      * ================================================================ */
     {
-        extern int   WardenSpotting(void);
-        extern float WardenSpotLeft(void);
-        extern float WardenSpotFrac(void);
         if (WardenSpotting()) {
             char cb[32];
             sprintf(cb, "%.1f", (double)WardenSpotLeft());
@@ -4348,7 +4333,6 @@ void DrawHUD(void) {
              * ================================================================ */
             {
                 extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
-                extern const char* ThemeName(int, int);
                 extern float posX, posY;
                 int cxp = (int)posX, cyp = (int)posY;
                 if (cxp >= 0 && cyp >= 0 && cxp < MAP_WIDTH && cyp < MAP_HEIGHT &&
@@ -4589,9 +4573,7 @@ void DrawHUD(void) {
             sprintf(pbuf, "HOLD %s  SEARCH", VkName(g_bindings[ACT_INTERACT]));
         else if (hoverKind == 4) {
             /* AD-46：舱门提示**独占一行**，不和时间/搜索提示抢坐标 */
-            extern const char* HatchTitle(int idx);
             char why[96];
-            extern int HatchGateCheck(int idx, char* why, int cap);
             if (HatchGateCheck(hoverIndex, why, (int)sizeof(why)))
                 sprintf(pbuf, "HOLD %s  %s", VkName(g_bindings[ACT_INTERACT]), HatchTitle(hoverIndex));
             else

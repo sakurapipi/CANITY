@@ -1,4 +1,7 @@
 #include "common.h"   /* 系统头只在 common.h 里出现（模块约定） */
+#include "economy.h"
+#include "ui.h"
+#include "wallet.h"
 #include "shop.h"
 #include "game.h"
 #include "entity.h"
@@ -265,7 +268,6 @@ static int ShopItemFits(int kind) {
 
 static int ShopSpend(int cost) {
     /* v6：统一走 Wallet —— 单一货币，不再有"已入账 / 待上缴"两级 */
-    extern int WalletSpendRun(int);
     return WalletSpendRun(cost);
 }
 
@@ -286,8 +288,6 @@ const char* ShopRowText(int row) {
     if (shopPage == SHP_UPGRADE) {
         if (row == RUN_UPG_COUNT) {
             /* v7 B3：协议行 —— 回车循环切换四种协议 */
-            extern const char* ContractName(void);
-            extern float ContractExitMul(void);
             sprintf(sbuf, "CONTRACT  %s   EXIT x%d%%",
                     ContractName(), (int)(ContractExitMul() * 100.0f));
             return sbuf;
@@ -304,8 +304,6 @@ const char* ShopRowText(int row) {
          * ================================================================ */
         {
             extern int g_lang;
-            extern const char* RunUpgDesc(int);
-            extern const char* RunUpgDescZh(int);
             const char* d = (g_lang == LANG_ZH) ? RunUpgDescZh(row) : RunUpgDesc(row);
             if (cost < 0)
                 sprintf(sbuf, "%s  LV%d/%d  MAX   %s",
@@ -523,7 +521,6 @@ static int ShopLeaveRow(int row) {
 }
 
 void ShopActivate(void) {
-    extern void ShopLeave(void);
     /* 鼠标点 LEAVE / 回车敲 LEAVE 都从这里走，和 ESC 同一条路径 */
     if (ShopLeaveRow(shopRow)) { ShopLeave(); return; }
 
@@ -531,7 +528,6 @@ void ShopActivate(void) {
     if (shopPage == SHP_UPGRADE) {
         if (shopRow == RUN_UPG_COUNT) {
         /* v7 B3：切协议（每局一次，签了不能撕 —— 这里只允许首次切换） */
-        extern void ContractCycle(void);
         extern int shopContractUsed;
         if (shopContractUsed) { PlaySfx(SFX_GLASS, 0.4f); return; }
         ContractCycle();
@@ -572,7 +568,6 @@ void ShopActivate(void) {
         if (shopRow >= SHOP_OFFERS) {
         /* v6 **LEAVE 行回车要能真的离开** ——
            原来画着 "LEAVE (ESC)" 但回车直接 return，玩家选中它按回车毫无反馈。 */
-        extern void ShopLeave(void);
         ShopLeave();
         return;
     }
@@ -726,7 +721,6 @@ void ShopActivate(void) {
     }
     /* v2.0：第 4 行 = 跳层（SHORTCUT keystone） */
     if (shopRow == 3) {
-        extern void SkipOneLevel(void);
         extern int shortcutUsed, bossLevel;
         if (SkillShortcutAvailable() && !shortcutUsed && !bossLevel) {
             extern int firstMouseMove;
@@ -785,7 +779,6 @@ void ShopSetSafeLv(int heal, int charge, int stamina) {
 void ShopLeave(void) {
     extern int resetInputState, uiDirty;
     extern int firstMouseMove;          /* 2026-11-05：**必须一起置位** */
-    extern void ForceCursor(int on);
     currentState = STATE_PLAYING;
     resetInputState = 1;
     /* ============================================================
@@ -820,16 +813,9 @@ void ShopLeave(void) {
  * 只用最底层的 DrawTextWin / BlendRectWin / FrameRectWin。
  * ================================================================ */
 
-extern void DrawTextWin(int, int, const char*, unsigned int);
-extern void DrawTextCenterWin(int, int, const char*, unsigned int);
-extern void BlendRectWin(int, int, int, int, unsigned int, float);
-extern void FrameRectWin(int, int, int, int, unsigned int, float, int);
-extern int  TextWidthWin(const char*);
-extern int  TextHeightWin(void);
 extern int  winW, winH;
 extern int  g_lang;
 extern int  carryGold;
-extern void PlaySfx(int, float);
 extern const char* pickupMsg;
 extern float pickupMsgTimer;
 extern int uiDirty;

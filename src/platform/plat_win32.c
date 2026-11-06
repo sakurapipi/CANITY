@@ -12,7 +12,6 @@
 #include "plat.h"
 #include "game.h"
 
-#include <stdio.h>
 
 /* ---------------------------------------------------------------------
  * 时间
@@ -27,6 +26,10 @@ static void PlatClockInit(void) {
     QueryPerformanceCounter(&s_t0);
     s_clockReady = 1;
 }
+
+void PlatInit(void) { }   /* 桌面端在 WinMain 里建窗，这里无事可做 */
+
+int PlatSelfTestRequested(void) { return 0; }
 
 void PlatSleepMs(int ms) {
     if (ms <= 0) return;

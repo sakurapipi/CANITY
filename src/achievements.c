@@ -4,6 +4,8 @@
  * 32 个成就，一张表。加成就 = 加一行。
  */
 #include "common.h"
+#include "save.h"
+#include "steam_zone.h"
 #include "achievements.h"
 #include "wallet.h"
 #include "audio.h"
@@ -125,7 +127,6 @@ void AchUnlock(int idx) {
     {
         extern const char* pickupMsg;
         extern float pickupMsgTimer;
-        extern void PlaySfx(int, float);
         extern int uiDirty;
         static char abuf[72];
         snprintf(abuf, sizeof(abuf), "+%d GOLD  %s",
@@ -138,12 +139,10 @@ void AchUnlock(int idx) {
 
     /* Steam 上报（没连接时是空操作） */
     if (kAchDefs[idx].steamId) {
-        extern int SteamZoneUnlockAchievement(const char*);
         SteamZoneUnlockAchievement(kAchDefs[idx].steamId);
     }
 
     {
-        extern void SaveGame(void);
         SaveGame();
     }
 }

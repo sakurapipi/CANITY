@@ -801,7 +801,6 @@ void SkillInitOnce(void) { skillRank[SK_ORIGIN]=1; }
  * 这是 Meta 系统的标准做法（重洗不该收费，收费只会让人不敢试）。
  * ================================================================ */
 void SkillResetAll(void) {
-    extern void WalletAddBank(int);
     int refund = 0;
     for (int i = 0; i < SKILL_COUNT; i++) {
         if (i == SK_ORIGIN) { skillRank[i] = 1; continue; }

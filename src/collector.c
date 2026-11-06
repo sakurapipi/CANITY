@@ -21,6 +21,7 @@
  *     45 秒上限只在「没钱」时生效（有钱时它在跑）。
  */
 #include "state.h"
+#include "economy.h"
 #include "common.h"
 #include "game.h"
 #include "entity.h"
@@ -70,10 +71,6 @@ typedef struct {
 
 Collector collector;
 
-extern float MoneyBagX(int), MoneyBagY(int), MoneyBagLife(int);
-extern int   MoneyBagAmount(int);
-extern void  MoneyBagTake(int idx);
-extern void  MoneyBagDropAt(float x, float y, int amount);
 
 int   CollectorActive(void)   { return collector.active; }
 float CollectorX(void)        { return collector.x; }
@@ -206,7 +203,6 @@ void CollectorSpawnIfEligible(void) {
     }
 
     extern int carryGold;
-    extern int GoldTier(void);
     CollectorReset();
     /* v2.4.71 平调：门槛 46000/T7 → 20000/T4 —— 用户要求「让他早点出来」。
        20000 大约是前期两三层就能攒到的量。 */
@@ -267,7 +263,6 @@ void CollectorBurstBounty(void) {
    前期一次就能抢回来，玩家敢上去打；
    后期要多砸几下，逼你在"追它"和"它跑掉"之间做取舍。 */
 static int CollectorHitsToDrop(void) {
-    extern int GoldTier(void);
     int t = GoldTier();
     if (t >= 9) return 3;
     if (t >= 6) return 2;

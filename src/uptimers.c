@@ -10,6 +10,7 @@
  * 所以是最安全的第一个切割点，用来验证「把 Update 拆成子函数」这条路。
  */
 #include "common.h"
+#include "save.h"
 #include "game.h"
 #include "state.h"
 #include "uptimers.h"
@@ -20,7 +21,6 @@ static float autoSaveTimer = 0.0f;
 extern float echoScanT, echoScanX, echoScanY;
 extern float hideBlockTimer;
 extern int   trainingMode;   /* currentState 已在 game.h 里声明 */
-void SaveGame(void);
    /* 原来在 Update() 里是函数内 static */
 
 void UpdateTimers(float dt) {

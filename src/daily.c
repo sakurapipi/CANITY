@@ -34,6 +34,7 @@
  * 种子 = 年月日 → 同一天全世界一样（公平）
  */
 #include "common.h"
+#include "save.h"
 #include "daily.h"
 #include "game.h"
 #include "wallet.h"
@@ -370,12 +371,9 @@ void DailyMarkDone(void) {
      * 代价是玩家可能损失一次奖励，但**绝不会重复发放**。
      * ================================================================== */
     {
-        extern void SaveGame(void);
         extern int g_saveState;
-        extern int WalletSpendBank(int);
         extern const char* pickupMsg;
         extern float pickupMsgTimer;
-        extern void PlaySfx(int, float);
 
         WalletAddBank(reward);
         SaveGame();
@@ -413,9 +411,7 @@ void DailyTick(void) {
     }
     /* 极端情况下（加钱后连退钱都失败）留一条待发奖励，下一帧再试 */
     if (s_pendingReward > 0) {
-        extern void SaveGame(void);
         extern int g_saveState;
-        extern int WalletSpendBank(int);
         int r = s_pendingReward;
         WalletAddBank(r);
         SaveGame();

@@ -10,6 +10,7 @@
  * 模块划分见 common.h 顶部注释。
  */
 #include "common.h"
+#include "skills.h"
 #include "entity.h"
 #include "game.h"
 #include "plat.h"
@@ -118,7 +119,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         const char* ui = getenv("CANITY_UI");
         if (ui && ui[0]) {
             extern GameState currentState;
-            extern void SkillInitOnce(void);
             SkillInitOnce();
             if (strcmp(ui, "skills") == 0 || strcmp(ui, "hub") == 0)
                 currentState = STATE_HUB;

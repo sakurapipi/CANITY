@@ -1,30 +1,112 @@
 /*
  * Canity — 公共契约头文件（唯一包含系统头的地方）
  *
- * 模块划分：
- *   common.h   系统头 / 全部常量 / 跨模块共享的类型 / 纯数学工具
- *   entity.h   玩家状态、状态效果、三种怪物 + 跳脸虫 QTE
+ * ==================================================================
+ * 分区（每一格只干一件事；跨格只能通过头文件里的公开符号）
+ * ==================================================================
+ *   common.h   系统头（**唯一入口**）/ 全部常量 / 跨模块共享类型 / 纯数学工具
+ *   plat.h     平台接口：时间 / 窗口 / 呈现 / 输入 / 文件 / 音频出口
+ *              游戏侧只认它，**不许**再出现任何系统 API 调用
+ *   entity.h   玩家状态、状态效果、三种怪物
  *   game.h     世界、关卡、规则、输入、菜单状态机、窗口过程
  *   render.h   像素缓冲、贴图与查表、多线程光栅、3D、精灵、地图
  *   ui.h       字体、文字、菜单/弹窗/HUD 绘制、最终呈现
  *   audio.h    waveOut 音频合成与混音
  *   save.h     SaveBlob 与存档读写
- *   main.c     只剩 WinMain：建窗 + 固定步长主循环
  *
- * 约定：
- *   - 除本文件外，任何 .c / .h 都不再直接包含系统头。
- *   - 全局变量只在某个 .c 里定义并赋初值，对应 .h 里只写 extern。
- *   - 本文件不定义任何变量对象。
- */
-#ifndef CANITY_COMMON_H
+ * 入口与后端（同一格的两份实现，构建时二选一）：
+ *   src/main.c                  Win32 入口：WinMain + 消息循环
+ *   src/platform/main_web.c     网页入口：main + rAF 主循环
+ *   src/platform/plat_win32.c   桌面后端（DIB / BitBlt / GetAsyncKeyState / 文件）
+ *   src/platform/plat_web.c     网页后端（canvas / localStorage）
+ *   src/audio_web.c             音频分区网页后端（一期静音）
+ *   src/music_web.c             配乐分区网页后端（一期静音）
+ *   src/gamepad_web.c           手柄分区网页后端
+ *   src/steam/steam_zone_web.c  Steam 分区网页后端（全部空实现）
+ *
+ * 约定（tools/partition_check.py 逐条检查）：
+ *   S1  除本文件外，任何 .c / .h 都不再直接包含系统头。
+ *   S2  只有 src/save/save_backend.c 能读写 .sav。
+ *   S3  每个分区的公开符号，只能由**该分区自己**的实现文件定义 ——
+ *       平台层不许替 audio / music / gamepad / steam 写桩。
+ *   S4  全局变量只在某个 .c 里定义并赋初值，对应 .h 里只写 extern。
+ *   S5  本文件不定义任何变量对象。
+ *
+ * 为什么 S3 存在：网页移植时曾经把 audio/music/steam/手柄的桩全塞进
+ * plat_web.c。结果平台层变成了"什么都懂一点"的杂物间，改一个音频接口
+ * 要动平台层。桩必须回到各自分区，平台层只管平台。
+ * ==================================================================
+ */#ifndef CANITY_COMMON_H
 #define CANITY_COMMON_H
 
-/* 2026-11-06（网页版 R4）：**系统头按平台分流**。
-   桌面构建拿 windows.h；网页构建拿 compat/web_compat.h ——
-   后者只提供类型与键码常量，不提供任何函数，
-   因为平台层之外本来就不许调用 Win32。 */
+/* ==================================================================
+ * 2026-11-06（网页版移植）：**系统头仍然只有本文件这一个入口**
+ * ------------------------------------------------------------------
+ * 桌面：windows.h + mmsystem.h
+ * 网页：emscripten.h + 下面那段 Win32 垫片
+ *
+ * 垫片里**只有类型与键码常量，没有任何函数** —— 因为平台层之外
+ * 本来就不许调用系统 API（tools/partition_check.py 规则 S1 会查）。
+ *
+ * 为什么垫片写在这里、而不是单开一个 compat/web_compat.h：
+ * 一旦允许第二个文件包含系统头，"唯一入口"这条约定就名存实亡，
+ * 后面每个人都会给自己的模块开一个小系统头。
+ * ================================================================ */
+/* stdint.h 必须在垫片之前 —— 垫片里的 WPARAM/LPARAM 要用 uint64_t/int64_t */
+#include <stdint.h>
+
 #ifdef CANITY_WEB
-#include "compat/web_compat.h"
+#include <emscripten.h>
+
+/* ---- Win32 兼容垫片：类型与键码，只此而已 ---- */
+#define MAX_PATH 260
+#define WINAPI
+#define CALLBACK
+#define TRUE 1
+#define FALSE 0
+
+typedef int            BOOL;
+typedef unsigned int   DWORD;
+typedef int            LONG;
+typedef unsigned int   UINT;
+typedef void*          HANDLE;
+typedef void*          HWND;
+typedef void*          HDC;
+typedef void*          HINSTANCE;
+typedef uint64_t       WPARAM;      /* 与 Win32 64 位一致 */
+typedef int64_t        LPARAM;
+typedef int64_t        LRESULT;
+
+typedef struct { LONG left, top, right, bottom; } RECT;
+typedef struct { LONG x, y; } POINT;
+
+/* 虚拟键码：只保留游戏实际用到的 25 个，编号与 Windows 一致，
+   这样存档里的键位绑定跨平台通用。 */
+#define VK_LBUTTON   0x01
+#define VK_RBUTTON   0x02
+#define VK_MBUTTON   0x04
+#define VK_TAB       0x09
+#define VK_RETURN    0x0D
+#define VK_SHIFT     0x10
+#define VK_CONTROL   0x11
+#define VK_MENU      0x12
+#define VK_ESCAPE    0x1B
+#define VK_SPACE     0x20
+#define VK_HOME      0x24
+#define VK_LEFT      0x25
+#define VK_UP        0x26
+#define VK_RIGHT     0x27
+#define VK_DOWN      0x28
+#define VK_NUMPAD0   0x60
+#define VK_NUMPAD9   0x69
+#define VK_F9        0x78
+#define VK_F11       0x7A
+#define VK_LSHIFT    0xA0
+#define VK_RSHIFT    0xA1
+#define VK_LCONTROL  0xA2
+#define VK_RCONTROL  0xA3
+#define VK_LMENU     0xA4
+#define VK_RMENU     0xA5
 #else
 #include <windows.h>
 #include <mmsystem.h>
@@ -34,7 +116,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <stdint.h>   /* uint32_t：程序化配乐用（规则：系统头只在本文件出现） */
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
 #define CANITY_VERSION_NUM 33         /* 整数版本，进存档做记录 */

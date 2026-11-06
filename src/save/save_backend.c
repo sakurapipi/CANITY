@@ -25,7 +25,6 @@
    声明在 save.h（上面已 include），这里直接用，不重复定义。 */
 
 /* 由 save.c 导出：按「候选路径 i + 存档槽 slot」算路径 */
-const char* SavePathForSlot(int i, int slot, char* buf, size_t n);
 
 /* ================================================================== */
 /* 原子写 / 整份读                                                     */

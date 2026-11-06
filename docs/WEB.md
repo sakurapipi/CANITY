@@ -50,13 +50,32 @@ cd ~/.dsh/tools/emsdk && emsdk.bat install latest
 
 ```
 include/plat.h                唯一跨平台接口（无任何 Win32 类型）
+include/common.h              系统头唯一入口（网页端在这里切到 emscripten.h + 垫片）
 src/platform/plat_win32.c     桌面后端（DIB + BitBlt + GetAsyncKeyState + 文件系统）
-src/platform/plat_web.c       网页后端（canvas + localStorage）+ 网页入口 main()
-include/compat/web_compat.h   Win32 类型/键码垫片（只有类型常量，没有函数）
+src/platform/plat_web.c       网页后端（canvas + localStorage）
+src/main.c                    Win32 入口（WinMain + 消息循环）
+src/platform/main_web.c       网页入口（main + rAF 主循环）
+src/audio_web.c               音频分区的网页后端
+src/music_web.c               配乐分区的网页后端
+src/gamepad_web.c             手柄分区的网页后端
+src/steam/steam_zone_web.c    Steam 分区的网页后端
 ```
 
-游戏侧只认 `plat.h`。铁律：**`plat_*.c` 之外的 `.c` 不得出现任何系统 API 调用**
-（`tools/partition_check.py` 会查系统头）。
+### 分区规则（tools/partition_check.py 逐条检查）
+
+```
+S1  除 common.h 外，任何 .c/.h 都不直接包含系统头
+S2  只有 src/save/save_backend.c 能读写 .sav
+S3  每个分区的公开符号只能由该分区自己的实现文件定义
+```
+
+**S3 是这轮补的**：网页移植的第一版把 audio / music / gamepad / steam 的桩
+全塞进了 `plat_web.c`，平台层变成"什么都懂一点"的杂物间。
+现在桩回到各自分区，平台层只管平台，规则会一直盯着。
+
+Win32 的类型与键码垫片**写在 `common.h` 里**（`#ifdef CANITY_WEB` 分支），
+而不是单开一个 `compat/web_compat.h` —— 一旦允许第二个文件包含系统头，
+"唯一入口"这条约定就名存实亡。
 
 ### 数据流
 
@@ -94,6 +113,7 @@ include/compat/web_compat.h   Win32 类型/键码垫片（只有类型常量，�
 | 配乐 | MCI | **静音**（`music.c` 被排除） |
 | 手柄 | XInput 动态加载 | 无（`gamepad.c` 被排除） |
 | Steam | Steamworks | 全部空实现（`steam_zone.c` 被排除） |
+| 入口 | `src/main.c`（WinMain） | `src/platform/main_web.c`（rAF） |
 | 全屏 | F11 / Alt+Enter | 浏览器全屏（由外壳处理） |
 
 被排除的五个 `.c` 都有同名桩函数在 `plat_web.c` 里，
@@ -132,3 +152,6 @@ python -X utf8 tools/build_validate.py     # 期望 ALL VALIDATION PASSED
 3. **存档**：只按文件名做键，多存档槽之间不会串，但**不同目录的同名文件会互相覆盖**
    （网页端本来就没有目录）。
 4. **触屏手感**：第一人称 + 0.42 秒 QTE 在手机上偏难，后续会放宽 QTE 窗口。
+5. **历史原型债务**：这轮清掉了 141 处「头文件里已有、.c 里又声明一遍」的重复
+   原型；还剩 `entity.c` / `render.c` / `main_web.c` 三个文件因为删了会破坏
+   编译顺序，暂未清理。

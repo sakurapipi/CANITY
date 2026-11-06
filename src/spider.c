@@ -3,13 +3,14 @@
  * 头部注释见 include/spider.h。
  */
 #include "common.h"
+#include "entity.h"
 #include "spider.h"
 #include "control_effect.h"
 #include "audio.h"
 
-/* PlaySfx 在 audio.h 里没有原型（老代码一直是隐式声明），
-   这里显式声明一次，避免 -Werror。 */
-void PlaySfx(int id, float vol);
+/* 2026-11-06（分区 S3）：PlaySfx 的原型本来就在 audio.h 里，
+   这里不许再声明一遍 —— 跨分区只认头文件的公开符号。 */
+#include "audio.h"
 
 typedef struct {
     int   active;
@@ -27,7 +28,6 @@ static float s_respawnCd = 0.0f;
 static Spider s_spider;
 
 /* 外部依赖（都在别处实现） */
-extern int   HasLOS(float, float, float, float);
 extern int   worldMap[MAP_HEIGHT][MAP_WIDTH];
 extern float posX, posY;
 extern int   hiddenIn;

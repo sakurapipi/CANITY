@@ -31,6 +31,8 @@
  *         巡逻和赶路都沿梯度走 —— 跨房间也不会卡。
  */
 #include "common.h"
+#include "campaign.h"
+#include "entity.h"
 #include "game.h"
 #include "state.h"
 #include "ai_common.h"
@@ -39,7 +41,6 @@
 #include "warden.h"
 
 /* v2.4.51：状态效果（减速） */
-extern void ApplyFx(int kind, float strength, float duration);
 
 #define WARDEN_SPEED          0.70f   /* 巡逻速度（全场最慢） */
 #define WARDEN_RUSH_SPEED     1.70f   /* 发现玩家后赶去出口的速度 */
@@ -409,7 +410,6 @@ void WardenSpawnIfPowered(void) {
     if (!breakerOpen) return;
     if (!breaker.active) {
         /* v6 战役第 3 关：只要通电，不等 breaker.active 的防守计时 */
-        extern int CampaignWardenImmediate(void);
         if (!CampaignWardenImmediate()) return;
     }
     if (warden.active) return;          /* v2.4.42：已经在了就别重置 */
@@ -806,7 +806,6 @@ void UpdateWarden(float dt) {
                2026-11-03：**原来只判距离和角度，他能隔墙看见你**
                （HasLOS 一次都没调过），烟对它也完全无效。 */
             if (diff <= WARDEN_CONE_HALF && playerMoveSpeedNow > WARDEN_MOVE_EPS) {
-                extern int HasLOS(float, float, float, float);
                 extern int SegmentInSmoke(float, float, float, float);
                 if (HasLOS(warden.x, warden.y, posX, posY) &&
                     !SegmentInSmoke(warden.x, warden.y, posX, posY)) {

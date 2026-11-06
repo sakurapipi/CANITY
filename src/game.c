@@ -60,7 +60,6 @@ void CollapseBegin(void);
 
 /* 文件内前置声明：这两个 static 辅助函数在被调用处之后定义
    （原来集中在 main.c 中部的前置声明块，拆分后只保留模块内部需要的）。 */
-void ThrowItem(int type, float charge);
 void SpawnShards(float x, float y, float vx, float vy, float charge);
 /* v3.3：粘胶区域（实现放在 entity.c） */
 void SpawnGlue(float x, float y);
@@ -373,7 +372,6 @@ int eventBonus = 0;          /* 本局事件累计加分 */
 
 /* 通过本层时给的分 */
 int EventScore(int ev) {
-    extern int EventScoreOf(int);
     return EventScoreOf(ev);   /* v6：查 events.c 的表 */
 }
 
@@ -783,7 +781,6 @@ void UpdateSmokes(float dt) {
 
     /* v3.4：商店每行的补货倒计时 */
     {
-        extern void ShopTickCooldown(float dt);
         ShopTickCooldown(dt);
     }
 
@@ -2575,13 +2572,11 @@ void GenerateLevel(void) {
     BestiaryBeginFloor();
     SuspicionReset();   /* v7：新一层，清空可疑点 */
     {   /* v7：新一层，清空地上的钱袋 */
-        extern void MoneyBagsResetForNewFloor(void);
         MoneyBagsResetForNewFloor();
     }
     { extern void HintsReset(void); HintsReset(); }   /* v7 B4: 一次性提示 */
     { extern void WardenReset(void); WardenReset(); }   /* v7 B1: 新一层清掉守门人 */
     {   /* v7：清道夫计时 / 连躲计数 / 重置（每层都清） */
-        extern void ScavengerReset(void);
         extern float floorTime;
         extern int hideStreak;
         ScavengerReset(); floorTime = 0.0f; hideStreak = 0;
@@ -2592,11 +2587,9 @@ void GenerateLevel(void) {
     }   /* v2.4.94 封喉表 + 第二只计时 + 理智档位重置 */
     }
     {   /* v7：拾荒者按强度档决定是否出现 */
-        extern void CollectorSpawnIfEligible(void);
         CollectorSpawnIfEligible();
     }
     {   /* v7：扳手次数每层补满 */
-        extern int RunUpgWrenchCharges(void);
         extern int wrenchCharges, wrenchLastUsed;
         extern float wrenchCd;
         wrenchCharges = RunUpgWrenchCharges();
@@ -2711,7 +2704,6 @@ void GenerateLevel(void) {
 #if CANITY_ROOMS
     CellMetaReset();
     {
-        extern int GenerateThemeRooms(int);
         extern int roomSeedUsed;
         /* ==================================================================
          * 2026-11-06（用户实测）：**训练营不要特殊房间；并且要给每层加上限**
@@ -2828,7 +2820,6 @@ void GenerateLevel(void) {
      * 定稿之后再算，那时 breaker.x/y 才是本层的真实位置。
      * ================================================================ */
     {
-        extern float CampaignExitDistNow(void);
         if (!(CampaignExitDistNow() > 1.01f)) {
             FindFarthestCell(&exitX, &exitY);
         }
@@ -2923,8 +2914,6 @@ void GenerateLevel(void) {
      * 这里在事件表之后叠一层，顺序：基础 → 层词条 → 事件 → 战役 → 每日
      * ================================================================ */
     if (dailyMode) {
-        extern float DailyMonsterSpeedMul(void), DailyBatteryDrainMul(void);
-        extern float DailyGoldMul(void), DailyNoiseMul(void);
         modSpeedMul   *= DailyMonsterSpeedMul();
         modBatteryMul *= DailyBatteryDrainMul();
         modShardMul   *= DailyGoldMul();
@@ -2946,7 +2935,6 @@ void GenerateLevel(void) {
      * 于是 5 关的保险丝全走普通曲线 —— 战役规模差异完全不成立。
      * ================================================================ */
     if (campaignMode) {
-        extern int CampaignFusesNow(void);
         int cf = CampaignFusesNow();
         if (cf >= 2 && cf <= MAX_CONTAINERS) {
             fusesNeeded = cf;
@@ -3307,7 +3295,6 @@ void GenerateLevel(void) {
      * "通电之后出口在图纸另一头"这个语义才成立。
      * ================================================================ */
     {
-        extern float CampaignExitDistNow(void);
         if (CampaignExitDistNow() > 1.01f && breaker.active) {
             FindFarthestFromCell((int)breaker.x, (int)breaker.y, &exitX, &exitY);
         }
@@ -3389,7 +3376,6 @@ void GenerateLevel(void) {
     levelEvent = -1;
     if (currentLevel >= 2 && (rand() % 100) < EVENT_CHANCE)
         {   /* v6：按权重抽（血月/空投更常见，幸运更少见） */
-            extern int EventPickRandom(unsigned int*);
             unsigned int sd = (unsigned int)rand();
             levelEvent = EventPickRandom(&sd);
         }
@@ -3453,7 +3439,6 @@ void GenerateLevel(void) {
         }
     }
     { extern void BestiaryNoteFloor(int,int);
-      extern void BestiaryMarkSeen(int);
       BestiaryMarkSeen(0); BestiaryNoteFloor(0, currentLevel); }   /* 寻声鬼：每层都有 */
     if (lightBeast.active) { BestiaryMarkSeen(1); BestiaryNoteFloor(1, currentLevel); }           /* 追光鬼 */
     if (currentLevel >= LEECH_MIN_LEVEL) { BestiaryMarkSeen(2); BestiaryNoteFloor(2, currentLevel); }   /* 偷电怪 */
@@ -3696,7 +3681,6 @@ float SanityDrainRate(void) {
 /* v1.8：瓶子携带上限（绣刀的代价是把它压到 1） */
 int BottleCap(void) {
     /* v3.4：DEEP POCKET（局内树 id 8）每种投掷物上限 +2 */
-    extern int BenchDeepPocket(void);
     int cap = 4 + RunUpgCarryBonus() + (BenchDeepPocket() ? 2 : 0);
     if (cap < 1) cap = 1;
     /* v6 **补上 return** —— 这里原来漏了，非 void 函数落空是未定义行为。
@@ -3782,7 +3766,6 @@ void BankSettle(int survived) {
 
     /* v6：结算统一走 WalletSettle */
     {
-        extern int WalletBank(void);
         int beforeBank = WalletBank();
         { extern void WalletSettle(int, int); WalletSettle(survived, profit); }
         lastRunKept=WalletBank()-beforeBank;
@@ -3790,7 +3773,6 @@ void BankSettle(int survived) {
            玩几局之后就能算真实金币/局、真实时长，
            再回头校准技能树价格（现在是推算值，不是实测值）。 */
         {
-            extern void TelemetryRunEnd(int, int, int, int, float, int);
             extern int CatchCountThisRun(void);
 float ExtractDepthMul(int level);
             TelemetryRunEnd(currentLevel,
@@ -4059,10 +4041,6 @@ void EchoMarksReset(void) {
 
 /* 在 (sx,sy) 周围 rad 格内记录所有怪物 */
 void EchoMarksScan(float sx, float sy, float rad) {
-    extern int   CollectorActive(void), ScavengerActive(void), WardenActive(void);
-    extern float CollectorX(void), CollectorY(void);
-    extern float ScavengerX(void), ScavengerY(void);
-    extern float WardenX(void), WardenY(void);
     extern int   trainingMode;
 
     /* 落点自带噪音 —— **这是它的代价**：敲门会让屋里的人知道。
@@ -4211,8 +4189,6 @@ static int WrenchSwingFrame(void) {
 /* ---- 真正结算击退（在命中帧调用一次）---- */
 static unsigned int wrenchHitMask=0;
 static void WrenchApplyHit(float power) {
-    extern float RunUpgWrenchRange(void);
-    extern float RunUpgWrenchStun(void);
 
     /* ============================================================
      * 修：**扳手打不到第 2、3 只听声鬼**
@@ -4268,9 +4244,6 @@ static void WrenchApplyHit(float power) {
      * 5 号位留给它，和清道夫的 4 号位并列。
      * ================================================================ */
     {
-        extern int   SpiderActive(void);
-        extern float SpiderX(void), SpiderY(void);
-        extern void  SpiderDispel(void);
         if (SpiderActive() && !(wrenchHitMask & 32u)) {
             float sdx = SpiderX() - posX, sdy = SpiderY() - posY;
             float reach = RunUpgWrenchRange() + BenchKnockExtra() + 1.2f;
@@ -4284,9 +4257,6 @@ static void WrenchApplyHit(float power) {
     }
 
     {
-        extern int   CollectorActive(void);
-        extern float CollectorX(void), CollectorY(void);
-        extern void  CollectorHitByWrench(float, float);
         if (CollectorActive() && !(wrenchHitMask&4u)) {
             float cdx = CollectorX() - posX, cdy = CollectorY() - posY;
             if (cdx * cdx + cdy * cdy < 4.0f) { CollectorHitByWrench(posX, posY);wrenchHitMask|=4u;knockCountRun++; }
@@ -4305,7 +4275,6 @@ void WrenchStartSwing(float charge) {
           pickupMsgTimer = 1.6f;
           return;
       } }
-    extern float RunUpgWrenchCooldown(void);
     extern int   wrenchCharges, wrenchLastUsed;
     extern float wrenchCd;
 
@@ -4400,7 +4369,6 @@ static void WrenchKnockUpdate(float dt) {
    所有自动点灯路径（摇电、满电重亮、读档）都必须走这里，
    否则玩家可以靠摇电绕过每日限制。 */
 static int FlashlightUseAllowed(void) {
-    extern int DailyForbidLight(void);
     /* ==================================================================
      * 2026-11-06（**P1-1**）：**SK_SALVAGE 不再永久禁灯**
      * ------------------------------------------------------------------
@@ -4445,13 +4413,11 @@ void Update(float dt) {
         if(hidingHunt && monster.state!=2 && lightBeast.state!=2) { fullHideDone=1; hidingHunt=0; }
     }
     {   /* v7 B4：第一次携带超过 8000 时提一句 */
-        extern void HintOnce(int);
         if (carryGold >= 8000) HintOnce(4);
     }
     if(currentState==STATE_PLAYING && !exitChoiceOpen) { UpdateCollector(dt); }
     {   /* v7：清道夫 */
         extern float floorTime;
-        extern void ScavengerTickTrigger(float), UpdateScavenger(float);
         if (currentState == STATE_PLAYING) floorTime += dt;
         if(currentState==STATE_PLAYING && !exitChoiceOpen) { ScavengerTickTrigger(dt); UpdateScavenger(dt); }
     }
@@ -4503,7 +4469,6 @@ void Update(float dt) {
        · **大地图不耗电**（全屏规划路线是免费的）
        · 小地图耗电，且可以被局内强化「小地图省电」降低（10 → 4 /秒） */
     if (isMapOpen && !mapFullScreen && currentState == STATE_PLAYING) {
-        extern float RunUpgMapDrainPct(void);
         battery -= RunUpgMapDrainPct() * dt;
         if (battery <= 0.0f) {
             battery = 0.0f;
@@ -5131,7 +5096,6 @@ void Update(float dt) {
         /* 2026-11-06 审计补：**任何控制生效时都不能动**。
            原来只判 jumperControlT（抱脸虫的 10 秒），
            于是蛛网虽然"抓住了玩家"，却完全不限制移动 —— 效果等于没有。 */
-        extern int ControlActive(void);
         extern int collapseArmed;
         /* 审计·中 6：崩塌黑屏期间也不能走。
            原来 CollapseTick 的"吞输入"放在移动**之后**，
@@ -5203,7 +5167,6 @@ void Update(float dt) {
         extern int shopOverlayOpen;
         int tNow = PlatKeyDown('T');
         if (tNow && !tPrev && currentState == STATE_PLAYING && !shopOverlayOpen) {
-            extern void ShopOpen(int);
             ShopOpen(currentLevel);
             currentState = STATE_SAFEHOUSE;
             shopPage = 0;
@@ -5221,7 +5184,6 @@ void Update(float dt) {
            而浮层不动 currentState，绕开了整条坏路径。 */
         {
             extern int shopOverlayOpen;
-            extern void ShopOpen(int);
             ShopOpen(currentLevel);
             shopOverlayOpen = 1;
             ForceCursor(1);
@@ -6114,9 +6076,6 @@ void Update(float dt) {
      * 现在所有控制类型共用这一个处理点，持有者用 ControlTakeResult() 取结果。
      * ================================================================ */
     {
-        extern int ControlActive(void);
-        extern int ControlPress(void);
-        extern float ControlTimeLeft(void);
         extern void ControlTimeout(void);
         if (ControlActive()) {
             if (IsActionPressed(ACT_DODGE)) {
@@ -6301,7 +6260,6 @@ void Update(float dt) {
         /* 战役模式：每段连续 3 层；段内换层不重置资源，段间才切规则/重开资源。 */
         if (campaignMode) {
             /* v7 第 ㊿ 轮：层数读 kCampaign[].layers，不再写死 3 */
-            extern int CampaignLayersNow(void);
             int stageLayers = CampaignLayersNow();
             if (stageLayers < 1) stageLayers = 1;
             int stageFloor = currentLevel - CampaignStartFloor(campaignStage);
@@ -6416,7 +6374,6 @@ void Update(float dt) {
             bankStreak++;
             /* v6：每日任务进度 —— 到达层数 / 箱子数 */
             { extern int DailyGoalId(void), DailyGoalParam(void);
-              extern void DailySetProgress(int);
               extern int currentLevel;
               if (DailyGoalId() == 2) DailySetProgress(currentLevel);
             }
@@ -6929,17 +6886,12 @@ void StartGame(void) {
         if (p >= BANK_CARRY_STEPS) p = BANK_CARRY_STEPS - 1;
         int take = (int)((float)bankGold * (float)(p * BANK_STEP_PCT) / 100.0f + 0.5f);
         {   /* v6：取款走 Wallet（银行 → 携带） */
-            extern int WalletWithdraw(int);
             take = WalletWithdraw(take);
         }
         carryGold = take;          /* 局内花的就是这笔 */
         carryAtRunStart = take;    /* v6：记录基线，用于算净赚 */
         /* v6：开局把今天的每日任务打出来 */
         {
-            extern const char* DailyGoalTextEn(void);
-            extern const char* DailyModTextEn(void);
-            extern const char* DailyRestrictTextEn(void);
-            extern int DailyDone(void);
             static char db[160];
             /* ==================================================================
              * 2026-11-06（用户实测）：**这行横幅只在每日挑战里才有意义**
@@ -7001,7 +6953,6 @@ void StartGame(void) {
                          可能出现负数 → 「90 秒内清完」白送
          lowSanitySeconds：上一局攒的秒数直接算进本局 → LAST BREATH 白送 */
     {
-        extern void ShopResetCooldowns(void);
         ShopResetCooldowns();   /* v3.4：新局清空商店冷却 */
     }
     /* v3.4 CARTO 满级：开局直接把安全屋和配电箱所在格子标记为已探索，
@@ -7161,8 +7112,6 @@ static void CheckAchievements(void) {
      * DailySetProgress 是**取最大值**的，所以传累计值即可。
      * ================================================================ */
     {
-        extern int DailyGoalId(void);
-        extern void DailySetProgress(int);
         extern int totalGoldEarned, runSearched;
         extern int dailyEscapeCount, floorsNoSanityLoss;
         int v = 0;
@@ -7180,7 +7129,6 @@ static void CheckAchievements(void) {
         DailyObserve(DailyGoalId(),v);
     }
 
-extern void AchCheck(const AchSnap*);
     AchCheck(&s);
 
     /* v7 第 ㊿ 轮：这里原来 `if (gameWon) s.flags[2] = 0;`
@@ -7530,16 +7478,13 @@ void RewardScheduleForLevel(int level) {
     skillPickTotal = (relic && skill) ? 2 : 1;
     skillPickRound = 1;
     if (relic) {
-        extern int OpenRelicPick(void);
         if (!OpenRelicPick() && skill) {
             /* 遗物池空了：不能把这一层的技能奖励一起吞掉 */
             skillPickTotal = 1;
             skillPickRound = 1;
-            extern void OpenSkillPick(void);
             OpenSkillPick();
         }
     } else if (skill) {
-        extern void OpenSkillPick(void);
         OpenSkillPick();
     }
 }
@@ -8590,7 +8535,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_LBUTTONUP:
             /* 2026-11-05：松开要通知锁盘 —— 过载的判定就发生在这一刻 */
             if (lockActive) {
-                extern void LockHoldEnd(void);
                 LockHoldEnd();
                 uiDirty = 1;
                 return 0;
@@ -8598,7 +8542,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (currentState == STATE_HUB) {
                 /* 修：没拖动就当成单击 —— 选中鼠标下的节点（见 ui.c 的注释） */
                 extern int SkillDragWasClick(void);
-                extern int SkillNodeHitTest(int, int);
                 extern int hubSelection;
                 int wasClick = SkillDragWasClick();
                 SkillDragEnd();
@@ -8654,7 +8597,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 static DWORD lastR = 0;
                 DWORD now = GetTickCount();
                 if (lastR != 0 && (now - lastR) < 2000) {
-                    extern void SkillResetAll(void);
                     extern const char* pickupMsg;
                     extern float pickupMsgTimer;
                     SkillResetAll();
@@ -8740,7 +8682,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                    崩溃的真正原因是 ShopPriceAt() 无限递归（已修），
                    不是这条状态路径。而这条路径是进改造树 / 局内强化 /
                    休息 / 校准小游戏的**唯一入口**，不能没有。 */
-                extern void ShopOpen(int);
                 extern int currentLevel;
                 ShopOpen(currentLevel);
                 currentState = STATE_SAFEHOUSE;
@@ -8979,7 +8920,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                        原来这里各写一遍，ShopLeave 补了 firstMouseMove
                        而这里漏了 —— 于是 ESC 退出仍会视角翻转。
                        一份实现，两处调用，才不会再有这种半修。 */
-                    extern void ShopLeave(void);
                     ShopLeave();
                 }
             } else if (currentState == STATE_WEAPON_PICK) {
@@ -9026,7 +8966,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                        col/row 加减会跳到视觉上很远的地方。
                        现在按方向 + 距离找最近的邻居。 */
                     int nid = -1;
-                    extern int SkillNavNearest(int, int);
                     if (menuUp)    nid = SkillNavNearest(cur, 0);
                     if (menuDown)  nid = SkillNavNearest(cur, 1);
                     if (menuLeft)  nid = SkillNavNearest(cur, 2);
@@ -9080,8 +9019,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
             } else if (currentState == STATE_ACHIEVEMENTS) {
                 /* v6：**分类筛选** —— 32 个平铺看不完，TAB / Q / E 切分类 */
-                extern void AchCycleFilter(int);
-                extern int AchVisibleCount(void);
                 if (wParam == VK_TAB || wParam == (WPARAM)'E') { AchCycleFilter(1); menuScrollOffsets[STATE_ACHIEVEMENTS] = 0; uiDirty = 1; return 0; }
                 if (wParam == (WPARAM)'Q') { AchCycleFilter(-1); menuScrollOffsets[STATE_ACHIEVEMENTS] = 0; uiDirty = 1; return 0; }
                 int n = AchVisibleCount() + 1;   /* +1 = Back 行 */
@@ -9102,8 +9039,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
              * ================================================================ */
             {
                 extern int shopOverlayOpen, shopRow;
-                extern void ShopActivate(void);
-                extern int ShopRowCount(void);
                 if (shopOverlayOpen) {
                     int n = ShopRowCount();
                     if (n < 1) n = 1;
