@@ -238,12 +238,31 @@ static void wdStepAlongPlayerBfs(float* x, float* y, float sp, float dt) {
 
 /* ---- BFS 距离场（以出口为源点）---- */
 static short wdB[MAP_HEIGHT][MAP_WIDTH];
+/* ==================================================================
+ * 2026-11-07（v2.4.2）：**巡逻半径按关卡自适应**
+ * ------------------------------------------------------------------
+ * 用户实测：「守门人不会巡逻了」。
+ * 实测（tools/warden_probe.c）：它确实在动，但**3 秒只走 1.7 格** ——
+ * 因为在出口附近来回蹭，看起来就是"站着没动"。
+ *
+ * 根因：巡逻的掉头距离写死成"离开口 7 步"（st >= 7 才往外走完）。
+ * 出口如果在一个浅袋子里（距离场最大深度只有 2~3），
+ * 它永远到不了 7 —— 于是永远在 st<=1 和 st=2 之间抖。
+ *
+ * 现在：建距离场时顺便记下 maxDepth 与最远格，掉头阈值按
+ *      min(7, maxDepth-1) 取，并且保证至少 3 格，来回才有肉眼看得到的行程。
+ * ================================================================== */
+static int wdMaxDepth = 0;
+static int wdFarX = 0, wdFarY = 0;
 
 static void wdBfsBuild(void) {
     extern float exitX, exitY;
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++)
             wdB[y][x] = -1;
+    wdMaxDepth = 0;
+    wdFarX = (int)exitX;
+    wdFarY = (int)exitY;
 
     int sx = (int)exitX, sy = (int)exitY;
     if (sx < 0 || sx >= MAP_WIDTH || sy < 0 || sy >= MAP_HEIGHT) return;
@@ -269,6 +288,7 @@ static void wdBfsBuild(void) {
             if (worldMap[ny][nx] != 0) continue;
             if (wdB[ny][nx] >= 0) continue;
             wdB[ny][nx] = (short)nd;
+            if (nd > wdMaxDepth) { wdMaxDepth = nd; wdFarX = nx; wdFarY = ny; }
             qx[tail] = nx; qy[tail] = ny; tail++;
         }
     }
@@ -932,9 +952,36 @@ void UpdateWarden(float dt) {
             return;
         }
 
-        /* 到达外圈 → 掉头；回到出口附近 → 再出去 */
-        if (!warden.headingToExit && st >= 7)  warden.headingToExit = 1;
-        if (warden.headingToExit  && st <= 1)  warden.headingToExit = 0;
+        /* ============================================================
+         * 掉头阈值按关卡深度自适应（见 wdMaxDepth 的注释）
+         *   目标行程 = min(7, maxDepth-1)，但不低于 3 ——
+         *   出口在浅袋子里时也能走出一段可见的距离。
+         * ============================================================ */
+        int turnAt = wdMaxDepth - 1;
+        if (turnAt > 7) turnAt = 7;
+        if (turnAt < 3) turnAt = 3;
+        if (turnAt > wdMaxDepth) turnAt = wdMaxDepth;
+
+        if (!warden.headingToExit && st >= turnAt) warden.headingToExit = 1;
+        if (warden.headingToExit  && st <= 1)      warden.headingToExit = 0;
+
+        /* 兜底：距离场太浅（<3 格）时梯度几乎没有坡度，
+           直接朝"最远格"走，保证它一定在动。 */
+        if (wdMaxDepth > 0 && wdMaxDepth <= 3) {
+            float ox2 = warden.x, oy2 = warden.y;
+            float ttx = (float)wdFarX + 0.5f, tty = (float)wdFarY + 0.5f;
+            float ddx = ttx - warden.x, ddy = tty - warden.y;
+            if (ddx * ddx + ddy * ddy < 0.36f) {
+                warden.headingToExit = !warden.headingToExit;
+                ttx = exitX; tty = exitY;
+            }
+            wdStepToward(&warden.x, &warden.y, ttx, tty, WARDEN_SPEED, dt);
+            if (warden.x != ox2 || warden.y != oy2) {
+                float mvx2 = warden.x - ox2, mvy2 = warden.y - oy2;
+                if (mvx2 * mvx2 + mvy2 * mvy2 > 1e-6f) warden.facing = atan2f(mvy2, mvx2);
+            }
+            return;
+        }
 
         float oldX = warden.x, oldY = warden.y;
         wdStepGradient(&warden.x, &warden.y, WARDEN_SPEED, dt,
