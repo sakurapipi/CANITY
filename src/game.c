@@ -8270,6 +8270,19 @@ void CanityMouseClick(int mx, int my) {
         uiDirty = 1;
         return;
     }
+    /* 技能树「返回」按钮：点它就回主菜单（用户报告退不出去） */
+    if (currentState == STATE_HUB) {
+        extern int HubBackButtonAt(int mx, int my);
+        if (HubBackButtonAt(mx, my)) {
+            SaveGame();
+            currentState = STATE_MAIN_MENU;
+            menuSelection = 0;
+            ForceCursor(1);
+            uiDirty = 1;
+            return;
+        }
+    }
+
     /* 技能树的 + / - 缩放按钮优先命中（点它们不该去选节点） */
     if (currentState == STATE_HUB) {
         extern int HubZoomButtonAt(int mx, int my);

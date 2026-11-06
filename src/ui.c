@@ -2081,9 +2081,11 @@ void SkillZoomAt(float factor, int mx, int my) {
 void HubZoomButtonRect(int which /* 0=+ 1=- */, int* x0, int* y0, int* x1, int* y1) {
     int sz = UIS(44);
     int gap = UIS(10);
-    /* 放**左下角**：右下角是节点详情（价格等），会压住 */
-    int bx = UIS(24);
-    int by = winH - UIS(24) - sz;
+    /* 2026-11-06（用户实测：**左下角 UI 重叠**）
+       左下角是节点详情文字（名称/描述/购买提示），按钮压上去了。
+       现在放到**左侧竖直居中**：那一带是空的，而且拇指/鼠标都够得到。 */
+    int bx = UIS(16);
+    int by = winH / 2 - sz - gap / 2;
     if (which == 0) {              /* + 在上面 */
         by -= (sz + gap);
     }
@@ -2091,6 +2093,23 @@ void HubZoomButtonRect(int which /* 0=+ 1=- */, int* x0, int* y0, int* x1, int* 
     if (y0) *y0 = by;
     if (x1) *x1 = bx + sz;
     if (y1) *y1 = by + sz;
+}
+
+/* 技能树「返回」按钮（左上角，写死位置，和 + / - 同一套风格） */
+void HubBackButtonRect(int* x0, int* y0, int* x1, int* y1) {
+    int w = UIS(104), h = UIS(40);
+    int bx = UIS(16);
+    int by = UIS(16);
+    if (x0) *x0 = bx;
+    if (y0) *y0 = by;
+    if (x1) *x1 = bx + w;
+    if (y1) *y1 = by + h;
+}
+
+int HubBackButtonAt(int mx, int my) {
+    int x0, y0, x1, y1;
+    HubBackButtonRect(&x0, &y0, &x1, &y1);
+    return (mx >= x0 && mx <= x1 && my >= y0 && my <= y1) ? 1 : 0;
 }
 
 void DrawHubZoomButtons(void) {
@@ -2679,8 +2698,20 @@ void DrawSkillTree(void) {
                          "滚轮缩放   拖拽平移   HOME 复位   回车购买"),
                       0x00707070u);
 
-    /* 2026-11-06：右下角 + / - 缩放按钮（鼠标 / 触屏都能点） */
+    /* 2026-11-06：左侧 + / - 缩放按钮 */
     DrawHubZoomButtons();
+
+    /* 2026-11-06（用户实测：**点进技能树就退不出去**）
+       底层有 ESC，但：① 全屏时浏览器会吃掉 ESC ② 界面上找不到它。
+       所以在左上角画一个明确的「返回」按钮，鼠标/触屏都能点。 */
+    {
+        int bx0, by0, bx1, by1;
+        HubBackButtonRect(&bx0, &by0, &bx1, &by1);
+        BlendRectWin(bx0, by0, bx1, by1, 0x00101418u, 0.90f);
+        FrameRectWin(bx0, by0, bx1, by1, 0x00607080u, 0.95f, UIS(2));
+        DrawTextCenterWin((bx0 + bx1) / 2, (by0 + by1) / 2 - TextHeightWin() / 2,
+                          Tr("BACK", "返回"), 0x00E8C040u);
+    }
 }
 
 /* 逻辑画布坐标 -> 节点 id（没点中 -1）。
