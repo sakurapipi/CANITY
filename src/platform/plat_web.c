@@ -93,6 +93,10 @@ EM_JS(void, js_get_size, (int* w, int* h), {
     HEAP32[h >> 2] = Module._ch || 600;
 });
 
+EM_JS(int, js_has_selftest, (void), {
+    return (location.search || '').indexOf('selftest') >= 0 ? 1 : 0;
+});
+
 EM_JS(int, js_key_down, (int vk), {
     return (vk >= 0 && vk < 256 && Module._keys) ? Module._keys[vk] : 0;
 });
@@ -114,7 +118,7 @@ EM_JS(void, js_set_lock, (int on), {
     if (Module.canvas) Module.canvas.style.cursor = on ? 'none' : 'default';
 });
 
-EM_JS(int, js_locked, (void), { return Module._locked ? 1 : 0; });
+EM_JS(int, js_locked, (void), { return (Module._locked || Module._touchLook) ? 1 : 0; });
 
 EM_JS(void, js_present, (const unsigned int* src, int w, int h), {
     var cv = Module.canvas;
@@ -476,6 +480,7 @@ int  GamepadConnected(void) { return 0; }
  * ------------------------------------------------------------------- */
 #define WEB_LOGIC_STEP (1.0 / 120.0)
 
+static int g_selftest = 0;
 static double s_accum = 0.0;
 static double s_prev = 0.0;
 static int    s_booted = 0;
@@ -561,10 +566,46 @@ int main(void) {
     s_booted = 1;
     (void)s_booted;
 
+    /* ==================================================================
+     * 存档自检（?selftest=1）
+     * ------------------------------------------------------------------
+     * 网页端存档落在 localStorage。无头浏览器没法点菜单进游戏，
+     * 所以给一条可自动化的验证路径：写一份、读回来、比对，
+     * 结果写进 document.title —— Chrome --dump-dom 能直接读到。
+     * ================================================================ */
+    if (js_has_selftest()) {
+        const char* probe = "canity-selftest-payload";
+        char back[64];
+        int wr = PlatWriteFileBytes("selftest.bin", probe, (int)strlen(probe));
+        int rd = PlatReadFileBytes("selftest.bin", back, (int)sizeof(back) - 1);
+        const char* verdict = "savetest-fail";
+        if (back[0] == 0) back[0] = 0;
+        if (wr == 0 && rd == (int)strlen(probe)) {
+            back[rd] = 0;
+            if (strcmp(back, probe) == 0) verdict = "savetest-ok";
+        }
+        /* 结论同时写进 title 和加载遮罩里的那行字：
+           无头浏览器截一张图就能读到，不需要 DevTools。 */
+        {
+            /* 三个位置都写：title（--dump-dom 可读）、status 行、大标题。
+               无头截图只要能看见其中任意一个就算通过。 */
+            char js[320];
+            snprintf(js, sizeof(js),
+                     "try{document.title='%s';"
+                     "var s=document.getElementById('status');if(s)s.textContent='%s';"
+                     "var h=document.querySelector('#boot h1');if(h)h.textContent='%s';"
+                     "var sub=document.querySelector('#boot .sub');if(sub)sub.textContent='%s';"
+                     "}catch(e){console.error(e);}", verdict, verdict, verdict, verdict);
+            emscripten_run_script(js);
+        }
+        g_selftest = 1;
+    }
+
     /* 2026-11-06（R4）：**从 C 里收掉加载遮罩**。
        原来靠 JS 的 Module.onRuntimeInitialized 隐藏，实测那个回调
        在本配置下不触发，遮罩就一直压在游戏上（截图确认过大字 CANITY）。
        从 C 里显式收掉是确定的：走到这里说明初始化和首帧都准备好了。 */
+    if (!g_selftest)
     emscripten_run_script(
         "var b=document.getElementById('boot');"
         "if(b){b.classList.add('hidden');setTimeout(function(){b.style.display='none';},400);}"

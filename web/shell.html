@@ -49,6 +49,37 @@
   }
   #entry a:hover { color: #e8c040; border-color: #4a5a6c; }
   #entry a.primary { color: #e8c040; border-color: #6a5a20; }
+
+  /* ---- 触屏操作层（2026-11-06 R8）---- */
+  #touch { position: fixed; inset: 0; z-index: 12; display: none; pointer-events: none; }
+  #touch.on { display: block; }
+  #stick {
+    position: absolute; left: 18px; bottom: 22px;
+    width: 128px; height: 128px; border-radius: 50%;
+    border: 1px solid #2f3a48; background: rgba(12,18,24,.42);
+    pointer-events: auto; touch-action: none;
+  }
+  #stick > i {
+    position: absolute; left: 50%; top: 50%;
+    width: 48px; height: 48px; margin: -24px 0 0 -24px;
+    border-radius: 50%; background: rgba(232,192,64,.28);
+    border: 1px solid #6a5a20;
+  }
+  #look { position: absolute; right: 0; top: 0; width: 55%; height: 100%;
+          pointer-events: auto; touch-action: none; }
+  #btns {
+    position: absolute; right: 16px; bottom: 20px;
+    display: grid; grid-template-columns: repeat(2, 62px); gap: 10px;
+    pointer-events: none;
+  }
+  #btns button {
+    width: 62px; height: 62px; border-radius: 50%;
+    border: 1px solid #3a4656; background: rgba(14,20,28,.68);
+    color: #cfd8e4; font: 600 13px/1 ui-monospace, monospace;
+    pointer-events: auto; touch-action: none;
+  }
+  #btns button:active { background: rgba(232,192,64,.24); color: #e8c040; }
+  #btns button.wide { grid-column: span 2; width: auto; border-radius: 10px; height: 44px; }
 </style>
 </head>
 <body>
@@ -59,6 +90,18 @@
   <div class="sub">RAYCASTER HORROR</div>
   <div id="bar"><i></i></div>
   <div id="status">载入中…</div>
+</div>
+
+<div id="touch">
+  <div id="stick"><i></i></div>
+  <div id="look"></div>
+  <div id="btns">
+    <button data-key="69">E</button>
+    <button data-key="86">V</button>
+    <button data-key="32">空</button>
+    <button data-key="77">M</button>
+    <button class="wide" data-key="2">投掷</button>
+  </div>
 </div>
 
 <div id="entry">
@@ -81,6 +124,98 @@
     },
     locateFile: function (path) { return path; }
   };
+  // ==================================================================
+  // 触屏操作（2026-11-06 R8）
+  // ------------------------------------------------------------------
+  // 直接往 Module._keys 写 Windows 虚拟键码 —— 与键盘走同一条通道，
+  // 游戏侧完全不知道输入来自触摸屏还是键盘。
+  //   W/A/S/D = 87/65/83/68     E=69  V=86  空=32  M=77  右键=2
+  // ==================================================================
+  (function () {
+    // ?touch=1 可以强制打开，方便在桌面上调试触屏布局
+    var forceTouch = (location.search || '').indexOf('touch=1') >= 0;
+    var touchable = forceTouch ||
+                    ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if (!touchable) return;
+    var layer = document.getElementById('touch');
+    if (!layer) return;
+    layer.classList.add('on');
+
+    function key(vk, on) {
+      if (!Module._keys) return;
+      Module._keys[vk] = on ? 1 : 0;
+    }
+
+    // 右侧半屏拖动 = 转视角
+    var look = document.getElementById('look');
+    var lookId = null, lastX = 0;
+    look.addEventListener('touchstart', function (e) {
+      var t = e.changedTouches[0];
+      lookId = t.identifier; lastX = t.clientX;
+      Module._touchLook = true;
+      e.preventDefault();
+    }, { passive: false });
+    look.addEventListener('touchmove', function (e) {
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        var t = e.changedTouches[i];
+        if (t.identifier !== lookId) continue;
+        var dx = t.clientX - lastX;
+        lastX = t.clientX;
+        Module._mouseDX = (Module._mouseDX || 0) + dx * 2;
+      }
+      e.preventDefault();
+    }, { passive: false });
+    look.addEventListener('touchend', function () {
+      lookId = null; Module._touchLook = false;
+    }, false);
+
+    // 左下摇杆 = 移动
+    var stick = document.getElementById('stick');
+    var knob = stick.querySelector('i');
+    var stickId = null, cx = 0, cy = 0, R = 56;
+    function clearMove() { key(87, 0); key(83, 0); key(65, 0); key(68, 0); }
+    function applyMove(dx, dy) {
+      clearMove();
+      var dead = 14;
+      if (dy < -dead) key(87, 1);
+      if (dy > dead) key(83, 1);
+      if (dx < -dead) key(65, 1);
+      if (dx > dead) key(68, 1);
+    }
+    stick.addEventListener('touchstart', function (e) {
+      var t = e.changedTouches[0];
+      var r = stick.getBoundingClientRect();
+      cx = r.left + r.width / 2; cy = r.top + r.height / 2;
+      stickId = t.identifier;
+      e.preventDefault();
+    }, { passive: false });
+    stick.addEventListener('touchmove', function (e) {
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        var t = e.changedTouches[i];
+        if (t.identifier !== stickId) continue;
+        var dx = t.clientX - cx, dy = t.clientY - cy;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var k = Math.min(1, R / len);
+        knob.style.transform = 'translate(' + (dx * k) + 'px,' + (dy * k) + 'px)';
+        applyMove(dx, dy);
+      }
+      e.preventDefault();
+    }, { passive: false });
+    stick.addEventListener('touchend', function () {
+      stickId = null;
+      knob.style.transform = '';
+      clearMove();
+    }, false);
+
+    // 动作按钮
+    Array.prototype.forEach.call(document.querySelectorAll('#btns button'), function (b) {
+      var vk = parseInt(b.getAttribute('data-key'), 10);
+      b.addEventListener('touchstart', function (e) { key(vk, 1); e.preventDefault(); }, { passive: false });
+      b.addEventListener('touchend', function (e) { key(vk, 0); e.preventDefault(); }, { passive: false });
+      b.addEventListener('touchcancel', function () { key(vk, 0); }, false);
+    });
+  })();
+
   // 进度条：Emscripten 的 download 进度靠 XHR 包装，这里给个粗粒度回退
   (function () {
     var bar = document.querySelector('#bar > i');
