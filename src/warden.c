@@ -252,6 +252,7 @@ static short wdB[MAP_HEIGHT][MAP_WIDTH];
  * 现在：建距离场时顺便记下 maxDepth 与最远格，掉头阈值按
  *      min(7, maxDepth-1) 取，并且保证至少 3 格，来回才有肉眼看得到的行程。
  * ================================================================== */
+static float s_patrolStall = 0.0f;   /* 巡逻连续没挪动的时间 */
 static int wdMaxDepth = 0;
 static int wdFarX = 0, wdFarY = 0;
 
@@ -295,12 +296,12 @@ static void wdBfsBuild(void) {
 }
 
 /* 沿「到出口的 BFS 梯度」走一步；climb=1 则反着走（远离出口） */
-static void wdStepGradient(float* x, float* y, float sp, float dt, int climb) {
+static int wdStepGradient(float* x, float* y, float sp, float dt, int climb) {
     int cx = (int)(*x), cy = (int)(*y);
-    if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return;
+    if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return 0;
 
     int here = wdB[cy][cx];
-    if (here < 0) { wdBfsBuild(); return; }
+    if (here < 0) { wdBfsBuild(); return 0; }
 
     static const int dxs[4] = { 1, -1, 0, 0 };
     static const int dys[4] = { 0, 0, 1, -1 };
@@ -315,7 +316,7 @@ static void wdStepGradient(float* x, float* y, float sp, float dt, int climb) {
     }
     if (bestI < 0) {
         /* 已经在端点（堵门位置 / 最远处）→ 原地不动 */
-        return;
+        return 0;
     }
 
     /* ===== v2.4.88 **修「卡脚」** =====
@@ -360,7 +361,7 @@ static void wdStepGradient(float* x, float* y, float sp, float dt, int climb) {
         wdStepToward(x, y, tx, ty, sp, dt);
         if (*x != ox || *y != oy) {
             warden.stuckT = 0.0f;
-            return;
+            return 1;
         }
     }
 
@@ -374,13 +375,13 @@ static void wdStepGradient(float* x, float* y, float sp, float dt, int climb) {
         } else {
             dx = step; dy = step;
         }
-        if (!Blocked(*x + dx, *y)) { *x += dx; warden.stuckT = 0.0f; return; }
-        if (!Blocked(*x, *y + dy)) { *y += dy; warden.stuckT = 0.0f; return; }
+        if (!Blocked(*x + dx, *y)) { *x += dx; warden.stuckT = 0.0f; return 1; }
+        if (!Blocked(*x, *y + dy)) { *y += dy; warden.stuckT = 0.0f; return 1; }
         /* 两个轴各自再试一次 */
-        if (!Blocked(*x + step, *y)) { *x += step; warden.stuckT = 0.0f; return; }
-        if (!Blocked(*x, *y + step)) { *y += step; warden.stuckT = 0.0f; return; }
-        if (!Blocked(*x - step, *y)) { *x -= step; warden.stuckT = 0.0f; return; }
-        if (!Blocked(*x, *y - step)) { *y -= step; warden.stuckT = 0.0f; return; }
+        if (!Blocked(*x + step, *y)) { *x += step; warden.stuckT = 0.0f; return 1; }
+        if (!Blocked(*x, *y + step)) { *y += step; warden.stuckT = 0.0f; return 1; }
+        if (!Blocked(*x - step, *y)) { *x -= step; warden.stuckT = 0.0f; return 1; }
+        if (!Blocked(*x, *y - step)) { *y -= step; warden.stuckT = 0.0f; return 1; }
     }
 
     /* ③ 真的卡住了：重建距离场，并把自己推到当前格中心 */
@@ -391,6 +392,7 @@ static void wdStepGradient(float* x, float* y, float sp, float dt, int climb) {
         float ccx = (float)cx + 0.5f, ccy = (float)cy + 0.5f;
         if (!Blocked(ccx, ccy)) { *x = ccx; *y = ccy; }
     }
+    return 0;
 }
 
 int WardenWatching(void) { return warden.active && (warden.state==WD_CHASE || warden.state==WD_BLOCK); }
@@ -929,6 +931,78 @@ void UpdateWarden(float dt) {
         }
     }
 
+    /* ==================================================================
+     * 2026-11-07（v2.4.2）：**巡逻改成"路点制"**
+     * ------------------------------------------------------------------
+     * 实测（tools/warden_probe.c，60 秒）：沿 BFS 梯度走时，
+     * 守门人只在离出口 1.2~2.5 格之间打转，始终离不开出口 ——
+     * 这一层的距离场在它附近只爬到深度 3，梯度到顶就没方向了。
+     *
+     * 用户看到的就是「守在出口附近不动」。
+     *
+     * 现在：巡逻不再依赖距离场坡度，改成**自己挑路点**：
+     *   · 在出口周围 4~8 格随机找一个可站、且和当前位置有视线的格子
+     *   · 走过去；到达 / 卡住超过 3 秒 / 超过 8 秒 → 换一个
+     * 路点用 wdStepToward（自带贴墙滑），所以不会再"站在死点不动"。
+     * ================================================================== */
+    {
+        int cx2 = (int)warden.x, cy2 = (int)warden.y;
+        float wdx = warden.tx - warden.x, wdy = warden.ty - warden.y;
+        int arrived = (wdx * wdx + wdy * wdy) < 0.30f;
+
+        warden.stateT += dt;
+        if (warden.tx == 0.0f && warden.ty == 0.0f) arrived = 1;
+
+        if (arrived || warden.stateT > 8.0f) {
+            int tries;
+            int ok = 0;
+            for (tries = 0; tries < 24 && !ok; tries++) {
+                float ang = (float)((rand() % 360) * 3.14159265f / 180.0f);
+                float rad = 4.0f + (float)(rand() % 40) * 0.1f;   /* 4.0 ~ 7.9 格 */
+                int nx = (int)(exitX + cosf(ang) * rad);
+                int ny = (int)(exitY + sinf(ang) * rad);
+                float tx2, ty2;
+                if (nx < 1 || ny < 1 || nx >= MAP_WIDTH - 1 || ny >= MAP_HEIGHT - 1) continue;
+                if (worldMap[ny][nx] != 0) continue;
+                tx2 = (float)nx + 0.5f;
+                ty2 = (float)ny + 0.5f;
+                if (!HasLOS(warden.x, warden.y, tx2, ty2)) continue;
+                warden.tx = tx2;
+                warden.ty = ty2;
+                ok = 1;
+            }
+            if (!ok) {
+                /* 找不到就沿着"远离出口"的方向硬走一格的位置 */
+                warden.tx = exitX + (warden.x - exitX) * 1.5f;
+                warden.ty = exitY + (warden.y - exitY) * 1.5f;
+            }
+            warden.stateT = 0.0f;
+        }
+
+        {
+            float ox3 = warden.x, oy3 = warden.y;
+            wdStepToward(&warden.x, &warden.y, warden.tx, warden.ty,
+                         WARDEN_SPEED, dt);
+            if (warden.x == ox3 && warden.y == oy3) {
+                s_patrolStall += dt;
+                if (s_patrolStall > 1.0f) {     /* 卡住就立刻换路点 */
+                    warden.tx = 0.0f;
+                    warden.ty = 0.0f;
+                    s_patrolStall = 0.0f;
+                }
+            } else {
+                s_patrolStall = 0.0f;
+                {
+                    float mvx3 = warden.x - ox3, mvy3 = warden.y - oy3;
+                    if (mvx3 * mvx3 + mvy3 * mvy3 > 1e-6f)
+                        warden.facing = atan2f(mvy3, mvx3);
+                }
+            }
+            (void)cx2; (void)cy2;
+        }
+        return;
+    }
+
     /* ============ 巡逻：**沿 BFS 梯度在出口 6~8 步之间来回** ============
        v2.4.51 重写。之前的问题：
          · 「往外走」用的是 AIMoveToward 直冲一个乘法算出来的点
@@ -983,9 +1057,49 @@ void UpdateWarden(float dt) {
             return;
         }
 
+        /* ============================================================
+         * 2026-11-07（v2.4.2）：**"站在出口不动"的真根因**
+         * ------------------------------------------------------------
+         * 实测（tools/warden_probe.c，60 秒）：它只在离出口 1.2~2.5 格
+         * 之间活动，最后**固定停在 2.36 格不动**。
+         *
+         * 原因：梯度爬到"这个方向上的局部最高点"后 wdStepGradient 直接
+         * return（没有更深的邻格），而掉头条件是 st >= turnAt ——
+         * 局部最高点的深度可能**永远达不到** turnAt（比如那个方向只深到 3），
+         * 于是它既不前进也不掉头，就那么站着。
+         *
+         * 现在用返回值兜住这个"死点"：
+         *   · 没挪动 → 立刻掉头
+         *   · 连续 1.2 秒还是没挪动 → 强制朝一个随机可走邻格迈一步
+         *     （保证它一定在动，不靠坡度）
+         * ============================================================ */
         float oldX = warden.x, oldY = warden.y;
-        wdStepGradient(&warden.x, &warden.y, WARDEN_SPEED, dt,
-                       warden.headingToExit ? 0 : 1);
+        int moved = wdStepGradient(&warden.x, &warden.y, WARDEN_SPEED, dt,
+                                   warden.headingToExit ? 0 : 1);
+        if (!moved) {
+            warden.headingToExit = !warden.headingToExit;
+            s_patrolStall += dt;
+            if (s_patrolStall > 1.2f) {
+                /* 强制走一格：挑第一个可走的邻格，直接推过去一点 */
+                static const int fx4[4] = { 1, -1, 0, 0 };
+                static const int fy4[4] = { 0, 0, 1, -1 };
+                int k, start = (int)(g_timeSec * 7.0f) & 3;
+                for (k = 0; k < 4; k++) {
+                    int d4 = (start + k) & 3;
+                    int nx = (int)warden.x + fx4[d4];
+                    int ny = (int)warden.y + fy4[d4];
+                    if (nx < 1 || ny < 1 || nx >= MAP_WIDTH - 1 || ny >= MAP_HEIGHT - 1) continue;
+                    if (worldMap[ny][nx]) continue;
+                    wdStepToward(&warden.x, &warden.y,
+                                 (float)nx + 0.5f, (float)ny + 0.5f,
+                                 WARDEN_SPEED, dt * 3.0f);
+                    break;
+                }
+                s_patrolStall = 0.0f;
+            }
+        } else {
+            s_patrolStall = 0.0f;
+        }
 
         /* 朝向跟着位移走 —— 视野锥靠它 */
         float mvx = warden.x - oldX, mvy = warden.y - oldY;
