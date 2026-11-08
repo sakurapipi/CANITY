@@ -3241,8 +3241,6 @@ float GoldSearchAt(int level)  {
     float mul = collapsedLevel ? 1.8f : 1.0f;
     return ( 6.0f + 1.1f * (float)level) * EndlessDepthBonus(level) * mul;
 }
-float GoldBreakerAt(int level) { return (25.0f + 3.0f * (float)level) * EndlessDepthBonus(level); }
-float GoldExitAt(int level)    { return (30.0f + 6.0f * (float)level) * EndlessDepthBonus(level); }
 
 /* v6 **深度倍数** —— 撤离时按当前层算。
    第 1 层 1.00，第 24 层 2.00（上限 2.0）。

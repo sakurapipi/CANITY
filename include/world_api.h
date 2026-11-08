@@ -85,4 +85,9 @@ extern int isEndlessRun;
 
 extern int breakerOpen, exitChoiceOpen;
 
+float GoldBreakerAt(int level);
+float GoldExitAt(int level);
+
+float EndlessDepthBonus(int level);
+
 #endif
