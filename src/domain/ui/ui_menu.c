@@ -112,7 +112,7 @@ static int MenuItemIndex(void) {
     if (currentState == STATE_SETTINGS) return settingsSelection;
     if (currentState == STATE_HUB) return hubSelection;
     if (currentState == STATE_SKILL_PICK) return skillPickSel;
-    if (currentState == STATE_WEAPON_PICK) return weaponPickSel;
+    /* 2026-11-08：选武器流程已删（武器改扳手） */
     if (currentState == STATE_SAFEHOUSE) return shopRow;
     if (currentState == STATE_ACHIEVEMENTS) return achSelection;
     if (currentState == STATE_BESTIARY) return bestiarySel;

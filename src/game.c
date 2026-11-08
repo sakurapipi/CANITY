@@ -143,7 +143,7 @@ int upgEco = 0;          /* 手电耗电 -12%/级 */
 int upgRest = 0;         /* 安全屋回智 +25%/级 */
 
 int hubSelection = 0;
-int weaponPickSel = 0;          /* v2.0: 开局选武器光标 */
+/* 2026-11-08：weaponPickSel 已删 —— 选武器流程不存在了 */
 int flares = 0, bottles = 0;
 /* 2026-11-06：两套相位投掷物（槽 6 / 7） */
 int phaseBeacons = 0;   /* 相位信标（唯一的一种相位投掷物） */
@@ -6952,7 +6952,7 @@ void ActivateMenuItem(void) {
             dailyMode = 0;
             campaignMode = 0;
             DeleteSave();
-            weaponPickSel = 0;
+            /* 2026-11-08：武器光标已删 */
             StartGame();
         } else if (sel == ixHub) {
             /* v2.8：HUB = 技能树，一进来光标就在第一个节点上 */
@@ -7015,12 +7015,7 @@ void ActivateMenuItem(void) {
     } else if (currentState == STATE_SAFEHOUSE) {
         ShopActivate();
         uiDirty = 1;
-    } else if (currentState == STATE_WEAPON_PICK) {
-        /* v2.0：确定初始武器 → 开一局 */
-        if (weaponPickSel < 0) weaponPickSel = 0;
-        if (weaponPickSel >= WPN_COUNT) weaponPickSel = WPN_COUNT - 1;
-        curWeapon = weaponPickSel;
-        StartGame();
+    /* 2026-11-08：选武器流程已删（武器改扳手后残留） */
     } else if (currentState == STATE_PAUSED) {
         if (menuSelection == 0) {
             currentState = STATE_PLAYING;
@@ -7633,13 +7628,13 @@ static void ClickMenu(int mx, int my) {
 
         /* v2.2 修复：安全屋 / 选武器原来没有命中分支，掉进通用兜底 ——
        点哪一行执行的都是"光标原来那一行"（买错东西、直接用掉跳层）。 */
-    if (currentState == STATE_SAFEHOUSE || currentState == STATE_WEAPON_PICK) {
+    if (currentState == STATE_SAFEHOUSE) {
         MenuGeo g2 = GetMenuGeo();
         for (int i = 0; i < g2.count; i++) {
             RECT r = RowRect(g2, i);
             if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
                 if (currentState == STATE_SAFEHOUSE) shopRow = i;
-                else weaponPickSel = i;
+                /* 2026-11-08：武器光标已删 */
                 ActivateMenuItem();
                 return;
             }
@@ -8349,16 +8344,6 @@ int CanityKeyDown(int vk, int repeat) {
                    而这里漏了 —— 于是 ESC 退出仍会视角翻转。
                    一份实现，两处调用，才不会再有这种半修。 */
                 ShopLeave();
-            }
-        } else if (currentState == STATE_WEAPON_PICK) {
-            if (menuUp)      { weaponPickSel = (weaponPickSel + WPN_COUNT - 1) % WPN_COUNT; uiDirty = 1; }
-            if (menuDown)    { weaponPickSel = (weaponPickSel + 1) % WPN_COUNT; uiDirty = 1; }
-            if (menuConfirm) { curWeapon = weaponPickSel; StartGame(); }
-            if (menuCancel) {
-                currentState = STATE_MAIN_MENU;
-                menuSelection = 0;
-                ForceCursor(1);
-                uiDirty = 1;
             }
         } else if (currentState == STATE_HUB) {
             /* v6 **ESC 必须在所有页都生效** ——
