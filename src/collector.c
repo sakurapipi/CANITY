@@ -197,7 +197,7 @@ void CollectorSpawnIfEligible(void) {
        否则怪会贴着脸生成，直接把正在选"继续/撤离"的玩家撞死。 */
     {
         extern int breakerOpen, exitChoiceOpen;
-        extern float exitX, exitY, posX, posY;
+
         if (exitChoiceOpen) return;
         if (breakerOpen) {
             extern float Dist2(float, float, float, float);
@@ -205,7 +205,7 @@ void CollectorSpawnIfEligible(void) {
         }
     }
 
-    extern int carryGold;
+
     CollectorReset();
     /* v2.4.71 平调：门槛 46000/T7 → 20000/T4 —— 用户要求「让他早点出来」。
        20000 大约是前期两三层就能攒到的量。 */
@@ -409,7 +409,7 @@ void UpdateCollector(float dt) {
         float dx = posX - collector.x, dy = posY - collector.y;
         float d = sqrtf(dx * dx + dy * dy);
         if (d < COLLECTOR_TOUCH) {
-            extern int carryGold;
+
             int pct = COLLECTOR_STEAL_BASE + (carryGold / 20000) * COLLECTOR_STEAL_PER_20K;
             if (pct > COLLECTOR_STEAL_MAX) pct = COLLECTOR_STEAL_MAX;
             int steal = carryGold * pct / 100;

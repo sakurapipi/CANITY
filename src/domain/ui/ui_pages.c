@@ -148,7 +148,7 @@ void UiDrawAchievementsPage(MenuGeo g) {
            AchCatNameZh 写好了但全工程 0 调用（审计报告点名）。
            这里按语言选。 */
         {
-            extern int g_lang;
+
             extern const char* AchCatNameZh(int cat);
             const char* catName = (g_lang == 1) ? AchCatNameZh(achFilter)
                                                 : AchCatNameEn(achFilter);
@@ -210,7 +210,7 @@ void UiDrawAchievementsPage(MenuGeo g) {
          * 现在：奖励画在进度左边，金色；隐藏成就没解锁时连名字都不给。
          * ============================================================ */
         {
-            extern const AchDef kAchDefs[ACH_COUNT];
+
             const AchDef* d = &kAchDefs[idx];
             int locked = !a->unlocked;
 

@@ -388,7 +388,7 @@ static int RoomReachable(void) {
      * 一堵新墙如果切断了唯一的通路，这个位置就不许放。
      * ================================================================== */
     {
-        extern float exitX, exitY;
+
         int ex = (int)exitX, ey = (int)exitY;
         if (ex >= 0 && ey >= 0 && ex < MAP_WIDTH && ey < MAP_HEIGHT) {
             if (!worldMap[ey][ex] && !seen[ey][ex]) return 0;
@@ -523,7 +523,7 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
 
 /* 保留区检查（用工地的**外墙角**判断） */
 static int ReservationsOk(int fx, int fy, int fw, int fh) {
-    extern float exitX, exitY;
+
     for (int y = fy; y < fy + fh; y++) {
         for (int x = fx; x < fx + fw; x++) {
             /* 出生区 1..3 外扩到 4 */
@@ -591,7 +591,7 @@ static int PickAllowedTemplate(int idMin, int idMax, int level) {
 }
 
 static int TryPlace(int placed, int idMin, int idMax) {
-    extern int currentLevel;
+
     int id = PickAllowedTemplate(idMin, idMax, currentLevel);
     if (id < 0) return 0;                 /* 本层这一档没有允许的主题 */
     if (id >= 0 && id < ROOM_TEMPLATE_COUNT) RoomTplTried[id]++;

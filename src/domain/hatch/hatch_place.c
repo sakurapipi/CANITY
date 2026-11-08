@@ -256,7 +256,7 @@ void HatchFireEffect(int idx) {
         else if (echoBolts > 0) echoBolts--;
         /* 全图怪静止 20 秒 —— 复用现成的 stun 字段，不新增 AI 钩子 */
         for (int i = 0; i < MON_HUNTER_MAX; i++) {
-            extern Monster monHunters[MON_HUNTER_MAX];
+
             if (monHunters[i].active) monHunters[i].stun = 20.0f;
         }
         {

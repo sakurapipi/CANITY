@@ -263,7 +263,7 @@ void AudioPlayWorld(int id, float x, float y, float vol, float maxDist, int prio
     (void)priority;
     extern void AudioComputeGains(float, float, float, float,
                                   float, float, float, float*, float*);
-    extern float posX, posY, dirX, dirY;
+
     float l = 0.0f, r = 0.0f;
     float gain, pan;
     AudioComputeGains(posX, posY, dirX, dirY, x, y, maxDist, &l, &r);

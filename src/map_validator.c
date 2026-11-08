@@ -78,8 +78,8 @@ void MapValidate(MapCheck* out) {
 
     /* ---- ④ 家具不许压墙、不许跑到房间外 ---- */
     {
-        extern RoomProp roomProps[MAX_ROOM_PROPS];
-        extern int roomPropCount;
+
+
         out->propCount = roomPropCount;
         for (int k = 0; k < roomPropCount && k < MAX_ROOM_PROPS; k++) {
             if (!roomProps[k].active) continue;

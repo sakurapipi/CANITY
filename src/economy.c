@@ -60,7 +60,7 @@ static const GoldTierDef kGoldTiers[16] = {
 /* 当前档位 0~15 */
 int GoldTier(void) {
     /* v6：每日任务的 GREED 修正把强度档 +2（钱更值钱，但更危险） */
-    extern int carryGold;
+
     /* v6 战役第 4 关「贪婪深渊」：每枚金币按 2 枚算强度 */
     float tm = CampaignTierMul();
     int g = (int)((float)(carryGold > 0 ? carryGold : 0) * tm + 0.5f);

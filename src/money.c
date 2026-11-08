@@ -62,7 +62,7 @@ void MoneyBagDropAt(float x, float y, int amount) {
 }
 
 void MoneyBagsResetForNewFloor(void) {
-    extern int moneyDropOpen;
+
     for (int i = 0; i < MAX_MONEYBAG; i++) moneyBags[i].active = 0;
     moneyDropOpen = 0;
 }

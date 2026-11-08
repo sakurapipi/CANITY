@@ -121,7 +121,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     {
         const char* ui = getenv("CANITY_UI");
         if (ui && ui[0]) {
-            extern GameState currentState;
+
             SkillInitOnce();
             if (strcmp(ui, "skills") == 0 || strcmp(ui, "hub") == 0)
                 currentState = STATE_HUB;
