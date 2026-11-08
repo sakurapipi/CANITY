@@ -71,6 +71,15 @@ const SkillDef skillDefs[] = {
     {"GOLD SCENT", "Noise -10% per rank while carrying gold", 4, 3, {1300,2000,2250},0,SK_GREEDHAND,0},
     {"GAMBLER", "10% per rank chance for double crate gold", 4, 3, {1300,2000,2250},0,SK_GOLDSCENT,0},
     {"DESPERATE", "Below 30 sanity: move +4% per rank", 4, 3, {1300,2000,2250},0,SK_GAMBLER,0},
+    /* ---- 2026-11-08（第 7 轮）：幽灵流派 GHOST ---- */
+    {"BREATH SYNC", "Standing still halves sanity drain (max 20s)", 0, 2,
+     {2600,3900,0}, 0, -1, 0},
+    {"SHADOW STEP", "Sprinting inside smoke makes no sound", 0, 1,
+     {3200,0,0}, 0, -1, 0},
+    {"SILENT LAND", "After standing 3s, your next 3s of steps are silent", 0, 1,
+     {3900,0,0}, 0, 4, 0},
+    {"FORMLESS", "Stand still 3s to vanish from sight (move speed -25%)", 0, 1,
+     {4500,0,0}, 0, 5, 1},
 };
 
 typedef char skillDefs_count_check[(sizeof(skillDefs)/sizeof(skillDefs[0]) == SKILL_COUNT) ? 1 : -1];
@@ -97,11 +106,11 @@ typedef char SKILL_DEF_COUNT_CHECK[(
      id 19    → SALVAGE，   列 2 第 5 行
    原来 16..19 一律当成「第 5 行列 0..3」，导致方向键导航跳错节点。 */
 static const unsigned char kNodeCol[SKILL_COUNT] = {
-    0,0,0,0,  1,1,1,1,  2,2,2,2,  3,3,3,3,  4, 0,1,2,  4,4,4,4,4,  4, 4,4,4,4
-};
+    0,0,0,0,  1,1,1,1,  2,2,2,2,  3,3,3,3,  4, 0,1,2,  4,4,4,4,4,  4, 4,4,4,4,
+ 5, 5, 5, 5 };
 static const unsigned char kNodeRow[SKILL_COUNT] = {
-    0,1,2,3,  0,1,2,3,  0,1,2,3,  0,1,2,3,  0, 4,4,4,  1,2,3,4,0,  4, 0,1,2,3
-};
+    0,1,2,3,  0,1,2,3,  0,1,2,3,  0,1,2,3,  0, 4,4,4,  1,2,3,4,0,  4, 0,1,2,3,
+ 0, 1, 2, 3 };
 
 int SkillNodeCol(int id) {
     if (id < 0 || id >= SKILL_COUNT) return -1;
@@ -216,6 +225,17 @@ extern int bankGold;   /* v7：货币统一后技能树花银行金币 */
 int SkillSwitchable(int id) {
     return id>=0 && id<SKILL_COUNT && skillDefs[id].isKeystone && SkillOwned(id) && activeKeystone!=id;
 }
+/* ==================================================================
+ * 2026-11-08（第 7 轮）：幽灵流派的四个效果查询
+ * ------------------------------------------------------------------
+ * 共享"静止计时"（game.c 的 ghostStillT）。前三个是行为改变，
+ * 第四个（无形）是王冠：隐身 + 移速 -25% 作为代价。
+ * ================================================================ */
+int SkillGhostBreathRank(void) { return skillRank[SK_GHOST_BREATH]; }
+int SkillGhostStepOwned(void)   { return skillRank[SK_GHOST_STEP] > 0; }
+int SkillGhostLandOwned(void)   { return skillRank[SK_GHOST_LAND] > 0; }
+int SkillGhostFormOwned(void)   { return skillRank[SK_GHOST_FORM] > 0; }
+
 int SkillSwitchKeystone(int id) {
     if (!SkillSwitchable(id)) return 0;
     /* ==================================================================
@@ -729,9 +749,8 @@ float ThickHideMul(void) {
  * 否则自检会失真（已经踩过一次）。
  * ================================================================ */
 static const float kSpokeRadius[4] = { 0.14f, 0.26f, 0.38f, 0.50f };
-static const float kCrossRadius   = 0.50f;   /* 16..19：错 36°，与第 3 行同半径 */
+static const float kCrossRadius   = 0.44f;   /* 16..19：内圈，把外圈让给流派节点 */
 static const float kInnerRadius   = 0.32f;   /* 20..24：错 36°，夹在 1~2 行之间 */
-static const float kCrossAngleOff = 6.2831853f / 10.0f;   /* 36° */
 
 void SkillNodeNorm(int id, float* nx, float* ny) {
     *nx = 0.5f; *ny = 0.5f;
@@ -751,18 +770,38 @@ void SkillNodeNorm(int id, float* nx, float* ny) {
      * ================================================================ */
     int branch, row;
     float angle;
+
+    /* 2026-11-08（第 7 轮）：幽灵流派走独立扇区（-54°），半径沿用辐条四档 */
+    if (id >= 30 && id <= 33) {
+        angle = -1.5707963f + 6.2831853f * 0.1f;   /* -90 + 36 = -54° */
+        /* 幽灵四档：0.26 / 0.38 / 0.50 / 0.56 ——
+           避开内环（0.32）与跨支（0.20）。 */
+        {
+            static const float kGhostR[4] = { 0.26f, 0.38f, 0.50f, 0.62f };
+            float gr = kGhostR[id - 30];
+            *nx = 0.5f + cosf(angle) * gr;
+            *ny = 0.5f + sinf(angle) * gr;
+        }
+        return;
+    }
     if (id < 16) { branch = id / 4; row = id % 4; }
     else if (id >= 26) { branch = 4; row = id - 26; }
     else if (id >= 20 && id <= 24) {
         /* 内环：夹在第 1、2 行之间，角度错开半格 */
-        angle = -1.5707963f + 6.2831853f * ((float)(id - 20) + 0.5f) / 5.0f;
+        /* 2026-11-08：从 +36° 改成 +18° —— 幽灵流派占了 +36°，
+           同角度上 0.32 会正好夹在幽灵的 0.26/0.38 中间。 */
+        angle = -1.5707963f + 6.2831853f * (float)(id - 20) / 5.0f
+                + 6.2831853f / 20.0f;   /* +18° */
         *nx = 0.5f + cosf(angle) * kInnerRadius;
         *ny = 0.5f + sinf(angle) * kInnerRadius;
         return;
     } else {
         /* 16..19：跨支王冠 —— 最外环，角度错开 36° 落在辐条中间 */
         branch = id - 16;
-        angle = -1.5707963f + 6.2831853f * (float)branch / 5.0f + kCrossAngleOff;
+        /* 108° 起跳：-90 + 108 = 18°，依次 90 / 162 / 234 ——
+           这四个方向与辐条（-90/-18/54/126/198）和幽灵（-54）都不重合。 */
+        angle = -1.5707963f + 6.2831853f * 0.3f
+                + 6.2831853f * (float)branch / 5.0f;
         *nx = 0.5f + cosf(angle) * kCrossRadius;
         *ny = 0.5f + sinf(angle) * kCrossRadius;
         return;
@@ -873,6 +912,10 @@ static const char* kShortNames[SKILL_COUNT] = {
     "SCENT", /* 27 */
     "BET",   /* 28 */
     "DESP",  /* 29 */
+    "BREATH", /* 30 */
+    "SHADOW", /* 31 */
+    "LAND",   /* 32 */
+    "FORM",   /* 33 */
 };
 
 const char* SkillShortName(int id) {

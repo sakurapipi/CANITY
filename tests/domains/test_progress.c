@@ -219,10 +219,11 @@ static void test_trees_shop(void) {
     before=bankGold;SkillResetAll();CHECK(bankGold==before+cost+reward && skillRank[0]==0 && skillRank[SK_ORIGIN]==1,"meta reset refunds cost, keeps origin, grants achievement");
     bankGold=1000000;
     for(int pass=0;pass<30;++pass)for(int id=0;id<SKILL_COUNT;++id)if(SkillCanBuy(id))SkillBuy(id);
-    CHECK(SkillNodesLit()==30,"all thirty network nodes are purchasable");
+    /* 2026-11-08：硬编码 30 会随节点增加而假失败 —— 用 SKILL_COUNT */
+    CHECK(SkillNodesLit()==SKILL_COUNT,"every network node must be reachable/buyable");
     CHECK(activeKeystone>=16 && activeKeystone<=19,"four capstones have one active choice");
     int equipped=activeKeystone;CHECK(SkillSwitchKeystone(equipped==16?17:16),"owned capstones switch without losing purchases");
-    CHECK(SkillNodesLit()==30,"capstone switching preserves the collected tree");
+    CHECK(SkillNodesLit()==SKILL_COUNT,"capstone switching preserves the collected tree");
     clear_meta();
     for(int col=0;col<4;++col) {
         BenchResetRun();ThreatReset();carryGold=10000;

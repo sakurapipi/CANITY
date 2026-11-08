@@ -206,6 +206,8 @@ void UnstickPlayer(void);
 extern float wrenchHitFlashT;
 /* 第 3 轮：挥空的暗标记（与挥击同长）*/
 extern float wrenchSwingFxT;
+/* 第 7 轮：连续静止秒数（幽灵流派用） */
+extern float ghostStillT;
 int ShotBlocked(float x, float y);
 int SpotClear(float x, float y, float minD, int selfKind, int selfIdx);
 

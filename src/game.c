@@ -3752,6 +3752,8 @@ float wrenchCharge = 0.0f;    /* 0..1 */
 float wrenchHitFlashT = 0.0f;
 /* 第 3 轮：**挥空**的暗标记（与挥击同长）—— 让"挥了但没打中"也看得见 */
 float wrenchSwingFxT  = 0.0f;
+/* 第 7 轮：连续静止秒数（幽灵流派用） */
+float ghostStillT = 0.0f;
 static int  wrenchPrev = 0;
 static int  wrenchInit = 0;
 /* ===== v2.5.00 **装填闩** =====
@@ -4076,7 +4078,16 @@ void Update(float dt) {
         }
         /* v2.5：安全屋里不流失 —— 这是"安全"二字的承诺 */
         /* 第 2 轮：难度改的是"恐惧增长"，不是血量公式 */
-        if (!inSafe) sanity -= drain * siphonSan * DiffSanityDrainMul() * dt;
+        /* 第 7 轮「呼吸同步」：站着不动时恐惧增长减半，
+           最长 20 秒（否则就是无限理智的神节点）。 */
+        {
+            extern int SkillGhostBreathRank(void);
+            float ghostMul = 1.0f;
+            if (SkillGhostBreathRank() > 0 && ghostStillT > 2.0f && ghostStillT <= 22.0f)
+                ghostMul = 0.5f;
+            if (!inSafe)
+                sanity -= drain * siphonSan * DiffSanityDrainMul() * ghostMul * dt;
+        }
     }
     /* v3.3：躲进垃圾桶后缓慢回理智；净恢复约 1.5/秒 */
     if (hiddenIn >= 0) {
@@ -4599,6 +4610,14 @@ void Update(float dt) {
     /* v3.0：藏在柜子里不能动（但可以转头偷看） */
     if (hiddenIn >= 0) { inF = 0; inS = 0; }
     int moving = (inF != 0 || inS != 0);
+    /* ==================================================================
+     * 2026-11-08（第 7 轮）：**静止计时** —— 幽灵流派四个节点共用
+     * ------------------------------------------------------------------
+     * 玩家原话「流派感不明显」：30 个节点里 25 个是倍率，没有一个
+     * 改变"什么时候该站着不动"。这四个把静止变成战术。
+     * ================================================================ */
+    if (moving) ghostStillT = 0.0f;
+    else if (ghostStillT < 99.0f) ghostStillT += dt;
     /* v2.1：走路相位，手持模型和准星都跟着动 */
     bobPhase += dt * (sprinting ? 11.0f : (moving ? 7.0f : 1.6f));
     if (bobPhase > 6283.0f) bobPhase -= 6283.0f;
@@ -4978,6 +4997,12 @@ void Update(float dt) {
     float sp = MOVE_SPEED * (1.0f + SkillSpeedAdd() + darkAdd + bullAdd) * slowMul * RelicSpeedMul() * glueSelf * dt * BenchMoveMul()
              * RunSpeedMul()
              * (sprinting ? SPRINT_MULT * (BenchSlide() ? 1.20f : 1.0f) * (1.0f + burstAdd) : 1.0f)   /* v3.4 SLIDE +20% */ * crankMul * (hatchSpeedT > 0.0f ? 1.25f : 1.0f);
+
+        /* 第 7 轮「无形」：隐身期间移速 -25%（代价） */
+    {
+        extern int SkillGhostFormOwned(void);
+        if (SkillGhostFormOwned() && ghostStillT >= 3.0f) sp *= 0.75f;
+    }
     if (sprinting && sp < 2.25f*dt) sp=2.25f*dt;
         { extern float playerMoveSpeedNow; playerMoveSpeedNow = dt>0.0f ? sp/dt : 0.0f; }   /* v8: 守门人据此判断在动/冲刺 */
     float perpX = -dirY, perpY = dirX;      /* 单位侧向，与 FOV 无关 */
@@ -5449,9 +5474,18 @@ void Update(float dt) {
                 stepTimer = 0.0f;
                 PlaySfx(SFX_STEP, 0.50f);
                 /* v3.0：keystone SILENT RUN —— 冲刺完全不产生噪音 */
-                if (!SilentRunOwned())
-                    MakeNoise(posX, posY, 9.0f * noiseMul * BenchWalkNoiseMul()
-                              * QuietSoleMul());   /* 轻步 + 静底 */
+                /* 第 7 轮「影步」：在烟里冲刺不发声（烟雾本来就该掩声） */
+                {
+                    extern int SkillGhostStepOwned(void);
+                    int inSmoke = 0;
+                    if (SkillGhostStepOwned()) {
+                        extern int PlayerInSmoke(void);
+                        inSmoke = PlayerInSmoke();
+                    }
+                    if (!SilentRunOwned() && !inSmoke)
+                        MakeNoise(posX, posY, 9.0f * noiseMul * BenchWalkNoiseMul()
+                                  * QuietSoleMul());   /* 轻步 + 静底 */
+                }
             }
         } else if (moving && !holdingNow && !cranking) {
             /* v2.6：走路本来完全无声，现在连续走 5 秒之后开始有细微噪声。
@@ -5466,9 +5500,15 @@ void Update(float dt) {
                     {
         /* v3.4 GHOST STEP 满级：关着手电时**脚步声完全消失**（开灯才恢复）。
            原来这节点是「黑暗脚步 -12% 耗电」，玩家感知不到。 */
-        if (!(SkillGhostSilent() && !flashlightOn))
-            MakeNoise(posX, posY, WALK_NOISE_RADIUS * noiseMul
-                              * BenchWalkNoiseMul() * QuietSoleMul());;
+        /* 第 7 轮「静默落地」：静止满 3 秒后，接下来 3 秒脚步完全无声 */
+        {
+            extern int SkillGhostLandOwned(void);
+            int silentLand = (SkillGhostLandOwned() && ghostStillT >= 3.0f
+                              && ghostStillT <= 6.0f);
+            if (!(SkillGhostSilent() && !flashlightOn) && !silentLand)
+                MakeNoise(posX, posY, WALK_NOISE_RADIUS * noiseMul
+                                  * BenchWalkNoiseMul() * QuietSoleMul());;
+        }
     }   /* 轻步 + 静底 */
                 }
             }

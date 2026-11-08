@@ -834,7 +834,11 @@ void SaveGame(void) {
       g_save.cleanFloorsSave=floorsNoSanityLoss; g_save.wardenFloorsSave=wardenCleanFloors;
       g_save.fullHideSave=fullHideDone; g_save.doubleHuntSave=doubleHuntSeconds;
       g_save.lastRunGoldSave=lastRunGold; g_save.lastRunKeptSave=lastRunKept; g_save.lastRunCaughtSave=lastRunCaught; }
-    for(int i=26;i<SKILL_COUNT;++i) g_save.extraSkillRanks[i-26]=skillRank[i];
+    /* 2026-11-08：26..29 进老字段，30..33 进新字段（v37 追加） */
+    for(int i=26;i<30 && i<SKILL_COUNT;++i) g_save.extraSkillRanks[i-26]=skillRank[i];
+    /* v37：幽灵流派 30..33 */
+    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.ghostSkillRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
+    for(int i=30;i<SKILL_COUNT;++i) g_save.ghostSkillRanks[i-30]=skillRank[i];
     { extern int shopRefreshFloor,shopRefreshUsed,contractKind,shopContractUsed;
       g_save.shopRefreshFloorSave=shopRefreshFloor; g_save.shopRefreshUsedSave=shopRefreshUsed;
       g_save.contractKindSave=contractKind; g_save.contractLockedSave=shopContractUsed;
@@ -1409,6 +1413,11 @@ int LoadSettings(void) {
     if (g_save.version == 35) {
         g_save.version = SAVE_VERSION;
     }
+    /* 2026-11-08（v37）：末尾多 ghostSkillRanks[4]，布局没重排 —— 放行即可。
+       v36 档比现在短 16 字节，memset 过之后该字段是 0（= 没买过）。 */
+    if (g_save.version == 36) {
+        g_save.version = SAVE_VERSION;
+    }
     if (g_save.version != SAVE_VERSION) {
         char oldp[MAX_PATH], arc[MAX_PATH + 24];   /* v3.0：留 ".v%d.bak" 的位置 */
         SavePathCand(0, oldp, sizeof(oldp));
@@ -1602,7 +1611,9 @@ int LoadSettings(void) {
     if (g_save.saveSlot >= 0 && g_save.saveSlot < SAVE_SLOTS)
         g_saveSlot = g_save.saveSlot;
 
-    for(int i=26;i<SKILL_COUNT;++i) { int r=g_save.extraSkillRanks[i-26]; skillRank[i]=(r>=0 && r<=3)?r:0; }
+    for(int i=26;i<30 && i<SKILL_COUNT;++i) { int r=g_save.extraSkillRanks[i-26]; skillRank[i]=(r>=0 && r<=3)?r:0; }
+    /* v37：幽灵流派 30..33 */
+    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.ghostSkillRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
     SkillInitOnce();
     BestiaryLoad(g_save.bestiaryKnowledge);
     RestoreBankFromSave();
@@ -1709,7 +1720,9 @@ void ContinueRun(void) {
         lowSanitySeconds   = g_save.achLowSanitySeconds;
     }
     /* v3.4/v6 银行：统一走 RestoreBankFromSave，只有一份逻辑 */
-    for(int i=26;i<SKILL_COUNT;++i) { int r=g_save.extraSkillRanks[i-26]; skillRank[i]=(r>=0 && r<=3)?r:0; }
+    for(int i=26;i<30 && i<SKILL_COUNT;++i) { int r=g_save.extraSkillRanks[i-26]; skillRank[i]=(r>=0 && r<=3)?r:0; }
+    /* v37：幽灵流派 30..33 */
+    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.ghostSkillRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
     SkillInitOnce();
     BestiaryLoad(g_save.bestiaryKnowledge);
     RestoreBankFromSave();

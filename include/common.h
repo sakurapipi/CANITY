@@ -881,10 +881,10 @@ extern int eventBonus;       /* 本局累计的事件加分 */
    列 = 静（噪声的时与地）· 筹（风险与经济）· 锋（伤害交付方式）· 途（整局形状）
    前 4 行每列 4 个（3 个普通 + 1 个分支 keystone），第 5 行 = 4 个跨支 keystone。
    设计红线：每个节点必须能一句话说出「玩法怎么变」，不许卖常驻百分比。 */
-#define SKILL_COUNT 30   /* v6：20 → 26（+5 联动 +1 中心）*/
+#define SKILL_COUNT 34   /* 2026-11-08：30 → 34（+4 幽灵流派）*/
 #define KEYSTONE_COUNT 8              /* 4 个分支 keystone + 4 个跨支 */
 #define SKILL_POINTS_FOR_KEYSTONE 5   /* 分支投入门槛（每列上限 7 点） */
-#define SKILL_TOTAL_COST 160000   /* 2026-11-06（A-2）：整体 ×1.3 抵消局内金币 +40%。按现表实算 = 160000。
+#define SKILL_TOTAL_COST 178100   /* 2026-11-08：+4 幽灵节点（18100）*/   /* 2026-11-06（A-2）：整体 ×1.3 抵消局内金币 +40%。按现表实算 = 160000。
                                     原来写 278,500，比实际多 104,000 → SkillsSelfTest 必然失败，
                                     而那个返回值又被 ui.c 的 (void)r 丢掉了，护栏装了没插电。 */
 #define SKILL_TOTAL_CORES 4   /* v6：按现表重算 */          /* 满树核心 */
@@ -905,7 +905,17 @@ enum {
     /* v6 网状结构新增 6 个 */
     SK_SILENTDEAL, SK_GOLDENESC, SK_APPRENTICE, SK_SHORTCUTJR,
     SK_NIGHTWALKER, SK_ORIGIN,
-    SK_GREEDHAND, SK_GOLDSCENT, SK_GAMBLER, SK_DESPERATE
+    SK_GREEDHAND, SK_GOLDSCENT, SK_GAMBLER, SK_DESPERATE,
+    /* ==================================================================
+     * 2026-11-08（第 7 轮）：**幽灵流派**（GHOST）
+     * ------------------------------------------------------------------
+     * 设计目标：把"停下来"从惩罚变成战术。现有 30 个节点里 25 个是倍率，
+     * 这 4 个是真正改变行为方式的 —— 玩家原话「流派感不明显」。
+     * ================================================================ */
+    SK_GHOST_BREATH,   /* 30 呼吸同步：静止时理智流失减半 */
+    SK_GHOST_STEP,     /* 31 影步：烟里冲刺不出声 */
+    SK_GHOST_LAND,     /* 32 静默落地：静止 3 秒后下一步无声 */
+    SK_GHOST_FORM      /* 33 无形（王冠）：静止 3 秒隐身，移速 -25% */
 };
 
 #define META_COST 3.0f          /* 代谢：1 理智 = 3.0 电量（2.0 已验证会崩） */
