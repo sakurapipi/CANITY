@@ -7,6 +7,7 @@
 #include "save.h"
 #include "steam_zone.h"
 #include "achievements.h"
+#include "content_db.h"
 #include "wallet.h"
 #include "audio.h"
 #include "music.h"
@@ -93,6 +94,22 @@ int AchUnlockedInFilter(void) {
  *   P 进程 8 / E 经济 6 / K 技巧 8 / C 收藏 4 / S 隐藏 6
  * ================================================================== */
 #define ACH_DEF(en,zh,de,dz,cat,reward,hidden,kind,target,steam) {en,zh,de,dz,cat,reward,hidden,kind,target,steam},
+/* ==================================================================
+ * 2026-11-09（第 6 轮）：成就登记进内容中枢
+ * ------------------------------------------------------------------
+ * 32 个成就全部登记，id 用 nameEn（字符串常量，地址稳定）。
+ *
+ * 注意：**语义改造（AK_FLAG 裸索引 → 枚举+参数）不在这轮**，
+ * 那会动存档语义，要单独一轮 + 5 个夹具。
+ * ================================================================ */
+void AchievementRegister(void) {
+    int i;
+    for (i = 0; i < ACH_COUNT; i++) {
+        if (kAchDefs[i].nameEn && kAchDefs[i].nameEn[0])
+            (void)ContentAdd(CK_ACHIEVEMENT, kAchDefs[i].nameEn, &kAchDefs[i]);
+    }
+}
+
 const AchDef kAchDefs[] = {
 #include "achievement_defs.inc"
 };

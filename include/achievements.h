@@ -72,6 +72,9 @@ typedef struct {
 } Achievement;
 
 extern Achievement g_achievements[ACH_COUNT];
+
+/* 2026-11-09：登记进内容中枢（幂等） */
+void AchievementRegister(void);
 extern const AchDef kAchDefs[];
 extern int achSelection;
 extern int achHovered;

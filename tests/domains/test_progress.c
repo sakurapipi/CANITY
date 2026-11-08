@@ -818,6 +818,29 @@ static void test_shots_and_settings_in_hub(void) {
     ContentReset();
 }
 
+
+/* ==================================================================
+ * 2026-11-09（第 6 轮）：**成就已接入内容中枢**
+ * ------------------------------------------------------------------
+ * 32 个成就全部登记，中枢计数必须等于 ACH_COUNT。
+ * （语义改造 AK_FLAG → 枚举+参数 不在这一轮，它要动存档。）
+ * ================================================================ */
+
+extern void AchievementRegister(void);
+
+static void test_achievements_in_hub(void) {
+    ContentReset();
+    AchievementRegister();
+    CHECK(ContentCount(CK_ACHIEVEMENT) == ACH_COUNT,
+          "the hub must hold exactly ACH_COUNT achievements");
+    CHECK(ContentDuplicateKind() == -1,
+          "achievement ids (english names) must be unique");
+    AchievementRegister();
+    CHECK(ContentCount(CK_ACHIEVEMENT) == ACH_COUNT,
+          "achievement registration must be idempotent");
+    ContentReset();
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -840,4 +863,5 @@ void TestSuite_progress(void) {
     test_bestiary_registered_in_hub();
     test_skills_registered_in_hub();
     test_shots_and_settings_in_hub();
+    test_achievements_in_hub();
 }
