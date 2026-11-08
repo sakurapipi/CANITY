@@ -18,6 +18,7 @@
 #include "game.h"
 #include "phase.h"
 #include "collapse.h"
+#include "core_tick.h"   /* 第 4 轮：每帧 tick 顺序守卫 */
 #include "control_effect.h"
 #include "spider.h"
 #include "plat.h"
@@ -3766,6 +3767,7 @@ int PlayerAtExit(void) {
 }
 
 void Update(float dt) {
+    TickFrameBegin();   /* 第 4 轮：每帧复位 tick 顺序守卫 */
     { extern float playerMoveSpeedNow; playerMoveSpeedNow = 0.0f; }   /* v8: 守门人判断「在动/冲刺」用 */
     /* v7：可疑点表每帧衰减 / 过期 */
     { extern float gameTime; gameTime += dt; }   /* v2.4.3 全局秒表 */
@@ -4891,6 +4893,7 @@ void Update(float dt) {
      * 结算效果。漏了它门就永远卡在 OPENING（这类"更新循环漏写"
      * 在 art_direction.h 里被点名过）。
      * ================================================================ */
+    TickMark(TICK_HATCH);
     HatchTick(dt);
     if (hatchLightsT > 0.0f) { hatchLightsT -= dt; if (hatchLightsT < 0.0f) hatchLightsT = 0.0f; }
     if (hatchGoldMulT > 0.0f) { hatchGoldMulT -= dt; if (hatchGoldMulT < 0.0f) hatchGoldMulT = 0.0f; }
@@ -4904,6 +4907,7 @@ void Update(float dt) {
      * 注意放在 UpdateExplored 与移动**之前** —— 放在后面的话，
      * 玩家在黑屏里仍然能走两步，重掷后位置就不可预测了。
      * ================================================================ */
+    TickMark(TICK_COLLAPSE);
     if (CollapseTick(dt)) return;
 
     UpdateExplored();
@@ -5372,6 +5376,7 @@ void Update(float dt) {
         heartTimer = 0.0f;
     }
 
+    TickMark(TICK_THROWING);
     UpdateShots(dt);
     /* v1.17 训练场：无限道具、不掉理智、标本固定不动 */
     if (trainingMode) {
@@ -5397,6 +5402,7 @@ void Update(float dt) {
         else trainingDps = 0;
     }
 
+    TickMark(TICK_SMOKES);
     UpdateSmokes(dt);
     /* v1.18：站在烟里 → **只把光压暗**（用户要求，不再收窄视野） */
     /* v1.21: in smoke go nearly black (like the old 0.09 ambient build) */
