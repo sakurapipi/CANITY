@@ -3,7 +3,10 @@
  */
 #include "common.h"
 #include "upgrade_run.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "lang.h"
 #include "audio.h"
 #include "bench.h"

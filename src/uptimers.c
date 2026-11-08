@@ -11,7 +11,10 @@
  */
 #include "common.h"
 #include "save.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "state.h"
 #include "uptimers.h"
 

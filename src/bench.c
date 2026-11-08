@@ -3,7 +3,10 @@
  */
 #include "common.h"
 #include "bench.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "entity.h"   /* sanity 在这里声明 */
 #include "lang.h"
 #include "save.h"

@@ -6,7 +6,10 @@
  * 一个功能 = 一个文件 + 只走公开接口。
  */
 #include "common.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "state.h"
 #include "suspicion.h"
 #include "audio.h"

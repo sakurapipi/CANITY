@@ -7,6 +7,9 @@
 
 #include "common.h"
 
+/* 状态机（循环层） */
+extern GameState currentState;
+
 void ResetRunModeFlags(void);
 extern int g_forceMod;
 void Update(float dt);

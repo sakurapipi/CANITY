@@ -7,7 +7,10 @@
 #include "map_validator.h"
 #include "cell_meta.h"
 #include "map_rooms.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 
 static void SetErr(MapCheck* m, const char* msg) {
     if (!m || m->firstError[0]) return;
