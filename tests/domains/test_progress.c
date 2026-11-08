@@ -571,6 +571,40 @@ static void test_training_has_seven_stations(void) {
     }
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 12 轮）：**七站都能被触发，且只播一次**
+ * ------------------------------------------------------------------
+ * 上一轮只验了"站点存在"；这一轮验"走上去真的会触发"，
+ * 以及"站着不动不会每秒重复播"。
+ * ================================================================ */
+
+extern int TrainingStationsTick(float px, float py);
+extern void TrainingStationsReset(void);
+
+static void test_training_stations_fire_once(void) {
+    int i, fired = 0;
+    TrainingStationsReset();
+
+    for (i = 0; i < TRAIN_STATION_COUNT; i++) {
+        float cx = (float)TrainingStationX(i) + 0.5f;
+        float cy = (float)TrainingStationY(i) + 0.5f;
+
+        /* 站上去：必须触发一次 */
+        if (TrainingStationsTick(cx, cy) == i) fired++;
+        /* 再站一帧：不许重复播 */
+        CHECK(TrainingStationsTick(cx, cy) == -1,
+              "standing on a station must not re-fire every frame");
+    }
+    CHECK(fired == TRAIN_STATION_COUNT, "walking through all 7 stations must fire all 7");
+
+    /* 站在两站之间：不该触发 */
+    TrainingStationsReset();
+    /* 6.2 距站 0（4.5）1.7 格、距站 1（8.5）2.3 格 —— 两边都在 1.5 半径外 */
+    CHECK(TrainingStationsTick(6.2f, (float)(MAP_HEIGHT / 2) + 0.5f) == -1,
+          "standing between two stations must not fire anything");
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -587,4 +621,5 @@ void TestSuite_progress(void) {
     test_keystone_switch_costs_gold();
     test_three_archetypes_are_wired();
     test_training_has_seven_stations();
+    test_training_stations_fire_once();
 }

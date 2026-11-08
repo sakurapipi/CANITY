@@ -5631,6 +5631,25 @@ void Update(float dt) {
             pickupMsg = TrainingStationText(st);
             pickupMsgTimer = 4.0f;
             PlaySfx(SFX_PICKUP, 0.45f);
+            /* ==========================================================
+             * 2026-11-08（第 12 轮）：**站点与教程步骤联动**
+             * ----------------------------------------------------------
+             * 原来空间引导（七站）和教程步骤（TUT_*）是两套独立推进，
+             * 玩家会看到"站在手电站上、提示却在说走路"。
+             *
+             * 现在：走到第 N 站，就把教程快进到对应步骤 —— 只前进不回退，
+             * 所以走回头路不会把教程弄乱。
+             * ========================================================== */
+            {
+                static const int kStationStep[7] = {
+                    TUT_MOVE, TUT_LIGHT, TUT_KNOCK, TUT_SEARCH,
+                    TUT_HIDE, TUT_BREAKER, TUT_EXIT
+                };
+                if (tutorialGuideOn && st < 7 && tutorialStep < kStationStep[st]) {
+                    tutorialStep = kStationStep[st];
+                    tutorialStepTimer = 0.0f;   /* 换步就重置超时兜底 */
+                }
+            }
         }
     }
     { extern int TelegraphTick(float); (void)TelegraphTick(dt); }
