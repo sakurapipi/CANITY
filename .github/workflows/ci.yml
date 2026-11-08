@@ -55,6 +55,27 @@ jobs:
         shell: msys2 {0}
         run: python -X utf8 tools/build_validate.py
 
+      # ================================================================
+      # 架构预算指标（第 1 轮加入，2026-11-08）
+      # ----------------------------------------------------------------
+      # 只报告，不阻塞 —— 因为 ui/render 现在确实超预算（5,590 / 4,283 行），
+      # 那是第 7 轮才拆的。等拆完再改成阻塞。
+      #
+      # 三个指标回答同一个问题："改一次要读多少行"。
+      # 详见 docs/架构重构方案_v2.md
+      # ================================================================
+      - name: Architecture budget (report only)
+        shell: pwsh
+        run: |
+          python -X utf8 tools/module_cost.py | Tee-Object -Variable mc | Out-Host
+          python -X utf8 tools/budget_check.py --n 40 | Tee-Object -Variable bc | Out-Host
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Architecture budget"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $mc
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $bc
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+          exit 0
+
       # 可复核性：证明产物真的存在且不是 0 字节
       - name: Artifact sanity
         shell: pwsh
