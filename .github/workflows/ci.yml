@@ -56,25 +56,30 @@ jobs:
         run: python -X utf8 tools/build_validate.py
 
       # ================================================================
-      # 架构预算指标（第 1 轮加入，2026-11-08）
+      # 架构预算指标（第 1 轮加入，2026-11-08；第 7 轮改成阻塞）
       # ----------------------------------------------------------------
-      # 只报告，不阻塞 —— 因为 ui/render 现在确实超预算（5,590 / 4,283 行），
-      # 那是第 7 轮才拆的。等拆完再改成阻塞。
+      # budget_check（单次改动涉及行数的中位数）现在**阻塞**：
+      #   中位数 > 2500 行 = 一次改动要读太多东西，红。
+      # module_cost 仍然只报告 —— ui(4,081) / render(4,283) 是有意保留的
+      # （render 是每帧热点，ui 的 HUD 还没拆），拿它阻塞会让 CI 永远红。
       #
       # 三个指标回答同一个问题："改一次要读多少行"。
       # 详见 docs/架构重构方案_v2.md
       # ================================================================
-      - name: Architecture budget (report only)
+      - name: Architecture budget (blocking: median commit size)
         shell: pwsh
         run: |
           python -X utf8 tools/module_cost.py | Tee-Object -Variable mc | Out-Host
           python -X utf8 tools/budget_check.py --n 40 | Tee-Object -Variable bc | Out-Host
+          $budget = $LASTEXITCODE
+          if ($budget -ne 0) {
+            Write-Error "One change now reads too much: the median commit touches more than 2500 lines (see docs/架构重构方案_v2.md)."
+          }
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Architecture budget"
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $mc
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $bc
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
-          exit 0
 
       # 可复核性：证明产物真的存在且不是 0 字节
       - name: Artifact sanity
