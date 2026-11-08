@@ -261,7 +261,12 @@ static const char* kBranchNameZh[7] = { "沉寂", "节流", "藏匿", "塑形", 
    现在直接按 0..SKILL_COUNT-1 生成，加节点不用改这里。 */
 static const int kSkillList[] = {
      0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13,
-    14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,27,28,29
+    14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,27,28,29,
+    /* 2026-11-08：三个流派共 10 个节点。这里原来是手写 0..29 的字面量，
+       注释却说"加节点不用改这里" —— 所以新节点一直没被画出来（界面显示 1/30）。 */
+    30, 31, 32, 33,      /* 幽灵：呼吸同步 / 影步 / 静默落地 / 无形 */
+    34, 35, 36,          /* 掠夺者：典当 / 赌徒 / 金币即力量 */
+    37, 38, 39           /* 反击者：挣脱 / 以牙还牙 / 反杀 */
 };
 #define SKILL_LIST_COUNT ((int)(sizeof(kSkillList) / sizeof(kSkillList[0])))
 /* v6：中心节点取代原来的"跨支行" */
@@ -905,6 +910,14 @@ static int SkillNodeBuyable(int id) {
 #define SK_K_MAX   2.60f
 
 static float skVX = 0.0f, skVY = 0.0f, skVK = 1.0f;
+/* ==================================================================
+ * 2026-11-08（用户实机反馈）：**方框尺寸不随缩放变化**
+ * ------------------------------------------------------------------
+ * 原来 nodeW/nodeH 乘了 skVK，滚轮一放大方框就跟着胀，
+ * 立刻和邻居压在一起（"连成一片"）。
+ * 现在尺寸固定在这个基准上，缩放只改坐标间距。
+ * ================================================================ */
+#define SK_NODE_K 0.78f
 static int   skDragging = 0;
 static float skDragMouseX = 0.0f, skDragMouseY = 0.0f;
 static float skDragVX = 0.0f, skDragVY = 0.0f;
@@ -944,8 +957,8 @@ int  SkillViewZoom(void)  { return (int)(skVK * 100.0f); }
 void SkillCenterOn(int id) {
     float wx, wy;
     SkillWorldPos(id, &wx, &wy);
-    int nodeW = (int)(SK_WX * 0.55f * skVK);
-    int nodeH = (int)(SK_WY * 0.62f * skVK);
+    int nodeW = (int)(SK_WX * 0.55f * SK_NODE_K);
+    int nodeH = (int)(SK_WY * 0.62f * SK_NODE_K);
     skVX = (float)winW * 0.50f - (wx * skVK + (float)nodeW * 0.5f);
     skVY = (float)winH * 0.42f - (wy * skVK + (float)nodeH * 0.5f);
     uiDirty = 1;
@@ -1319,8 +1332,8 @@ void DrawSkillTree(void) {
 
     /* ---------- 图区（可缩放/平移） ---------- */
     {
-        int nodeW = (int)(SK_WX * 0.55f * skVK);
-        int nodeH = (int)(SK_WY * 0.62f * skVK);
+        int nodeW = (int)(SK_WX * 0.55f * SK_NODE_K);
+        int nodeH = (int)(SK_WY * 0.62f * SK_NODE_K);
         if (nodeW < 24) nodeW = 24;
         if (nodeH < 18) nodeH = 18;
         /* ============================================================
@@ -1561,8 +1574,8 @@ void SkillFocusNode(int id) {
        之外就把它拉回中心，轴间独立，不会来回抖。 */
     float wx, wy;
     SkillWorldPos(id, &wx, &wy);
-    int nodeW = (int)(SK_WX * 0.55f * skVK);
-    int nodeH = (int)(SK_WY * 0.62f * skVK);
+    int nodeW = (int)(SK_WX * 0.55f * SK_NODE_K);
+    int nodeH = (int)(SK_WY * 0.62f * SK_NODE_K);
     float cx = wx * skVK + (float)nodeW * 0.5f;
     float cy = wy * skVK + (float)nodeH * 0.5f;
     float tx = (float)winW * 0.50f;
@@ -1582,8 +1595,8 @@ RECT SkillNodeRect(int id) {
 int SkillNodeHitTest(int mx, int my) {
     /* v6：**逆变换命中** —— 屏幕坐标先反解回世界坐标，再判矩形。 */
     int TH = TextHeightWin();
-    int nodeW = (int)(SK_WX * 0.55f * skVK);
-    int nodeH = (int)(SK_WY * 0.62f * skVK);
+    int nodeW = (int)(SK_WX * 0.55f * SK_NODE_K);
+    int nodeH = (int)(SK_WY * 0.62f * SK_NODE_K);
     if (nodeW < 24) nodeW = 24;
     if (nodeH < 18) nodeH = 18;
     (void)TH;

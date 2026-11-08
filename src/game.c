@@ -8900,6 +8900,35 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ScreenToClient(g_hwnd, &pt);
                 int dx = pt.x, dy = pt.y;
                 MouseToLogical(&dx, &dy);
+                /* ==================================================
+                 * 2026-11-08（用户实机反馈）：**返回键和 +/- 按钮点了没反应**
+                 * --------------------------------------------------
+                 * 原来这里无条件 SkillDragStart + return 0 ——
+                 * 技能树里每一次左键按下都被"拖拽"吞掉，按钮永远轮不到。
+                 * 现在先问按钮，都没命中才开始拖。
+                 * ================================================== */
+                {
+                    extern int HubBackButtonAt(int, int);
+                    extern int HubZoomButtonAt(int, int);
+                    extern void SkillZoomAt(float, int, int);
+                    if (HubBackButtonAt(dx, dy)) {
+                        SaveGame();
+                        currentState = STATE_MAIN_MENU;
+                        menuSelection = 0;
+                        ForceCursor(1);
+                        uiDirty = 1;
+                        return 0;
+                    }
+                    {
+                        int hit = HubZoomButtonAt(dx, dy);
+                        if (hit != 0) {
+                            SkillZoomAt(hit > 0 ? 1.25f : (1.0f / 1.25f),
+                                        winW / 2, winH / 2);
+                            uiDirty = 1;
+                            return 0;
+                        }
+                    }
+                }
                 SkillDragStart(dx, dy);
                 return 0;
             }
