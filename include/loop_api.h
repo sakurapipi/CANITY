@@ -1,20 +1,34 @@
-/* include/loop_api.h —— loop 契约（2026-11-09，第 8 轮）
+/* include/loop_api.h —— 循环/模式（2026-11-09，第 9 轮）
  *
- * 从 game.h 按职责抽出来的第 4 块。**game.h 未改动**，两边暂时并存。
- *
- * 目的：只关心loop的文件，不必认识 game.h 里全部 255 个全局。
+ * 从 game.h 按职责抽出。**game.h 未改动**，两边并存。
  */
 #ifndef CANITY_LOOP_API_H
 #define CANITY_LOOP_API_H
 
 #include "common.h"
 
-extern GameState currentState, prevState;
-extern int levelEvent;
-extern int eventBonus;
-extern int tutorialStep, tutorialDone;
-extern int dailyMode;
+void ResetRunModeFlags(void);
+extern int g_forceMod;
+void Update(float dt);
+extern int autoPaused;
+extern int trainingMode, trainingTotal, trainingLast, trainingCount, trainingDps;
+const char* TutorialObjective(void);
+const char* TutorialHint(void);
+int TutorialStepNumber(void);
+int TutorialStepTotal(void);
+void TutorialBegin(void);
+extern int trainingHist[6];
+extern float trainingDpsTimer;
+extern int skillPickSel;
+void OpenSkillPick(void);
+int OpenRelicPick(void);
+extern int pickMode;
 extern int campaignMode;
-extern int campaignStage;
+extern const char* campaignName(int stage);
+void CloseSkillPick(void);
+void StartGame(void);
+void StartDailyRun(void);
+void StartCampaign(int stage);
+void PauseGame(void);
 
 #endif

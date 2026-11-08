@@ -1,20 +1,88 @@
-/* include/present_api.h —— present 契约（2026-11-09，第 8 轮）
+/* include/present_api.h —— 呈现/界面（2026-11-09，第 9 轮）
  *
- * 从 game.h 按职责抽出来的第 3 块。**game.h 未改动**，两边暂时并存。
- *
- * 目的：只关心present的文件，不必认识 game.h 里全部 255 个全局。
+ * 从 game.h 按职责抽出。**game.h 未改动**，两边并存。
  */
 #ifndef CANITY_PRESENT_API_H
 #define CANITY_PRESENT_API_H
 
 #include "common.h"
 
-extern int uiDirty;
-extern double g_timeSec;
-extern const char* pickupMsg;
-extern float pickupMsgTimer;
-void ForceCursor(int visible);
-extern float g_shakeOffX, g_shakeOffY;
-void AddShake(float seconds, float mag);
+extern HWND g_hwnd;
+int CanityKeyDown(int vk, int repeat);
+void CanityMouseMove(int mx, int my);
+void CanityMouseClick(int mx, int my);
+void CanityMouseWheel(int delta, int mx, int my);
+void CanityPauseToggle(void);
+void CanityToggleFlashlight(void);
+void CanityMenuAction(void);
+extern int menuSelection, settingsSelection, settingsPopupOpen;
+extern int popupSelection, popupItem;
+extern int rebindingAct;
+extern int rebindConflict;
+extern int resetDefaultsFlag;
+extern int sliderDragging;
+extern int resIndex;
+extern const int resolutions[RES_COUNT][2];
+extern int isFullscreen;
+extern int showFps;
+extern int fpsCapIndex;
+extern const int fpsCaps[5];
+extern int renderScaleIndex;
+extern int dynamicRes;
+extern const int renderScales[4];
+extern float mouseSens;
+extern int vignetteOn;
+extern int hudDetail;
+extern int fovIndex;
+extern float gammaValue;
+extern float gammaBuilt;
+extern int currentFps;
+extern double lastRenderMs;
+extern double frameMsMax;
+extern int hubSelection;
+extern float mouseCharge;
+extern int resetInputState;
+extern float volumeF;
+extern float musicVolumeF;
+extern int hoverKind;
+extern int hoverIndex;
+extern int keys[256];
+extern int keyPressed[256];
+extern POINT lastMousePos;
+extern int firstMouseMove;
+extern POINT g_mousePos;
+extern int isMapOpen;
+extern int mapFullScreen;
+extern int settingsPage;
+extern int menuScrollOffsets[16];
+extern SettingItem settings[SETTING_COUNT];
+extern const char* optKeys[OPT_KEY_COUNT];
+extern const int optKeyVKs[OPT_KEY_COUNT];
+extern const char* rootCategoryNames[3];
+extern const char* bindCategoryNames[3];
+void ClearKeyEdges(void);
+void ApplyDisplayMode(void);
+int IsActionPressed(ActionId act);
+void SettingsRegister(void);
+const char* PageTitle(int page);
+int PageItems(int* out);
+int SettingsRowCount(void);
+const char* VkName(int vk);
+int BindActionOfItem(const SettingItem* it);
+int IsKeyBindItem(const SettingItem* it);
+extern int hubPage;
+void DumpUILayout(const char* path);
+extern int forceFrame;
+void PollInput(void);
+extern float treeVX, treeVY, treeVK;
+void SyncWindowSize(void);
+extern int clientW, clientH;
+void ApplySetting(int item, int value);
+void ActivateMenuItem(void);
+void ActivateHubRow(void);
+void ActivateSettingRow(void);
+extern int mapsFullyExplored;
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+extern int helpPage;
 
 #endif
