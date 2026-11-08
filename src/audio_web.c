@@ -12,6 +12,7 @@
  * 分区规则：audio 的符号只住在 audio 分区（partition_check 规则 S3）。
  */
 #include "common.h"
+#include "state.h"
 #include "audio.h"
 
 /* =====================================================================
