@@ -221,8 +221,11 @@ void SpiderTick(float dt) {
                **绝不**再排队等下一次。 */
             /* 第 5 轮：这是现在唯一的"限时按键"事件，难度也要作用于它
                （轻松 ×1.6 窗口，硬核 ×0.75） */
-            if (ControlBeginTimed(CTRL_SPIDER_WEB,
-                                  SPIDER_WEB_WINDOW * DiffQteWindowMul(),
+            /* 第 9 轮「挣脱」：窗口 ×1.5（反击者流派） */
+            float webWin = SPIDER_WEB_WINDOW * DiffQteWindowMul();
+            { extern int SkillCounterFreeOwned(void);
+              if (SkillCounterFreeOwned()) webWin *= 1.5f; }
+            if (ControlBeginTimed(CTRL_SPIDER_WEB, webWin,
                                   SPIDER_WEB_REDUCE,
                                   SPIDER_WEB_MIN)) {
                 PlaySfx(SFX_GLUE, 0.9f);

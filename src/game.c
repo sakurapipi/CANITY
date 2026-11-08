@@ -3756,6 +3756,9 @@ float wrenchSwingFxT  = 0.0f;
 float ghostStillT = 0.0f;
 /* 第 8 轮：典当的冷却（秒） */
 float pawnCd = 0.0f;
+/* 第 9 轮：以牙还牙的加速剩余秒数 / 反杀是否已用（每局一次） */
+float retaliateT = 0.0f;
+int   counterKillUsed = 0;
 static int  wrenchPrev = 0;
 static int  wrenchInit = 0;
 /* ===== v2.5.00 **装填闩** =====
@@ -5022,7 +5025,9 @@ void Update(float dt) {
              * RunSpeedMul()
              * (sprinting ? SPRINT_MULT * (BenchSlide() ? 1.20f : 1.0f) * (1.0f + burstAdd) : 1.0f)   /* v3.4 SLIDE +20% */ * crankMul * (hatchSpeedT > 0.0f ? 1.25f : 1.0f);
 
-        /* 第 8 轮「金币即力量」：每个强度档 +1.5% 移速，上限 +20% */
+        /* 第 9 轮「以牙还牙」：受伤后 3 秒 +30% 移速 */
+    if (retaliateT > 0.0f) sp *= 1.30f;
+    /* 第 8 轮「金币即力量」：每个强度档 +1.5% 移速，上限 +20% */
     {
         extern int SkillRaiderPowerOwned(void);
         extern int GoldTier(void);
@@ -5594,6 +5599,7 @@ void Update(float dt) {
     if (wrenchHitFlashT > 0.0f) wrenchHitFlashT -= dt;   /* 第 1 轮：扳手命中闪光 */
     if (wrenchSwingFxT  > 0.0f) wrenchSwingFxT  -= dt;   /* 第 3 轮：挥空暗标记 */
     if (pawnCd > 0.0f) pawnCd -= dt;   /* 第 8 轮：典当冷却 */
+    if (retaliateT > 0.0f) retaliateT -= dt;   /* 第 9 轮：以牙还牙 */
     UpdateMonster(dt);
     { extern void UpdateMonster2(float); UpdateMonster2(dt); }
     { extern void UpdateMonster3(float); UpdateMonster3(dt); }   /* v2.4.12 第二只 */

@@ -567,6 +567,10 @@ void UpdateScavenger(float dt) {
                              * (SCAV_CATCH_SAN_MAX - SCAV_CATCH_SAN_MIN);
                 if (loss > SCAV_CATCH_SAN_MAX) loss = SCAV_CATCH_SAN_MAX;
                 sanity -= loss * RunDamageTakenMul();
+                /* 第 9 轮「以牙还牙」：挨了一下之后 3 秒跑更快 */
+                { extern int SkillCounterBackOwned(void);
+                  extern float retaliateT;
+                  if (SkillCounterBackOwned()) retaliateT = 3.0f; }
                 if (sanity < 0.0f) sanity = 0.0f;
 
                 /* 减速 30% 持续 120 秒 —— 走现成的 FX_SLOW 通道，
@@ -583,6 +587,22 @@ void UpdateScavenger(float dt) {
                 pickupMsgTimer = 2.2f;
                 { extern int floorSpotted, runSpotted;
                   floorSpotted = 1; runSpotted = 1; }
+                /* 第 9 轮「反杀」：每局一次，抓住你的瞬间把它打退 */
+                {
+                    extern int SkillCounterKillOwned(void);
+                    extern int counterKillUsed;
+                    if (SkillCounterKillOwned() && !counterKillUsed) {
+                        counterKillUsed = 1;
+                        sanity += loss;          /* 撤销这次掉理智 */
+                        if (sanity > 100.0f) sanity = 100.0f;
+                        pickupMsg = (g_lang == LANG_ZH)
+                            ? "反杀！它被打了回去" : "COUNTERKILL! IT BACKS OFF";
+                        pickupMsgTimer = 2.2f;
+                        AddShake(0.30f, 0.20f);
+                        scavengerLeave();
+                        return;
+                    }
+                }
                 scavengerLeave();      /* 抓完就走，进入 40 秒冷却 */
                 return;
             }

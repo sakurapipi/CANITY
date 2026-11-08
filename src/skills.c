@@ -87,6 +87,13 @@ const SkillDef skillDefs[] = {
      {3200,0,0}, 0, SK_RAIDER_PAWN, 0},
     {"GOLD POWER", "Each gold tier gives +1.5%% move speed (cap +20%%)", 1, 1,
      {4500,0,0}, 0, SK_RAIDER_GAMBLE, 1},
+    /* ---- 2026-11-08（第 9 轮）：反击者流派 COUNTER ---- */
+    {"BREAK FREE", "Struggle window is 1.5x wider when grabbed", 2, 1,
+     {2600,0,0}, 0, SK_GHOST_FORM, 0},
+    {"RETALIATE", "After taking a hit: +30% move speed for 3s", 2, 1,
+     {3200,0,0}, 0, SK_COUNTER_FREE, 0},
+    {"COUNTERKILL", "Once per run: kill the scavenger as it grabs you", 2, 1,
+     {4500,0,0}, 0, SK_COUNTER_BACK, 1},
 };
 
 typedef char skillDefs_count_check[(sizeof(skillDefs)/sizeof(skillDefs[0]) == SKILL_COUNT) ? 1 : -1];
@@ -114,10 +121,10 @@ typedef char SKILL_DEF_COUNT_CHECK[(
    原来 16..19 一律当成「第 5 行列 0..3」，导致方向键导航跳错节点。 */
 static const unsigned char kNodeCol[SKILL_COUNT] = {
     0,0,0,0,  1,1,1,1,  2,2,2,2,  3,3,3,3,  4, 0,1,2,  4,4,4,4,4,  4, 4,4,4,4,
- 5, 5, 5, 5, 5, 5, 5 };
+ 5, 5, 5, 5, 5, 5, 5, 5, 5, 5 };
 static const unsigned char kNodeRow[SKILL_COUNT] = {
     0,1,2,3,  0,1,2,3,  0,1,2,3,  0,1,2,3,  0, 4,4,4,  1,2,3,4,0,  4, 0,1,2,3,
- 0, 1, 2, 3, 0, 1, 3 };
+ 0, 1, 2, 3, 0, 1, 3, 0, 1, 2 };
 
 int SkillNodeCol(int id) {
     if (id < 0 || id >= SKILL_COUNT) return -1;
@@ -243,6 +250,10 @@ int SkillGhostBreathRank(void) { return skillRank[SK_GHOST_BREATH]; }
 int SkillRaiderPawnOwned(void)   { return skillRank[SK_RAIDER_PAWN] > 0; }
 int SkillRaiderGambleOwned(void) { return skillRank[SK_RAIDER_GAMBLE] > 0; }
 int SkillRaiderPowerOwned(void)  { return skillRank[SK_RAIDER_POWER] > 0; }
+/* 第 9 轮：反击者三件 */
+int SkillCounterFreeOwned(void) { return skillRank[SK_COUNTER_FREE] > 0; }
+int SkillCounterBackOwned(void) { return skillRank[SK_COUNTER_BACK] > 0; }
+int SkillCounterKillOwned(void) { return skillRank[SK_COUNTER_KILL] > 0; }
 int SkillGhostStepOwned(void)   { return skillRank[SK_GHOST_STEP] > 0; }
 int SkillGhostLandOwned(void)   { return skillRank[SK_GHOST_LAND] > 0; }
 int SkillGhostFormOwned(void)   { return skillRank[SK_GHOST_FORM] > 0; }
@@ -784,6 +795,15 @@ void SkillNodeNorm(int id, float* nx, float* ny) {
 
     /* 2026-11-08（第 7 轮）：幽灵流派走独立扇区（-54°），半径沿用辐条四档 */
     /* 2026-11-08（第 8 轮）：掠夺者走 +18° 扇区（幽灵在南侧 -54°，互不干扰） */
+    /* 2026-11-08（第 9 轮）：反击者放在正下方 90°（唯一没用的大方向） */
+    if (id >= 37 && id <= 39) {
+        static const float kCounterR[3] = { 0.20f, 0.32f, 0.50f };  /* 0.14 太挤（与辐条 36° 只差 104px），抬到 0.20 */
+        angle = 1.5707963f;   /* +90° */
+        *nx = 0.5f + cosf(angle) * kCounterR[id - 37];
+        *ny = 0.5f + sinf(angle) * kCounterR[id - 37];
+        return;
+    }
+
     if (id >= 34 && id <= 36) {
         static const float kRaiderR[3] = { 0.26f, 0.38f, 0.62f };
         angle = -1.5707963f + 6.2831853f * 0.3f;   /* -90 + 108 = 18° */
@@ -941,6 +961,9 @@ static const char* kShortNames[SKILL_COUNT] = {
     "PAWN",   /* 34 */
     "GAMBLE", /* 35 */
     "POWER",  /* 36 */
+    "FREE",   /* 37 */
+    "BACK",   /* 38 */
+    "KILL",   /* 39 */
 };
 
 const char* SkillShortName(int id) {

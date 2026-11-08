@@ -285,6 +285,9 @@ static void test_runs_and_layout(void) {
                 int oy=(a.bottom<b.bottom?a.bottom:b.bottom)-(a.top>b.top?a.top:b.top);
                 { long long share = 0;
                   if (ox > 0 && oy > 0) share = (long long)ox * oy * 100 / ((long long)aw * ah);
+                  if (share >= 8)
+                      fprintf(stderr, "  [overlap] id %d x id %d  %lld%%\n",
+                              i, j, share);
                   CHECK(share < 8, "radial skill nodes never overlap"); }
             }
         }
@@ -474,6 +477,68 @@ static void test_keystone_switch_costs_gold(void) {
     SkillResetAll();
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 9 轮）：**三流派对拍**
+ * ------------------------------------------------------------------
+ * 三个流派各 3~4 个节点，每个节点的"效果入口"必须真的存在且有返回。
+ * 这条测试防的是：加了数据但忘了接效果（本工程历史上发生过多次）。
+ * ================================================================ */
+
+extern int SkillGhostBreathRank(void);
+extern int SkillGhostStepOwned(void);
+extern int SkillGhostLandOwned(void);
+extern int SkillGhostFormOwned(void);
+extern int SkillRaiderPawnOwned(void);
+extern int SkillRaiderGambleOwned(void);
+extern int SkillRaiderPowerOwned(void);
+extern int SkillCounterFreeOwned(void);
+extern int SkillCounterBackOwned(void);
+extern int SkillCounterKillOwned(void);
+
+static void test_three_archetypes_are_wired(void) {
+    extern void SkillResetAll(void);
+    extern int  skillRank[];
+    int zero, one;
+
+    SkillResetAll();
+
+    /* 全部未购买时：所有入口都必须能调用且返回 0 */
+    zero = SkillGhostBreathRank() + SkillGhostStepOwned() + SkillGhostLandOwned()
+         + SkillGhostFormOwned() + SkillRaiderPawnOwned() + SkillRaiderGambleOwned()
+         + SkillRaiderPowerOwned() + SkillCounterFreeOwned() + SkillCounterBackOwned()
+         + SkillCounterKillOwned();
+    CHECK(zero == 0, "with nothing bought, every archetype entry must read 0");
+
+    /* 逐个点亮，入口必须跟着变 1（幽灵的呼吸同步是 rank，其余是 owned） */
+    skillRank[SK_GHOST_BREATH] = 1;
+    CHECK(SkillGhostBreathRank() == 1, "ghost/breath must report its rank");
+
+    skillRank[SK_GHOST_STEP] = 1;  skillRank[SK_GHOST_LAND] = 1;
+    skillRank[SK_GHOST_FORM] = 1;  skillRank[SK_RAIDER_PAWN] = 1;
+    skillRank[SK_RAIDER_GAMBLE] = 1; skillRank[SK_RAIDER_POWER] = 1;
+    skillRank[SK_COUNTER_FREE] = 1;  skillRank[SK_COUNTER_BACK] = 1;
+    skillRank[SK_COUNTER_KILL] = 1;
+
+    one = SkillGhostStepOwned() + SkillGhostLandOwned() + SkillGhostFormOwned()
+        + SkillRaiderPawnOwned() + SkillRaiderGambleOwned() + SkillRaiderPowerOwned()
+        + SkillCounterFreeOwned() + SkillCounterBackOwned() + SkillCounterKillOwned();
+    CHECK(one == 9, "all nine owned-flags must flip to 1");
+
+    /* 三个流派都必须真的存在于表里（名字非空、有价格） */
+    {
+        int i, ghost = 0, raider = 0, counter = 0;
+        extern const SkillDef skillDefs[];
+        for (i = 30; i <= 33; i++) if (skillDefs[i].name && skillDefs[i].name[0]) ghost++;
+        for (i = 34; i <= 36; i++) if (skillDefs[i].name && skillDefs[i].name[0]) raider++;
+        for (i = 37; i <= 39; i++) if (skillDefs[i].name && skillDefs[i].name[0]) counter++;
+        CHECK(ghost == 4 && raider == 3 && counter == 3,
+              "the three archetypes must contribute 4 + 3 + 3 named nodes");
+    }
+
+    SkillResetAll();
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -488,4 +553,5 @@ void TestSuite_progress(void) {
     test_skill_nodes_are_all_placeable();
     test_skill_short_names_are_short();
     test_keystone_switch_costs_gold();
+    test_three_archetypes_are_wired();
 }

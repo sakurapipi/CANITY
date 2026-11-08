@@ -56,6 +56,7 @@ def parse_norm(src):
     inner = re.search(r'kInnerRadius\s*=\s*([0-9.]+)f', src)
     ghost = re.search(r'kGhostR\[4\]\s*=\s*\{([^}]*)\}', src)
     raider = re.search(r'kRaiderR\[3\]\s*=\s*\{([^}]*)\}', src)
+    counter = re.search(r'kCounterR\[3\]\s*=\s*\{([^}]*)\}', src)
     crossdeg = re.search(r'kCrossDeg\[4\]\s*=\s*\{([^}]*)\}', src)
     if not (spoke and cross and inner):
         return None
@@ -70,6 +71,8 @@ def parse_norm(src):
                     if ghost else []),
         'raider_r': ([float(x.strip().rstrip('f')) for x in raider.group(1).split(',') if x.strip()]
                      if raider else []),
+        'counter_r': ([float(x.strip().rstrip('f')) for x in counter.group(1).split(',') if x.strip()]
+                      if counter else []),
         'cross_deg': ([float(x.strip().rstrip('f')) for x in crossdeg.group(1).split(',') if x.strip()]
                       if crossdeg else [18.0, 54.0, 126.0, 162.0]),
     }
@@ -102,6 +105,11 @@ def norm_pos(id_, cfg, origin_id, count):
     if id_ == origin_id:
         return 0.5, 0.5
     sectors = cfg['sectors']
+    if 37 <= id_ <= 39:
+        cr = cfg.get('counter_r') or []
+        r = cr[id_ - 37] if len(cr) > id_ - 37 else 0.20
+        ang = math.pi / 2
+        return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
     if 34 <= id_ <= 36:
         rr = cfg.get('raider_r') or []
         r = rr[id_ - 34] if len(rr) > id_ - 34 else 0.26
