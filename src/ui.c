@@ -1818,6 +1818,19 @@ void DrawHUD(void) {
        词条横幅在任何档位都只在进关后 5 秒出现（levelBanner 控制），
        因为它是「一次性信息」，常驻反而是噪音。 */
 
+    /* ==================================================================
+     * 2026-11-08（第 10 轮）：**HUD 精简**
+     * ------------------------------------------------------------------
+     * 玩家原话：「左上角太多数值了，新手看不懂」。
+     * 常驻只留 4 项（LEVEL / GOLD / SANITY / THREAT>0），
+     * 按住 Tab 临时展开完整 HUD —— 信息没删，只是默认不糊在脸上。
+     * ================================================================ */
+    int effDetail = hudDetail;
+    {
+        extern int keys[256];
+        if (keys[VK_TAB]) effDetail = 2;   /* 按住 Tab = 临时 Full */
+    }
+
     int goldRowEnd = 0;   /* v2.4.90 顶行金币栏的右边界 */
     sprintf(buf, Tr("LEVEL %d", "第 %d 层"), currentLevel);
         if (campaignMode) {
@@ -1868,6 +1881,13 @@ void DrawHUD(void) {
             static char tbuf[32];
             float tv = ThreatValue();
             int tx0 = gx0 + TextWidthWin(gbuf) + UIS(14);
+            /* 2026-11-08：**威胁为 0 时不显示** —— 开局那个 THREAT 0.0
+               对新玩家没有任何决策价值，还占着第一行。
+               注意：这里**不能 return**（那会把整个 DrawHUD 退掉，
+               SANITY / FUSES / 状态条全都不画了 —— 实测截图为证）。 */
+            if (tv <= 0.0f) {
+                goldRowEnd = tx0;
+            } else {
             snprintf(tbuf, sizeof(tbuf), "THREAT %.1f", (double)tv);
             {
                 /* v6 铁律十九：三态全部来自调色盘
@@ -1882,6 +1902,7 @@ void DrawHUD(void) {
                 DrawTextWin(tx0, UIS(18), tbuf, tc);
             }
             goldRowEnd = tx0 + TextWidthWin(tbuf) + UIS(14);
+            }   /* end tv > 0 */
         }
     }
 
@@ -1893,7 +1914,7 @@ void DrawHUD(void) {
        常驻的是「提醒」，横幅是「解释」。 */
     /* 2026-11-08：**hudDetail 三档真正生效**。
        词条改变规则（怪更快 / 理智掉更快），Normal 起显示。 */
-    if (hudDetail >= 1 && levelMod >= 0 && levelMod < MOD_COUNT) {
+    if (effDetail >= 1 && levelMod >= 0 && levelMod < MOD_COUNT) {
         int lx = goldRowEnd;
         sprintf(buf, "%s", modNames[levelMod]);
         DrawTextWin(lx, UIS(18), buf, 0x00C08040u);
@@ -1903,7 +1924,7 @@ void DrawHUD(void) {
        原来画在 y=UIS(36)，而文字高度在小窗口下就有 30 多逻辑像素，
        结果和 LEVEL / SANITY 叠在一起（截图里就是这样）。
        现在并到首行右侧，跟词条同一行，永远不会撞。 */
-    if (hudDetail >= 2 && levelEvent >= 0 && levelEvent < EVENT_COUNT) {
+    if (effDetail >= 2 && levelEvent >= 0 && levelEvent < EVENT_COUNT) {
         int ex = goldRowEnd;
         if (levelMod >= 0 && levelMod < MOD_COUNT) {
             char mb[32];
@@ -2062,7 +2083,7 @@ void DrawHUD(void) {
 
     /* 2026-11-08：Minimal 档只留 4 项（LEVEL/GOLD/SANITY/THREAT）。
        保险丝进度从 Normal 起显示。 */
-    if (hudDetail >= 1) {
+    if (effDetail >= 1) {
         if (breakerOpen) sprintf(buf, "POWER ON");
         else sprintf(buf, "FUSES %d/%d", fusesHeld, fusesNeeded);
         DrawTextWin(UIS(20), hudY2, buf, breakerOpen ? 0x0030FF60u : 0x00E8C040u);
@@ -2131,7 +2152,7 @@ void DrawHUD(void) {
          * 是纯噪音，而它们正好占了左上角两行。
          * 老玩家想要就开 Full —— 信息没删，只是默认不糊在脸上。
          * ================================================================ */
-        if (hudDetail >= 2) {
+        if (effDetail >= 2) {
             int tier = GoldTier();
             sprintf(buf, Tr("CARRY  %d   TIER %d", "带入  %d   强度档 %d"), carryGold, tier);
             /* 档位越高颜色越烫：0~4 灰 / 5~9 黄 / 10~15 红 */
@@ -2140,7 +2161,7 @@ void DrawHUD(void) {
             DrawTextWin(UIS(20), hudY3, buf, tc);
         }
 
-        if (hudDetail >= 2) {
+        if (effDetail >= 2) {
             int boost = 0;
             if (bankHistMax > 0)
                 boost = (int)((float)carryGold * 100.0f / (float)bankHistMax + 0.5f);
