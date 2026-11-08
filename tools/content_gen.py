@@ -85,8 +85,8 @@ def plan_skill(a):
         return [], 'common.h 里找不到 SKILL_COUNT'
     count = int(m.group(1))
     # 网格 8 列 × 5 行，满了就不硬塞
-    if count % 8 == 0 and count >= 40:
-        return [], ('坐标网格 8x5 已满（%d 个）。先扩表再生成 —— '
+    if count % 8 == 0 and count >= 48:
+        return [], ('坐标网格 8x6 已满（%d 个）。先扩表再生成 —— '
                     '硬塞会得到重叠的节点。' % count)
 
     edits = []
@@ -105,10 +105,30 @@ def plan_skill(a):
                  'SKILL_COUNT %d' % (count + 1), 'SKILL_COUNT +1')
     edits.append(('src/skills.c', m2.group(1)[-40:], m2.group(1)[-40:] + row, '表行'))
 
-    # ③ 坐标：按 8 列网格推下一个格子
-    DX, DY = 0.1221, 0.1353
-    X0, Y0 = 0.5 - DX * 7 / 2, 0.5 - DY * 4 / 2
-    col, rowi = count % 8, count // 8
+    # ③ 坐标：**从 skills.c 的实际表读**，不再硬编码网格参数
+    #    （2026-11-09 A-1：网格 8x5 → 8x6，硬编码的 DY 会把新节点放到屏幕外）
+    def _levels(name):
+        m2 = re.search(name + r'\[\w+\]\s*=\s*\{(.*?)\};', skills, re.S)
+        if not m2:
+            return []
+        b = re.sub(r'/\*.*?\*/', '', m2.group(1), flags=re.S)
+        vals = [float(x.strip().rstrip('f')) for x in b.split(',') if x.strip()]
+        return sorted(set(vals))
+
+    xs = _levels('kNodeNX')
+    ys = _levels('kNodeNY')
+    if len(xs) >= 2 and len(ys) >= 2:
+        DX = xs[1] - xs[0]
+        DY = ys[1] - ys[0]
+        X0, Y0 = xs[0], ys[0]
+        ROWS = len(ys) + (0 if count % 8 else 1)
+        # 新节点落在最后一行之后：沿用同一间距，从表顶往下数第 count//8 行
+        col, rowi = count % 8, count // 8
+        Y0 = ys[0]
+    else:
+        DX, DY = 0.1221, 0.10824
+        X0, Y0 = 0.5 - DX * 7 / 2, 0.5 - DY * 5 / 2
+        col, rowi = count % 8, count // 8
     nx, ny = X0 + col * DX, Y0 + rowi * DY
     edits.append(('src/skills.c', 'kNodeNX', 'kNodeNX', '坐标 (%.4f, %.4f)' % (nx, ny)))
 
