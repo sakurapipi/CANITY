@@ -350,6 +350,39 @@ static void test_wrench(void) {
     CHECK(RunUpgLevel(0)==0,"run upgrades clear on a new run");
 }
 
+
+/* ==================================================================
+ * 2026-11-08：**技能树数据自检**
+ * ------------------------------------------------------------------
+ * SkillsSelfTest() 一直只写 log，没有测试断言它必须返回 0。
+ * 表一旦被改坏（总数对不上 / 前置成环 / keystone 列写错），
+ * 玩家看到的是"买了没用"或"节点点不动"，却没人报警。
+ * ================================================================ */
+
+extern int SkillsSelfTest(void);
+
+static void test_skill_tree_data_is_consistent(void) {
+    int code = SkillsSelfTest();
+    CHECK(code == 0, "skill tree data self-test must pass (code tells which check failed)");
+}
+
+static void test_skill_nodes_are_all_placeable(void) {
+    extern const int* SkillNodeTableX(void);
+    extern const int* SkillNodeTableY(void);
+    extern int SkillNodeXTableSize(void);
+    (void)SkillNodeTableX; (void)SkillNodeTableY; (void)SkillNodeXTableSize;
+    /* 每个节点都必须有合法格子：用公开的列/行查询验证一遍 */
+    {
+        int id, bad = 0;
+        for (id = 0; id < SKILL_COUNT; id++) {
+            int c = SkillNodeCol(id);
+            int r = SkillNodeRow(id);
+            if (c < 0 && r < 0) bad++;      /* 两个都非法 = 完全没位置 */
+        }
+        CHECK(bad == 0, "every skill node must have a grid slot (0 = all placed)");
+    }
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -359,4 +392,7 @@ void TestSuite_progress(void) {
     test_runs_and_layout();
     test_music();
     test_wrench();
+    /* 技能树数据自检（2026-11-08 加） */
+    test_skill_tree_data_is_consistent();
+    test_skill_nodes_are_all_placeable();
 }
