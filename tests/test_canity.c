@@ -592,10 +592,10 @@ static void test_save_persist_contract(void) {
     /* v37（2026-11-08 第 7 轮）：幽灵流派 4 个节点的等级必须能存。
        注意：**不能**把中间的 extraSkillRanks[4] 改大 —— 那会让后面所有
        字段偏移，老档全错位。只能是末尾追加。 */
-    check(contains(saveh, "int ghostSkillRanks[4];"),
-          "v37 must persist the ghost archetype ranks");
-    check(contains(savec, "g_save.ghostSkillRanks[i-30]=skillRank[i]"),
-          "save must write the ghost ranks");
+    check(contains(saveh, "int archetypeRanks[8];"),
+          "v37/v38 must persist the archetype ranks (30..37)");
+    check(contains(savec, "g_save.archetypeRanks[i-30]=skillRank[i]"),
+          "save must write the archetype ranks");
     check(contains(savec, "i<30 && i<SKILL_COUNT"),
           "the old extraSkillRanks[4] must not be written past its size");
     /* v36（2026-11-08 第 2 轮）：难度选择必须能存档，且老档读成标准 */

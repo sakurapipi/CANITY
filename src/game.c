@@ -3754,6 +3754,8 @@ float wrenchHitFlashT = 0.0f;
 float wrenchSwingFxT  = 0.0f;
 /* 第 7 轮：连续静止秒数（幽灵流派用） */
 float ghostStillT = 0.0f;
+/* 第 8 轮：典当的冷却（秒） */
+float pawnCd = 0.0f;
 static int  wrenchPrev = 0;
 static int  wrenchInit = 0;
 /* ===== v2.5.00 **装填闩** =====
@@ -4075,6 +4077,28 @@ void Update(float dt) {
             pickupMsgTimer = 2.0f;
             uiDirty = 1;
             return;
+        }
+        /* ==================================================================
+         * 第 8 轮「典当」：理智低于 30% 时自动花 200×层数 金 换 20 理智。
+         * 做成自动而不是按键：这个游戏已经有 8 个交互键，再加一个没人记得住；
+         * 而"钱换命"这件事应该在玩家快撑不住时自己发生。
+         * 30 秒冷却，避免一口气把银行花光。
+         * ================================================================ */
+        {
+            extern int SkillRaiderPawnOwned(void);
+            extern float pawnCd;
+            if (SkillRaiderPawnOwned() && pawnCd <= 0.0f &&
+                sanity < 30.0f && WalletCanPayBank(200 * (currentLevel > 0 ? currentLevel : 1))) {
+                int cost = 200 * (currentLevel > 0 ? currentLevel : 1);
+                if (WalletSpendBank(cost)) {
+                    sanity += 20.0f;
+                    if (sanity > SanityMax()) sanity = SanityMax();
+                    pawnCd = 30.0f;
+                    PlaySfx(SFX_PICKUP, 0.5f);
+                    pickupMsg = (g_lang == LANG_ZH) ? "典当：金币换理智" : "PAWNED GOLD FOR SANITY";
+                    pickupMsgTimer = 1.6f;
+                }
+            }
         }
         /* v2.5：安全屋里不流失 —— 这是"安全"二字的承诺 */
         /* 第 2 轮：难度改的是"恐惧增长"，不是血量公式 */
@@ -4998,7 +5022,17 @@ void Update(float dt) {
              * RunSpeedMul()
              * (sprinting ? SPRINT_MULT * (BenchSlide() ? 1.20f : 1.0f) * (1.0f + burstAdd) : 1.0f)   /* v3.4 SLIDE +20% */ * crankMul * (hatchSpeedT > 0.0f ? 1.25f : 1.0f);
 
-        /* 第 7 轮「无形」：隐身期间移速 -25%（代价） */
+        /* 第 8 轮「金币即力量」：每个强度档 +1.5% 移速，上限 +20% */
+    {
+        extern int SkillRaiderPowerOwned(void);
+        extern int GoldTier(void);
+        if (SkillRaiderPowerOwned()) {
+            float add = (float)GoldTier() * 0.015f;
+            if (add > 0.20f) add = 0.20f;
+            sp *= (1.0f + add);
+        }
+    }
+    /* 第 7 轮「无形」：隐身期间移速 -25%（代价） */
     {
         extern int SkillGhostFormOwned(void);
         if (SkillGhostFormOwned() && ghostStillT >= 3.0f) sp *= 0.75f;
@@ -5151,6 +5185,15 @@ void Update(float dt) {
                 runSearched++;
         int shardGain = (int)(GoldSearchAt(currentLevel) * SkillScavengerShardMul() * SkillCrateGoldMul()
                               * RelicShardMul() * modShardMul + 0.5f);   /* v2.0：遗物+事件 */
+                /* 第 8 轮「赌徒」：50% 双倍 / 50% 归零 —— 把开箱变成赌注 */
+                {
+                    extern int SkillRaiderGambleOwned(void);
+                    extern unsigned int RunRngNext(void);
+                    if (SkillRaiderGambleOwned()) {
+                        if (RunRngNext() & 1u) shardGain *= 2;
+                        else                   shardGain = 0;
+                    }
+                }
                 carryGold += shardGain;    /* v1.8：先记在待上缴里 */
                 totalGoldEarned += shardGain;
                 PlaySfx(SFX_PICKUP, 0.55f);
@@ -5550,6 +5593,7 @@ void Update(float dt) {
     if (lastHitTimer > 0.0f) lastHitTimer -= dt;   /* v1.15：命中数字淡出 */
     if (wrenchHitFlashT > 0.0f) wrenchHitFlashT -= dt;   /* 第 1 轮：扳手命中闪光 */
     if (wrenchSwingFxT  > 0.0f) wrenchSwingFxT  -= dt;   /* 第 3 轮：挥空暗标记 */
+    if (pawnCd > 0.0f) pawnCd -= dt;   /* 第 8 轮：典当冷却 */
     UpdateMonster(dt);
     { extern void UpdateMonster2(float); UpdateMonster2(dt); }
     { extern void UpdateMonster3(float); UpdateMonster3(dt); }   /* v2.4.12 第二只 */

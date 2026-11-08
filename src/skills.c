@@ -80,6 +80,13 @@ const SkillDef skillDefs[] = {
      {3900,0,0}, 0, 4, 0},
     {"FORMLESS", "Stand still 3s to vanish from sight (move speed -25%)", 0, 1,
      {4500,0,0}, 0, 5, 1},
+    /* ---- 2026-11-08（第 8 轮）：掠夺者流派 RAIDER ---- */
+    {"PAWN", "Below 30%% sanity: auto-spend 200x floor gold for +20 sanity", 1, 1,
+     {2600,0,0}, 0, SK_BATTERY, 0},
+    {"GAMBLER II", "Crate gold is 50%% doubled, 50%% nothing", 1, 1,
+     {3200,0,0}, 0, SK_RAIDER_PAWN, 0},
+    {"GOLD POWER", "Each gold tier gives +1.5%% move speed (cap +20%%)", 1, 1,
+     {4500,0,0}, 0, SK_RAIDER_GAMBLE, 1},
 };
 
 typedef char skillDefs_count_check[(sizeof(skillDefs)/sizeof(skillDefs[0]) == SKILL_COUNT) ? 1 : -1];
@@ -107,10 +114,10 @@ typedef char SKILL_DEF_COUNT_CHECK[(
    原来 16..19 一律当成「第 5 行列 0..3」，导致方向键导航跳错节点。 */
 static const unsigned char kNodeCol[SKILL_COUNT] = {
     0,0,0,0,  1,1,1,1,  2,2,2,2,  3,3,3,3,  4, 0,1,2,  4,4,4,4,4,  4, 4,4,4,4,
- 5, 5, 5, 5 };
+ 5, 5, 5, 5, 5, 5, 5 };
 static const unsigned char kNodeRow[SKILL_COUNT] = {
     0,1,2,3,  0,1,2,3,  0,1,2,3,  0,1,2,3,  0, 4,4,4,  1,2,3,4,0,  4, 0,1,2,3,
- 0, 1, 2, 3 };
+ 0, 1, 2, 3, 0, 1, 3 };
 
 int SkillNodeCol(int id) {
     if (id < 0 || id >= SKILL_COUNT) return -1;
@@ -232,6 +239,10 @@ int SkillSwitchable(int id) {
  * 第四个（无形）是王冠：隐身 + 移速 -25% 作为代价。
  * ================================================================ */
 int SkillGhostBreathRank(void) { return skillRank[SK_GHOST_BREATH]; }
+/* 第 8 轮：掠夺者三件 */
+int SkillRaiderPawnOwned(void)   { return skillRank[SK_RAIDER_PAWN] > 0; }
+int SkillRaiderGambleOwned(void) { return skillRank[SK_RAIDER_GAMBLE] > 0; }
+int SkillRaiderPowerOwned(void)  { return skillRank[SK_RAIDER_POWER] > 0; }
 int SkillGhostStepOwned(void)   { return skillRank[SK_GHOST_STEP] > 0; }
 int SkillGhostLandOwned(void)   { return skillRank[SK_GHOST_LAND] > 0; }
 int SkillGhostFormOwned(void)   { return skillRank[SK_GHOST_FORM] > 0; }
@@ -749,7 +760,7 @@ float ThickHideMul(void) {
  * 否则自检会失真（已经踩过一次）。
  * ================================================================ */
 static const float kSpokeRadius[4] = { 0.14f, 0.26f, 0.38f, 0.50f };
-static const float kCrossRadius   = 0.44f;   /* 16..19：内圈，把外圈让给流派节点 */
+static const float kCrossRadius   = 0.62f;   /* 16..19：内圈，把外圈让给流派节点 */
 static const float kInnerRadius   = 0.32f;   /* 20..24：错 36°，夹在 1~2 行之间 */
 
 void SkillNodeNorm(int id, float* nx, float* ny) {
@@ -772,6 +783,15 @@ void SkillNodeNorm(int id, float* nx, float* ny) {
     float angle;
 
     /* 2026-11-08（第 7 轮）：幽灵流派走独立扇区（-54°），半径沿用辐条四档 */
+    /* 2026-11-08（第 8 轮）：掠夺者走 +18° 扇区（幽灵在南侧 -54°，互不干扰） */
+    if (id >= 34 && id <= 36) {
+        static const float kRaiderR[3] = { 0.26f, 0.38f, 0.62f };
+        angle = -1.5707963f + 6.2831853f * 0.3f;   /* -90 + 108 = 18° */
+        *nx = 0.5f + cosf(angle) * kRaiderR[id - 34];
+        *ny = 0.5f + sinf(angle) * kRaiderR[id - 34];
+        return;
+    }
+
     if (id >= 30 && id <= 33) {
         angle = -1.5707963f + 6.2831853f * 0.1f;   /* -90 + 36 = -54° */
         /* 幽灵四档：0.26 / 0.38 / 0.50 / 0.56 ——
@@ -798,10 +818,12 @@ void SkillNodeNorm(int id, float* nx, float* ny) {
     } else {
         /* 16..19：跨支王冠 —— 最外环，角度错开 36° 落在辐条中间 */
         branch = id - 16;
-        /* 108° 起跳：-90 + 108 = 18°，依次 90 / 162 / 234 ——
-           这四个方向与辐条（-90/-18/54/126/198）和幽灵（-54）都不重合。 */
-        angle = -1.5707963f + 6.2831853f * 0.3f
-                + 6.2831853f * (float)branch / 5.0f;
+        /* 最外环 0.62：正上/正下会顶出屏幕，所以角度用显式表
+           {18, 54, 126, 162}，避开 90 与 270。 */
+        {
+            static const float kCrossDeg[4] = { 234.0f, 54.0f, 126.0f, 162.0f };
+            angle = kCrossDeg[branch] * 0.017453292f;
+        }
         *nx = 0.5f + cosf(angle) * kCrossRadius;
         *ny = 0.5f + sinf(angle) * kCrossRadius;
         return;
@@ -916,6 +938,9 @@ static const char* kShortNames[SKILL_COUNT] = {
     "SHADOW", /* 31 */
     "LAND",   /* 32 */
     "FORM",   /* 33 */
+    "PAWN",   /* 34 */
+    "GAMBLE", /* 35 */
+    "POWER",  /* 36 */
 };
 
 const char* SkillShortName(int id) {

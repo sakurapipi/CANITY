@@ -837,8 +837,8 @@ void SaveGame(void) {
     /* 2026-11-08：26..29 进老字段，30..33 进新字段（v37 追加） */
     for(int i=26;i<30 && i<SKILL_COUNT;++i) g_save.extraSkillRanks[i-26]=skillRank[i];
     /* v37：幽灵流派 30..33 */
-    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.ghostSkillRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
-    for(int i=30;i<SKILL_COUNT;++i) g_save.ghostSkillRanks[i-30]=skillRank[i];
+    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.archetypeRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
+    for(int i=30;i<SKILL_COUNT;++i) g_save.archetypeRanks[i-30]=skillRank[i];
     { extern int shopRefreshFloor,shopRefreshUsed,contractKind,shopContractUsed;
       g_save.shopRefreshFloorSave=shopRefreshFloor; g_save.shopRefreshUsedSave=shopRefreshUsed;
       g_save.contractKindSave=contractKind; g_save.contractLockedSave=shopContractUsed;
@@ -1613,7 +1613,7 @@ int LoadSettings(void) {
 
     for(int i=26;i<30 && i<SKILL_COUNT;++i) { int r=g_save.extraSkillRanks[i-26]; skillRank[i]=(r>=0 && r<=3)?r:0; }
     /* v37：幽灵流派 30..33 */
-    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.ghostSkillRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
+    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.archetypeRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
     SkillInitOnce();
     BestiaryLoad(g_save.bestiaryKnowledge);
     RestoreBankFromSave();
@@ -1722,7 +1722,7 @@ void ContinueRun(void) {
     /* v3.4/v6 银行：统一走 RestoreBankFromSave，只有一份逻辑 */
     for(int i=26;i<30 && i<SKILL_COUNT;++i) { int r=g_save.extraSkillRanks[i-26]; skillRank[i]=(r>=0 && r<=3)?r:0; }
     /* v37：幽灵流派 30..33 */
-    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.ghostSkillRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
+    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.archetypeRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
     SkillInitOnce();
     BestiaryLoad(g_save.bestiaryKnowledge);
     RestoreBankFromSave();
