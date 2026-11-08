@@ -67,4 +67,16 @@ int  fixture_copy(const char* from, const char* to);
 void finish_floor(void);
 void mask32(int sprId, unsigned char out[32][32]);
 
+
+/* 假音频后端（音乐测试用）：从 test_runtime.c 搬到共享头，
+ * 让 tests/domains/test_progress.c 也能用 */
+typedef struct {int plays,stops,pauses,scenes,ticks;float gain;} FakeMusic;
+static int fake_play(void* p,const char* track,int loop){(void)track;(void)loop;((FakeMusic*)p)->plays++;return 1;}
+
+static inline void fake_stop(void* p){((FakeMusic*)p)->stops++;}
+static inline void fake_pause(void* p,int pause){((FakeMusic*)p)->pauses=pause;}
+static inline void fake_gain(void* p,float gain){((FakeMusic*)p)->gain=gain;}
+static inline void fake_scene(void* p,MusicScene scene){(void)scene;((FakeMusic*)p)->scenes++;}
+static inline void fake_tick(void* p,float dt){(void)dt;((FakeMusic*)p)->ticks++;}
+
 #endif /* CANITY_TEST_COMMON_H */
