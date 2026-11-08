@@ -1,226 +1,88 @@
 #!/usr/bin/env python3
-"""技能树布局自检：节点有没有叠在一起、有没有跑出屏幕。
+# -*- coding: utf-8 -*-
+"""技能树布局自检 —— 2026-11-08 重写：**直接读坐标表**。
 
-## 为什么要有
+## 为什么重写
 
-加节点最容易犯两个错：
-  ① 两个节点半径/角度撞了 → 屏幕上叠成一坨，点不中
-  ② 节点半径太大 → 默认缩放下跑到屏幕外（实测现在已有 9 个）
+以前这个工具按"椭圆 + 角度 + 半径"公式把 skills.c 的常数再算一遍，
+于是出现"工具说没事、实机压住"，以及"改了公式工具就崩"。
 
-这个脚本从 `src/skills.c` 的 `SkillNodeNorm()` 里读参数，
-算出每个节点的屏幕坐标，然后断言两件事。
+现在 skills.c 里就是一张 `kNodeNX[] / kNodeNY[]` 的 40 项常量表，
+工具**只读这张表**，和界面用同一份数据。
 
-## 用法
-
-    python tools/skill_layout_check.py
-    python tools/skill_layout_check.py --zoom 0.78 --width 1264 --height 711
-
-退出码：0 = 布局合格；1 = 有重叠或出界；2 = 解析失败。
+## 判据
+  ① 每个节点都在安全区内（留 40px 边距）
+  ② 任意两个方框重叠面积 < 8%（擦边 1~2% 不算问题）
 """
-import argparse
-import io
 import math
 import os
 import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(ROOT, 'src', 'skills.c')
 
-SK_WX, SK_WY = 210.0, 120.0     # ui.c:902-903
-WORLD = 6.0                     # SkillWorldPos 里的 ×6
-
-
-def read(path):
-    with io.open(path, encoding='utf-8', errors='replace') as f:
-        return f.read()
+# 与 ui.c 的 SK_NODE_K 保持一致（方框尺寸基准）
+NODE_K = 0.78
+SK_WX, SK_WY = 210.0, 120.0
+WORLD = 6.0
 
 
-def parse_const(text, name, default):
-    m = re.search(r'#define\s+%s\s+([0-9.]+)f?' % name, text)
-    return float(m.group(1)) if m else default
-
-
-def parse_norm(src):
-    """读**显式半径表**（与 C 代码同源），不再从公式反推。
-
-    2026-11-08（第 5 轮）：上一版按 `0.18 + 0.17*row` 抓系数，
-    代码改成常量表后工具立刻报假问题 —— 校验必须和代码读同一份数据。
-    """
-    m = re.search(r'void SkillNodeNorm\([^)]*\)\s*\{(.*?)\n\}', src, re.S)
+def read_table(src, name):
+    m = re.search(name + r'\[\s*\w+\s*\]\s*=\s*\{(.*?)\};', src, re.S)
     if not m:
         return None
-    body = m.group(1)
-
-    spoke = re.search(r'kSpokeRadius\[\s*\d+\s*\]\s*=\s*\{([^}]*)\}', src)
-    cross = re.search(r'kCrossRadius\s*=\s*([0-9.]+)f', src)
-    inner = re.search(r'kInnerRadius\s*=\s*([0-9.]+)f', src)
-    ghost = re.search(r'kGhostR\[4\]\s*=\s*\{([^}]*)\}', src)
-    raider = re.search(r'kRaiderR\[3\]\s*=\s*\{([^}]*)\}', src)
-    counter = re.search(r'kCounterR\[3\]\s*=\s*\{([^}]*)\}', src)
-    crossdeg = re.search(r'kCrossDeg\[4\]\s*=\s*\{([^}]*)\}', src)
-    if not (spoke and cross and inner):
-        return None
-    radii = [float(x.rstrip('f')) for x in re.findall(r'[0-9.]+f?', spoke.group(1))]
-    return {
-        'sectors': 5,
-        'radii': radii,
-        'cross_r': float(cross.group(1)),
-        'inner_r': float(inner.group(1)),
-        'cross_off': 108.0,     # 跨支王冠：-90 + 108 = 18° 起跳
-        'ghost_r': ([float(x.strip().rstrip('f')) for x in ghost.group(1).split(',') if x.strip()]
-                    if ghost else []),
-        'raider_r': ([float(x.strip().rstrip('f')) for x in raider.group(1).split(',') if x.strip()]
-                     if raider else []),
-        'counter_r': ([float(x.strip().rstrip('f')) for x in counter.group(1).split(',') if x.strip()]
-                      if counter else []),
-        'cross_deg': ([float(x.strip().rstrip('f')) for x in crossdeg.group(1).split(',') if x.strip()]
-                      if crossdeg else [18.0, 54.0, 126.0, 162.0]),
-    }
-
-    sectors = None
-    for mm in re.finditer(r'/\s*([0-9.]+)f?\s*\)\s*;', body):
-        v = float(mm.group(1))
-        if v in (3.0, 4.0, 5.0, 6.0, 8.0):
-            sectors = int(v)
-    if sectors is None:
-        mm = re.search(r'6\.2831853f\s*\*\s*\(float\)\s*\w+\s*/\s*([0-9.]+)f', body)
-        if mm:
-            sectors = int(float(mm.group(1)))
-    if sectors is None:
-        sectors = 5
-
-    mm = re.search(r'radius\s*=\s*([0-9.]+)f\s*\+\s*([0-9.]+)f\s*\*\s*\(float\)\s*\w+', body)
-    if mm:
-        base, step = float(mm.group(1)), float(mm.group(2))
-    else:
-        base, step = 0.18, 0.17
-    radii = [base + step * i for i in range(6)]
-    inner = re.search(r'\*\s*([0-9.]+)f\s*;\s*\*ny', body)
-    inner_r = float(inner.group(1)) if inner else 0.37
-    return {'sectors': sectors, 'radii': radii, 'inner_r': inner_r}
-
-
-def norm_pos(id_, cfg, origin_id, count):
-    """复刻 SkillNodeNorm 的映射（与 C 侧同构）。"""
-    if id_ == origin_id:
-        return 0.5, 0.5
-    sectors = cfg['sectors']
-    if 37 <= id_ <= 39:
-        cr = cfg.get('counter_r') or []
-        r = cr[id_ - 37] if len(cr) > id_ - 37 else 0.20
-        ang = math.pi / 2
-        return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
-    if 34 <= id_ <= 36:
-        rr = cfg.get('raider_r') or []
-        r = rr[id_ - 34] if len(rr) > id_ - 34 else 0.26
-        ang = -math.pi / 2 + 2 * math.pi * 0.3
-        return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
-    if 30 <= id_ <= 33:
-        # 幽灵流派：-54°，半径读 kGhostR
-        gr = cfg.get('ghost_r') or []
-        r = gr[id_ - 30] if len(gr) > id_ - 30 else 0.26
-        ang = -math.pi / 2 + 2 * math.pi * 0.1
-        return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
-    if id_ < 16:
-        branch, row = id_ // 4, id_ % 4
-    elif id_ >= 26:
-        branch, row = 4, id_ - 26
-    elif 20 <= id_ <= 24:
-        # 与 C 一致：-90 + 72*(i-20)/5 + 18°（不再用 +0.5 的老写法）
-        ang = -math.pi / 2 + 2 * math.pi * (id_ - 20) / 5.0 + 2 * math.pi / 20.0
-        r = cfg['inner_r']
-        return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
-    else:
-        # 16..19：最外环，角度错开 36°
-        degs = cfg.get('cross_deg') or [18.0, 54.0, 126.0, 162.0]
-        ang = math.radians(degs[id_ - 16] if id_ - 16 < len(degs) else degs[-1])
-        r = cfg['cross_r']
-        return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
-    ang = -math.pi / 2 + 2 * math.pi * branch / sectors
-    radii = cfg['radii']
-    r = radii[row] if row < len(radii) else radii[-1]
-    return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
+    body = re.sub(r'/\*.*?\*/', '', m.group(1), flags=re.S)
+    return [float(x.strip().rstrip('f')) for x in body.split(',') if x.strip()]
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--zoom', type=float, default=0.78)
-    ap.add_argument('--width', type=int, default=1264)
-    ap.add_argument('--height', type=int, default=711)
-    ap.add_argument('--margin', type=int, default=40)
-    a = ap.parse_args()
+    src = open(SRC, encoding='utf-8', errors='replace').read()
+    nx = read_table(src, 'kNodeNX')
+    ny = read_table(src, 'kNodeNY')
+    if not nx or not ny or len(nx) != len(ny):
+        print('✗ 读不到 kNodeNX / kNodeNY 坐标表')
+        return 1
 
-    skills = read(os.path.join(ROOT, 'src', 'skills.c'))
-    common = read(os.path.join(ROOT, 'include', 'common.h'))
-    ui = read(os.path.join(ROOT, 'src', 'ui.c'))
-
-    count = int(parse_const(common, 'SKILL_COUNT', 30))
-    wx = parse_const(ui, 'SK_WX', SK_WX)
-    wy = parse_const(ui, 'SK_WY', SK_WY)
-    # 屏幕像素尺寸（ui.c: nodeW = SK_WX*0.55*skVK, nodeH = SK_WY*0.62*skVK）
-    node_w = 0.55 * wx * a.zoom
-    node_h = 0.62 * wy * a.zoom
-
-    m = re.search(r'#define\s+SKILL_CROSS_ID\s+(\d+)', ui)
-    origin = int(m.group(1)) if m else 25
-
-    cfg = parse_norm(skills)
-    if not cfg:
-        print('解析 SkillNodeNorm 失败')
-        return 2
-
-    print('节点数 %d，扇区 %d，缩放 %.2f，窗口 %dx%d'
-          % (count, cfg['sectors'], a.zoom, a.width, a.height))
-    print('安全半宽 %.0f px，半高 %.0f px（留 %d px 边距）'
-          % (a.width / 2 - a.margin, a.height / 2 - a.margin, a.margin))
-    print()
+    n = len(nx)
+    win_w, win_h = 1264, 711
+    node_w = int(SK_WX * 0.55 * NODE_K)
+    node_h = int(SK_WY * 0.62 * NODE_K)
+    half_w, half_h = win_w / 2.0 - 40, win_h / 2.0 - 40
 
     pts = []
-    for i in range(count):
-        nx, ny = norm_pos(i, cfg, origin, count)
-        px = (nx - 0.5) * WORLD * wx * a.zoom
-        py = (ny - 0.5) * WORLD * wy * a.zoom
-        pts.append((i, px, py))
+    for i in range(n):
+        x = (nx[i] - 0.5) * WORLD * SK_WX * NODE_K
+        y = (ny[i] - 0.5) * WORLD * SK_WY * NODE_K
+        pts.append((i, x, y))
 
-    half_w = a.width / 2 - a.margin
-    half_h = a.height / 2 - a.margin
+    oob = [(i, x, y) for i, x, y in pts
+           if abs(x) + node_w / 2 > half_w or abs(y) + node_h / 2 > half_h]
+    bad = []
+    area = node_w * node_h
+    for a in range(n):
+        for b in range(a + 1, n):
+            dx = abs(pts[a][1] - pts[b][1])
+            dy = abs(pts[a][2] - pts[b][2])
+            ox, oy = node_w - dx, node_h - dy
+            if ox > 0 and oy > 0 and (ox * oy) / area >= 0.08:
+                bad.append((a, b, ox, oy))
 
-    off = [(i, px, py) for i, px, py in pts
-           if abs(px) > half_w or abs(py) > half_h]
-    if off:
-        print('✗ 出界 %d 个节点：' % len(off))
-        for i, px, py in off[:12]:
-            print('    id %2d  水平 %5.0f  垂直 %5.0f' % (i, px, py))
+    print('  节点数 %d，方框 %.0fx%.0f px，安全区 ±%.0f x ±%.0f'
+          % (n, node_w, node_h, half_w, half_h))
+    if oob:
+        print('✗ 出界 %d 个：' % len(oob))
+        for i, x, y in oob[:8]:
+            print('    id %2d  (%.0f, %.0f)' % (i, x, y))
     else:
         print('✓ 全部节点在屏幕内')
-
-    # 重叠：矩形相交（同辐条上下相邻垂直间距 95 > 高 58，不算重叠）
-    # 2026-11-08：按**面积占比**判，不再按"矩形相不相交"。
-    # 同辐条上下相邻的节点会擦到边（实测 21x3 px = 1.2% 面积），
-    # 视觉上看不出来；真正要抓的是"明显压住"，取 8% 阈值。
-    AREA_MIN = 0.08
-    node_area = node_w * node_h
-    close = []
-    for x in range(len(pts)):
-        for y in range(x + 1, len(pts)):
-            dx = abs(pts[x][1] - pts[y][1])
-            dy = abs(pts[x][2] - pts[y][2])
-            ox = node_w - dx
-            oy = node_h - dy
-            if ox > 0 and oy > 0:
-                share = (ox * oy) / node_area
-                if share >= AREA_MIN:
-                    close.append((pts[x][0], pts[y][0], ox, oy, share))
-    if close:
-        print('✗ 明显重叠 %d 对（节点 %.0fx%.0f px，阈值 %.0f%% 面积）：'
-              % (len(close), node_w, node_h, AREA_MIN * 100))
-        for i, j, ox, oy, share in close[:12]:
-            print('    id %2d × id %2d  叠 %.0fx%.0f px（%.0f%%）'
-                  % (i, j, ox, oy, share * 100))
+    if bad:
+        print('✗ 明显重叠 %d 对：' % len(bad))
+        for a, b, ox, oy in bad[:10]:
+            print('    id %2d × id %2d  叠 %.0fx%.0f px' % (a, b, ox, oy))
     else:
-        print('✓ 没有明显重叠（面积占比 < %.0f%%）' % (AREA_MIN * 100))
-
-    return 1 if (off or close) else 0
+        print('✓ 没有明显重叠')
+    return 0 if not oob and not bad else 1
 
 
 if __name__ == '__main__':

@@ -269,6 +269,19 @@ static const int kSkillList[] = {
     37, 38, 39           /* 反击者：挣脱 / 以牙还牙 / 反杀 */
 };
 #define SKILL_LIST_COUNT ((int)(sizeof(kSkillList) / sizeof(kSkillList[0])))
+
+/* ==================================================================
+ * 2026-11-08：**编译期断言 —— 绘制列表必须覆盖全部节点**
+ * ------------------------------------------------------------------
+ * 教训：我在 skills.c 加了 10 个节点、布局算好了、测试也过了，
+ * 但 `kSkillList[]` 还是手写的 0..29，界面一个都没画出来，
+ * 玩家看到的是 `1 / 30 NODES`。
+ *
+ * 测试查的是 SKILL_COUNT，界面用的是 SKILL_LIST_COUNT —— 两个常量
+ * 各自为政。这一行让它们一旦不一致就**编译不过**。
+ * ================================================================ */
+typedef char skill_list_must_cover_all_nodes[
+    (sizeof(kSkillList) / sizeof(kSkillList[0]) == SKILL_COUNT) ? 1 : -1];
 /* v6：中心节点取代原来的"跨支行" */
 #define SKILL_CROSS_ID 25
 
