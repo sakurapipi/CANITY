@@ -39,4 +39,10 @@ extern int tutorialDone;
 
 void ClearKeyEdges(void);
 
+/* 局内随机数（原 game.c，已拆出） */
+unsigned int RunRngNext(void);
+void RunRngSeed(unsigned int seed);
+unsigned int RunRngState(void);
+void RunRngSetState(unsigned int st);
+
 #endif

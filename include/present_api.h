@@ -103,4 +103,11 @@ int itemHasStock(void);
 extern int weaponPickSel;
 extern int playerInSafe;
 
+/* 粒子（原 game.c，已拆出） */
+void SpawnParticles(float x, float y, int tint);
+void SpawnShards(float x, float y, float vx, float vy, float charge);
+/* v3.3：粘胶区域（实现放在 entity.c） */;
+
+extern int g_shardTint;
+
 #endif

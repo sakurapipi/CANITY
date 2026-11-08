@@ -70,8 +70,6 @@ void CollapseBegin(void);
 
 /* 文件内前置声明：这两个 static 辅助函数在被调用处之后定义
    （原来集中在 main.c 中部的前置声明块，拆分后只保留模块内部需要的）。 */
-void SpawnShards(float x, float y, float vx, float vy, float charge);
-/* v3.3：粘胶区域（实现放在 entity.c） */
 void SpawnGlue(float x, float y);
 /* InitAchievements is public now (see game.h) */
 static void UnlockAchievement(int idx);
@@ -3347,7 +3345,6 @@ int chargeBonus(float charge) {
 
 /* v2.7：ThrowItem 是否真的生成了一个投掷物。
    以前池子满时它会静默不生成，而调用方已经先把数量扣掉了 —— 东西凭空消失。 */
-static int g_shardTint = 0;   /* v2.1：下一批金币的颜色类型 */
 int g_throwOk = 0;
 
 /* v8: ThrowItem / UpdateShots 已搬到 src/throwing.c */
@@ -3381,11 +3378,6 @@ int WeaponDamageType(int id) {
 
 
 /* v2.1：对外统一的粒子接口。tint: 0 玻璃 / 1 血 / 2 尘 */
-void SpawnParticles(float x, float y, int tint) {
-    g_shardTint = tint;
-    SpawnShards(x, y, 0.0f, 0.0f, 0.45f);
-    g_shardTint = 0;
-}
 
 /* 生成玻璃金币：撞击点产生随机扩散的金币 */
 void SpawnShards(float x, float y, float vx, float vy, float charge) {
@@ -7146,22 +7138,7 @@ void RewardScheduleForLevel(int level) {
  * 所以抽卡用自己的 xorshift 状态，存在 SaveBlob 末尾（v34 追加）。
  * 读档时状态为 0 → 重新播种。
  * ================================================================== */
-static unsigned int s_runRng = 0;
-
-unsigned int RunRngNext(void) {
-    if (s_runRng == 0) s_runRng = 0x9E3779B9u;   /* 兜底，绝不让它恒为 0 */
-    s_runRng ^= s_runRng << 13;
-    s_runRng ^= s_runRng >> 17;
-    s_runRng ^= s_runRng << 5;
-    return s_runRng;
-}
-
-void RunRngSeed(unsigned int seed) {
-    s_runRng = seed ? seed : 0x9E3779B9u;
-}
-
-unsigned int RunRngState(void) { return s_runRng; }
-void RunRngSetState(unsigned int st) { s_runRng = st; }
+/* RNG 已搬到 src/loop_rng.c（2026-11-09） */
 
 /* 这张卡现在拿了有没有用。目前只排除"效果尚未实现"的新卡，
    避免出了拿不到东西的卡（v2.4.1 只做了 3 张新卡的效果）。 */
