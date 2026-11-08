@@ -42,6 +42,10 @@ void PageTabRect(int idx, int* x0, int* y0, int* x1, int* y1);   /* v2.8 */
 /* v3.0：绘制原语对外暴露（锁箱 / 其它模块要用） */
 void BlendRectWin(int x0, int y0, int x1, int y1, unsigned int color, float alpha);
 void FrameRectWin(int x0, int y0, int x1, int y1, unsigned int color, float alpha, int thick);
+/* 第 7 轮：文本层搬到 src/domain/ui/ui_text.c 后，这几个也需要跨文件可见 */
+int  TextScale(void);
+void DrawTextSmallWin(int xWin, int yWin, const char* t, unsigned int color);
+int  DrawTextSmallWidth(const char* t);
 void DrawTextWin(int x, int y, const char* t, unsigned int color);
 void DrawTextCenterWin(int cx, int y, const char* t, unsigned int color);
 int  TextHeightWin(void);
