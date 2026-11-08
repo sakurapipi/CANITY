@@ -776,8 +776,52 @@ int SkillNavNearest(int from, int dir) {
     }
 }
 
+/* ==================================================================
+ * 2026-11-08（实机反馈）：**补一张真正的短名表**
+ * ------------------------------------------------------------------
+ * 原来这里直接 `return skillDefs[id].name;` —— "短名"是假的。
+ * 节点框约 90px 宽、小号字 8px/字符，只能放 ~10 字符，
+ * 于是 SECOND WIND / GREEDY HAND / GOLDEN ESCAPE 全被截成 `SEC..`/`GRE..`。
+ *
+ * 现在每个名字 ≤ 6 字符（"SILENT"/"START"/"SCENT" 是 6），
+ * 详情条仍然显示全名 —— 全名没有丢。
+ * ================================================================ */
+static const char* kShortNames[SKILL_COUNT] = {
+    "LIGHT", /*  0 */
+    "QUIET", /*  1 */
+    "GHOST", /*  2 */
+    "DECOY", /*  3 */
+    "SIPHON",/*  4 */
+    "CRANK", /*  5 */
+    "REST",  /*  6 */
+    "METAB", /*  7 */
+    "BREATH",/*  8 */
+    "STILL", /*  9 */
+    "SLIP",  /* 10 */
+    "DEAD",  /* 11 */
+    "CARTO", /* 12 */
+    "BREAK", /* 13 */
+    "FUSE",  /* 14 */
+    "CUT",   /* 15 */
+    "SILENT",/* 16 */
+    "GREED", /* 17 */
+    "WIND",  /* 18 */
+    "DARK",  /* 19 */
+    "DEAL",  /* 20 */
+    "GOLD",  /* 21 */
+    "APPR",  /* 22 */
+    "JR",    /* 23 */
+    "NIGHT", /* 24 */
+    "START", /* 25 */
+    "HAND",  /* 26 */
+    "SCENT", /* 27 */
+    "BET",   /* 28 */
+    "DESP",  /* 29 */
+};
+
 const char* SkillShortName(int id) {
     if (id < 0 || id >= SKILL_COUNT) return "?";
+    if (kShortNames[id] && kShortNames[id][0]) return kShortNames[id];
     return skillDefs[id].name;
 }
 

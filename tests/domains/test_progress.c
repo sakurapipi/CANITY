@@ -383,6 +383,29 @@ static void test_skill_nodes_are_all_placeable(void) {
     }
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 4 轮）：**节点短名必须真的短**
+ * ------------------------------------------------------------------
+ * 实机截图里节点名被截成 `SIG..` / `GRE..`，因为 SkillShortName
+ * 直接返回了全名，而节点框只放得下 ~10 个字符。
+ * ================================================================ */
+
+extern const char* SkillShortName(int id);
+
+static void test_skill_short_names_are_short(void) {
+    int id, tooLong = 0, empty = 0;
+    for (id = 0; id < SKILL_COUNT; id++) {
+        const char* n = SkillShortName(id);
+        int len = 0;
+        if (!n || !n[0]) { empty++; continue; }
+        while (n[len]) len++;
+        if (len > 6) tooLong++;
+    }
+    CHECK(empty == 0, "every skill must have a short name");
+    CHECK(tooLong == 0, "short names must be <= 6 chars or the node box truncates them");
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -395,4 +418,5 @@ void TestSuite_progress(void) {
     /* 技能树数据自检（2026-11-08 加） */
     test_skill_tree_data_is_consistent();
     test_skill_nodes_are_all_placeable();
+    test_skill_short_names_are_short();
 }
