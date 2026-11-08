@@ -1,36 +1,44 @@
-# ui（界面：文本层 / HUD / 菜单 / 商店 / 技能树）
+# ui（界面：文本层 / 页面 / 菜单 / HUD）
 
 ## 职责
-所有 2D 覆盖层：点阵文字、HUD、主菜单、设置、商店与改造树、技能树、图鉴。
+所有 2D 覆盖层：点阵文字、主菜单（含改造树/银行页/校准条）、成就页、图鉴、
+设置、商店、技能树、HUD。
 
-## 结构（第 7 轮后）
+## 结构（第 2 轮后）
 | 文件 | 行数 | 内容 |
 |---|---|---|
-| `src/domain/ui/ui_text.c` | ~250 | 点阵字与中文图集 → **已拆**，只依赖 render/lang |
-| `src/ui.c` | ~5,300 | 其余全部（含 1,299 行的 DrawHUD） |
+| `domain/ui/ui_text.c` | ~250 | 点阵字 + 中文图集 + 宽度测量 |
+| `domain/ui/ui_pages.c` | ~285 | 成就页、AchCompute 几何、ClampRowText/WrapText |
+| `domain/ui/ui_menu.c` | ~1,410 | 主菜单整簇：面板/文字/改造树/银行页/校准条 |
+| `ui.c` | ~3,670 | HUD（1,299 行单函数）、商店、技能树页、设置、弹窗 |
 
 ## 契约
-`include/ui.h`（对外）+ `include/ui_text.h`（文本层内部件：UiTrack）。
+`include/ui.h`（对外）+ `ui_text.h`（文本层）+ `ui_pages.h`（页面/几何）+
+`ui_menu.h`（菜单 + UI 内部契约：SkillTreeLayout / UiPanel9 / UiRowSel 等）。
 
 ## 绝不做
 - 不在 UI 里算价格/可买性/伤害（调对应域的查询函数）
-- 不改 `UiTrack` 的记录语义（布局自检 `ui_layout.txt` 依赖它）
-- 不把 `pixels` 缓冲的写入顺序搞乱（HUD 必须最后画）
+- 不改 `UiTrack` / `AchCompute` 的几何语义 —— 菜单命中测试依赖同一份计算
+- 不把 `pixels` 写入顺序搞乱（HUD 必须最后画）
 
 ## 测试
 `python tools/build_validate.py` → PASS
-布局/运行用例在 test_runtime.c（`test_runs_and_layout` 等）。
-可见改动必须出**世界内截图**（`CANITY_SHOT`）—— AD-66。
+`tests/domains/test_ui.c`：成就页几何（3 种窗口）、文本截断、
+**菜单截图**（设 `CANITY_SHOT=<目录>` 会写出 `shot_menu.ppm`）。
+可见改动必须出图看 —— AD-66。
 
 ## 常见改动
 | 想改什么 | 动哪里 |
 |---|---|
+| 菜单行/标题/页脚 | `ui_menu.c` 的 `MainMenuCompute` / `DrawMenuText` |
+| 改造树 | `ui_menu.c` 的 `DrawBenchTree` |
+| 成就页 | `ui_pages.c` 的 `UiDrawAchievementsPage` |
 | 字号/行高 | `ui_text.c` 的 `TextScale` / `TextHeightWin` |
-| 某页面排版 | `ui.c` 里对应的 `DrawXxx`（菜单 `DrawMenu...`） |
-| HUD 元素位置 | `DrawHUD`（1,299 行，改之前先 `grep` 目标字符串） |
+| HUD | `ui.c` 的 `DrawHUD`（1,299 行，改前先 grep 目标字符串） |
 
 ## 历史坑
-- `TextScale` 原来固定 2 倍，但测量又乘了 `renderH/458` ——
-  布局按大字排、实际画小字，文字偏左（第 7 轮拆出来时正好看到这段注释）。
-- 标题被画两遍（+1px 偏移同色）→ 字发毛，`DrawTitleWin` 只画一遍。
-- 世界内截图用例必须在 `SpritesInit` **之后**跑，否则精灵是空的（AD-66）。
+- `TextScale` 原来固定 2 倍、测量又乘 `renderH/458` → 布局按大字排、实际画小字。
+- 标题被画两遍（+1px 同色偏移）→ 字发毛，`DrawTitleWin` 只画一遍。
+- **菜单搬出去时会连锁缺声明**：ui.c 从来没有"内部契约头"，
+  任何函数往外搬都会带上十几个私有助手（UiPanel9/UiRowSel/UiTitle/…）。
+  第 2 轮一次性把这张契约补进 `ui_menu.h`，以后搬 HUD 会容易得多。

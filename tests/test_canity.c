@@ -162,7 +162,7 @@ static void test_no_unwired_api(void) {
         /* 战绩 / 图鉴 */
         { "BestiaryMarkEscaped",     "src/entity.c" },
         { "BestiaryMarkCaught",      "src/entity.c" },
-        { "BestiaryDanger",          "src/ui.c" },
+        { "BestiaryDanger",          "src/domain/ui/ui_menu.c" },   /* 第 2 轮：图鉴页随菜单搬走 */
         /* 每日修正上一条遥测 */
         { "CatchCountThisRun",       "src/game.c" },
         /* 战役 5 关的规则（第 ⑧ 轮写好，第 ㉓ 轮才接上） */
@@ -551,6 +551,8 @@ static void test_save_persist_contract(void) {
     const char* game  = read_file("src/game.c");
     const char* gameh = read_file("include/game.h");
     const char* uic   = read_file("src/ui.c");
+    /* 第 2 轮：主菜单整簇搬到 domain/ui/ui_menu.c，菜单相关断言要看新文件 */
+    char* uim = read_file("src/domain/ui/ui_menu.c");
 
     /* ==================================================================
      * 2026-11-06（v2.4-rc）：**v29 -> v30**
@@ -625,9 +627,9 @@ static void test_save_persist_contract(void) {
           "EndlessUnlocked declaration missing");
     check(contains(game, "int EndlessUnlocked(void)"),
           "EndlessUnlocked implementation missing");
-    check(contains(uic, "EndlessUnlocked()"),
+    check(contains(uim, "EndlessUnlocked()"),
           "menu does not use the shared endless unlock rule");
-    check(!contains(uic, "(bestLevel >= 10) || gameWon"),
+    check(!contains(uim, "(bestLevel >= 10) || gameWon"),
           "duplicate endless unlock rule came back");
 
     free((void*)saveh);
@@ -635,6 +637,7 @@ static void test_save_persist_contract(void) {
     free((void*)game);
     free((void*)gameh);
     free((void*)uic);
+    free((void*)uim);
 }
 
 /* ==================================================================

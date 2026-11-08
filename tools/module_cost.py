@@ -38,7 +38,9 @@ DOMAINS = {
     'warden':   (['warden.c'], ['warden.h'], 'warden.md'),
     'shop':     (['shop.c'], ['shop.h'], 'shop.md'),
     'map_rooms': (['map_rooms.c'], ['map_rooms.h'], 'map_rooms.md'),
-    'ui':       (['ui.c', 'domain/ui/ui_text.c'], ['ui.h', 'ui_text.h'], 'ui.md'),
+    'ui':       (['ui.c', 'domain/ui/ui_text.c', 'domain/ui/ui_pages.c',
+                 'domain/ui/ui_menu.c'],
+                 ['ui.h', 'ui_text.h', 'ui_pages.h', 'ui_menu.h'], 'ui.md'),
     'render':   (['render.c'], ['render.h'], 'render.md'),
 }
 
@@ -72,7 +74,9 @@ TESTS = os.path.join(ROOT, 'tests', 'domains')
 def measure():
     out = []
     for domain, (cs, hs, card) in sorted(DOMAINS.items()):
-        impl = sum(count_lines(find_c(c)) for c in cs)
+        sizes = [count_lines(find_c(c)) for c in cs]
+        impl = sum(sizes)                       # 合计（信息列）
+        biggest = max(sizes) if sizes else 0    # 单文件最大值（判预算用）
         hdr = sum(count_lines(os.path.join(INC, h)) for h in hs)
         card_lines = count_lines(os.path.join(DOCS, card)) if card else 0
         ext = sum(extern_count(find_c(c)) for c in cs)
@@ -81,11 +85,13 @@ def measure():
         out.append({
             'domain': domain,
             'impl': impl,
+            'biggest': biggest,
             'header': hdr,
             'card': card_lines,
             'test': test_lines,
             'extern': ext,
-            'cost': impl + hdr + card_lines + test_lines,
+            # 判预算用"最大单文件"：改一个域只需要读它所在的那个文件
+            'cost': biggest + hdr + card_lines + test_lines,
             'missing': [p for p in
                         ([find_c(c) for c in cs] +
                          [os.path.join(INC, h) for h in hs] +
@@ -106,8 +112,8 @@ def main():
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
 
-    print('  %-11s %7s %7s %6s %6s %7s %8s' %
-          ('域', '实现', '契约头', '卡片', '测试', 'extern', '必读合计'))
+    print('  %-11s %7s %7s %7s %6s %6s %7s %8s' %
+          ('域', '最大文件', '全部合计', '契约头', '卡片', '测试', 'extern', '必读'))
     print('  ' + '-' * 64)
     over = 0
     for r in rows:
@@ -117,8 +123,8 @@ def main():
             over += 1
         elif r['impl'] == 0 and r['header'] == 0:
             flag = '  （未拆分）'
-        print('  %-11s %7d %7d %6d %6d %7d %8d%s' %
-              (r['domain'], r['impl'], r['header'], r['card'],
+        print('  %-11s %7d %7d %7d %6d %6d %7d %8d%s' %
+              (r['domain'], r['biggest'], r['impl'], r['header'], r['card'],
                r.get('test', 0), r['extern'], r['cost'], flag))
     print('')
     print('  预算 %d 行；超预算 %d 个域' % (args.budget, over))

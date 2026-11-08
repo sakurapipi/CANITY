@@ -53,8 +53,65 @@ static void test_clamp_row_text_never_overflows(void) {
     CHECK(buf[0] == 0, "zero available width must produce an empty string");
 }
 
+
+/* ==================================================================
+ * 菜单截图（AD-66）
+ * ------------------------------------------------------------------
+ * 第 2 轮把 1,357 行菜单代码搬到 domain/ui/ui_menu.c。
+ * 只跑数据测试证明不了"菜单还画得出来"——必须出图。
+ * 设 CANITY_SHOT=<目录> 跑 test_runtime 就会写出 shot_menu.ppm。
+ * ================================================================ */
+
+extern void UiDrawMenuPages(void);
+extern unsigned int* pixels;
+extern int renderW, renderH;
+extern GameState currentState;
+
+static void write_ppm(const char* path, int w, int h, const unsigned int* px) {
+    FILE* f = fopen(path, "wb");
+    int i;
+    if (!f) return;
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
+    for (i = 0; i < w * h; i++) {
+        unsigned int p = px[i];
+        unsigned char rgb[3];
+        rgb[0] = (unsigned char)((p >> 16) & 0xFF);
+        rgb[1] = (unsigned char)((p >> 8) & 0xFF);
+        rgb[2] = (unsigned char)(p & 0xFF);
+        fwrite(rgb, 1, 3, f);
+    }
+    fclose(f);
+    fprintf(stderr, "  [shot] wrote %s\n", path);
+}
+
+static void test_menu_draws_without_crashing(void) {
+    GameState savedState = currentState;
+    int i, nonBlack = 0;
+
+    currentState = STATE_MAIN_MENU;
+    if (pixels && renderW > 0 && renderH > 0) {
+        for (i = 0; i < renderW * renderH; i++) pixels[i] = 0;
+        UiDrawMenuPages();
+        for (i = 0; i < renderW * renderH; i++) {
+            if (pixels[i] != 0) { nonBlack++; }
+        }
+        CHECK(nonBlack > 500, "drawing the main menu must actually put pixels on screen");
+    }
+
+    {
+        const char* dir = getenv("CANITY_SHOT");
+        if (dir && dir[0] && pixels && renderW > 0 && renderH > 0) {
+            char path[512];
+            snprintf(path, sizeof(path), "%s/shot_menu.ppm", dir);
+            write_ppm(path, renderW, renderH, pixels);
+        }
+    }
+    currentState = savedState;
+}
+
 void TestSuite_ui(void) {
     test_ach_geo_stays_inside_window();
     test_ach_geo_shrinks_rows_on_short_windows();
     test_clamp_row_text_never_overflows();
+    test_menu_draws_without_crashing();
 }
