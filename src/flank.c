@@ -59,7 +59,7 @@ int FlankChokeOnExitPath(float px, float py, float* gx, float* gy) {
     return 0;
 }
 int   FlankBlocksPlayer(float nx, float ny) { (void)nx; (void)ny; return 0; }
-int   FlankIsBlocking(void) { return 0; }
-float FlankGoalX(void) { return 0.0f; }
-float FlankGoalY(void) { return 0.0f; }
-int   FlankStreak(void) { return 0; }
+/* 2026-11-08（第 13 轮）：FlankIsBlocking 是常量桩（全工程零调用），已删 */
+/* 2026-11-08（第 13 轮）：FlankGoalX 是常量桩（全工程零调用），已删 */
+/* 2026-11-08（第 13 轮）：FlankGoalY 是常量桩（全工程零调用），已删 */
+/* 2026-11-08（第 13 轮）：FlankStreak 是常量桩（全工程零调用），已删 */

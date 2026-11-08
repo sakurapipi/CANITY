@@ -108,7 +108,7 @@ int   HasKeystone(int id);
 
 /* v2.0 新节点效果 */
 float SkillExecuteMul(int hp, int maxHp);
-int   SkillSalvageKeep(void);
+
 int   SkillCartoUnlock(void);
 int   SkillShortcutAvailable(void);
 int   SkillLastResortOneshot(void);

@@ -99,7 +99,7 @@ const char* RunUpgDescZh(int kind) {
 /* v3.0：武器取消 → 这一条改成携带量
    v3.3：**真正接到全部投掷物上**，不再只作用于瓶子。
    审计报告：「CARRY 只进 BottleCap（只管瓶子），文案写投掷物上限」。 */
-float RunUpgDamageMul(void)   { return 1.0f; }
+/* 2026-11-08（第 13 轮）：RunUpgDamageMul 是常量桩（全工程零调用），已删 */
 int   RunUpgCarryBonus(void)  { return 2 * upg[0]; }
 float RunUpgResistMul(void)   { return 1.0f - 0.10f * (float)upg[1]; }
 float RunUpgStaminaMul(void)  { return 1.0f - 0.15f * (float)upg[2]; }

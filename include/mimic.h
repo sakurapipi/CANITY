@@ -97,6 +97,5 @@ int  MimicWrenchSweep(float px, float py, float facing, float range); /* 返回 
 void MimicOnGlue(float x, float y);             /* 胶水落点 */
 
 /* ---- 渲染 ---- */
-void MimicDraw(void);
 
 #endif /* CANITY_MIMIC_H */

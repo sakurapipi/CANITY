@@ -604,9 +604,7 @@ float SkillExecuteMul(int hp, int maxHp) {
 }
 
 /* SALVAGE：死亡时保留 50% 待上缴金币 */
-int SkillSalvageKeep(void) {
-    return 0;
-}
+/* 2026-11-08（第 13 轮）：SkillSalvageKeep 是常量桩（全工程零调用），已删 */
 
 /* CARTOGRAPHER：开局揭示安全屋 / 配电箱 */
 int SkillCartoUnlock(void) {

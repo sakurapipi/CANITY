@@ -165,7 +165,7 @@ int   BenchRecover(void)    { return 0; }   /* 19 回神：安全屋+60% */
    这 6 个节点已经从局内树移除（方案 v5：感知类与回声弹重叠，
    数值类感知不到）。调用点还在，这里给「无加成」的默认值。 */
 float BenchHideStealth(void)   { return 1.0f; }   /* HOLD BREATH 已并入局外树 */
-float BenchSprintMul(void)     { return 1.0f; }   /* BURST 已退役 */
+/* 2026-11-08（第 13 轮）：BenchSprintMul 是常量桩（全工程零调用），已删 */   /* BURST 已退役 */
 /* v6 **三个退役节点的功能重新挂到活着的节点上** ——
    原来它们恒返回 0，而 render.c / ui.c 里三整段代码
    （听风落点标记 / 预知红边 / 心眼距离读数）看起来是活的、实际永远不执行。
@@ -180,17 +180,17 @@ float BenchDarkFearMul(void)   { return 1.0f; }   /* COMPOSURE 已退役 */
 
 /* ---- 兼容旧接口（改造树重做后这些名字换了，留空实现避免链接错误） ---- */
 int   BenchEnergyMax(int base)      { return base; }
-float BenchDamageMul(void)          { return 1.0f; }
+/* 2026-11-08（第 13 轮）：BenchDamageMul 是常量桩（全工程零调用），已删 */
 float BenchSanityDrainMul(void)     { return 1.0f; }
 float BenchFlashDrainMul(void) { return (BenchHas(5)?0.80f:1.0f)*(BenchHas(7)?0.65f:1.0f)*(BenchHas(17)?1.20f:1.0f); }
 float BenchBatteryPickupMul(void)   { return 1.0f; }
-float BenchLowSpeedAdd(void)        { return 0.0f; }
-int   BenchArmorIgnore(void)        { return 0; }
-int   BenchDarkSense(void)          { return 0; }
-int   BenchExecuteThreshold(void)   { return 0; }
-int   BenchMonsterSpeedMul(void)    { return 1.0f; }
-float BenchDrainPenalty(void)       { return 1.0f; }
-int   BenchAlchemy(void)            { return 0; }
+/* 2026-11-08（第 13 轮）：BenchLowSpeedAdd 是常量桩（全工程零调用），已删 */
+/* 2026-11-08（第 13 轮）：BenchArmorIgnore 是常量桩（全工程零调用），已删 */
+/* 2026-11-08（第 13 轮）：BenchDarkSense 是常量桩（全工程零调用），已删 */
+/* 2026-11-08（第 13 轮）：BenchExecuteThreshold 是常量桩（全工程零调用），已删 */
+/* 2026-11-08（第 13 轮）：BenchMonsterSpeedMul 是常量桩（全工程零调用），已删 */
+/* 2026-11-08（第 13 轮）：BenchDrainPenalty 是常量桩（全工程零调用），已删 */
+/* 2026-11-08（第 13 轮）：BenchAlchemy 是常量桩（全工程零调用），已删 */
 
 
 /* ==================== 画布视口（v2.9，照搬思维导图模型） ====================
