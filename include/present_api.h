@@ -1,4 +1,4 @@
-/* include/present_api.h —— 呈现/界面（2026-11-09，第 9 轮）
+/* include/present_api.h —— 呈现/界面（2026-11-09，第 10 轮）
  *
  * 从 game.h 按职责抽出。**game.h 未改动**，两边并存。
  */
@@ -42,6 +42,7 @@ extern double frameMsMax;
 extern int hubSelection;
 extern float mouseCharge;
 extern int resetInputState;
+extern double g_timeSec;
 extern float volumeF;
 extern float musicVolumeF;
 extern int hoverKind;
@@ -62,6 +63,7 @@ extern const char* rootCategoryNames[3];
 extern const char* bindCategoryNames[3];
 void ClearKeyEdges(void);
 void ApplyDisplayMode(void);
+void ForceCursor(int visible);
 int IsActionPressed(ActionId act);
 void SettingsRegister(void);
 const char* PageTitle(int page);
@@ -70,7 +72,11 @@ int SettingsRowCount(void);
 const char* VkName(int vk);
 int BindActionOfItem(const SettingItem* it);
 int IsKeyBindItem(const SettingItem* it);
+extern float g_shakeOffX, g_shakeOffY;
+extern float bobPhase;
+void AddShake(float seconds, float mag);
 extern int hubPage;
+void UiLayoutBegin(void);
 void DumpUILayout(const char* path);
 extern int forceFrame;
 void PollInput(void);
@@ -82,7 +88,16 @@ void ActivateMenuItem(void);
 void ActivateHubRow(void);
 void ActivateSettingRow(void);
 extern int mapsFullyExplored;
+extern int flashlightOffLevel;
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 extern int helpPage;
+
+extern int uiDirty;
+extern const char* pickupMsg;
+extern float pickupMsgTimer;
+
+extern int itemHasStock;
+extern int weaponPickSel;
+extern int playerInSafe;
 
 #endif

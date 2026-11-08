@@ -1,4 +1,4 @@
-/* include/player_api.h —— 玩家（2026-11-09，第 9 轮）
+/* include/player_api.h —— 玩家（2026-11-09，第 10 轮）
  *
  * 从 game.h 按职责抽出。**game.h 未改动**，两边并存。
  */
@@ -66,5 +66,12 @@ extern int bottlesKilled;
 extern int faceDodged;
 extern int crankTimeTotal;
 extern int tookDamage;
+
+extern int ghostStillT;
+extern int holdingNow;
+extern int stepTimer;
+extern int wrenchHitFlashT;
+extern int wrenchSwingFxT;
+extern int sprintedThisLevel;
 
 #endif

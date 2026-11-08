@@ -1,4 +1,4 @@
-/* include/loop_api.h —— 循环/模式（2026-11-09，第 9 轮）
+/* include/loop_api.h —— 循环/模式（2026-11-09，第 10 轮）
  *
  * 从 game.h 按职责抽出。**game.h 未改动**，两边并存。
  */
@@ -30,5 +30,8 @@ void StartGame(void);
 void StartDailyRun(void);
 void StartCampaign(int stage);
 void PauseGame(void);
+
+extern int prevState;
+extern int tutorialDone;
 
 #endif
