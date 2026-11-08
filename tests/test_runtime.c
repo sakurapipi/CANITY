@@ -35,6 +35,7 @@
 #include "test_common.h"
 void TestSuite_throwing(void);
 void TestSuite_core(void);
+void TestSuite_ui(void);
 void TestSuite_collapse(void);
 void TestSuite_hatch(void);
 void TestSuite_phase(void);
@@ -3651,6 +3652,6 @@ int main(void) {
     srand(1234);InitAchievements();InitPixels();
     test_music();test_daily();test_save_v34_items();test_v33_save_is_accepted();test_legacy_fixtures();test_corrupt_save_is_never_overwritten();test_menu_save_keeps_run();test_training_items_do_not_leak();test_wallet_save();test_save_backend_errors();test_cloud_decide_length();test_save_unknown_chunk_roundtrip();test_sound_event_center();test_audio_pan_math();test_sound_propagation();test_suspicion_best_uses_propagation();test_monster_search_around();test_theme_rooms_placement();test_room_props();test_room_seed_roundtrip();test_prop_layers();test_global_balance_invariants();test_theme_depth_bands();test_rooms_stay_sealed();test_theme_room_label();test_room_budget_and_exit();test_room_wall_flags();test_mote_neutral();test_draft_structure();test_build_tags();test_jumper_removed_spider_takes_over();test_web_floor_ignores_press();test_spider_spawn_curve();test_spider_dispel_cooldown();test_spider_bind_no_damage();test_floor_change_clears_field_state();test_control_result_contract();test_control_layer();test_double_reward_rounds();test_shop_full_bag_no_charge();test_two_light_beasts();test_balance_targets();test_load_clamps_flags();test_trees_shop();test_runs_and_layout();test_wrench();test_three_hunters();test_hunter_models();test_floor_resets_hunters();
     TestSuite_phase();TestSuite_hatch();TestSuite_collapse();TestSuite_throwing();
-    TestSuite_core();
+    TestSuite_core();TestSuite_ui();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }
