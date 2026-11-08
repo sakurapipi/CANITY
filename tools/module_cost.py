@@ -28,7 +28,7 @@ DOCS = os.path.join(ROOT, 'docs', 'modules')
 
 # 域定义：域 -> (实现文件, 契约头, 卡片)
 DOMAINS = {
-    'core':     ([], ['core.h'], None),
+    'core':     (['core/tick.c', 'core/rng.c'], [], None),
     'phase':    (['domain/phase/phase.c'], ['phase.h'], 'phase.md'),
     'hatch':    (['hatch.c', 'domain/hatch/hatch_place.c'], ['hatch.h'], 'hatch.md'),
     'collapse': (['domain/collapse/collapse.c'], ['collapse.h'], 'collapse.md'),
@@ -38,7 +38,7 @@ DOMAINS = {
     'warden':   (['warden.c'], ['warden.h'], 'warden.md'),
     'shop':     (['shop.c'], ['shop.h'], 'shop.md'),
     'map_rooms': (['map_rooms.c'], ['map_rooms.h'], 'map_rooms.md'),
-    'ui':       (['ui.c'], ['ui.h'], 'ui.md'),
+    'ui':       (['ui.c', 'domain/ui/ui_text.c'], ['ui.h', 'ui_text.h'], 'ui.md'),
     'render':   (['render.c'], ['render.h'], 'render.md'),
 }
 
