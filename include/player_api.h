@@ -67,11 +67,11 @@ extern int faceDodged;
 extern int crankTimeTotal;
 extern int tookDamage;
 
-extern int ghostStillT;
+extern float ghostStillT;
 extern int holdingNow;
-extern int stepTimer;
-extern int wrenchHitFlashT;
-extern int wrenchSwingFxT;
+extern float stepTimer;
+extern float wrenchHitFlashT;
+extern float wrenchSwingFxT;
 extern int sprintedThisLevel;
 
 #endif

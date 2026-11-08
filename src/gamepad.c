@@ -1,7 +1,10 @@
 #include "entity.h"
 #include "common.h"
 #include "gamepad.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 
 /* ------------------------------------------------------------------ */
 /* v2.0 手柄支持（动态加载 xinput，不引入链接依赖）                      */

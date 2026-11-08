@@ -31,7 +31,7 @@ void StartDailyRun(void);
 void StartCampaign(int stage);
 void PauseGame(void);
 
-extern int prevState;
+extern GameState prevState;
 extern int tutorialDone;
 
 #endif

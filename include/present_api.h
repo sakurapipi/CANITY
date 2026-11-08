@@ -96,7 +96,7 @@ extern int uiDirty;
 extern const char* pickupMsg;
 extern float pickupMsgTimer;
 
-extern int itemHasStock;
+int itemHasStock(void);
 extern int weaponPickSel;
 extern int playerInSafe;
 

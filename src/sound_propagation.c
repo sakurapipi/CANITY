@@ -5,7 +5,10 @@
  */
 #include "common.h"
 #include "sound_propagation.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 
 static int s_cost[PROP_CELLS];
 static int s_built = 0;          /* 场是否有效 */

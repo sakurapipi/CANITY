@@ -11,7 +11,10 @@
  * 存档不记，每局重来（新手每一局都该看到）。
  */
 #include "common.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "hints.h"
 #include "audio.h"
 #include "lang.h"

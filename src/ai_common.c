@@ -13,7 +13,10 @@
  * 这也是「AI 区块」的第一块砖：AI 的公共能力集中在一处。
  */
 #include "common.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "state.h"
 #include "ai_common.h"
 
