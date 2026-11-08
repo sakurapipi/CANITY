@@ -700,6 +700,79 @@ static void test_scavenger_does_not_vanish_when_you_leave(void) {
     hideSpots[2].active = 0;
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 3 轮）：威胁预告层
+ * ------------------------------------------------------------------
+ * 调研结论：恐怖来自**预期**（进门前就知道屋里有东西）。
+ * 这三条锁的是契约：远处要响、看见它就不响、没怪绝对不响。
+ * ================================================================ */
+
+#include "threat_telegraph.h"
+
+static void test_telegraph_is_silent_without_threats(void) {
+    int i;
+    TelegraphReset();
+    for (i = 0; i < MON_HUNTER_MAX; i++) monHunters[i].active = 0;
+    for (i = 0; i < LIGHTBEAST_MAX; i++) lightBeasts[i].active = 0;
+    parasite.active = 0;
+
+    CHECK(TelegraphTick(0.016f) == 0, "no monsters means no telegraph");
+    CHECK(TelegraphBand() == -1, "no monsters means no distance band");
+    CHECK(TelegraphFlicker() == 0.0f, "the flashlight must not flicker with nothing around");
+}
+
+static void test_telegraph_bands_by_distance(void) {
+    int i;
+    TelegraphReset();
+    for (i = 0; i < MON_HUNTER_MAX; i++) monHunters[i].active = 0;
+    for (i = 0; i < LIGHTBEAST_MAX; i++) lightBeasts[i].active = 0;
+    parasite.active = 0;
+
+    /* 放一只 20 格外的怪：超出预告范围 */
+    monHunters[0].active = 1;
+    monHunters[0].x = posX + 20.0f;
+    monHunters[0].y = posY;
+    (void)TelegraphTick(0.016f);
+    CHECK(TelegraphBand() == -1, "a monster 20 tiles away must not trigger the telegraph");
+
+    /* 注意：档位必须测"背后"的怪 —— 正前方的会被"看得见就不预告"过滤掉，
+       那正是上一条用例要验的语义。 */
+    /* 9 格：中距离档（背后） */
+    monHunters[0].x = posX - dirX * 9.0f;
+    monHunters[0].y = posY - dirY * 9.0f;
+    (void)TelegraphTick(0.016f);
+    CHECK(TelegraphBand() == 1, "9 tiles behind you must read as the mid band");
+
+    /* 3 格：近距离档（背后）+ 手电该抖 */
+    monHunters[0].x = posX - dirX * 3.0f;
+    monHunters[0].y = posY - dirY * 3.0f;
+    (void)TelegraphTick(0.016f);
+    CHECK(TelegraphBand() == 2, "3 tiles behind you must read as the near band");
+
+    monHunters[0].active = 0;
+    TelegraphReset();
+}
+
+static void test_telegraph_stays_quiet_when_you_can_see_it(void) {
+    int i;
+    TelegraphReset();
+    for (i = 0; i < MON_HUNTER_MAX; i++) monHunters[i].active = 0;
+    for (i = 0; i < LIGHTBEAST_MAX; i++) lightBeasts[i].active = 0;
+    parasite.active = 0;
+
+    /* 正前方 3 格：看得见 → 不该再有"预告"（那是音效装饰，不是预告） */
+    monHunters[0].active = 1;
+    monHunters[0].x = posX + dirX * 3.0f;
+    monHunters[0].y = posY + dirY * 3.0f;
+    (void)TelegraphTick(0.016f);
+    CHECK(TelegraphBand() == -1,
+          "a monster you are looking at must not be 'telegraphed'");
+
+    monHunters[0].active = 0;
+    TelegraphReset();
+}
+
 void TestSuite_actors(void) {
     test_jumper_removed_spider_takes_over();
     test_spider_spawn_curve();
@@ -718,4 +791,7 @@ void TestSuite_actors(void) {
     test_wrench_stun_has_a_floor_at_low_level();
     test_bestiary_announces_only_once();
     test_scavenger_does_not_vanish_when_you_leave();
+    test_telegraph_is_silent_without_threats();
+    test_telegraph_bands_by_distance();
+    test_telegraph_stays_quiet_when_you_can_see_it();
 }

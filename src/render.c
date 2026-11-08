@@ -3,6 +3,7 @@
  *
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
+#include "threat_telegraph.h"
 #include "common.h"
 #include "control_effect.h"
 #include "spider.h"
@@ -3688,6 +3689,13 @@ void Render3D(void) {
         if (flick < 0.45f) flick = 0.45f;
     }
     int lightOn = (flashlightOn && battery > 0.0f);
+    /* 第 3 轮：有东西靠近时手电会抖一下（威胁预告的环境征兆）。
+       只在"手电开着"时有意义，且只是一个乘系数 —— 不新增分支。 */
+    if (lightOn) {
+        extern float TelegraphFlicker(void);
+        float tf = TelegraphFlicker();
+        if (tf > 0.0f) flick *= (1.0f - tf * 0.55f);
+    }
     for (int x = 0; x < renderW; x++) {
         float f;
         if (lightOn) {
