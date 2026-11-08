@@ -49,23 +49,23 @@ int  BenchTryBuy(int id);                  /* 返回 0=成功，否则失败原�
 
 /* —— 效果查询（没买就是 0 / 1.0） —— */
 int   BenchEnergyMax(int base);            /* 弹匣 / 电池库 / 嗜血 加成后的上限 */
-float BenchDamageMul(void);                /* 穿甲：武器伤害倍率 */
+/* BenchDamageMul 已删（第 13 轮：常量桩零调用）*/
 float BenchSanityDrainMul(void);           /* 厚皮：理智流失倍率 */
 float BenchFlashDrainMul(void);            /* 省电：手电耗电倍率 */
 float BenchBatteryPickupMul(void);         /* 电池库：电池拾取倍率 */
-float BenchLowSpeedAdd(void);              /* 稳心：低理智移速加成 */
-int   BenchArmorIgnore(void);              /* 穿甲：无视护甲点数 */
-int   BenchDarkSense(void);                /* 听风：关灯可视格数 */
-int   BenchExecuteThreshold(void);         /* 处决：斩杀阈值百分比 */
+/* BenchLowSpeedAdd 已删（第 13 轮：常量桩零调用）*/
+/* BenchArmorIgnore 已删（第 13 轮：常量桩零调用）*/
+/* BenchDarkSense 已删（第 13 轮：常量桩零调用）*/
+/* BenchExecuteThreshold 已删（第 13 轮：常量桩零调用）*/
 int   BenchSecondWind(void);               /* 第二口气：还有没有 */
-int   BenchMonsterSpeedMul(void);          /* 畸变：怪速倍率 */
-float BenchDrainPenalty(void);             /* 畸变：理智流失倍率（惩罚） */
+/* BenchMonsterSpeedMul 已删（第 13 轮：常量桩零调用）*/
+/* BenchDrainPenalty 已删（第 13 轮：常量桩零调用）*/
 /* ---- v3.0 逃生试炼：新效果接口 ---- */
 float BenchWalkNoiseMul(void);   /* 轻步：走路噪音 */
 float BenchHideStealth(void);    /* 屏息：藏身被发现概率 */
 int   BenchVanish(void);         /* 消失 */
 int   BenchStaminaBonus(void);   /* 耐力：体力上限 */
-float BenchSprintMul(void);      /* 爆发：冲刺速度 */
+/* BenchSprintMul 已删（第 13 轮：常量桩零调用）*/
 int   BenchSecondWind(void);     /* 二次呼吸 */
 int   BenchHearing(void);        /* 听觉 */
 int   BenchInnerEye(void);       /* 心眼 */
@@ -74,7 +74,7 @@ float BenchFearDamageMul(void);  /* 厚皮：恐惧伤害 */
 float BenchDarkFearMul(void);    /* 镇定：黑暗恐惧 */
 int   BenchPlayDead(void);       /* 假死 */
 
-int   BenchAlchemy(void);                  /* 旧接口，保留 */
+/* BenchAlchemy 已删（第 13 轮：常量桩零调用）*/
 
 /* ---- 画布视口（v2.9，照搬思维导图模型） ---- */
 #define BENCH_NODE_WX  260.0f   /* v2.9：跟着框加宽 */      /* 节点世界间距（横向） */

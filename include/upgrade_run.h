@@ -24,7 +24,7 @@ const char* RunUpgDesc(int kind);    /* 精确效果 */
 const char* RunUpgDescZh(int kind);
 
 /* ---- 效果查询 ---- */
-float RunUpgDamageMul(void);         /* 武器伤害倍率 */
+/* RunUpgDamageMul 已删（第 13 轮：常量桩零调用）*/
 float RunUpgResistMul(void);         /* 受伤倍率 */
 float RunUpgStaminaMul(void);        /* 冲刺消耗倍率 */
 float RunUpgFlashMul(void);          /* 手电耗电倍率 */
