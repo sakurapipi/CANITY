@@ -9,7 +9,10 @@
  * 不要显式 include <math.h>：分区契约 S1 要求系统头只在 common.h。
  */
 #include "common.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "entity.h"
 #include "lang.h"
 #include "audio.h"

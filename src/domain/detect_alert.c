@@ -6,7 +6,10 @@
 #include "detect_alert.h"
 #include "audio.h"
 #include "entity.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "lang.h"
 
 static int   s_prevState[MON_HUNTER_MAX];

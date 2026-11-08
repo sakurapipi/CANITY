@@ -6,6 +6,7 @@
 #define CANITY_WORLD_API_H
 
 #include "common.h"
+#include "score.h"
 
 extern int gameWon;
 extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
