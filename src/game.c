@@ -474,9 +474,6 @@ int keyPressed[256] = {0};
    （120Hz 逻辑 vs 60Hz 渲染，一帧通常跑 2 次），
    那样第一个 Update 就把按键清掉了，QTE 会吞掉一半的输入。
    所以边沿由主循环在一批逻辑更新**跑完之后**统一清。 */
-void ClearKeyEdges(void) {
-    for (int i = 0; i < 256; i++) keyPressed[i] = 0;
-}
 
 /* v6：g_achievements 定义在 achievements.c */
 

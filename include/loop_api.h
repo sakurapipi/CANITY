@@ -37,4 +37,6 @@ void PauseGame(void);
 extern GameState prevState;
 extern int tutorialDone;
 
+void ClearKeyEdges(void);
+
 #endif
