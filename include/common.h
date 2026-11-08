@@ -330,7 +330,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 41   /* 2026-11-08：+1（第 2 轮加 Difficulty 行） */
+#define SETTING_COUNT 44   /* 2026-11-08：+3（挥击/诱饵/丢钱可改绑）*/   /* 2026-11-08：+1（第 2 轮加 Difficulty 行） */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 

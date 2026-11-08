@@ -141,7 +141,16 @@ void UiDrawAchievementsPage(MenuGeo g) {
         static char cnt[48];
 
         /* 左：分类名（短，不会被挤） */
-        DrawTextWin(left, A.titleY, AchCatNameEn(achFilter), PAL_CYAN);
+        /* 2026-11-08（第 2 轮联通修复）：中文模式一直显示英文分类名 ——
+           AchCatNameZh 写好了但全工程 0 调用（审计报告点名）。
+           这里按语言选。 */
+        {
+            extern int g_lang;
+            extern const char* AchCatNameZh(int cat);
+            const char* catName = (g_lang == 1) ? AchCatNameZh(achFilter)
+                                                : AchCatNameEn(achFilter);
+            DrawTextWin(left, A.titleY, catName, PAL_CYAN);
+        }
 
         /* 右：该类进度 */
         sprintf(cnt, "%d/%d", AchUnlockedInFilter(), AchVisibleCount());

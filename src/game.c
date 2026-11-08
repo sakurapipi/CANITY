@@ -1066,6 +1066,11 @@ SettingItem settings[] = {
     {"Select Flare",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_1],      NULL, 0, 0, 0, 4},
     {"Select Bottle",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_2],      NULL, 0, 0, 0, 4},
     {"Select Slot 3",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_3],      NULL, 0, 0, 0, 4},
+    /* 2026-11-08（第 2 轮联通修复）：这三个动作有默认键、游戏里在用，
+       但设置表里一直没有行 —— 玩家查不到也改不了。 */
+    {"Attack (wrench)", SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SWING],         NULL,      0,    0,    0, 5},
+    {"Make Noise",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DECOY],         NULL,      0,    0,    0, 5},
+    {"Drop Gold",       SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DROP_GOLD],     NULL,      0,    0,    0, 5},
 
     /* ========== 分类: KEY BINDINGS / MENU KEYS ========== */
     {"Dodge (QTE)",     SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DODGE],         NULL, 0, 0, 0, 5},
