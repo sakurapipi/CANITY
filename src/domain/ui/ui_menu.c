@@ -228,9 +228,13 @@ static const char* MenuLabel(int i) {
             static char wb[128];
             static const char* resName[WRES_COUNT] = { "STAMINA", "BATTERY", "SANITY", "ENERGY" };   /* v2.3：三把武器都烧能量 */
             if (i < 0 || i >= WPN_COUNT) return "";
-            sprintf(wb, "%s   %s -%.0f   LV%d", Tr(weaponDefs[i].dispName, weaponDefs[i].nameZh),
-                    resName[weaponDefs[i].resource], weaponDefs[i].cost,
-                    weaponRank[i]);
+            /* 2026-11-08（武器残留清理 A-1）：**不再打印 LV%d** ——
+               武器早就改造成扳手，等级/经验的唯一增长入口 WeaponAddXp
+               零调用，所以这里永远显示 LV0（假信息）。
+               等级体系已废弃；状态机清理见下一轮。 */
+            sprintf(wb, "%s   %s -%.0f", Tr(weaponDefs[i].dispName, weaponDefs[i].nameZh),
+                    resName[weaponDefs[i].resource], weaponDefs[i].cost);
+            (void)weaponRank;
             return wb;
         }
         case STATE_SKILL_PICK: {
