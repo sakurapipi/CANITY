@@ -2695,18 +2695,27 @@ void DrawHUD(void) {
     if (hiddenIn >= 0) {
         extern float TelegraphNearestDist(void);
         float nd = TelegraphNearestDist();
-        const char* hs = 0;
-        unsigned int hc = 0x0080C8FFu;
-        if (nd < 8.0f) {
-            hs = (g_lang == LANG_ZH) ? "它在外面找你" : "IT IS LOOKING FOR YOU";
-            hc = 0x00FF8050u;
-        } else if (nd > 12.0f) {
-            hs = (g_lang == LANG_ZH) ? "外面安静了" : "IT IS QUIET OUT THERE";
-            hc = 0x0080FFA0u;
-        }
-        if (hs) {
-            int tw5 = TextWidthWin(hs);
-            DrawTextWin((winW - tw5) / 2, winH - UIS(112), hs, hc);
+        /* 2026-11-08（实机反馈）：三段全覆盖。
+           原来 8~12 格什么都不画 —— 玩家以为卡了。 */
+        extern int HideStatusBand(float);
+        {
+            int band = HideStatusBand(nd);
+            const char* hs;
+            unsigned int hc;
+            if (band == 0) {
+                hs = (g_lang == LANG_ZH) ? "它在外面找你" : "IT IS LOOKING FOR YOU";
+                hc = 0x00FF8050u;
+            } else if (band == 1) {
+                hs = (g_lang == LANG_ZH) ? "它在附近" : "IT IS CLOSE";
+                hc = 0x00FFD060u;
+            } else {
+                hs = (g_lang == LANG_ZH) ? "外面安静了" : "IT IS QUIET OUT THERE";
+                hc = 0x0080FFA0u;
+            }
+            {
+                int tw5 = TextWidthWin(hs);
+                DrawTextWin((winW - tw5) / 2, winH - UIS(112), hs, hc);
+            }
         }
     }
 

@@ -170,10 +170,32 @@ static void test_hud_draws_without_crashing(void) {
     currentState = savedState;
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 2 轮）：**躲柜子时不许有空白区**
+ * ------------------------------------------------------------------
+ * 实机反馈：进柜子后 0s / 8s / 16s 三张图都没有任何威胁提示 ——
+ * 因为源码只在 <8 或 >12 格画，8~12 是空白。
+ * ================================================================ */
+
+#include "ui_pages.h"
+
+static void test_hide_status_has_no_blank_band(void) {
+    CHECK(HideStatusBand(3.0f) == 0, "3 tiles must read as 'looking for you'");
+    CHECK(HideStatusBand(7.9f) == 0, "7.9 tiles is still the near band");
+    CHECK(HideStatusBand(8.0f) == 1, "8.0 tiles must switch to the middle band");
+    CHECK(HideStatusBand(12.0f) == 1, "12.0 tiles is still the middle band");
+    CHECK(HideStatusBand(12.1f) == 2, "12.1 tiles must read as quiet");
+    CHECK(HideStatusBand(1.0e9f) == 2, "no monsters at all must read as quiet");
+    /* 关键：中间档必须存在，不能像以前那样"什么都不画" */
+    CHECK(HideStatusBand(10.0f) >= 0, "the old 8-12 gap must be covered by a band");
+}
+
 void TestSuite_ui(void) {
     test_ach_geo_stays_inside_window();
     test_ach_geo_shrinks_rows_on_short_windows();
     test_clamp_row_text_never_overflows();
     test_menu_draws_without_crashing();
     test_hud_draws_without_crashing();
+    test_hide_status_has_no_blank_band();
 }
