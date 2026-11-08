@@ -74,4 +74,6 @@ extern float wrenchHitFlashT;
 extern float wrenchSwingFxT;
 extern int sprintedThisLevel;
 
+extern float playerMoveSpeedNow;
+
 #endif

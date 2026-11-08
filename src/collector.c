@@ -196,7 +196,6 @@ void CollectorSpawnIfEligible(void) {
     /* v2.4.98 EXIT_SPAWN_GUARD：玩家站在出口附近时不刷新 ——
        否则怪会贴着脸生成，直接把正在选"继续/撤离"的玩家撞死。 */
     {
-        extern int breakerOpen, exitChoiceOpen;
 
         if (exitChoiceOpen) return;
         if (breakerOpen) {

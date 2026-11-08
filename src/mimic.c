@@ -306,7 +306,6 @@ void MimicTick(float dt) {
 
             /* 追击移动（硬直时不走） */
             if (m->stun <= 0.0f && d2 > 0.01f) {
-                extern float playerMoveSpeedNow;
                 float sp = playerMoveSpeedNow;
                 if (sp < 1.6f) sp = 1.6f;              /* 走路基准 */
                 sp *= MIM_SPEED_MUL;

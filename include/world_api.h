@@ -83,4 +83,6 @@ extern int fusesCollectedRun;
 
 extern int isEndlessRun;
 
+extern int breakerOpen, exitChoiceOpen;
+
 #endif
