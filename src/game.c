@@ -1280,6 +1280,8 @@ int g_forceMod = -1;
 /* v3.1 训练场改成新手教程：一条长廊 + 一个可翻的箱子 + 一个不会动的靶子。
    不再摆安全屋/配电箱/出口 —— 教程只教「怎么操作」，不要求真的逃出去。 */
 static void BuildTrainingArena(void) {
+    /* 2026-11-08（第 11 轮）：七个教学站点，位置见 training_stations.c */
+    { extern void TrainingStationsReset(void); TrainingStationsReset(); }
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++) {
             worldMap[y][x] = 1;
@@ -5620,6 +5622,17 @@ void Update(float dt) {
      * 而不是凭空出现在脸上。
      * 纯表现层：只读怪的位置，不改任何 AI 状态。
      * ================================================================ */
+    /* 2026-11-08（第 11 轮）：训练营七站 —— 走进 1.5 格播一句提示 */
+    if (trainingMode) {
+        extern int TrainingStationsTick(float, float);
+        extern const char* TrainingStationText(int);
+        int st = TrainingStationsTick(posX, posY);
+        if (st >= 0) {
+            pickupMsg = TrainingStationText(st);
+            pickupMsgTimer = 4.0f;
+            PlaySfx(SFX_PICKUP, 0.45f);
+        }
+    }
     { extern int TelegraphTick(float); (void)TelegraphTick(dt); }
     /* 第 4 轮：**被发现预警** —— 只有守门人有锁定预警，别的怪从
        "没发现"到"开追"是瞬间的，玩家只能硬吃。这里把那一瞬间变成可读的。 */

@@ -539,6 +539,38 @@ static void test_three_archetypes_are_wired(void) {
     SkillResetAll();
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 11 轮）：**训练营七站**
+ * ------------------------------------------------------------------
+ * 玩家反馈「新手教程不够完整」。训练营原来只有一条走廊 + 一只标本怪。
+ * 这条锁住：七站存在、坐标递增、都在可走的走廊行上。
+ * ================================================================ */
+
+#include "training_stations.h"
+
+static void test_training_has_seven_stations(void) {
+    int i, prevX = -1, ordered = 1, sameRow = 1;
+    CHECK(TRAIN_STATION_COUNT == 7, "the tutorial must have exactly 7 stations");
+
+    for (i = 0; i < TRAIN_STATION_COUNT; i++) {
+        int x = TrainingStationX(i), y = TrainingStationY(i);
+        CHECK(x >= 2 && x <= MAP_WIDTH - 3, "every station must sit inside the corridor");
+        CHECK(y == MAP_HEIGHT / 2, "every station must be on the corridor row");
+        if (x <= prevX) ordered = 0;
+        if (y != MAP_HEIGHT / 2) sameRow = 0;
+        prevX = x;
+    }
+    CHECK(ordered, "stations must be ordered left to right so the player walks forward");
+    CHECK(sameRow, "all stations share the corridor row");
+
+    /* 每站都有文案 */
+    for (i = 0; i < TRAIN_STATION_COUNT; i++) {
+        const char* s = TrainingStationText(i);
+        CHECK(s && s[0], "every station needs a hint text");
+    }
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -554,4 +586,5 @@ void TestSuite_progress(void) {
     test_skill_short_names_are_short();
     test_keystone_switch_costs_gold();
     test_three_archetypes_are_wired();
+    test_training_has_seven_stations();
 }
