@@ -11,6 +11,7 @@
  */
 #include "common.h"
 #include "bestiary.h"
+#include "content_db.h"
 #include "entity.h"
 
 int bestiarySel = 0;
@@ -121,6 +122,22 @@ const BestiaryEntry bestiary[BESTIARY_COUNT] = {
  * 认识进度
  * ================================================================== */
 
+/* ==================================================================
+ * 2026-11-09（第 3 轮）：**图鉴登记进内容中枢**
+ * ------------------------------------------------------------------
+ * 用英文名当 id（它是字符串常量，地址稳定 —— 中枢只存指针，见
+ * content_db.h 第 4 条规矩）。
+ *
+ * 幂等：ContentAdd 会拒绝重复 id，所以多调几次不会重复计数。
+ * ================================================================ */
+void BestiaryRegister(void) {
+    int i;
+    for (i = 0; i < BESTIARY_COUNT; i++) {
+        if (bestiary[i].nameEn && bestiary[i].nameEn[0])
+            (void)ContentAdd(CK_MONSTER, bestiary[i].nameEn, &bestiary[i]);
+    }
+}
+
 void BestiaryMarkSeen(int id) {
     if (id < 0 || id >= BESTIARY_COUNT) return;
     bestiarySeen |= (1 << id);
@@ -220,6 +237,7 @@ int BestiaryDanger(int id) {
     return d;
 }
 
-void BestiaryBeginFloor(void) { for(int i=0;i<BESTIARY_COUNT;++i)s_lastFloor[i]=-1; }
+void BestiaryBeginFloor(void) {
+    BestiaryRegister();   /* 第 3 轮：保证图鉴已登记进中枢 */ for(int i=0;i<BESTIARY_COUNT;++i)s_lastFloor[i]=-1; }
 void BestiarySave(int* a) { for(int i=0;i<BESTIARY_COUNT;++i) {a[i]=bestiaryEscapes[i];a[6+i]=bestiaryCaught[i];a[12+i]=s_floorsSeen[i];} }
 void BestiaryLoad(const int* a) { for(int i=0;i<BESTIARY_COUNT;++i) {bestiaryEscapes[i]=a[i]>0?a[i]:0;bestiaryCaught[i]=a[6+i]>0?a[6+i]:0;s_floorsSeen[i]=a[12+i]>0?a[12+i]:0;}BestiaryBeginFloor(); }

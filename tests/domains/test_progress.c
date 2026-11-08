@@ -687,6 +687,49 @@ static void test_content_db_capacity(void) {
     ContentReset();
 }
 
+
+/* ==================================================================
+ * 2026-11-09（第 3 轮）：**图鉴已接入内容中枢**
+ * ------------------------------------------------------------------
+ * 之前"加一只怪"要同时改 BESTIARY_COUNT、bestiary[]、解锁数组三处。
+ * 现在图鉴自己登记进中枢，计数由中枢说了算。
+ *
+ * 这条测试锁两件事：
+ *   ① 中枢里的怪物数 == BESTIARY_COUNT
+ *   ② 每一只都能按 id（英文名）找到，且取回的就是它自己
+ * ================================================================ */
+
+extern void BestiaryRegister(void);
+
+static void test_bestiary_registered_in_hub(void) {
+    int i, found = 0;
+    ContentReset();
+    BestiaryRegister();
+
+    CHECK(ContentCount(CK_MONSTER) == BESTIARY_COUNT,
+          "the hub must hold exactly BESTIARY_COUNT monsters");
+
+    for (i = 0; i < BESTIARY_COUNT; i++) {
+        extern const BestiaryEntry bestiary[];
+        const char* id = bestiary[i].nameEn;
+        int idx;
+        if (!id || !id[0]) continue;
+        idx = ContentFind(CK_MONSTER, id);
+        if (idx < 0) continue;
+        if (ContentGet(CK_MONSTER, idx) == (const void*)&bestiary[i]) found++;
+    }
+    CHECK(found == BESTIARY_COUNT,
+          "every bestiary entry must be findable by its english name");
+
+    /* 幂等：再登记一次不许翻倍 */
+    BestiaryRegister();
+    CHECK(ContentCount(CK_MONSTER) == BESTIARY_COUNT,
+          "registering twice must not duplicate entries");
+    CHECK(ContentDuplicateKind() == -1, "the hub must stay duplicate-free");
+
+    ContentReset();
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -706,4 +749,5 @@ void TestSuite_progress(void) {
     test_training_stations_fire_once();
     test_content_db_basics();
     test_content_db_capacity();
+    test_bestiary_registered_in_hub();
 }

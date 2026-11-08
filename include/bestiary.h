@@ -58,6 +58,11 @@ extern int bestiarySeen;                     /* 位掩码：见过 */
 extern int bestiaryEscapes[BESTIARY_COUNT];  /* 每种怪的逃脱次数 */
 extern int bestiaryCaught[BESTIARY_COUNT];   /* 每种怪的被抓次数 */
 
+/* 2026-11-09（第 3 轮）：把图鉴条目登记进内容中枢 content_db。
+   可重复调用（已登记的会被 ContentAdd 拒绝，不会重复计数）。
+   调用点：BestiaryBeginFloor()，每层开头顺手保证一次。 */
+void BestiaryRegister(void);
+
 void BestiaryMarkSeen(int id);
 int  BestiaryIsSeen(int id);
 
