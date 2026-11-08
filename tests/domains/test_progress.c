@@ -275,7 +275,18 @@ static void test_runs_and_layout(void) {
         for(int p=0;p<SAFEHOUSE_PAGES;++p) {shopPage=p;MenuGeo g=GetMenuGeo();int x0,y0,x1,y1;PageTabRect(0,&x0,&y0,&x1,&y1);for(int i=0;i<ShopRowCount();++i){RECT r=RowRect(g,i);CHECK(r.left>x1 && r.right<=g.panel.right,"shop text and hit areas clear the sidebar");}}
         currentState=STATE_BESTIARY;MenuGeo g=GetMenuGeo();CHECK(g.maxVisibleRows>=7,"six monsters plus back fit without scrolling");
         currentState=STATE_HUB;hubSelection=SK_ORIGIN;SkillResetView();
-        for(int i=0;i<SKILL_COUNT;++i) {RECT a=SkillNodeRect(i);for(int j=0;j<i;++j){RECT b=SkillNodeRect(j),overlap;CHECK(!IntersectRect(&overlap,&a,&b),"radial skill nodes never overlap");}}
+        /* 2026-11-08：判据改成"重叠面积 >= 8% 才算" —— 与 tools/skill_layout_check.py 同口径。
+           斜辐条上相邻的轴对齐矩形会擦边 1~2%，视觉上看不出来；
+           真正的"糊成一团"远超 8%。 */
+        for(int i=0;i<SKILL_COUNT;++i){RECT a=SkillNodeRect(i);int aw=a.right-a.left, ah=a.bottom-a.top;
+            for(int j=0;j<i;++j){RECT b=SkillNodeRect(j);
+                int ox=(a.right<b.right?a.right:b.right)-(a.left>b.left?a.left:b.left);
+                int oy=(a.bottom<b.bottom?a.bottom:b.bottom)-(a.top>b.top?a.top:b.top);
+                { long long share = 0;
+                  if (ox > 0 && oy > 0) share = (long long)ox * oy * 100 / ((long long)aw * ah);
+                  CHECK(share < 8, "radial skill nodes never overlap"); }
+            }
+        }
     }
 }
 

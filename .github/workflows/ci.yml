@@ -66,7 +66,20 @@ jobs:
       # 三个指标回答同一个问题："改一次要读多少行"。
       # 详见 docs/架构重构方案_v2.md
       # ================================================================
-      - name: Architecture budget (blocking: median commit size)
+      # ================================================================
+      # 技能树布局自检（2026-11-08 第 5 轮加，**阻塞**）
+      # ----------------------------------------------------------------
+      # 从 skills.c 的半径表算出每个节点的屏幕坐标，断言：
+      #   ① 默认缩放下全部可见（原来 30 个里 7 个在屏幕外）
+      #   ② 没有明显重叠（面积占比 >= 8% 才算）
+      # ================================================================
+      - name: Skill tree layout (blocking)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -X utf8 tools/skill_layout_check.py
+
+      - name: "Architecture budget (blocking: median commit size)"
         shell: pwsh
         run: |
           python -X utf8 tools/module_cost.py | Tee-Object -Variable mc | Out-Host

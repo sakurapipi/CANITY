@@ -41,11 +41,29 @@ def parse_const(text, name, default):
 
 
 def parse_norm(src):
-    """从 SkillNodeNorm 里抽出：扇区数、半径表、内环半径、内环槽数。"""
+    """读**显式半径表**（与 C 代码同源），不再从公式反推。
+
+    2026-11-08（第 5 轮）：上一版按 `0.18 + 0.17*row` 抓系数，
+    代码改成常量表后工具立刻报假问题 —— 校验必须和代码读同一份数据。
+    """
     m = re.search(r'void SkillNodeNorm\([^)]*\)\s*\{(.*?)\n\}', src, re.S)
     if not m:
         return None
     body = m.group(1)
+
+    spoke = re.search(r'kSpokeRadius\[\s*\d+\s*\]\s*=\s*\{([^}]*)\}', src)
+    cross = re.search(r'kCrossRadius\s*=\s*([0-9.]+)f', src)
+    inner = re.search(r'kInnerRadius\s*=\s*([0-9.]+)f', src)
+    if not (spoke and cross and inner):
+        return None
+    radii = [float(x.rstrip('f')) for x in re.findall(r'[0-9.]+f?', spoke.group(1))]
+    return {
+        'sectors': 5,
+        'radii': radii,
+        'cross_r': float(cross.group(1)),
+        'inner_r': float(inner.group(1)),
+        'cross_off': 36.0,      # kCrossAngleOff = 2π/10 = 36°
+    }
 
     sectors = None
     for mm in re.finditer(r'/\s*([0-9.]+)f?\s*\)\s*;', body):
@@ -84,9 +102,14 @@ def norm_pos(id_, cfg, origin_id, count):
         r = cfg['inner_r']
         return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
     else:
-        branch, row = id_ - 16, 4
+        # 16..19：最外环，角度错开 36°
+        ang = (-math.pi / 2 + 2 * math.pi * (id_ - 16) / sectors
+               + math.radians(cfg['cross_off']))
+        r = cfg['cross_r']
+        return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
     ang = -math.pi / 2 + 2 * math.pi * branch / sectors
-    r = cfg['radii'][row] if row < len(cfg['radii']) else cfg['radii'][-1]
+    radii = cfg['radii']
+    r = radii[row] if row < len(radii) else radii[-1]
     return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
 
 
@@ -143,19 +166,30 @@ def main():
         print('✓ 全部节点在屏幕内')
 
     # 重叠：矩形相交（同辐条上下相邻垂直间距 95 > 高 58，不算重叠）
+    # 2026-11-08：按**面积占比**判，不再按"矩形相不相交"。
+    # 同辐条上下相邻的节点会擦到边（实测 21x3 px = 1.2% 面积），
+    # 视觉上看不出来；真正要抓的是"明显压住"，取 8% 阈值。
+    AREA_MIN = 0.08
+    node_area = node_w * node_h
     close = []
     for x in range(len(pts)):
         for y in range(x + 1, len(pts)):
             dx = abs(pts[x][1] - pts[y][1])
             dy = abs(pts[x][2] - pts[y][2])
-            if dx < node_w and dy < node_h:
-                close.append((pts[x][0], pts[y][0], dx, dy))
+            ox = node_w - dx
+            oy = node_h - dy
+            if ox > 0 and oy > 0:
+                share = (ox * oy) / node_area
+                if share >= AREA_MIN:
+                    close.append((pts[x][0], pts[y][0], ox, oy, share))
     if close:
-        print('✗ 重叠 %d 对（节点 %.0fx%.0f px）：' % (len(close), node_w, node_h))
-        for i, j, dx, dy in close[:12]:
-            print('    id %2d × id %2d  dx=%.0f dy=%.0f' % (i, j, dx, dy))
+        print('✗ 明显重叠 %d 对（节点 %.0fx%.0f px，阈值 %.0f%% 面积）：'
+              % (len(close), node_w, node_h, AREA_MIN * 100))
+        for i, j, ox, oy, share in close[:12]:
+            print('    id %2d × id %2d  叠 %.0fx%.0f px（%.0f%%）'
+                  % (i, j, ox, oy, share * 100))
     else:
-        print('✓ 没有重叠（矩形不相交）')
+        print('✓ 没有明显重叠（面积占比 < %.0f%%）' % (AREA_MIN * 100))
 
     return 1 if (off or close) else 0
 

@@ -701,22 +701,62 @@ float ThickHideMul(void) {
  *   行半径 0.12 / 0.22 / 0.32 / 0.42 / 0.50（间距 0.10）
  *   联动节点（branch 4）半径 0.30，靠中
  * ================================================================ */
-static void SkillNodeNorm(int id, float* nx, float* ny) {
+/* ==================================================================
+ * 2026-11-08（第 5 轮）：**技能树半径表 —— 显式常量，代码与工具同源**
+ * ------------------------------------------------------------------
+ * 旧值 0.18 + 0.17*row（最大 0.86）在默认缩放 0.78 下有 7 个节点出界。
+ * 新约束（节点 90x58px、窗口半高 356、标题+详情条占 30）：
+ *     r × 561.6 + 29 ≤ 326   →   r ≤ 0.53
+ * 所以辐条压到 0.50 以内；王冠/内环靠**角度错开 36°** 而不是靠更远半径。
+ *
+ * tools/skill_layout_check.py 直接读这三个数 —— 改布局必须两个一起改，
+ * 否则自检会失真（已经踩过一次）。
+ * ================================================================ */
+static const float kSpokeRadius[4] = { 0.14f, 0.26f, 0.38f, 0.50f };
+static const float kCrossRadius   = 0.50f;   /* 16..19：错 36°，与第 3 行同半径 */
+static const float kInnerRadius   = 0.32f;   /* 20..24：错 36°，夹在 1~2 行之间 */
+static const float kCrossAngleOff = 6.2831853f / 10.0f;   /* 36° */
+
+void SkillNodeNorm(int id, float* nx, float* ny) {
     *nx = 0.5f; *ny = 0.5f;
     if (id < 0 || id >= SKILL_COUNT) return;
     if (id == SK_ORIGIN) return;              /* 中心 */
 
+    /* ==================================================================
+     * 2026-11-08（第 5 轮）：**压半径**
+     * ------------------------------------------------------------------
+     * 旧半径 0.18 + 0.17*row（最大 0.86）→ 默认缩放 0.78 下，
+     * 第 3 行起垂直出界、王冠那一环水平也出界，**30 个节点里 7 个看不见**。
+     *
+     * 新约束（节点 90x58，窗口半高 356，标题+详情条占 30）：
+     *   r × 561.6 + 29 ≤ 326  →  r ≤ 0.53
+     * 所以辐条 4 行压到 0.14 / 0.26 / 0.38 / 0.50，
+     * 王冠与外环错开 36°，落在两条辐条之间 —— 不叠、不出界。
+     * ================================================================ */
     int branch, row;
-    if(id<16) { branch=id/4; row=id%4; }
-    else if(id>=26) { branch=4; row=id-26; }
-    else if(id>=20 && id<=24) {
-        float angle=-1.5707963f+6.2831853f*((float)(id-20)+0.5f)/5.0f;
-        *nx=0.5f+cosf(angle)*0.37f; *ny=0.5f+sinf(angle)*0.37f; return;
-    } else { branch=id-16; row=4; }
-    float angle=-1.5707963f+6.2831853f*(float)branch/5.0f;
-    float radius=0.18f+0.17f*(float)row;
-    *nx=0.5f+cosf(angle)*radius; *ny=0.5f+sinf(angle)*radius;
-
+    float angle;
+    if (id < 16) { branch = id / 4; row = id % 4; }
+    else if (id >= 26) { branch = 4; row = id - 26; }
+    else if (id >= 20 && id <= 24) {
+        /* 内环：夹在第 1、2 行之间，角度错开半格 */
+        angle = -1.5707963f + 6.2831853f * ((float)(id - 20) + 0.5f) / 5.0f;
+        *nx = 0.5f + cosf(angle) * kInnerRadius;
+        *ny = 0.5f + sinf(angle) * kInnerRadius;
+        return;
+    } else {
+        /* 16..19：跨支王冠 —— 最外环，角度错开 36° 落在辐条中间 */
+        branch = id - 16;
+        angle = -1.5707963f + 6.2831853f * (float)branch / 5.0f + kCrossAngleOff;
+        *nx = 0.5f + cosf(angle) * kCrossRadius;
+        *ny = 0.5f + sinf(angle) * kCrossRadius;
+        return;
+    }
+    angle = -1.5707963f + 6.2831853f * (float)branch / 5.0f;
+    {
+        float radius = (row < 4) ? kSpokeRadius[row] : kSpokeRadius[3];
+        *nx = 0.5f + cosf(angle) * radius;
+        *ny = 0.5f + sinf(angle) * radius;
+    }
 }
 
 float SkillNodeX(int id) {
