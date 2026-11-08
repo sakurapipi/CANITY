@@ -217,8 +217,121 @@ static void test_stone_break_single_event(void) {
     SuspicionReset();
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 5 轮）：**三条落点分支必须给出同样的效果**
+ * ------------------------------------------------------------------
+ * AD-71 的原话：同一个投掷物有三条落点分支（全局落地 / 子步落地 / 撞墙），
+ * 各写了一套效果 —— 子步落地只有碎片和相位，撞墙的回声只做了半套
+ * （不揭地形、不标资源）。弹道落进哪条取决于这一帧的步进几何，
+ * 所以玩家看到的是"回声弹有时候不生效"。
+ *
+ * 这四条用例就是那张网：效果必须**从任意分支**都能出现。
+ * 做法：自己清出通道（AD-64，不赌地图），扔一个，跑到落地，看全局状态。
+ * ================================================================ */
+
+extern SmokeCloud smokes[MAX_SMOKE];
+extern GlueZone   glues[MAX_GLUE];
+extern float      echoScanT;
+extern int        explored[MAP_HEIGHT][MAP_WIDTH];
+extern int        worldMap[MAP_HEIGHT][MAP_WIDTH];
+extern float      posX, posY, dirX, dirY;
+extern void       UpdateShots(float dt);
+extern void       ThrowItem(int type, float charge);
+
+/* 清一条朝 +X 的直通道，并清掉上次用例残留的效果 */
+static void throw_prepare(int corridor, int wall_at) {
+    int cy = (int)posY;
+    int i;
+    for (i = 0; i < MAX_SMOKE; i++) smokes[i].active = 0;
+    for (i = 0; i < MAX_GLUE; i++)  glues[i].active = 0;
+    echoScanT = 0.0f;
+    for (i = 0; i < corridor + 2; i++) {
+        int cx = (int)posX + i;
+        if (cx >= 1 && cx < MAP_WIDTH - 1 && cy >= 1 && cy < MAP_HEIGHT - 1)
+            worldMap[cy][cx] = 0;
+    }
+    if (wall_at > 0) {
+        int cx = (int)posX + wall_at;
+        if (cx >= 1 && cx < MAP_WIDTH - 1)
+            worldMap[cy][cx] = 1;      /* 挡住去路 */
+    }
+    dirX = 1.0f; dirY = 0.0f;
+}
+
+/* 跑若干帧直到条件成立或超时；返回是否成立 */
+static int throw_run_until(int (*cond)(void), int maxFrames) {
+    int f;
+    for (f = 0; f < maxFrames; f++) {
+        UpdateShots(0.016f);
+        if (cond()) return 1;
+    }
+    return 0;
+}
+
+static int smoke_active_any(void) {
+    int i;
+    for (i = 0; i < MAX_SMOKE; i++) if (smokes[i].active) return 1;
+    return 0;
+}
+
+static int glue_active_any(void) {
+    int i;
+    for (i = 0; i < MAX_GLUE; i++) if (glues[i].active) return 1;
+    return 0;
+}
+
+static int echo_scanning(void) {
+    return echoScanT > 0.0f;
+}
+
+static void test_smoke_works_when_it_lands_on_open_floor(void) {
+    throw_prepare(10, 0);
+    ThrowItem(2, 1.0f);                    /* kind 4 = 烟雾 */
+    CHECK(throw_run_until(smoke_active_any, 400),
+          "a smoke bomb landing on open floor must spawn a cloud");
+}
+
+static void test_glue_works_when_it_lands_on_open_floor(void) {
+    throw_prepare(10, 0);
+    ThrowItem(3, 1.0f);                    /* kind 8 = 胶水 */
+    CHECK(throw_run_until(glue_active_any, 400),
+          "a glue pot landing on open floor must spawn a glue zone");
+}
+
+static void test_echo_works_when_it_lands_on_open_floor(void) {
+    int marked = 0;
+    int i;
+    throw_prepare(10, 0);
+    ThrowItem(4, 1.0f);                    /* kind 10 = 回声 */
+    CHECK(throw_run_until(echo_scanning, 400),
+          "an echo bolt landing on open floor must start a sonar scan");
+    /* 扫过之后地形必须被揭出来 —— 这是"撞墙分支只做了半套"漏掉的那一半 */
+    for (i = 0; i < MAP_WIDTH * MAP_HEIGHT; i++) {
+        if (explored[i / MAP_WIDTH][i % MAP_WIDTH]) { marked = 1; break; }
+    }
+    CHECK(marked, "the echo scan must actually reveal terrain");
+}
+
+static void test_effects_also_fire_when_hitting_a_wall(void) {
+    /* 墙近到弹道出不去，只能撞墙结束 —— 走的是撞墙分支 */
+    throw_prepare(10, 2);
+    ThrowItem(2, 1.0f);
+    CHECK(throw_run_until(smoke_active_any, 400),
+          "a smoke bomb hitting a wall must still spawn a cloud (wall branch)");
+
+    throw_prepare(10, 2);
+    ThrowItem(4, 1.0f);
+    CHECK(throw_run_until(echo_scanning, 400),
+          "an echo bolt hitting a wall must still start a scan (wall branch)");
+}
+
 void TestSuite_throwing(void) {
     test_flare_heal_budget();
     test_stone_hearing_range();
     test_stone_break_single_event();
+    test_smoke_works_when_it_lands_on_open_floor();
+    test_glue_works_when_it_lands_on_open_floor();
+    test_echo_works_when_it_lands_on_open_floor();
+    test_effects_also_fire_when_hitting_a_wall();
 }
