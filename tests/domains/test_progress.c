@@ -605,6 +605,88 @@ static void test_training_stations_fire_once(void) {
           "standing between two stations must not fire anything");
 }
 
+
+/* ==================================================================
+ * 2026-11-09（第 2 轮）：**内容中枢 content_db**
+ * ------------------------------------------------------------------
+ * 中枢是"同一个终端"的地基：所有内容（怪/投掷物/技能/成就/设置）
+ * 都登记到一张表，其它系统只查这张表。
+ *
+ * 这一轮还没有系统接进来，所以这些用例是它将来能被信任的前提：
+ * 越界安全、id 唯一、满表拒绝、清空彻底。
+ * ================================================================ */
+
+#include "content_db.h"
+
+static void test_content_db_basics(void) {
+    int a, b, c;
+    ContentReset();
+
+    CHECK(ContentCount(CK_MONSTER) == 0, "a fresh content db must be empty");
+    CHECK(ContentGet(CK_MONSTER, 0) == NULL, "Get on an empty kind must return NULL");
+    CHECK(ContentFind(CK_MONSTER, "nope") == -1, "Find on an empty kind must return -1");
+    CHECK(ContentTotal() == 0, "total must start at 0");
+
+    a = ContentAdd(CK_MONSTER, "sound_hunter", (const void*)1);
+    b = ContentAdd(CK_MONSTER, "light_beast", (const void*)2);
+    c = ContentAdd(CK_MONSTER, "chest_mimic", (const void*)3);
+    CHECK(a == 0 && b == 1 && c == 2, "adds must return consecutive indices");
+    CHECK(ContentCount(CK_MONSTER) == 3, "count must follow the adds");
+
+    /* 按序号取 */
+    CHECK(ContentGet(CK_MONSTER, 1) == (const void*)2, "Get(1) must be the second entry");
+    CHECK(ContentGet(CK_MONSTER, 3) == NULL, "Get past the end must return NULL");
+    CHECK(ContentGet(CK_MONSTER, -1) == NULL, "Get(-1) must return NULL");
+
+    /* 按 id 找 */
+    CHECK(ContentFind(CK_MONSTER, "light_beast") == 1, "Find must locate by id");
+    CHECK(ContentFind(CK_MONSTER, "ghost") == -1, "Find must return -1 for unknown id");
+
+    /* id 唯一：重复登记必须被拒绝 */
+    CHECK(ContentAdd(CK_MONSTER, "sound_hunter", (const void*)9) == -1,
+          "registering the same id twice must be rejected");
+    CHECK(ContentCount(CK_MONSTER) == 3, "a rejected add must not change the count");
+    CHECK(ContentDuplicateKind() == -1, "no duplicates must ever get in");
+
+    /* 空 id / NULL id 拒绝 */
+    CHECK(ContentAdd(CK_MONSTER, "", (const void*)1) == -1, "empty id must be rejected");
+    CHECK(ContentAdd(CK_MONSTER, NULL, (const void*)1) == -1, "NULL id must be rejected");
+
+    /* 不同种类互不干扰 */
+    CHECK(ContentAdd(CK_SKILL, "sound_hunter", (const void*)7) >= 0,
+          "the same id in a different kind is a different entry");
+    CHECK(ContentCount(CK_SKILL) == 1 && ContentCount(CK_MONSTER) == 3,
+          "kinds must be independent");
+
+    /* 清空彻底 */
+    ContentReset();
+    CHECK(ContentCount(CK_MONSTER) == 0 && ContentCount(CK_SKILL) == 0,
+          "reset must clear every kind");
+    CHECK(ContentTotal() == 0, "reset must clear the total");
+}
+
+static void test_content_db_capacity(void) {
+    /* id 必须指向**稳定存储** —— 中枢只存指针。
+       第一版这里用栈上的 `char id[32]`，循环里被复用，
+       第二次登记时中枢读到的还是"id_1"，当场被判重复。
+       （这条约定也写进了 content_db.h。） */
+    static char ids[CONTENT_MAX][16];
+    int i, ok = 1;
+    ContentReset();
+    for (i = 0; i < CONTENT_MAX; i++) {
+        sprintf(ids[i], "id_%d", i);
+        if (ContentAdd(CK_SETTING, ids[i], (const void*)(long)(i + 1)) < 0) {
+            ok = 0;
+            break;
+        }
+    }
+    CHECK(ok, "the db must accept exactly CONTENT_MAX entries");
+    CHECK(ContentCount(CK_SETTING) == CONTENT_MAX, "count must reach CONTENT_MAX");
+    CHECK(ContentAdd(CK_SETTING, "one_too_many", (const void*)1) == -1,
+          "the (CONTENT_MAX+1)th add must be rejected, not overflow");
+    ContentReset();
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -622,4 +704,6 @@ void TestSuite_progress(void) {
     test_three_archetypes_are_wired();
     test_training_has_seven_stations();
     test_training_stations_fire_once();
+    test_content_db_basics();
+    test_content_db_capacity();
 }
