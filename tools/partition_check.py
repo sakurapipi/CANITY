@@ -161,6 +161,22 @@ def check_symbol_ownership():
     return bad
 
 
+def check_content_hub_isolation(bad):
+    """S4：内容中枢只允许 include common.h / content_db.h。"""
+    for rel in ('src/domain/content/content_db.c', 'src/content_db.c'):
+        path = os.path.join(ROOT, rel)
+        if not os.path.isfile(path):
+            continue
+        src = io.open(path, encoding='utf-8', errors='replace').read()
+        for m in re.finditer(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', src, re.M):
+            inc = m.group(1).strip()
+            if inc in ('common.h', 'content_db.h'):
+                continue
+            line = src[:m.start()].count('\n') + 1
+            bad.append((rel, line, '#include "%s"' % inc))
+    return bad
+
+
 def main():
     bad = []
     for p in iter_files():
@@ -186,8 +202,11 @@ def main():
     # 规则 S3：分区符号归属
     owner_bad = check_symbol_ownership()
 
-    if not bad and not save_bad and not owner_bad:
-        print('partition: OK  (S1 系统头只在 common.h；S2 存档只在 save 后端；S3 分区符号各归各家)')
+    # 规则 S4：内容中枢不许反向依赖系统
+    hub_bad = check_content_hub_isolation([])
+
+    if not bad and not save_bad and not owner_bad and not hub_bad:
+        print('partition: OK  (S1 系统头 / S2 存档 / S3 符号归属 / S4 中枢隔离)')
         return 0
 
     if bad:
@@ -219,6 +238,14 @@ def main():
         print('  · .bak 备份链')
         print('  · 信封（SteamCloudHead）封头 —— 云存档就认不出来')
         print('修法：改调 SaveBackendWrite / SaveBackendRead / SaveBackendUpload。')
+    if hub_bad:
+        print('partition: FAIL  —— 有 %d 处内容中枢反向依赖了系统' % len(hub_bad))
+        for rel, line, what in hub_bad:
+            print('  %-40s %4d  %s' % (rel, line, what))
+        print()
+        print('为什么不行：中枢一旦认识系统，就变成上帝对象 ——')
+        print('所有系统都认识它、它也认识所有系统，耦合又回到原样。')
+        print('修法：中枢只允许 include common.h / content_db.h。')
     return 1
 
 
