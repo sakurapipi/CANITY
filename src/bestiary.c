@@ -131,6 +131,16 @@ int BestiaryIsSeen(int id) {
     return (bestiarySeen >> id) & 1;
 }
 
+/* 第 1 轮：本进程内已经播报过的怪（不进存档） */
+static int bestiaryAnnounced = 0;
+
+int BestiaryAnnounce(int id) {
+    if (id < 0 || id >= BESTIARY_COUNT) return 0;
+    if (bestiaryAnnounced & (1 << id)) return 0;
+    bestiaryAnnounced |= (1 << id);
+    return 1;
+}
+
 int BestiarySeenAll(void) {
     for (int i = 0; i < BESTIARY_COUNT; i++)
         if (!BestiaryIsSeen(i)) return 0;

@@ -2617,6 +2617,41 @@ void DrawHUD(void) {
                再上移 24 像素留出呼吸空间。 */
             DrawTextWin(winW - UIS(24) - tw3, winH - UIS(394), st, sc);
 
+    /* ==================================================================
+     * 2026-11-08（第 1 轮）：**扳手命中标记**
+     * ------------------------------------------------------------------
+     * 玩家原话：「扳手没啥效果，打不到」。命中确实有击退，但屏幕上
+     * 没有任何确认 —— 分不清"打空了"和"打中了但怪没退"。
+     * 这里在准星四周画四道短线，命中后 0.22 秒内淡出。
+     * ================================================================== */
+    if (wrenchHitFlashT > 0.0f) {
+        extern float wrenchHitFlashT;
+        int cx3 = winW / 2, cy3 = winH / 2;
+        int len = UIS(14), gap = UIS(6);
+        float a = wrenchHitFlashT / 0.22f;
+        unsigned int mc = 0x00FFE080u;
+        /* 直接写像素（PlotUiPixel 已随文本层搬到 ui_text.c，且是 static）——
+           这里就一个 HUD 标记，不值得为它开新 API。 */
+        {
+            int pts[8][2];
+            int k;
+            pts[0][0] = cx3 - gap;              pts[0][1] = cy3;
+            pts[1][0] = cx3 - gap - (int)(len * a); pts[1][1] = cy3;
+            pts[2][0] = cx3 + gap;              pts[2][1] = cy3;
+            pts[3][0] = cx3 + gap + (int)(len * a); pts[3][1] = cy3;
+            pts[4][0] = cx3;                    pts[4][1] = cy3 - gap;
+            pts[5][0] = cx3;                    pts[5][1] = cy3 - gap - (int)(len * a);
+            pts[6][0] = cx3;                    pts[6][1] = cy3 + gap;
+            pts[7][0] = cx3;                    pts[7][1] = cy3 + gap + (int)(len * a);
+            for (k = 0; k < 8; k++) {
+                int px = pts[k][0], py = pts[k][1];
+                if (px < 0 || py < 0 || px >= renderW || py >= renderH) continue;
+                pixels[(size_t)py * renderW + px] = mc;
+            }
+        }
+    }
+
+
     DrawHudThemeRoom();   /* 第 3 轮：主题房间字幕抽成函数 */
         }
     }

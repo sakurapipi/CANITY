@@ -30,6 +30,15 @@ int RunUpgCost(int kind) {
     return costs[upg[kind]];
 }
 
+/* 2026-11-08（第 1 轮）：测试钩子 —— 直接把某条升级设到指定等级。
+   生产路径不调用；测试要验"低级扳手也该有硬直"必须有它。 */
+void RunUpgSetLevel(int kind, int lv) {
+    if (kind < 0 || kind >= RUN_UPG_COUNT) return;
+    if (lv < 0) lv = 0;
+    if (lv > RUN_UPG_MAX) lv = RUN_UPG_MAX;
+    upg[kind] = lv;
+}
+
 int RunUpgTryBuy(int kind) {
     if (kind < 0 || kind >= RUN_UPG_COUNT) return 1;
     if (upg[kind] >= RUN_UPG_MAX) return 2;
@@ -160,7 +169,18 @@ float RunUpgWrenchRange(void) {
     return (lv >= 3) ? 4.0f : (lv >= 1 ? 3.0f : 2.0f);
 }
 float RunUpgWrenchStun(void) {
-    return (RunUpgWrenchLevel() >= 3) ? 1.0f : 0.0f;
+    /* ==================================================================
+     * 2026-11-08（第 1 轮）：**低级也要有硬直**
+     * ------------------------------------------------------------------
+     * 原来 level < 3 一律返回 0 —— 升级前砸中怪只有击退、零硬直，
+     * 怪立刻又贴上来。玩家原话：「扳手没啥效果」。
+     * 现在给一条下限曲线，升级仍然明显（0.25 → 1.0）。
+     * ================================================================ */
+    int lv = RunUpgWrenchLevel();
+    if (lv <= 0) return 0.25f;
+    if (lv == 1) return 0.45f;
+    if (lv == 2) return 0.70f;
+    return 1.0f;
 }
 
 void RunUpgLoadFromSave(const int* arr) {

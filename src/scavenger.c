@@ -127,6 +127,9 @@ typedef struct {
     float x, y;
     float tx, ty;          /* 目标：玩家（或藏身点）的位置，动态更新 */
     float warnT;           /* >0 = 正在拉柜门 */
+    int   grabSpot;        /* 正在拉的那个柜子下标（-1 = 没有）。
+                            * 第 1 轮（2026-11-08）：必须记下来 —— 否则玩家在预警里
+                            * 出柜，hiddenIn 变 -1 就查不到是哪个柜子被拽了。 */
     float eatT;            /* 正在吃箱子的进度 */
     int   eating;          /* 正在吃的箱子下标，-1 = 没在吃 */
     float stepAcc;     /* v2.4.92 脚步累计距离 */
@@ -398,6 +401,7 @@ static void scavengerLeave(void) {
     scavenger.active = 0;
     scavenger.eating = -1;
     scavenger.warnT = 0.0f;
+    scavenger.grabSpot = -1;
     scavenger.searchT = 0.0f;
     scavCooldown = SCAV_COOLDOWN;
     { extern int hideStreak; hideStreak = 0; }
@@ -465,26 +469,52 @@ void UpdateScavenger(float dt) {
         scavenger.warnT -= dt;
         if (scavenger.warnT <= 0.0f) {
             extern int hiddenIn;
-            if (hiddenIn >= 0) {
+            extern HideSpot hideSpots[];
+            int spot = scavenger.grabSpot;
+
+            if (hiddenIn >= 0 && hiddenIn == spot) {
+                /* ---- (a) 玩家还在柜里：原样结算并把他踢出来 ---- */
                 /* v2.4.36：按当前理智的 20%~50% 扣，随金币和强度档成长 */
                 sanity -= scavSanityLoss() * RunDamageTakenMul();
                 if (sanity < 0.0f) sanity = 0.0f;
                 AddHitFlash(0.85f);
                 AddShake(0.28f, 0.20f);
-                {
-                    extern HideSpot hideSpots[];
-                    extern int resetInputState;
-                    if (hiddenIn >= 0 && hiddenIn < HIDESPOT_MAX) {
-                        hideSpots[hiddenIn].broken = 1;   /* 真的撬坏，要花钱修 */
-                    }
-                    hiddenIn = -1;
-                    resetInputState = 1;
+                if (spot >= 0 && spot < HIDESPOT_MAX) {
+                    hideSpots[spot].broken = 1;   /* 真的撬坏，要花钱修 */
                 }
+                { extern int resetInputState; hiddenIn = -1; resetInputState = 1; }
                 PlaySfx(SFX_SCREAM, 0.7f);
                 pickupMsg = (g_lang == LANG_ZH) ? "它把柜门拉开了！" : "IT OPENED THE LOCKER!";
                 pickupMsgTimer = 2.2f;
+                scavenger.grabSpot = -1;
+                scavengerLeave();
+                return;
             }
-            scavengerLeave();
+
+            /* ================================================================
+             * ---- (b) 玩家在预警里跑出来了（2026-11-08 修）----
+             * ----------------------------------------------------------------
+             * 旧代码这里直接 scavengerLeave()：玩家零代价脱身，怪凭空消失。
+             * 玩家原话：「只需要在他刚抓住柜门的时候出来就消失了」。
+             *
+             * 现在：柜门已经被它拽住了 —— **柜子照样坏**（要花钱修），
+             * 但它**不再走人**，继续追你。跑掉能躲过理智惩罚，
+             * 代价是柜子报废 + 它继续在场上，不再是白嫖。
+             * ================================================================ */
+            if (spot >= 0 && spot < HIDESPOT_MAX && hideSpots[spot].active) {
+                hideSpots[spot].broken = 1;
+                PlaySfx(SFX_GLASS, 0.7f);
+                pickupMsg = (g_lang == LANG_ZH)
+                    ? "它把柜门拽坏了 —— 它还在找你"
+                    : "IT RIPPED THE LOCKER APART - IT IS STILL HUNTING";
+                pickupMsgTimer = 2.2f;
+            }
+            scavenger.grabSpot = -1;
+            scavenger.warnT = 0.0f;
+            /* 重置翻箱状态，让它专心追人 */
+            scavenger.eating = -1;
+            scavenger.searchT = 0.0f;
+            scavenger.life = (scavenger.life < 12.0f) ? 12.0f : scavenger.life;
             return;
         }
         return;
@@ -543,6 +573,7 @@ void UpdateScavenger(float dt) {
         /* (a) 玩家躲着 → 拉柜门 */
         if (hiddenIn >= 0) {
             scavenger.warnT = SCAV_GRAB_WARN;
+            scavenger.grabSpot = hiddenIn;
         /* v2.4-beta B02：刮擦声来自柜门外那一边 */
         { extern void AudioPlayWorld(int, float, float, float, float, int);
           AudioPlayWorld(SFX_SCAVENGER, scavenger.x, scavenger.y, 0.85f, 18.0f, 3); }
@@ -658,6 +689,27 @@ void UpdateScavenger(float dt) {
 }
 
 /* v2.3.9：训练营用 —— 强制把清道夫摆到指定位置当标本 */
+/* ==================================================================
+ * 2026-11-08（第 1 轮）：**测试钩子**（生产路径不调用）
+ * ------------------------------------------------------------------
+ * 玩家反馈的 bug 是"抓柜门时玩家跑出来 → 它凭空消失"。
+ * 那条路径要复现必须能设置"它抓住了哪个柜子"并推进预警，
+ * 而 scavenger 结构体是文件私有的 —— 所以留这两个钩子。
+ * 先例：StoneBreakLockAtTest（game.c）。
+ * ================================================================== */
+void ScavengerGrabTest(int spot) {
+    scavenger.active = 1;
+    scavenger.warnT = SCAV_GRAB_WARN;
+    scavenger.grabSpot = spot;
+    if (scavenger.life < 20.0f) scavenger.life = 20.0f;
+}
+
+int ScavengerWarnExpireTest(void) {
+    scavenger.warnT = 0.0001f;
+    UpdateScavenger(0.01f);
+    return scavenger.active;
+}
+
 void ScavengerForcePlace(float x, float y) {
     scavenger.active = 1;
     scavenger.x = x;

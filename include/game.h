@@ -202,6 +202,8 @@ void GenerateLevel(void);
 /* 落点被阻塞时把玩家挪到最近可站处（相位传送 / 藏身柜共用）。
  * 第 3 轮：phase 域搬到 src/domain/phase/ 后需要跨文件调用。 */
 void UnstickPlayer(void);
+/* 第 1 轮：扳手命中闪光（HUD 用）*/
+extern float wrenchHitFlashT;
 int ShotBlocked(float x, float y);
 int SpotClear(float x, float y, float minD, int selfKind, int selfIdx);
 

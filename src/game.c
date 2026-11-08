@@ -2803,6 +2803,15 @@ void GenerateLevel(void) {
     }
     { extern void BestiaryNoteFloor(int,int);
       BestiaryMarkSeen(0); BestiaryNoteFloor(0, currentLevel); }   /* 寻声鬼：每层都有 */
+    /* 第 1 轮：**首次遇到就报名字** —— 玩家原话「不知道哪个怪是哪个」。
+       只在第一次（本进程内）播，不打断后续节奏。 */
+    { extern int BestiaryAnnounce(int);
+      if (BestiaryAnnounce(0)) {
+        pickupMsg = (g_lang == LANG_ZH)
+            ? "新威胁：听声鬼 —— 它看不见，走向最后听到的声音"
+            : "NEW THREAT: SOUND HUNTER - blind, walks to the last sound";
+        pickupMsgTimer = 3.2f;
+      } }
     if (lightBeast.active) { BestiaryMarkSeen(1); BestiaryNoteFloor(1, currentLevel); }           /* 追光鬼 */
     if (currentLevel >= LEECH_MIN_LEVEL) { BestiaryMarkSeen(2); BestiaryNoteFloor(2, currentLevel); }   /* 偷电怪 */
     { extern int SpiderActive(void);
@@ -3583,6 +3592,8 @@ static void WrenchApplyHit(float power) {
                                    ny = target->y + uy * push * 0.5f; }
             if (!Blocked(nx, ny)) { target->x = nx; target->y = ny; }
             wrenchHitMask|=tbits[ti];
+            /* 第 1 轮：命中闪光 —— 让玩家**看得见**自己打中了 */
+            { extern float wrenchHitFlashT; wrenchHitFlashT = 0.22f; }
             target->stun=RunUpgWrenchStun()*BenchKnockStunMul();
             knockCountRun++;
             if(BenchShock()) { SuspicionReset();target->stateTimer=0.0f;target->tx=target->x;target->ty=target->y; }
@@ -3697,6 +3708,8 @@ void WrenchTick(float dt) {
 }
 
 float wrenchCharge = 0.0f;    /* 0..1 */
+/* 第 1 轮：扳手命中闪光剩余秒数（HUD 画准星命中标记用） */
+float wrenchHitFlashT = 0.0f;
 static int  wrenchPrev = 0;
 static int  wrenchInit = 0;
 /* ===== v2.5.00 **装填闩** =====
@@ -5452,6 +5465,7 @@ void Update(float dt) {
 
     EnsureThrowSelectedValid();   /* v1.14：手里不能是空的 */
     if (lastHitTimer > 0.0f) lastHitTimer -= dt;   /* v1.15：命中数字淡出 */
+    if (wrenchHitFlashT > 0.0f) wrenchHitFlashT -= dt;   /* 第 1 轮：扳手命中闪光 */
     UpdateMonster(dt);
     { extern void UpdateMonster2(float); UpdateMonster2(dt); }
     { extern void UpdateMonster3(float); UpdateMonster3(dt); }   /* v2.4.12 第二只 */

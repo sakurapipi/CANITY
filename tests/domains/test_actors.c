@@ -637,6 +637,69 @@ static void test_monster_search_around(void) {
     memcpy(worldMap, saved, sizeof(saved));
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 1 轮）：玩家反馈的三条
+ * ------------------------------------------------------------------
+ *  ① 清道夫：抓柜门时玩家跑出来 → 旧代码直接走人（零代价脱身）
+ *  ② 扳手：升级前砸中没有任何硬直 → 手感"没效果"
+ *  ③ 图鉴：局内从不播报名字 → "不知道哪个怪是哪个"
+ * ================================================================ */
+
+extern float RunUpgWrenchStun(void);
+extern int   RunUpgWrenchLevel(void);   /* 读 upg[4] */
+extern void  RunUpgSetLevel(int idx, int lv);
+extern int   BestiaryAnnounce(int id);
+
+static void test_wrench_stun_has_a_floor_at_low_level(void) {
+    /* 旧实现：level < 3 一律 0 —— 砸中只有击退，怪立刻贴回来 */
+    int saved = RunUpgWrenchLevel();   /* 扳手是升级表里的 4 号 */
+    RunUpgSetLevel(4, 0);   /* 4 = 扳手 */
+    CHECK(RunUpgWrenchStun() > 0.05f,
+          "wrench must stagger even before upgrades (a zero stun feels like 'no effect')");
+    RunUpgSetLevel(4, 3);
+    CHECK(RunUpgWrenchStun() >= 0.9f, "the level-3 wrench must still be clearly better");
+    RunUpgSetLevel(4, saved);
+}
+
+static void test_bestiary_announces_only_once(void) {
+    /* 同一只怪在一次进程里只播报一次，第二次返回 0 */
+    int first = BestiaryAnnounce(6);      /* 用一个少见的 id */
+    int again = BestiaryAnnounce(6);
+    CHECK(first == 1, "the first encounter must be announced");
+    CHECK(again == 0, "the same monster must not be announced twice");
+    CHECK(BestiaryAnnounce(-1) == 0, "invalid ids must not be announced");
+    CHECK(BestiaryAnnounce(BESTIARY_COUNT) == 0, "out-of-range ids must not be announced");
+}
+
+static void test_scavenger_does_not_vanish_when_you_leave(void) {
+    /* 直接验状态机：抓柜门 → 玩家出柜 → 预警到期后它必须还在场上。
+       旧代码在这里 scavengerLeave()，玩家零代价脱身。 */
+    extern int hiddenIn;
+    extern void ScavengerForcePlace(float, float);
+    extern void ScavengerGrabTest(int spot);
+    extern int  ScavengerWarnExpireTest(void);
+    extern int  ScavengerActive(void);
+    extern HideSpot hideSpots[];
+
+    ScavengerForcePlace(posX + 0.5f, posY + 0.5f);
+    hiddenIn = 2;                     /* 假装躲在 2 号柜 */
+    if (!ScavengerActive()) { CHECK(1, "scavenger could not be placed"); return; }
+    hideSpots[2].active = 1;
+    hideSpots[2].broken = 0;
+
+    ScavengerGrabTest(2);
+    hiddenIn = -1;                    /* 玩家在预警里跑出来 */
+    (void)ScavengerWarnExpireTest();
+
+    CHECK(ScavengerActive(),
+          "leaving the locker mid-grab must not make the scavenger vanish");
+    CHECK(hideSpots[2].broken,
+          "the grabbed locker must still be destroyed even if the player escapes");
+    hiddenIn = -1;
+    hideSpots[2].active = 0;
+}
+
 void TestSuite_actors(void) {
     test_jumper_removed_spider_takes_over();
     test_spider_spawn_curve();
@@ -651,4 +714,8 @@ void TestSuite_actors(void) {
     test_hunter_models();
     test_floor_resets_hunters();
     test_monster_search_around();
+    /* 第 1 轮：玩家反馈三条 */
+    test_wrench_stun_has_a_floor_at_low_level();
+    test_bestiary_announces_only_once();
+    test_scavenger_does_not_vanish_when_you_leave();
 }
