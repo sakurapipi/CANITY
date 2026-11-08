@@ -2,6 +2,7 @@
  * Canity — 缚丝蛛实现（v2.4.1 第 5~6 轮）
  * 头部注释见 include/spider.h。
  */
+#include "difficulty.h"
 #include "common.h"
 #include "entity.h"
 #include "spider.h"
@@ -218,8 +219,10 @@ void SpiderTick(float dt) {
         if (hit) {
             /* 交给控制层。被拒（抱脸虫正在生效 / 免疫中）就直接进冷却，
                **绝不**再排队等下一次。 */
+            /* 第 5 轮：这是现在唯一的"限时按键"事件，难度也要作用于它
+               （轻松 ×1.6 窗口，硬核 ×0.75） */
             if (ControlBeginTimed(CTRL_SPIDER_WEB,
-                                  SPIDER_WEB_WINDOW,
+                                  SPIDER_WEB_WINDOW * DiffQteWindowMul(),
                                   SPIDER_WEB_REDUCE,
                                   SPIDER_WEB_MIN)) {
                 PlaySfx(SFX_GLUE, 0.9f);

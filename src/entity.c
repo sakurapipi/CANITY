@@ -737,6 +737,8 @@ static void MonsterWanderFor(Monster* m) {
 #define HUNTER_SPAWN_3_T  120.0f   /* 第三只：120 秒 */
 
 static float s_hunterSpawnT = 0.0f;
+/* 第 5 轮：理智回满后的喘息计时（这段时间不刷新怪） */
+static float s_breathT = 0.0f;
 static int   s_hunterSpawned = 1;   /* 第一只开局就在，所以从 1 算起 */
 
 void ResetSecondSpawn(void) {
@@ -895,6 +897,21 @@ void TickSecondSpawn(float dt) {
     }
 
     s_hunterSpawnT += dt;
+
+    /* ==================================================================
+     * 第 5 轮：**喘息窗口**（DiffBreathWindow）
+     * ------------------------------------------------------------------
+     * 玩家原话：「频率差不多是刚回满 san 就要来了」。
+     * 现在：理智刚回满的那段时间里不刷新怪 —— 让"补给完"有一小段
+     * 真正安全的空档，而不是立刻被惩罚。
+     * 轻松 30 秒 / 标准 18 秒 / 硬核 8 秒。
+     * ================================================================ */
+    if (sanity >= SanityMax() - 0.01f) {
+        s_breathT += dt;
+        if (s_breathT < DiffBreathWindow()) return;
+    } else {
+        s_breathT = 0.0f;
+    }
     if (s_hunterSpawned >= MON_HUNTER_MAX) return;
 
     /* 威胁越高来得越早（保留原来的两个修正，但上限不超过 25%） */
