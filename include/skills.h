@@ -56,6 +56,9 @@ void SkillInitOnce(void);
 float SkillGoldMul(void);
 float SkillCrateGoldMul(void);
 float SkillExtractMul(void);
+/* 2026-11-09（第 4 轮）：把全部技能登记进内容中枢（幂等） */
+void SkillRegister(void);
+
 void SkillResetAll(void);
 
 /* 查询 */

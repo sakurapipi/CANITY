@@ -730,6 +730,45 @@ static void test_bestiary_registered_in_hub(void) {
     ContentReset();
 }
 
+
+/* ==================================================================
+ * 2026-11-09（第 4 轮）：**技能已接入内容中枢**
+ * ------------------------------------------------------------------
+ * 一个技能节点要登记四处（表 / 短名 / 坐标 / 绘制列表）。
+ * 这一轮先让中枢持有全部 40 个节点：中枢计数必须等于 SKILL_COUNT，
+ * 且每个都能按英文名找回它自己。
+ * ================================================================ */
+
+extern void SkillRegister(void);
+
+static void test_skills_registered_in_hub(void) {
+    int i, found = 0;
+    ContentReset();
+    SkillRegister();
+
+    CHECK(ContentCount(CK_SKILL) == SKILL_COUNT,
+          "the hub must hold exactly SKILL_COUNT skills");
+
+    for (i = 0; i < SKILL_COUNT; i++) {
+        extern const SkillDef skillDefs[];
+        const char* id = skillDefs[i].name;
+        int idx;
+        if (!id || !id[0]) continue;
+        idx = ContentFind(CK_SKILL, id);
+        if (idx >= 0 && ContentGet(CK_SKILL, idx) == (const void*)&skillDefs[i])
+            found++;
+    }
+    CHECK(found == SKILL_COUNT,
+          "every skill must be findable by name and map back to its own row");
+
+    /* 幂等 */
+    SkillRegister();
+    CHECK(ContentCount(CK_SKILL) == SKILL_COUNT, "registering twice must not duplicate");
+    CHECK(ContentDuplicateKind() == -1, "the hub must stay duplicate-free");
+
+    ContentReset();
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -750,4 +789,5 @@ void TestSuite_progress(void) {
     test_content_db_basics();
     test_content_db_capacity();
     test_bestiary_registered_in_hub();
+    test_skills_registered_in_hub();
 }

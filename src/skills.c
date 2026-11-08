@@ -10,6 +10,7 @@
 #include "common.h"
 #include "game.h"
 #include "skills.h"
+#include "content_db.h"
 #include "upgrade_run.h"
 #include "save.h"
 #include "wallet.h"
@@ -940,7 +941,27 @@ void SkillInitOnce(void) { skillRank[SK_ORIGIN]=1; }
  * 语义：**全额退还**。玩家可以免费重洗，用它去试别的构筑。
  * 这是 Meta 系统的标准做法（重洗不该收费，收费只会让人不敢试）。
  * ================================================================ */
+/* ==================================================================
+ * 2026-11-09（第 4 轮）：**技能登记进内容中枢**
+ * ------------------------------------------------------------------
+ * 一个技能节点在这个项目里要登记四处（表 / 短名 / 坐标 / 绘制列表）。
+ * 这四处目前仍由各自的常量表维护 —— 真正"一次生成"是第 7 轮生成器的事。
+ *
+ * 这一轮先让中枢持有全部节点：任何"表里有、中枢里没有"的情况，
+ * 测试会当场发现。
+ *
+ * id 用英文名（字符串常量，地址稳定 —— 见 content_db.h 第 4 条规矩）。
+ * ================================================================ */
+void SkillRegister(void) {
+    int i;
+    for (i = 0; i < SKILL_COUNT; i++) {
+        if (skillDefs[i].name && skillDefs[i].name[0])
+            (void)ContentAdd(CK_SKILL, skillDefs[i].name, &skillDefs[i]);
+    }
+}
+
 void SkillResetAll(void) {
+    SkillRegister();   /* 第 4 轮：保证技能已登记进中枢 */
     int refund = 0;
     for (int i = 0; i < SKILL_COUNT; i++) {
         if (i == SK_ORIGIN) { skillRank[i] = 1; continue; }
