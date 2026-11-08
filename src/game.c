@@ -19,6 +19,7 @@
 #include "phase.h"
 #include "collapse.h"
 #include "core_rng.h"
+#include "difficulty.h"
 #include "core_tick.h"   /* 第 4 轮：每帧 tick 顺序守卫 */
 #include "control_effect.h"
 #include "spider.h"
@@ -1027,6 +1028,8 @@ static const char* optLang[2] = {"ENGLISH", "\xe4\xb8\xad\xe6\x96\x87"};
 /* HUD 详细度：游戏画面上放多少字。
    Minimal = 只留必须实时知道的数值；Full = 全部显示。 */
 static const char* optHud[3] = {"Minimal", "Normal", "Full"};
+/* 第 2 轮：难度三档。名字走 difficulty.c 的表，和存档里的整数一一对应 */
+static const char* optDiff[3] = {"EASY", "NORMAL", "HARDCORE"};
 /* QTE 提示详细度：Full = 带英文说明，Minimal = 只留大按键和倒计时条 */
 static const char* optQte[2] = {"Minimal", "Full"};
 static const char* optSlot[SAVE_SLOTS] = {"SLOT 1", "SLOT 2", "SLOT 3"};
@@ -1073,6 +1076,11 @@ SettingItem settings[] = {
     {"Menu Cancel",     SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_CANCEL],   NULL, 0, 0, 0, 5},
 
     /* ========== 分类: GAMEPLAY ========== */
+    /* 第 2 轮（2026-11-08）：**难度选择**
+       朋友实测的反馈分两类：「太难，每次都硬吃」和「不恐怖，好安全」——
+       同一套参数满足不了两端，所以做成玩家自己选。
+       只调六个可感知的量（见 include/difficulty.h），不动玩法规则。 */
+    {"Difficulty",      SET_LIST,   optDiff,     3, &difficulty,         NULL,      0,    0,    0, 6},
     {"Mouse Sens.",     SET_SLIDER, NULL,        0, NULL, &mouseSens, 0.2f, 3.0f, 0.1f, 6},
     {"SFX Volume",      SET_SLIDER, NULL,        0, NULL, &volumeF,  0.0f, 1.0f, 0.05f, 6},
     {"Music Volume",    SET_SLIDER, NULL,        0, NULL, &musicVolumeF, 0.0f, 1.0f, 0.05f, 6},
@@ -3546,7 +3554,7 @@ int   wrenchSwingHit = 0;       /* 已经判定过了吗 */
 /* 挥击进度 0..1（0 = 刚挥出，1 = 已收势） */
 static float WrenchSwingProgress(void) {
     if (wrenchSwingT <= 0.0f) return 1.0f;
-    return 1.0f - wrenchSwingT / WRENCH_SWING_TIME;
+    return 1.0f - wrenchSwingT / (WRENCH_SWING_TIME * DiffWrenchWindowMul());
 }
 
 /* 当前第几帧（0..4） */
@@ -3676,7 +3684,8 @@ void WrenchStartSwing(float charge) {
         wrenchCd = cdMax;
     }
 
-    wrenchSwingT     = WRENCH_SWING_TIME;
+    /* 第 2 轮：难度决定判定窗口宽度（轻松 ×1.45 / 硬核 ×0.85） */
+    wrenchSwingT     = WRENCH_SWING_TIME * DiffWrenchWindowMul();
     wrenchSwingPower = 0.70f + 0.30f * charge;
     wrenchSwingHit   = 0;
     wrenchHitMask = 0;
@@ -4016,7 +4025,7 @@ void Update(float dt) {
         battery -= drain * META_COST * dt;
         if (battery <= 0.0f) {          /* 断电：理智开始双倍流失 */
             battery = 0.0f;
-            sanity -= drain * META_STARVE_MUL * dt;
+            sanity -= drain * META_STARVE_MUL * DiffSanityDrainMul() * dt;
         }
     } else {
         float siphonSan = 1.0f;
@@ -4033,7 +4042,8 @@ void Update(float dt) {
             return;
         }
         /* v2.5：安全屋里不流失 —— 这是"安全"二字的承诺 */
-        if (!inSafe) sanity -= drain * siphonSan * dt;
+        /* 第 2 轮：难度改的是"恐惧增长"，不是血量公式 */
+        if (!inSafe) sanity -= drain * siphonSan * DiffSanityDrainMul() * dt;
     }
     /* v3.3：躲进垃圾桶后缓慢回理智；净恢复约 1.5/秒 */
     if (hiddenIn >= 0) {

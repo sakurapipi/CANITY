@@ -588,7 +588,14 @@ static void test_save_persist_contract(void) {
         free(throwc);
     }
 
-    check(contains(saveh, "SAVE_VERSION 35"), "save format must be v35");
+    check(contains(saveh, "SAVE_VERSION 36"), "save format must be v36");
+    /* v36（2026-11-08 第 2 轮）：难度选择必须能存档，且老档读成标准 */
+    check(contains(saveh, "int difficultyPlus1;"),
+          "v36 must persist the difficulty choice");
+    check(contains(savec, "g_save.difficultyPlus1 = difficulty + 1"),
+          "save must store difficulty+1 so a missing field means normal");
+    check(contains(savec, "(dv >= 1 && dv <= 3) ? (dv - 1) : 1"),
+          "load must map a missing difficulty to NORMAL, not EASY");
     /* v35（2026-11-08）：随机数引擎版本 —— 老档按旧 rand 序列重放房间 */
     check(contains(saveh, "int rngVersion;"),
           "v35 must persist the RNG engine version");

@@ -770,6 +770,9 @@ void SaveGame(void) {
       g_save.roomSeed = roomSeedUsed;
     /* 第 6 轮：记下本档用的是哪套随机序列 —— 读档时按它重放房间 */
     { extern int rng_version(void); g_save.rngVersion = rng_version(); }
+    /* 第 2 轮：难度存 difficulty+1 —— 老档缺这个字段读到 0，
+       明确表示"没设过 → 用标准"，不会误判成轻松。 */
+    { extern int difficulty; g_save.difficultyPlus1 = difficulty + 1; }
       g_save.roomCount = RoomCount();
       /* v33：舱门已用状态（位掩码，按**种类**记，不记坐标） */
       { extern int HatchUsedMask(void); g_save.hatchUsedMask = HatchUsedMask(); } }
@@ -1401,6 +1404,11 @@ int LoadSettings(void) {
     if (g_save.version == 34) {
         g_save.version = SAVE_VERSION;
     }
+    /* 2026-11-08（v36）：v35 -> v36 只需要放行 —— 末尾多一个 int
+       （difficultyPlus1），布局没重排，读到 0 就是"没设过难度"。 */
+    if (g_save.version == 35) {
+        g_save.version = SAVE_VERSION;
+    }
     if (g_save.version != SAVE_VERSION) {
         char oldp[MAX_PATH], arc[MAX_PATH + 24];   /* v3.0：留 ".v%d.bak" 的位置 */
         SavePathCand(0, oldp, sizeof(oldp));
@@ -1456,6 +1464,18 @@ int LoadSettings(void) {
     showFps = g_save.showFps;
     hudDetail = g_save.hudDetail;
     qteHint = g_save.qteHint;
+    /* ==================================================================
+     * 第 2 轮：**难度是设置，读档时就该立刻生效**
+     * ------------------------------------------------------------------
+     * 一开始放到 ContinueRun 的房间重放块里 —— 结果"不继续对局"时
+     * 难度就不还原（玩家的选择被静默丢弃）。设置项必须和 hudDetail
+     * 一样，在 LoadSettings 里当场还原。
+     *
+     * 存的是 difficulty+1：0 = 老档（没设过）→ 标准，不是轻松。
+     * ================================================================ */
+    { extern int difficulty;
+      int dv = g_save.difficultyPlus1;
+      difficulty = (dv >= 1 && dv <= 3) ? (dv - 1) : 1; }
     /* v28：**语言选项在启动时也必须恢复**。
        以前只有 ContinueRun 会写 g_lang —— 也就是说：
          · 改完语言、退出设置，当场生效（内存里已经改了）

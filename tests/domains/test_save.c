@@ -260,6 +260,9 @@ static void test_legacy_fixtures(void) {
     fprintf(stderr, "  ---- 迁移结果: %d/%d 正确 ----\n", ok, total);
     checks += total;   /* 每个夹具都算一次检查，别让汇总把覆盖数吃掉 */
     CHECK(ok == total, "every historical save must migrate with identical key state");
+    /* 第 2 轮：读完老档之后难度必须是"标准"，不能因为字段缺失变成轻松 */
+    { extern int difficulty; CHECK(difficulty == 1,
+        "a legacy save without a difficulty field must load as NORMAL"); }
 }
 
 static void test_v33_save_is_accepted(void) {
@@ -622,6 +625,72 @@ static void test_save_backend_errors(void) {
     }
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 2 轮）：难度档位
+ * ------------------------------------------------------------------
+ * 玩家反馈分两类：「太难，每次都硬吃」和「不恐怖，好安全」。
+ * 同一套参数满足不了两端 → 做成三档，只调六个可感知的量。
+ * 这里锁的是"三档必须真的不同"和"存档往返不丢"。
+ * ================================================================ */
+
+#include "difficulty.h"
+
+static void test_difficulty_multipliers_differ(void) {
+    int saved = difficulty;
+
+    difficulty = DIFF_EASY;
+    {
+        float t = DiffThreatIntervalMul(), s2 = DiffSanityDrainMul();
+        float w = DiffWardenBlockAdd(), q = DiffQteWindowMul();
+        difficulty = DIFF_NORMAL;
+        CHECK(t > DiffThreatIntervalMul(), "easy must spawn threats less often than normal");
+        CHECK(s2 < DiffSanityDrainMul(), "easy must drain sanity slower than normal");
+        CHECK(w < DiffWardenBlockAdd(), "easy must shorten the warden block");
+        CHECK(q > DiffQteWindowMul() && q > 0.0f, "easy must widen the QTE window");
+    }
+
+    difficulty = DIFF_HARD;
+    {
+        float t = DiffThreatIntervalMul(), s2 = DiffSanityDrainMul();
+        difficulty = DIFF_NORMAL;
+        CHECK(t < DiffThreatIntervalMul(), "hardcore must spawn threats more often");
+        CHECK(s2 > DiffSanityDrainMul(), "hardcore must drain sanity faster");
+    }
+
+    /* 标准档必须是恒等值 —— 否则"默认手感"就被悄悄改了 */
+    difficulty = DIFF_NORMAL;
+    CHECK(DiffThreatIntervalMul() == 1.0f && DiffSanityDrainMul() == 1.0f &&
+          DiffWrenchWindowMul() == 1.0f,
+          "the normal difficulty must be the identity (no hidden rebalance)");
+    CHECK(DiffWardenBlockAdd() == 0.0f, "normal must not shift the warden block");
+
+    difficulty = saved;
+}
+
+static void test_difficulty_roundtrips_through_save(void) {
+    extern const SaveBlob* SaveTestBlob(void);
+    int saved = difficulty;
+
+    clear_meta(); StartGame();
+    runInProgress = 1;
+    difficulty = DIFF_HARD;
+    SaveGame();
+    {
+        const SaveBlob* b = SaveTestBlob();
+        CHECK(b->difficultyPlus1 == DIFF_HARD + 1,
+              "hardcore must be stored as 3 (difficulty+1), not 2");
+    }
+
+    /* 读回来 */
+    difficulty = DIFF_EASY;
+    CHECK(LoadSettings(), "save must load back");
+    CHECK(difficulty == DIFF_HARD, "difficulty must survive a save/load round trip");
+
+    /* 老档语义：字段为 0 → 标准，不是轻松 */
+    difficulty = saved;
+}
+
 void TestSuite_save(void) {
     test_save_v34_items();
     test_training_items_do_not_leak();
@@ -629,6 +698,8 @@ void TestSuite_save(void) {
     test_corrupt_save_is_never_overwritten();
     test_legacy_fixtures();
     test_v33_save_is_accepted();
+    test_difficulty_multipliers_differ();
+    test_difficulty_roundtrips_through_save();
     test_wallet_save();
     test_save_unknown_chunk_roundtrip();
     test_save_backend_errors();

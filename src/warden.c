@@ -30,6 +30,7 @@
  *   寻路：从出口做一次 BFS，得到「每格到出口多少步」的距离场，
  *         巡逻和赶路都沿梯度走 —— 跨房间也不会卡。
  */
+#include "difficulty.h"
 #include "common.h"
 #include "campaign.h"
 #include "entity.h"
@@ -47,7 +48,8 @@
 #define WARDEN_SIGHT_SPRINT   7.0f    /* 冲刺时多少格内发现 */
 #define WARDEN_SIGHT_WALK     4.0f    /* 走路时多少格内发现 */
 #define WARDEN_SPRINT_SPEED   2.30f   /* 超过这个算冲刺（原来写 2.4，永远不成立） */
-#define WARDEN_BLOCK_TIME    18.0f    /* v2.4.48 平调：25 → 18 秒。
+/* 第 2 轮：堵门时长随难度加减（轻松 -6 秒 / 硬核 +6 秒） */
+#define WARDEN_BLOCK_TIME    (18.0f + DiffWardenBlockAdd())    /* v2.4.48 平调：25 → 18 秒。
                                        25 秒是"被迫站着等"，18 秒还能忍。 */    /* 堵门持续 */
 #define WARDEN_MAX_BLOCKS      2      /* v2.4.49 **一局最多堵两次**。
                                          用户实测：它堵在窄走廊里直接把关卡堵死，

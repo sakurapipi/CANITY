@@ -3,6 +3,7 @@
  *
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
+#include "difficulty.h"
 #include "common.h"
 #include "sound_propagation.h"
 #include "sound_event.h"
@@ -901,7 +902,9 @@ void TickSecondSpawn(float dt) {
     { extern float ThreatSpawnAdvance(void); adv = ThreatSpawnAdvance(); }
     { extern float DailySecondSpawnOffset(void); adv -= DailySecondSpawnOffset(); }
 
-    float base = (s_hunterSpawned == 1) ? HUNTER_SPAWN_2_T : HUNTER_SPAWN_3_T;
+    /* 第 2 轮：难度把间隔拉长/缩短（轻松 ×1.55 / 硬核 ×0.72） */
+    float base = ((s_hunterSpawned == 1) ? HUNTER_SPAWN_2_T : HUNTER_SPAWN_3_T)
+                 * DiffThreatIntervalMul();
     if (adv > base * 0.25f) adv = base * 0.25f;
     if (adv < 0.0f) adv = 0.0f;
     if (s_hunterSpawnT < base - adv) return;
