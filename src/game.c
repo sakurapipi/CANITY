@@ -3766,6 +3766,60 @@ int PlayerAtExit(void) {
     return (breakerOpen && Dist2(posX, posY, exitX, exitY) < EXIT_ENTER_R2 * EXIT_ENTER_R2);
 }
 
+/* 训练场每帧补货：无限道具、不掉理智、标本固定不动。
+ * 第 4 轮从 Update() 抽出来 —— 它只用全局与 dt，不碰外层局部变量。 */
+static void UpdateTrainingPad(float dt) {
+        /* v3.3：投掷物重做后训练场要给全六种，方便逐个试手感。
+           对应槽位：光球 / 投石 / 烟雾 / 胶水 / 回声 / 诱饵 */
+        flares = 99;
+        bottles = 99;      /* 投石 */
+        smokeBombs = 99;
+        gluePots = 99;
+        echoBolts = 99;
+        decoys = 99;
+        /* 已删的三种清零，免得老存档带进来 */
+        bricks = 0; acids = 0; firePots = 0; mirrors = 0;
+        sanity = 100.0f;
+        /* 教程里手电电量会正常消耗，这样「按住 R 摇电」才有可见效果；
+           只做上限夹取，不再每帧强行充满。 */
+        if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
+        stamina = StaminaMax();
+        monster.active = 1;
+        monster.state = 2;              /* 原地不动，当标本 */
+        monster.stun = 0.0f;
+        if (trainingDpsTimer > 0.0f) trainingDpsTimer -= dt;
+        else trainingDps = 0;
+}
+
+/* 烟里的怪丢失目标 —— 这才是"遮蔽视线"该有的效果。
+ * 第 4 轮从 Update() 抽出来 —— 只碰全局（monster / lightBeast / monHunters / smokes）。 */
+static void UpdateSmokeBlindness(void) {
+    /* v2.2：烟幕原来**只压暗玩家自己**（怪完全不看烟），等于自伤道具。
+       现在：烟里的怪丢失目标 —— 这才是"遮蔽视线"该有的效果。 */
+    for (int si = 0; si < MAX_SMOKE; si++) {
+        extern SmokeCloud smokes[MAX_SMOKE];
+        if (!smokes[si].active) continue;
+        if (monster.active && Dist2(monster.x, monster.y, smokes[si].x, smokes[si].y) < 2.6f) {
+            monster.state = 0;
+            monster.pathLen = 0;
+        }
+        if (lightBeast.active && Dist2(lightBeast.x, lightBeast.y, smokes[si].x, smokes[si].y) < 2.6f) {
+            lightBeast.state = 0;
+            lightBeast.pathLen = 0;
+        }
+        /* 2026-11-03：第 2、3 只听声鬼以前**完全不吃烟** ——
+           烟只写了 monster 和 lightBeast，扩到三只之后这里没跟着改。 */
+        for (int hi = 1; hi < MON_HUNTER_MAX; hi++) {
+            extern Monster monHunters[MON_HUNTER_MAX];
+            if (!monHunters[hi].active) continue;
+            if (Dist2(monHunters[hi].x, monHunters[hi].y, smokes[si].x, smokes[si].y) < 2.6f) {
+                monHunters[hi].state = 0;
+                monHunters[hi].pathLen = 0;
+            }
+        }
+    }
+}
+
 void Update(float dt) {
     TickFrameBegin();   /* 第 4 轮：每帧复位 tick 顺序守卫 */
     { extern float playerMoveSpeedNow; playerMoveSpeedNow = 0.0f; }   /* v8: 守门人判断「在动/冲刺」用 */
@@ -5379,28 +5433,7 @@ void Update(float dt) {
     TickMark(TICK_THROWING);
     UpdateShots(dt);
     /* v1.17 训练场：无限道具、不掉理智、标本固定不动 */
-    if (trainingMode) {
-        /* v3.3：投掷物重做后训练场要给全六种，方便逐个试手感。
-           对应槽位：光球 / 投石 / 烟雾 / 胶水 / 回声 / 诱饵 */
-        flares = 99;
-        bottles = 99;      /* 投石 */
-        smokeBombs = 99;
-        gluePots = 99;
-        echoBolts = 99;
-        decoys = 99;
-        /* 已删的三种清零，免得老存档带进来 */
-        bricks = 0; acids = 0; firePots = 0; mirrors = 0;
-        sanity = 100.0f;
-        /* 教程里手电电量会正常消耗，这样「按住 R 摇电」才有可见效果；
-           只做上限夹取，不再每帧强行充满。 */
-        if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
-        stamina = StaminaMax();
-        monster.active = 1;
-        monster.state = 2;              /* 原地不动，当标本 */
-        monster.stun = 0.0f;
-        if (trainingDpsTimer > 0.0f) trainingDpsTimer -= dt;
-        else trainingDps = 0;
-    }
+    if (trainingMode) UpdateTrainingPad(dt);   /* 第 4 轮：抽成函数 */
 
     TickMark(TICK_SMOKES);
     UpdateSmokes(dt);
@@ -5409,30 +5442,7 @@ void Update(float dt) {
     /* v2.1：0.10 等于把画面关掉。要的是「看不清」不是「看不见」。 */
     smokeDim = PlayerInSmoke() ? 0.45f : 1.0f;
 
-    /* v2.2：烟幕原来**只压暗玩家自己**（怪完全不看烟），等于自伤道具。
-       现在：烟里的怪丢失目标 —— 这才是"遮蔽视线"该有的效果。 */
-    for (int si = 0; si < MAX_SMOKE; si++) {
-        extern SmokeCloud smokes[MAX_SMOKE];
-        if (!smokes[si].active) continue;
-        if (monster.active && Dist2(monster.x, monster.y, smokes[si].x, smokes[si].y) < 2.6f) {
-            monster.state = 0;
-            monster.pathLen = 0;
-        }
-        if (lightBeast.active && Dist2(lightBeast.x, lightBeast.y, smokes[si].x, smokes[si].y) < 2.6f) {
-            lightBeast.state = 0;
-            lightBeast.pathLen = 0;
-        }
-        /* 2026-11-03：第 2、3 只听声鬼以前**完全不吃烟** ——
-           烟只写了 monster 和 lightBeast，扩到三只之后这里没跟着改。 */
-        for (int hi = 1; hi < MON_HUNTER_MAX; hi++) {
-            extern Monster monHunters[MON_HUNTER_MAX];
-            if (!monHunters[hi].active) continue;
-            if (Dist2(monHunters[hi].x, monHunters[hi].y, smokes[si].x, smokes[si].y) < 2.6f) {
-                monHunters[hi].state = 0;
-                monHunters[hi].pathLen = 0;
-            }
-        }
-    }
+    UpdateSmokeBlindness();   /* 第 4 轮：抽成函数，位置不变 */
 
     EnsureThrowSelectedValid();   /* v1.14：手里不能是空的 */
     if (lastHitTimer > 0.0f) lastHitTimer -= dt;   /* v1.15：命中数字淡出 */
