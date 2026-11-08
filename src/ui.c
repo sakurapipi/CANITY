@@ -2652,6 +2652,33 @@ void DrawHUD(void) {
     }
 
 
+    /* ==================================================================
+     * 2026-11-08（第 4 轮）：**躲在柜子里时的反馈**
+     * ------------------------------------------------------------------
+     * 玩家原话：「要怎么躲」。躲进去之后如果什么都没有，玩家无法判断
+     * 是躲对了还是游戏卡了 —— 所以给两句话：
+     *   附近有东西（<8 格）→ 「它在外面找你」
+     *   确实安静（>12 格） → 「外面安静了」
+     * 中间模糊区不显示，免得误导。
+     * ================================================================ */
+    if (hiddenIn >= 0) {
+        extern float TelegraphNearestDist(void);
+        float nd = TelegraphNearestDist();
+        const char* hs = 0;
+        unsigned int hc = 0x0080C8FFu;
+        if (nd < 8.0f) {
+            hs = (g_lang == LANG_ZH) ? "它在外面找你" : "IT IS LOOKING FOR YOU";
+            hc = 0x00FF8050u;
+        } else if (nd > 12.0f) {
+            hs = (g_lang == LANG_ZH) ? "外面安静了" : "IT IS QUIET OUT THERE";
+            hc = 0x0080FFA0u;
+        }
+        if (hs) {
+            int tw5 = TextWidthWin(hs);
+            DrawTextWin((winW - tw5) / 2, winH - UIS(112), hs, hc);
+        }
+    }
+
     DrawHudThemeRoom();   /* 第 3 轮：主题房间字幕抽成函数 */
         }
     }

@@ -773,6 +773,63 @@ static void test_telegraph_stays_quiet_when_you_can_see_it(void) {
     TelegraphReset();
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 4 轮）：被发现预警
+ * ------------------------------------------------------------------
+ * 玩家原话：「要怎么躲」「我每次都硬吃」。
+ * 只有守门人有锁定预警，别的怪从"没发现"到"开追"是瞬间的。
+ * ================================================================ */
+
+#include "detect_alert.h"
+
+static void test_detect_alert_fires_on_state_change(void) {
+    int i;
+    for (i = 0; i < MON_HUNTER_MAX; i++) { monHunters[i].active = 0; monHunters[i].state = 0; }
+    for (i = 0; i < LIGHTBEAST_MAX; i++) { lightBeasts[i].active = 0; lightBeasts[i].state = 0; }
+    parasite.active = 0; parasite.state = 0;
+
+    DetectAlertReset();
+    (void)DetectAlertTick(0.016f);          /* 建立基线 */
+
+    CHECK(DetectAlertTick(0.016f) == 0,
+          "no state change means no alert");
+
+    /* 一只怪从"不知道"变成"在追" → 这一帧必须报出来 */
+    monHunters[0].active = 1;
+    monHunters[0].x = posX + 4.0f;
+    monHunters[0].y = posY;
+    monHunters[0].state = 2;
+    CHECK(DetectAlertTick(0.016f) == 1,
+          "a monster switching to chase must raise exactly one alert");
+    CHECK(DetectAlertAge() < 0.05f, "the alert must reset the 'time since seen' clock");
+
+    /* 持续在追不算新的发现 */
+    CHECK(DetectAlertTick(0.016f) == 0,
+          "staying in chase must not re-announce every frame");
+
+    monHunters[0].active = 0;
+    monHunters[0].state = 0;
+    DetectAlertReset();
+}
+
+static void test_tutorial_teaches_hiding(void) {
+    extern const char* TutorialHint(void);
+    extern int tutorialStep;
+    int savedStep = tutorialStep;
+    const char* hint;
+    int i, found = 0;
+
+    /* 遍历所有教程步，必须存在一步在教"躲" */
+    for (i = 0; i < 32; i++) {
+        tutorialStep = i;
+        hint = TutorialHint();
+        if (hint && (strstr(hint, "HIDE") || strstr(hint, "BREAK SIGHT"))) found = 1;
+    }
+    CHECK(found, "the tutorial must teach hiding - players said they never learned how to dodge");
+    tutorialStep = savedStep;
+}
+
 void TestSuite_actors(void) {
     test_jumper_removed_spider_takes_over();
     test_spider_spawn_curve();
@@ -794,4 +851,6 @@ void TestSuite_actors(void) {
     test_telegraph_is_silent_without_threats();
     test_telegraph_bands_by_distance();
     test_telegraph_stays_quiet_when_you_can_see_it();
+    test_detect_alert_fires_on_state_change();
+    test_tutorial_teaches_hiding();
 }

@@ -20,6 +20,7 @@
 #include "collapse.h"
 #include "core_rng.h"
 #include "difficulty.h"
+#include "detect_alert.h"
 #include "core_tick.h"   /* 第 4 轮：每帧 tick 顺序守卫 */
 #include "control_effect.h"
 #include "spider.h"
@@ -178,6 +179,7 @@ enum {
     TUT_CRANK,
     TUT_THROW,
     TUT_KNOCK,
+    TUT_HIDE,       /* 第 4 轮：被追的时候该往哪躲 —— 玩家原话「要怎么躲」 */
     TUT_BREAKER,
     TUT_EXIT,
     TUT_DONE
@@ -1477,6 +1479,11 @@ const char* TutorialObjective(void) {
         snprintf(buf, sizeof(buf), "MAKE NOISE  -  %s  /  %s",
                  VkName(g_bindings[ACT_DECOY]), VkName(g_bindings[ACT_THROW]));
         break;
+    case TUT_HIDE:
+        /* 第 4 轮：玩家原话「要怎么躲」——把躲这件事明确教一次 */
+        snprintf(buf, sizeof(buf), "HIDE  -  %s  NEAR A LOCKER",
+                 VkName(g_bindings[ACT_INTERACT]));
+        break;
     case TUT_BREAKER:
         snprintf(buf, sizeof(buf), "BREAKER  -  HOLD %s", VkName(g_bindings[ACT_INTERACT]));
         break;
@@ -1500,6 +1507,7 @@ const char* TutorialHint(void) {
     case TUT_CRANK:  return "HOLD CRANK UNTIL THE BATTERY RISES.";
     case TUT_THROW:  return "HOLD THROW, AIM AT THE TARGET, RELEASE.";
     case TUT_KNOCK:  return "HOLD KNOCK, RELEASE TO MAKE NOISE.";
+    case TUT_HIDE:   return "WHEN ONE CHASES YOU: BREAK SIGHT, THEN HIDE.";
     case TUT_BREAKER:return "TAKE THE FUSE TO THE BREAKER.";
     case TUT_EXIT:   return "THE EXIT IS AT THE END OF THE HALL.";
     case TUT_DONE:
@@ -1633,6 +1641,10 @@ static void TutorialUpdate(float dt) {
            并且**投掷也算制造噪音** —— 训练场不一定授予 G 键需要的
            DECOY 天赋，不给兜底就会死锁（P1-4）。 */
         if (tutorialKnocked || tutorialThrown) TutorialAdvance();
+        break;
+    case TUT_HIDE:
+        /* 真的躲进柜子才算过 —— 光看提示不算 */
+        if (hiddenIn >= 0) TutorialAdvance();
         break;
     case TUT_BREAKER:
         if (breakerOpen) TutorialAdvance();
@@ -5497,6 +5509,21 @@ void Update(float dt) {
      * 纯表现层：只读怪的位置，不改任何 AI 状态。
      * ================================================================ */
     { extern int TelegraphTick(float); (void)TelegraphTick(dt); }
+    /* 第 4 轮：**被发现预警** —— 只有守门人有锁定预警，别的怪从
+       "没发现"到"开追"是瞬间的，玩家只能硬吃。这里把那一瞬间变成可读的。 */
+    { extern int DetectAlertTick(float); (void)DetectAlertTick(dt); }
+    /* 第 4 轮：第一次被追时，教一次"怎么躲"。
+       只在第一次（本局）弹，之后不再打扰。 */
+    if (DetectAlertAge() < 0.05f) {
+        static int oncePerRun = 0;
+        if (!oncePerRun && !tutorialGuideOn && hiddenIn < 0 && !trainingMode) {
+            oncePerRun = 1;
+            pickupMsg = (g_lang == LANG_ZH)
+                ? "被追时：断视线 → 关手电 → 躲进柜子"
+                : "WHEN CHASED: BREAK SIGHT > KILL THE LIGHT > HIDE";
+            pickupMsgTimer = 3.4f;
+        }
+    }
     /* ==================================================================
      * 2026-11-06 审计补：**控制效果的唯一输入点**
      * ------------------------------------------------------------------
