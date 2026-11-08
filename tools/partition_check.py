@@ -25,6 +25,9 @@ SYS = {
     'windows.h', 'mmsystem.h', 'math.h', 'stdio.h', 'stdlib.h',
     'string.h', 'time.h', 'stdint.h', 'stddef.h', 'stdint.h',
     'stdarg.h', 'limits.h', 'float.h', 'assert.h', 'ctype.h',
+    # 2026-11-08（架构审计 P1-1）：这 4 个以前不在表里 → 违规被漏判。
+    # 实测 steam_zone.c 自己 include 了 <stdbool.h>，检查器却报 OK。
+    'stdbool.h', 'errno.h', 'wchar.h', 'locale.h',
 }
 
 # 允许直接碰系统头的位置：**只有 common.h 一个**（2026-11-06 恢复严格）。

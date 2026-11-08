@@ -23,6 +23,7 @@
 退出码：0 = 没有超阈值重叠；1 = 有。
 """
 import os
+import re
 import sys
 
 THRESHOLD = 0.25
@@ -34,13 +35,18 @@ SKIP_TAGS = ('[bg]', '[panel]', '[row]', '[box]', '[fill]')
 def find_dump(argv):
     if len(argv) > 1 and os.path.isfile(argv[1]):
         return argv[1]
+    # 游戏写的是 `ui_layout.txt`（ui.c DumpUILayout("ui_layout.txt")）。
+    # 早期版本只找 `canity_ui_layout.txt`，于是不带参数跑永远 exit 2。
+    NAMES = ('ui_layout.txt', 'canity_ui_layout.txt')
     cands = []
     here = os.getcwd()
-    cands.append(os.path.join(here, 'canity_ui_layout.txt'))
-    cands.append(os.path.join(here, 'work', 'codex-build', 'canity_ui_layout.txt'))
+    for n in NAMES:
+        cands.append(os.path.join(here, n))
+        cands.append(os.path.join(here, 'work', 'codex-build', n))
     tmp = os.environ.get('TEMP') or os.environ.get('TMP')
     if tmp:
-        cands.append(os.path.join(tmp, 'canity_ui_layout.txt'))
+        for n in NAMES:
+            cands.append(os.path.join(tmp, n))
     for p in cands:
         if os.path.isfile(p):
             return p
@@ -98,6 +104,25 @@ def main():
         print('矩形太少，这一帧大概是空的（没画文字）—— 换一个界面再按 F9。')
         return 2
 
+    # ---- 越界检测（2026-11-08 加）----
+    # 实机 dump 里技能树提示行是 x=-72..872，画布只有 800 —— 旧版完全不报。
+    canvas_w = canvas_h = 0
+    mm = re.search(r'canvas=(\d+)x(\d+)', meta or '')
+    if mm:
+        canvas_w, canvas_h = int(mm.group(1)), int(mm.group(2))
+    bad = []
+    if canvas_w and canvas_h:
+        for r0, r1, r2, r3, label in rects:
+            if r0 < 0 or r1 < 0 or r2 > canvas_w or r3 > canvas_h:
+                bad.append((r0, r1, r2, r3, label))
+        if bad:
+            print('✗ 越界 %d 条（画布 %dx%d）：' % (len(bad), canvas_w, canvas_h))
+            for r in bad[:10]:
+                print('    "%s"  x=%d..%d  y=%d..%d'
+                      % (r[4] or '?', r[0], r[2], r[1], r[3]))
+        else:
+            print('✓ 没有越界')
+
     hits = []
     for i in range(len(rects)):
         if any(t in rects[i][4] for t in SKIP_TAGS):
@@ -111,7 +136,7 @@ def main():
 
     if not hits:
         print('✓ 没有超阈值的文字重叠（阈值 %.0f%%）' % (THRESHOLD * 100))
-        return 0
+        return 1 if bad else 0
 
     hits.sort(key=lambda t: -t[0])
     print('✗ 发现 %d 处文字重叠：' % len(hits))

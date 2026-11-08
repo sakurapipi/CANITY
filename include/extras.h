@@ -32,7 +32,7 @@ void ExtrasSpawnOne(int idx);
 void UpdateExtras(float dt);
 
 /* v2.2：对指定位置附近的游荡怪造成伤害，返回打中的只数 */
-int  DamageExtrasAt(float x, float y, float radius, int dmg);
+/* 2026-11-08（架构审计 P1-3）：DamageExtrasAt 无定义，已删。 */
 
 /* 供渲染使用 */
 int  ExtrasCount(void);

@@ -45,7 +45,8 @@ int SkillNodeIdAt(int col, int row);         /* 越界返回 -1 */
 /* v6 网状：边查询（UI 画连线用） */
 int SkillEdgeCount(int id);
 int SkillEdgeNeighbor(int id, int i);
-int SkillIsCrossNode(int id);
+/* 2026-11-08（审计 P1-3）：SkillIsCrossNode 无定义，已删。
+ * 跨支节点由 isKeystone + SkillEdgeCount 表达。 */
 /* v6 辐射布局：按方向找最近的节点（0上 1下 2左 3右） */
 int SkillNavNearest(int from, int dir);
 /* v6：节点里显示用的短名（详情条仍用全名） */

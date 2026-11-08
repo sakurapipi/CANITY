@@ -124,9 +124,33 @@ static void test_hud_draws_without_crashing(void) {
     int i, nonBlack = 0;
 
     currentState = STATE_PLAYING;
+    /* 2026-11-08（实机反馈）：注入一条**长播报** + 打开 Full 档，
+       这样 BOOST 行真的存在、播报也真的长 —— 才能验"压字"。
+       原来这条用例的播报是空的，所以永远看不出问题。 */
+    {
+        extern const char* pickupMsg;
+        extern float pickupMsgTimer;
+        extern int hudDetail;
+        extern int exitChoiceOpen, settingsPopupOpen;
+        pickupMsg = "THREAT: SOUND HUNTER - blind, walks to the last sound it heard";
+        pickupMsgTimer = 5.0f;
+        hudDetail = 2;
+        /* DrawPickupToast 有两个早退守卫：模态面板打开就不画。
+           前面的用例可能把它们留成 1 —— 不清理就永远画不出来。 */
+        exitChoiceOpen = 0;
+        settingsPopupOpen = 0;
+    }
     if (pixels && renderW > 0 && renderH > 0) {
+        /* 每帧开头清矩形表 —— RenderFrame 里本来会调，测试没走那条路径。
+           不清的话 dump 会把上一帧的菜单和这一帧的 HUD 混在一起，
+           布局工具就会报"Hub 压在播报行上"这种假重叠。 */
+        { extern void UiLayoutBegin(void); UiLayoutBegin(); }
         for (i = 0; i < renderW * renderH; i++) pixels[i] = 0;
         DrawHUD();
+        /* v2.4.53 起播报是**独立函数**（DrawPickupToast），不归 DrawHUD 管。
+           只画 DrawHUD 的话，这条永远进不了截图和布局 dump ——
+           实机报告说"dump 里没有播报行"，一半原因就在这里。 */
+        { extern void DrawPickupToast(void); DrawPickupToast(); }
         for (i = 0; i < renderW * renderH; i++) {
             if (pixels[i] != 0) { nonBlack++; }
         }
@@ -139,6 +163,8 @@ static void test_hud_draws_without_crashing(void) {
             char path[512];
             snprintf(path, sizeof(path), "%s/shot_hud.ppm", dir);
             write_ppm(path, renderW, renderH, pixels);
+            /* 同时把这一帧的文字矩形落盘 —— tools/ui_layout_check.py 直接查压字 */
+            { extern void DumpUILayout(const char*); DumpUILayout("ui_layout.txt"); }
         }
     }
     currentState = savedState;

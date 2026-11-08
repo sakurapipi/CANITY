@@ -1303,7 +1303,9 @@ void DrawSkillTree(void) {
        原来 gBot 正好等于详情首行 y，第 3 行的节点会压上去。
        再让出「一个节点高 + 半行」，保证压不到。 */
     /* ---------- 顶部固定栏 ---------- */
-    DrawTitleWin("SKILL TREE", L.titleY, 0x00D23C3Cu);
+    /* 2026-11-08（实机反馈）：标题原来画在节点**之前**，
+       节点压上去把 "SKILL TREE" 盖成 "SK*LL T**EE"。
+       这里只留一个占位的绘制标记，真正的标题挪到节点循环之后。 */
     {
         int owned = 0;
         for (int k = 0; k < SKILL_LIST_COUNT; k++)
@@ -1509,9 +1511,24 @@ void DrawSkillTree(void) {
             DrawTextWin(innerL, dy + TH * 2, st, sc);
         }
     }
+    /* 2026-11-08：标题放到最上层 —— chrome 永远在内容之上 */
+    DrawTitleWin("SKILL TREE", L.titleY, 0x00D23C3Cu);
+
     DrawTextCenterWin((L.panel.left + L.panel.right) / 2, L.panel.bottom - TH,
-                      Tr("R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY",
-                         "滚轮缩放   拖拽平移   HOME 复位   回车购买"),
+                      /* ================================================
+                       * 2026-11-08（实机反馈）：**这行越界 72px**
+                       * ------------------------------------------------
+                       * 实测 dump：`R x2 RESET / WHEEL ZOOM ...` 是 x=-72..872，
+                       * 画布只有 800 —— 左右各被裁掉一截。
+                       * 这里按可用宽度自动降级到短版本（信息没删，只是缩写）。
+                       * ================================================ */
+                      (TextWidthWin(Tr("R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY",
+                                       "滚轮缩放   拖拽平移   HOME 复位   回车购买"))
+                       > (L.panel.right - L.panel.left) - UIS(16))
+                      ? Tr("R RESET - WHEEL ZOOM - ENTER BUY",
+                           "R 复位 - 滚轮缩放 - 回车购买")
+                      : Tr("R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY",
+                           "滚轮缩放   拖拽平移   HOME 复位   回车购买"),
                       0x00707070u);
 
     /* 2026-11-06：左侧 + / - 缩放按钮 */
@@ -1874,7 +1891,9 @@ void DrawHUD(void) {
        用暗橙色区分于绿色的 LEVEL。
        详细说明（"THE THING MOVES FASTER"）仍然只在进关 5 秒的横幅里出现，
        常驻的是「提醒」，横幅是「解释」。 */
-    if (levelMod >= 0 && levelMod < MOD_COUNT) {
+    /* 2026-11-08：**hudDetail 三档真正生效**。
+       词条改变规则（怪更快 / 理智掉更快），Normal 起显示。 */
+    if (hudDetail >= 1 && levelMod >= 0 && levelMod < MOD_COUNT) {
         int lx = goldRowEnd;
         sprintf(buf, "%s", modNames[levelMod]);
         DrawTextWin(lx, UIS(18), buf, 0x00C08040u);
@@ -1884,7 +1903,7 @@ void DrawHUD(void) {
        原来画在 y=UIS(36)，而文字高度在小窗口下就有 30 多逻辑像素，
        结果和 LEVEL / SANITY 叠在一起（截图里就是这样）。
        现在并到首行右侧，跟词条同一行，永远不会撞。 */
-    if (levelEvent >= 0 && levelEvent < EVENT_COUNT) {
+    if (hudDetail >= 2 && levelEvent >= 0 && levelEvent < EVENT_COUNT) {
         int ex = goldRowEnd;
         if (levelMod >= 0 && levelMod < MOD_COUNT) {
             char mb[32];
@@ -2041,9 +2060,13 @@ void DrawHUD(void) {
     DrawTextWin(UIS(20), hudY1, buf, (sanity < 30.0f) ? 0x00FF3C3Cu : 0x0000FFFFu);
     int hudY2 = hudY1 + hudTH + UIS(4);
 
-    if (breakerOpen) sprintf(buf, "POWER ON");
-    else sprintf(buf, "FUSES %d/%d", fusesHeld, fusesNeeded);
-    DrawTextWin(UIS(20), hudY2, buf, breakerOpen ? 0x0030FF60u : 0x00E8C040u);
+    /* 2026-11-08：Minimal 档只留 4 项（LEVEL/GOLD/SANITY/THREAT）。
+       保险丝进度从 Normal 起显示。 */
+    if (hudDetail >= 1) {
+        if (breakerOpen) sprintf(buf, "POWER ON");
+        else sprintf(buf, "FUSES %d/%d", fusesHeld, fusesNeeded);
+        DrawTextWin(UIS(20), hudY2, buf, breakerOpen ? 0x0030FF60u : 0x00E8C040u);
+    }
 
     /* ===== v3.4 左上角新增两行（用户要求）=====
        ① 带入金币 —— 这局手上还有多少可花
@@ -2101,8 +2124,14 @@ void DrawHUD(void) {
                 DrawTextWin(UIS(20), hudY3 + hudTH * 2 + UIS(10), sb2, 0x00FFD040u);
             }
         }
-        /* v7：CARRY 后面跟当前强度档位 —— 玩家必须看得见「我跨档了」 */
-        {
+        /* ==================================================================
+         * 2026-11-08：**CARRY / TIER / BOOST 只在 Full 档显示**
+         * ------------------------------------------------------------------
+         * 这三项对新手没有任何决策价值：「CARRY 0  TIER 0  BOOST +0%」
+         * 是纯噪音，而它们正好占了左上角两行。
+         * 老玩家想要就开 Full —— 信息没删，只是默认不糊在脸上。
+         * ================================================================ */
+        if (hudDetail >= 2) {
             int tier = GoldTier();
             sprintf(buf, Tr("CARRY  %d   TIER %d", "带入  %d   强度档 %d"), carryGold, tier);
             /* 档位越高颜色越烫：0~4 灰 / 5~9 黄 / 10~15 红 */
@@ -2111,14 +2140,16 @@ void DrawHUD(void) {
             DrawTextWin(UIS(20), hudY3, buf, tc);
         }
 
-        int boost = 0;
-        if (bankHistMax > 0)
-            boost = (int)((float)carryGold * 100.0f / (float)bankHistMax + 0.5f);
-        if (boost > 100) boost = 100;
-        sprintf(buf, Tr("BOOST  +%d%%", "强度  +%d%%"), boost);
-        DrawTextWin(UIS(20), hudY3 + hudTH + UIS(4), buf,
-                    boost >= 100 ? 0x0060FF90u
-                                 : (boost >= 50 ? 0x00FFD040u : 0x00909090u));
+        if (hudDetail >= 2) {
+            int boost = 0;
+            if (bankHistMax > 0)
+                boost = (int)((float)carryGold * 100.0f / (float)bankHistMax + 0.5f);
+            if (boost > 100) boost = 100;
+            sprintf(buf, Tr("BOOST  +%d%%", "强度  +%d%%"), boost);
+            DrawTextWin(UIS(20), hudY3 + hudTH + UIS(4), buf,
+                        boost >= 100 ? 0x0060FF90u
+                                     : (boost >= 50 ? 0x00FFD040u : 0x00909090u));
+        }   /* end hudDetail >= 2 */
     }
 
     /* ===== v2.4.56 **扳手状态**（用户要求补 UI）=====
@@ -3257,11 +3288,32 @@ void DrawPickupToast(void) {
         DrawTextSmallWin(tx, ty, pickupMsg, 0x00F0E870u);
         return;
     } else {
-        ty = UIS(150);
-        if (ty < TextHeightWin() * 5) ty = TextHeightWin() * 5;
+        /* ================================================================
+         * 2026-11-08（实机反馈）：**播报行压住 BOOST**
+         * ----------------------------------------------------------------
+         * 原来写死 ty = UIS(150)，而左上角第 5 行（BOOST）在 130..154 ——
+         * 实测截图里 `THREAT: SOUND HUNTER…` 正好盖在 `BOOST +50%` 上。
+         *
+         * 现在按"最满 6 行"算出 HUD 区块下沿，再往下让 10px。
+         * 同时：太长就降级成小号字（原来是直接画出去被窗口裁掉）。
+         * ================================================================ */
+        int hudBottom = UIS(18) + 6 * (TextHeightWin() + UIS(4));
+        ty = hudBottom + UIS(10);
+        if (ty < TextHeightWin() * 6) ty = TextHeightWin() * 6;
     }
 
-    DrawTextWin(tx, ty, pickupMsg, 0x00E8E060u);
+    /* 2026-11-08：判据必须对**渲染缓冲**（renderW），不是窗口宽 ——
+       文字是按窗口尺度排的，画进缓冲就溢出。实测 1280 窗口 / 800 缓冲下，
+       `tw=992` 对 winW 判"不长"，但画出来右边被切掉一截。 */
+    if (tw > renderW - 40) {
+        /* 太长：小号字重算宽度并居中，绝不画到窗口外 */
+        int sw3 = DrawTextSmallWidth(pickupMsg);
+        int tx3 = (winW - sw3) / 2;
+        if (tx3 < UIS(8)) tx3 = UIS(8);
+        DrawTextSmallWin(tx3, ty, pickupMsg, 0x00F0E870u);
+    } else {
+        DrawTextWin(tx, ty, pickupMsg, 0x00E8E060u);
+    }
 }
 
 

@@ -70,7 +70,8 @@ void SpawnLightBeast(void);
 void SpawnLightBeast2(void);   /* 第二只（2026-11-06） */
 void UpdateLightBeast(float dt);
 void UpdateLightBeast2(float dt);   /* 第二只（2026-11-06） */
-void SpawnParasite(void);
+/* 2026-11-08（架构审计 P1-3）：SpawnParasite 声明了但全工程无定义 ——
+ * 跳脸怪功能删除后留下的空壳。已删（声明本身会误导调用方）。 */
 
 /* ==================================================================
  * 2026-11-06（v2.4-beta B04）：**以记忆点为锚的定向搜查**
@@ -80,7 +81,7 @@ void SpawnParasite(void);
  * 环上都不通时退回 MonsterWanderFor。
  * ================================================================== */
 void MonsterSearchAround(Monster* m, float cx, float cy);
-void UpdateParasite(float dt);
+/* 2026-11-08：UpdateParasite 同上，无定义。control_effect 才是控制层的推进入口。 */
 
 /* ---- 感知 / 受击 ---- */
 int HasLOS(float x0, float y0, float x1, float y1);

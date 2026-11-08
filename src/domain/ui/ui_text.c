@@ -223,6 +223,14 @@ void DrawTextWin(int xWin, int yWin, const char* t, unsigned int color) {
    这条通道给「角落的次要提示」用 —— 不抢画面、不压住功能 UI。 */
 void DrawTextSmallWin(int xWin, int yWin, const char* t, unsigned int color) {
     t = Transl(t);
+    /* ================================================================
+     * 2026-11-08（实机反馈）：**小号字没有走 UiTrack**
+     * ----------------------------------------------------------------
+     * F9 的布局 dump 里从来没有播报行、躲藏提示这些"小字" ——
+     * 因为只有 DrawTextWin 埋了 UiTrack，DrawTextSmallWin 没有。
+     * 工具因此永远查不出它们压字。
+     * ================================================================ */
+    UiTrack(xWin, yWin, TextBaseWidth(t) + 2, FONT_H + 2, t);
     DrawUiTextRaw(xWin * renderW / winW, yWin * renderH / winH, t, color, 1);
 }
 

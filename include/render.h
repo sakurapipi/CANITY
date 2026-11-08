@@ -82,7 +82,7 @@ void ShutdownWorkers(void);
 void Render3D(void);
 void RenderSprites(void);
 void RenderMap(void);
-void DrawParasiteSprite(void);
+/* 2026-11-08（审计 P1-3）：DrawParasiteSprite 无定义（跳脸怪已删），已删。 */
 
 /* 基准测试用：单独跑某个渲染阶段（1=地板 2=墙体 3=后处理） */
 void RunPhase(int phase);

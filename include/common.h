@@ -54,6 +54,7 @@
  * ================================================================ */
 /* stdint.h 必须在垫片之前 —— 垫片里的 WPARAM/LPARAM 要用 uint64_t/int64_t */
 #include <stdint.h>
+#include <stdbool.h>   /* 2026-11-08：系统头统一从 common.h 出 */
 
 #ifdef CANITY_WEB
 #include <emscripten.h>

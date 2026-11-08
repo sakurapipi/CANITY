@@ -830,6 +830,56 @@ static void test_tutorial_teaches_hiding(void) {
     tutorialStep = savedStep;
 }
 
+
+/* ==================================================================
+ * 2026-11-08：**清道夫冷却不再被"本层计时"永久上锁**
+ * ------------------------------------------------------------------
+ * 旧代码 timeUp = (floorTime >= 180)。floorTime 只增不减，
+ * 第 180 秒之后永远为真 → 冷却一走完就立刻再来（每 60 秒一次）。
+ * 玩家原话：「两个 CD 感觉是独立的，导致清道夫 CD 特别快」。
+ * ================================================================ */
+
+extern void  ScavengerForceLeaveTest(void);
+extern float ScavengerQuietTTest(void);
+extern int   ScavengerActive(void);
+
+static void reset_scavenger_world(void) {
+    extern void ScavengerReset(void);
+    ScavengerReset();
+    ScavengerReset();          /* 两次：第二次确保 quietT 归零后不被历史污染 */
+}
+
+static void test_scavenger_quiet_timer_gates_the_trigger(void) {
+    extern void ScavengerTickTrigger(float);
+    extern int  ScavengerActive(void);
+
+    reset_scavenger_world();
+    CHECK(!ScavengerActive(), "scavenger must start inactive");
+
+    /* 安静 179 秒：不该来 */
+    ScavengerTickTrigger(179.0f);
+    CHECK(!ScavengerActive(), "179 quiet seconds is not enough");
+
+    /* 再 2 秒（共 181）：应该来 */
+    ScavengerTickTrigger(2.0f);
+    CHECK(ScavengerActive(), "181 quiet seconds must summon the scavenger");
+
+    /* 让它走人 → 进 35 秒冷却，quietT 归零 */
+    ScavengerForceLeaveTest();
+    CHECK(!ScavengerActive(), "it must leave");
+
+    /* 冷却走完 + 只安静 36 秒：**不许再来**（这就是修之前的行为） */
+    ScavengerTickTrigger(36.0f);
+    CHECK(!ScavengerActive(),
+          "after one visit the 180s clock must restart - it must NOT re-trigger on cooldown alone");
+
+    /* 继续安静到满 → 才允许再来 */
+    ScavengerTickTrigger(150.0f);
+    CHECK(ScavengerActive(), "a full new 180 quiet seconds must summon it again");
+
+    ScavengerForceLeaveTest();
+}
+
 void TestSuite_actors(void) {
     test_jumper_removed_spider_takes_over();
     test_spider_spawn_curve();
@@ -853,4 +903,5 @@ void TestSuite_actors(void) {
     test_telegraph_stays_quiet_when_you_can_see_it();
     test_detect_alert_fires_on_state_change();
     test_tutorial_teaches_hiding();
+    test_scavenger_quiet_timer_gates_the_trigger();
 }

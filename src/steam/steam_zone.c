@@ -21,7 +21,6 @@
 #include "steam_ach.h"
 #include "common.h"
 #include "achievements.h"
-#include <stdbool.h>
 
 /* ---------------- 状态 ---------------- */
 static int          s_ready = 0;          /* 1 = 完全可用 */

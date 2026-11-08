@@ -150,6 +150,18 @@ float ScavengerX(void)       { return scavenger.x; }
 float ScavengerY(void)       { return scavenger.y; }
 float ScavengerWarnT(void)   { return scavenger.warnT; }
 
+/* ==================================================================
+ * 2026-11-08（用户实测）：**清道夫的"待机触发"是一次性上锁**
+ * ------------------------------------------------------------------
+ * 旧代码：timeUp = (floorTime >= 180)。floorTime 是本层累计时间，
+ * 第 180 秒之后它永远是 true —— 冷却一走完就立刻再来，
+ * 变成"180 秒后每 60 秒一次，永不停止"。
+ * 玩家原话：「两个 CD 感觉是独立的，导致清道夫 CD 特别快」。
+ *
+ * 现在用"距离上次它离开过了多久"：它不在场时才累加，出现/离开都归零。
+ * ================================================================ */
+static float s_quietT = 0.0f;
+
 void ScavengerReset(void) {
     scavenger.active = 0;
     scavenger.x = scavenger.y = 0.0f;
@@ -162,6 +174,7 @@ void ScavengerReset(void) {
     scavenger.searchT = 0.0f;
     scavenger.stuckT = 0.0f;
     scavCooldown = 0.0f;
+    s_quietT = 0.0f;
 }
 
 /* ===== v2.4.22 **多方向绕障** =====
@@ -352,10 +365,16 @@ static void retargetToPlayer(void) {
 /* 触发检查 —— 每帧调用，内部只做轻量判断 */
 
 void ScavengerTickTrigger(float dt) {
-    extern float floorTime;
+    /* 2026-11-08：floorTime 不再参与触发判定（它只增不减，会永久上锁），
+       改成 s_quietT。这里不再 extern floorTime。 */
     extern int   hideStreak;
     extern int   trainingMode;
     if (trainingMode) return;
+    /* 2026-11-08：安静计时**在冷却期间也走** —— 否则"安静 180 秒"实际是
+       215 秒（35 秒冷却 + 180 秒），和玩家理解的字面意思不符。
+       它不在场时才累加；出场/离开各自归零。 */
+    if (!scavenger.active) s_quietT += dt;
+
     if (scavCooldown > 0.0f) {
         scavCooldown -= dt;
         if (scavCooldown < 0.0f) scavCooldown = 0.0f;
@@ -366,7 +385,9 @@ void ScavengerTickTrigger(float dt) {
     }
     if (scavenger.active) return;
 
-    int timeUp  = (floorTime >= SCAV_TRIGGER_TIME);
+    /* 2026-11-08：**不再用本层累计时间**（那会永久上锁）。
+       现在要求"安静满 180 秒"才由时间触发。 */
+    int timeUp  = (s_quietT >= SCAV_TRIGGER_TIME);
     /* **连续躲 3 次**清道夫才出发。
        （我在这条上反复过两次：2 → 3 → 2 → 3，是我不该擅自改。
          现在定死 3，并写清楚：躲 1 次安全，躲 2 次安全，第 3 次它来。） */
@@ -388,6 +409,7 @@ void ScavengerTickTrigger(float dt) {
     scavenger.lastY = y;
     scavenger.stuckT = 0.0f;
     scavenger.active = 1;
+    s_quietT = 0.0f;          /* 2026-11-08：出场即重置安静计时 */
     retargetToPlayer();
 
     { extern void BestiaryMarkSeen(int); BestiaryMarkSeen(4); }
@@ -404,6 +426,7 @@ static void scavengerLeave(void) {
     scavenger.grabSpot = -1;
     scavenger.searchT = 0.0f;
     scavCooldown = SCAV_COOLDOWN;
+    s_quietT = 0.0f;          /* 2026-11-08：安静计时也一起归零 */
     { extern int hideStreak; hideStreak = 0; }
 }
 
@@ -697,6 +720,11 @@ void UpdateScavenger(float dt) {
  * 而 scavenger 结构体是文件私有的 —— 所以留这两个钩子。
  * 先例：StoneBreakLockAtTest（game.c）。
  * ================================================================== */
+/* 第 2026-11-08：测试用 —— 让它立刻离场（走真实的 scavengerLeave 路径，
+   连带把 scavCooldown 和 s_quietT 都重置） */
+void ScavengerForceLeaveTest(void) { scavengerLeave(); }
+float ScavengerQuietTTest(void) { return s_quietT; }
+
 void ScavengerGrabTest(int spot) {
     scavenger.active = 1;
     scavenger.warnT = SCAV_GRAB_WARN;

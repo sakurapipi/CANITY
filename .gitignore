@@ -76,3 +76,7 @@ dump_*.ppm
 .DS_Store
 Thumbs.db
 *.swp
+
+# 运行时产物（2026-11-08）：游戏自己写的对局记录，别进库
+canity_runs.csv
+canity*.log
