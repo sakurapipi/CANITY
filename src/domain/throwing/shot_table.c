@@ -8,6 +8,7 @@
 /* DT_* 在 common.h 里；这里只要常量值，但不 include common.h 会被
  * 分区契约 S1 允许（common.h 是唯一带系统头的），所以正常 include。 */
 #include "common.h"
+#include "content_db.h"
 
 static const ShotSpec kShotSpecs[] = {
 /* dmgType = -1 表示"这种投掷物不造成伤害"。
@@ -31,6 +32,20 @@ static const ShotSpec kShotSpecs[] = {
 /* 未知 kind 的兜底：碎一下、出声、不伤害 —— 和改动前的 else 分支一致 */
 static const ShotSpec kDefaultSpec =
     { 0, "unknown", FX_SHARDS, 14.0f, 0, 1, DT_SHARD, 0, 0, 0 };
+
+/* ==================================================================
+ * 2026-11-09（第 5 轮）：投掷物登记进内容中枢
+ * ------------------------------------------------------------------
+ * 用表里的名字（字符串常量）当 id；中枢只存指针，要求 id 地址稳定。
+ * ================================================================ */
+void ShotRegister(void) {
+    int i;
+    for (i = 0; i < ShotSpecCount(); i++) {
+        const ShotSpec* sp = ShotSpecAt(i);
+        if (sp && sp->name && sp->name[0])
+            (void)ContentAdd(CK_SHOT, sp->name, sp);
+    }
+}
 
 int ShotSpecCount(void) {
     return (int)(sizeof(kShotSpecs) / sizeof(kShotSpecs[0]));

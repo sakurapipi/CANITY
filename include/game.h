@@ -208,6 +208,9 @@ extern float wrenchHitFlashT;
 extern float wrenchSwingFxT;
 /* 第 7 轮：连续静止秒数（幽灵流派用） */
 extern float ghostStillT;
+
+/* 2026-11-09：设置项登记进内容中枢（幂等） */
+void SettingsRegister(void);
 int ShotBlocked(float x, float y);
 int SpotClear(float x, float y, float minD, int selfKind, int selfIdx);
 

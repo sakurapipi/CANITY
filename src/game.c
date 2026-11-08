@@ -54,6 +54,7 @@
 #include "audio.h"
 #include "save.h"
 #include "skills.h"
+#include "content_db.h"
 #include "bestiary.h"
 #include "score.h"
 
@@ -1037,6 +1038,18 @@ static const char* optDiff[3] = {"EASY", "NORMAL", "HARDCORE"};
 /* QTE 提示详细度：Full = 带英文说明，Minimal = 只留大按键和倒计时条 */
 static const char* optQte[2] = {"Minimal", "Full"};
 static const char* optSlot[SAVE_SLOTS] = {"SLOT 1", "SLOT 2", "SLOT 3"};
+/* ==================================================================
+ * 2026-11-09（第 5 轮）：设置项登记进内容中枢
+ * 用标签字符串当 id（字符串常量，地址稳定 —— 中枢只存指针）。
+ * ================================================================ */
+void SettingsRegister(void) {
+    int i;
+    for (i = 0; i < SETTING_COUNT; i++) {
+        if (settings[i].name && settings[i].name[0])
+            (void)ContentAdd(CK_SETTING, settings[i].name, &settings[i]);
+    }
+}
+
 SettingItem settings[] = {
     /* ========== 分类 1: DISPLAY ========== */
     {"Resolution",      SET_LIST,   optRes,      RES_COUNT, &resIndex,          NULL,      0,    0,    0, 1},

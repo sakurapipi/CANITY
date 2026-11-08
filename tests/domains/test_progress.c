@@ -548,6 +548,7 @@ static void test_three_archetypes_are_wired(void) {
  * ================================================================ */
 
 #include "training_stations.h"
+#include "shot_spec.h"
 
 static void test_training_has_seven_stations(void) {
     int i, prevX = -1, ordered = 1, sameRow = 1;
@@ -769,6 +770,54 @@ static void test_skills_registered_in_hub(void) {
     ContentReset();
 }
 
+
+/* ==================================================================
+ * 2026-11-09（第 5 轮）：**投掷物 / 设置已接入内容中枢**
+ * ------------------------------------------------------------------
+ * 投掷物：表 11 行 → 中枢 11 条
+ * 设置：  表 44 行 → 中枢 44 条
+ *
+ * 设置这块治的是"加了动作忘登记"（今天补 3 个改绑行就是这个病）。
+ * ================================================================ */
+
+extern void ShotRegister(void);
+extern void SettingsRegister(void);
+extern int  ShotSpecCount(void);
+
+static void test_shots_and_settings_in_hub(void) {
+    int i, found = 0;
+    ContentReset();
+
+    /* ---- 投掷物 ---- */
+    ShotRegister();
+    CHECK(ContentCount(CK_SHOT) == ShotSpecCount(),
+          "the hub must hold exactly ShotSpecCount() throwables");
+    for (i = 0; i < ShotSpecCount(); i++) {
+        extern const ShotSpec* ShotSpecAt(int);
+        const ShotSpec* sp = ShotSpecAt(i);
+        if (!sp || !sp->name) continue;
+        if (ContentFind(CK_SHOT, sp->name) >= 0) found++;
+    }
+    CHECK(found == ShotSpecCount(), "every throwable must be findable by name");
+    ShotRegister();
+    CHECK(ContentCount(CK_SHOT) == ShotSpecCount(), "shot registration must be idempotent");
+
+    /* ---- 设置 ---- */
+    ContentReset();
+    SettingsRegister();
+    CHECK(ContentCount(CK_SETTING) == SETTING_COUNT,
+          "the hub must hold exactly SETTING_COUNT settings");
+    {
+        int dup = ContentDuplicateKind();
+        CHECK(dup == -1, "settings must not contain duplicate labels");
+    }
+    SettingsRegister();
+    CHECK(ContentCount(CK_SETTING) == SETTING_COUNT,
+          "settings registration must be idempotent");
+
+    ContentReset();
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -790,4 +839,5 @@ void TestSuite_progress(void) {
     test_content_db_capacity();
     test_bestiary_registered_in_hub();
     test_skills_registered_in_hub();
+    test_shots_and_settings_in_hub();
 }

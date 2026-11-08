@@ -38,6 +38,9 @@ typedef struct {
 const ShotSpec* ShotSpecFor(int kind);
 
 /* 表里有多少行（测试用） */
+/* 2026-11-09：登记进内容中枢（幂等） */
+void ShotRegister(void);
+
 int ShotSpecCount(void);
 
 /* 第 i 行（测试用；越界返回 0） */
