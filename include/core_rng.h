@@ -31,6 +31,20 @@ int rng_range(int lo, int hi);
 /* [0, 1) */
 float rng_float(void);
 
+/* ---- 存档保真：RNG 版本 ----
+ * 老存档的游戏世界是用 C 标准库 rand() 生成的；换算法后重放会变样。
+ * 所以按版本分派：1 = 旧 rand 序列（老档），2 = xorshift（新档）。
+ * 只有"会写进存档的随机"（关卡/房间生成）需要这个开关。
+ */
+void rng_set_version(int version);
+int  rng_version(void);
+
+/* 按当前版本取一个随机数；版本 1 时等价于 rand() */
+unsigned int rng_world_next(void);
+
+/* 按当前版本播种（版本 1 -> srand(seed)，版本 2 -> rng_seed(seed)） */
+void rng_world_seed(unsigned int seed);
+
 /* 老路径：透传给 C 标准库 rand()，只为让"暂时不迁"的调用点显式可见。
  * 不要在**新增**代码里用它。 */
 int rng_legacy_next(void);

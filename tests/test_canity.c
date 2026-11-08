@@ -588,7 +588,12 @@ static void test_save_persist_contract(void) {
         free(throwc);
     }
 
-    check(contains(saveh, "SAVE_VERSION 34"), "save format must be v34");
+    check(contains(saveh, "SAVE_VERSION 35"), "save format must be v35");
+    /* v35（2026-11-08）：随机数引擎版本 —— 老档按旧 rand 序列重放房间 */
+    check(contains(saveh, "int rngVersion;"),
+          "v35 must persist the RNG engine version");
+    check(contains(savec, "rng_set_version(g_save.rngVersion)"),
+          "load must set the RNG engine from the save, not guess");
     check(contains(saveh, "int hatchUsedMask;"), "v33 must carry the hatch-used mask");
     check(contains(saveh, "int echoBolts;"), "v34 must persist echo bolts");
     check(contains(saveh, "int decoys;"), "v34 must persist decoys");

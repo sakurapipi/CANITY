@@ -18,6 +18,7 @@
 #include "game.h"
 #include "phase.h"
 #include "collapse.h"
+#include "core_rng.h"
 #include "core_tick.h"   /* 第 4 轮：每帧 tick 顺序守卫 */
 #include "control_effect.h"
 #include "spider.h"
@@ -2078,9 +2079,14 @@ void GenerateLevel(void) {
         int want = ThemeRoomBudgetForLevel(currentLevel, trainingMode);
         /* v2.4-rc：记下这一阶段的种子。读档后用它重放，
            否则每层重新载入都会丢掉房间的色调、家具和碰撞。 */
-        roomSeedUsed = (int)(rand() & 0x7FFFFFFF);
+        /* 第 6 轮：**新开局一律用版本 2（xorshift32）**。
+           老存档读进来时 SaveLoad 会把版本设回 0/1，所以那里的重放仍走 rand()。
+           这里显式设 2，确保新档的房间布局跨平台一致。 */
+        { extern void rng_set_version(int); rng_set_version(2); }
+        roomSeedUsed = (int)(rng_world_next() & 0x7FFFFFFF);
         if (want > 0) {
-            srand((unsigned)roomSeedUsed);
+            { extern void rng_world_seed(unsigned int);
+              rng_world_seed((unsigned)roomSeedUsed); }
             (void)GenerateThemeRooms(want);
         } else {
             /* ==================================================================

@@ -4,6 +4,7 @@
  * 入口：TestSuite_save()
  */
 #include "../test_common.h"
+#include <stddef.h>
 
 static void test_legacy_fixture_one(const char* file, int oldVer, int wantPayload,
                                     int* ok, int* total) {
@@ -293,7 +294,10 @@ static void test_v33_save_is_accepted(void) {
          * 拿到的还是上一步的 v34 档 —— 用例假失败。
          * SavePathForSlot 是导出的，所以这里可以老老实实全覆盖。
          * ================================================================ */
-        size_t legacyLen = sizeof(SaveBlob) - 4 * sizeof(int);
+        /* v33 档 = 一直写到 echoBolts 之前（v34 才开始有那四个字段）。
+           用 offsetof 表达，以后再加字段也不会算错 —— 原来是
+           sizeof - 4*int，v35 多了一个 int 之后就偏了 4 字节。 */
+        size_t legacyLen = offsetof(SaveBlob, echoBolts);
         int written = 0;
         for (int slot = 0; slot < 3; slot++) {
             for (int cand = 0; cand < 6; cand++) {

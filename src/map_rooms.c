@@ -19,7 +19,21 @@
 #include "cell_meta.h"
 #include "room_template.h"
 #include "map_rooms.h"
+#include "core_rng.h"
 #include "game.h"
+
+/* ==================================================================
+ * 2026-11-08（第 6 轮）：**关卡重放要能跨版本复现**
+ * ------------------------------------------------------------------
+ * 房间生成的全部随机都走这里。老存档（rngVersion=1）走 C 标准库 rand()
+ * 序列 —— 和玩家当年看到的房间逐格一致；新存档（2）走 xorshift32，
+ * 跨平台（Windows / Emscripten）序列相同。
+ * ================================================================ */
+static unsigned int RoomRand(void) {
+    extern unsigned int rng_world_next(void);
+    return rng_world_next();
+}
+
 extern int explored[MAP_HEIGHT][MAP_WIDTH];
 
 #define ROOM_KEEP_EXIT   3      /* 出口周围 3 格不许压 */
@@ -173,7 +187,7 @@ static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
     int innerY = fy + ROOM_BORDER;
     /* 2026-11-06（用户要求）：3~4 件 → 2~3 件。
        家具是**布景**，不是资源；堆太多既挡视线又显得每间房都一样满。 */
-    int want = 2 + (int)(rand() % 2);          /* 每间 2~3 件（含木箱堆） */
+    int want = 2 + (int)(RoomRand() % 2);          /* 每间 2~3 件（含木箱堆） */
     int placed = 0;
 
     /* 2026-11-06：新三种房间的家具搭配。
@@ -570,7 +584,7 @@ static int PickAllowedTemplate(int idMin, int idMax, int level) {
     for (int i = idMin; i <= idMax && i < ROOM_TEMPLATE_COUNT; i++)
         if (i >= 0 && ThemeTemplateAllowed(i, level)) cand[n++] = i;
     if (n <= 0) return -1;
-    return cand[rand() % n];
+    return cand[RoomRand() % n];
 }
 
 static int TryPlace(int placed, int idMin, int idMax) {
@@ -578,7 +592,7 @@ static int TryPlace(int placed, int idMin, int idMax) {
     int id = PickAllowedTemplate(idMin, idMax, currentLevel);
     if (id < 0) return 0;                 /* 本层这一档没有允许的主题 */
     if (id >= 0 && id < ROOM_TEMPLATE_COUNT) RoomTplTried[id]++;
-    int rot = rand() % 4;
+    int rot = RoomRand() % 4;
     RoomTemplate t;
     if (!RoomTemplateRotate(id, rot, &t)) return 0;
     if (t.w <= 0 || t.h <= 0) return 0;
@@ -588,8 +602,8 @@ static int TryPlace(int placed, int idMin, int idMax) {
     int spanY = MAP_HEIGHT - 2 - fh;
     if (spanX < 1 || spanY < 1) return 0;
 
-    int fx = 1 + (int)(rand() % (unsigned)spanX);
-    int fy = 1 + (int)(rand() % (unsigned)spanY);
+    int fx = 1 + (int)(RoomRand() % (unsigned)spanX);
+    int fy = 1 + (int)(RoomRand() % (unsigned)spanY);
 
     /* ==================================================================
      * 2026-11-06：**房间不许压出生区**
@@ -604,7 +618,7 @@ static int TryPlace(int placed, int idMin, int idMax) {
 
     if (!ReservationsOk(fx, fy, fw, fh)) return 0;
 
-    int doorRot = (int)(rand() % 2);
+    int doorRot = (int)(RoomRand() % 2);
     if (!CarveRoomBordered(&t, fx, fy, placed + 1, doorRot)) return 0;
     if (id >= 0 && id < ROOM_TEMPLATE_COUNT) RoomTplPlaced[id]++;
     return 1;
@@ -652,7 +666,7 @@ int GenerateThemeRooms(int wantCount) {
 /* ==================================================================
  * 诊断：把**游戏真正生成的那一层**打成 ASCII 文件。
  * ------------------------------------------------------------------
- * 为什么需要它：tools/map_gen_dump.c 复制了 DFS，但 rand() 的调用序列
+ * 为什么需要它：tools/map_gen_dump.c 复制了 DFS，但 RoomRand() 的调用序列
  * 和真实游戏不一样，生成出来的层也不同。判断"房间里到底有没有东西"
  * 必须看真实的那一张图。
  *
@@ -702,6 +716,8 @@ static void RoomDumpIfRequested(int placed) {
 
 int roomSeedUsed = 0;
 
+
+
 /* ==================================================================
  * 重放：读档后用保存的种子把房间重建出来。
  * ------------------------------------------------------------------
@@ -721,7 +737,8 @@ int RoomReplay(int seed, int wantCount) {
     HatchReset();
     if (wantCount <= 0) { roomSeedUsed = 0; RoomPropReset(); return 0; }
     roomSeedUsed = seed;
-    srand((unsigned)seed);
+    { extern void rng_world_seed(unsigned int);
+      rng_world_seed((unsigned)seed); }
     return GenerateThemeRooms(wantCount);
 }
 

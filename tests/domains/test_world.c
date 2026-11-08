@@ -4,6 +4,7 @@
  * 入口：TestSuite_world()
  */
 #include "../test_common.h"
+#include "cell_meta.h"
 
 static void test_global_balance_invariants(void) {
     extern int BatteryMax(void);
@@ -1090,6 +1091,68 @@ static void test_sound_propagation(void) {
     memcpy(worldMap, saved, sizeof(saved));
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 6 轮）：**随机数引擎版本与房间重放**
+ * ------------------------------------------------------------------
+ * 房间布局 = f(worldMap, roomSeed, RNG 序列)。换算法后，
+ * 老存档重放会得到**另一套**房间 —— 门可能开在别的墙上。
+ * 所以存档里要记 rngVersion，读档时按它选引擎。
+ * 这三条用例盯的就是这个契约。
+ * ================================================================ */
+
+extern void rng_set_version(int v);
+extern int  rng_version(void);
+extern int  RoomReplay(int seed, int wantCount);
+
+/* 同一个种子下，按当前引擎连续取 8 个数，压成一个指纹 */
+static unsigned int rng_probe(unsigned int seed) {
+    extern void rng_world_seed(unsigned int);
+    extern unsigned int rng_world_next(void);
+    extern int rng_version(void);
+    unsigned int h = 2166136261u;
+    int i;
+    if (rng_version() <= 1) srand(seed);
+    rng_world_seed(seed);
+    for (i = 0; i < 8; i++) {
+        h ^= rng_world_next();
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static void test_rng_engines_are_deterministic_and_distinct(void) {
+    unsigned int v1a, v1b, v2a, v2b;
+
+    rng_set_version(1);
+    v1a = rng_probe(4242u);
+    v1b = rng_probe(4242u);
+    CHECK(v1a == v1b, "the legacy engine must replay the same sequence for one seed");
+
+    rng_set_version(2);
+    v2a = rng_probe(4242u);
+    v2b = rng_probe(4242u);
+    CHECK(v2a == v2b, "the xorshift engine must replay the same sequence for one seed");
+
+    /* 两个引擎对同一个种子必须给出不同序列 —— 否则版本开关是假的 */
+    CHECK(v1a != v2a, "the two RNG engines must actually produce different numbers");
+
+    rng_set_version(2);
+}
+
+static void test_new_save_records_rng_version(void) {
+    extern const SaveBlob* SaveTestBlob(void);
+    clear_meta(); StartGame();
+    runInProgress = 1;
+    SaveGame();
+    {
+        const SaveBlob* blob = SaveTestBlob();
+        CHECK(blob != 0, "save blob must exist after SaveGame");
+        CHECK(blob->rngVersion == 2,
+              "a new save must record RNG engine v2 (xorshift), not the legacy rand");
+    }
+}
+
 void TestSuite_world(void) {
     test_global_balance_invariants();
     test_theme_depth_bands();
@@ -1105,6 +1168,8 @@ void TestSuite_world(void) {
     test_room_seed_roundtrip();
     test_room_props();
     test_prop_layers();
+    test_new_save_records_rng_version();
+    test_rng_engines_are_deterministic_and_distinct();
     test_suspicion_best_uses_propagation();
     test_sound_propagation();
 }

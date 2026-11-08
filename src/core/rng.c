@@ -39,6 +39,26 @@ float rng_float(void) {
     return (float)((rng_next() >> 8) & 0xFFFFFFu) / 16777216.0f;
 }
 
+/* ---- 存档保真：版本分派 ---- */
+static int s_version = 2;
+
+void rng_set_version(int version) {
+    s_version = (version >= 2) ? 2 : 1;
+}
+
+int rng_version(void) { return s_version; }
+
+unsigned int rng_world_next(void) {
+    if (s_version <= 1) return (unsigned int)rand();
+    return rng_next();
+}
+
+void rng_world_seed(unsigned int seed) {
+    if (s_version <= 1) { srand(seed); rng_seed(seed); return; }
+    rng_seed(seed);
+    srand(seed);          /* 生成路径里还有未迁移的 rand()，一并播种 */
+}
+
 int rng_legacy_next(void) {
     return rand();
 }

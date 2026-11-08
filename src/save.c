@@ -665,16 +665,19 @@ void SaveGame(void) {
     runSpans[1].off = offsetof(SaveBlob, isEndlessRunSaved);
     runSpans[1].len = sizeof(int);
     runSpans[2].off = offsetof(SaveBlob, roomSeed);
-    runSpans[2].len = (offsetof(SaveBlob, jumperSpawnedRun) + sizeof(int)) - runSpans[2].off;
+    /* 第 6 轮：末尾多了 rngVersion —— 它也是"运行态"（读档重放要用），
+       所以这一段必须把它包进来，否则回主菜单存盘会把它清成 0（旧序列），
+       下一次读档房间就重放成另一套。 */
+    runSpans[2].len = (offsetof(SaveBlob, rngVersion) + sizeof(int)) - runSpans[2].off;
 
     /* 编译期守卫：区段表的假设一旦被结构体改动打破，这里会编译失败。
-       roomSeed..jumperSpawnedRun 目前正好是 7 个 int：
+       roomSeed..rngVersion 目前正好是 8 个 int：
          roomSeed / roomCount / hatchUsedMask / echoBolts / decoys /
          phaseBeacons / jumperSpawnedRun
        以后往这段里插字段，长度对不上就会编译失败，逼人重新核对区段表。 */
     typedef char assert_run_block_size[
-        (((offsetof(SaveBlob, jumperSpawnedRun) + (int)sizeof(int))
-          - offsetof(SaveBlob, roomSeed)) == 7 * (int)sizeof(int)) ? 1 : -1];
+        (((offsetof(SaveBlob, rngVersion) + (int)sizeof(int))
+          - offsetof(SaveBlob, roomSeed)) == 8 * (int)sizeof(int)) ? 1 : -1];
     typedef char assert_run_span0_ends_at_hud[
         (offsetof(SaveBlob, hasRun) < offsetof(SaveBlob, hudDetail)) ? 1 : -1];
     typedef char assert_endless_flag_before_run_block[
@@ -765,6 +768,8 @@ void SaveGame(void) {
     /* v2.4-rc：房间重放种子也进档 */
     { extern int roomSeedUsed; extern int RoomCount(void);
       g_save.roomSeed = roomSeedUsed;
+    /* 第 6 轮：记下本档用的是哪套随机序列 —— 读档时按它重放房间 */
+    { extern int rng_version(void); g_save.rngVersion = rng_version(); }
       g_save.roomCount = RoomCount();
       /* v33：舱门已用状态（位掩码，按**种类**记，不记坐标） */
       { extern int HatchUsedMask(void); g_save.hatchUsedMask = HatchUsedMask(); } }
@@ -1383,6 +1388,19 @@ int LoadSettings(void) {
     if (g_save.version == 33) {
         g_save.version = SAVE_VERSION;
     }
+    /* ==================================================================
+     * 2026-11-08（v35）：**v34 -> v35 只需要放行**
+     * ------------------------------------------------------------------
+     * v35 只在结构体末尾追加了一个 int（rngVersion），布局一点没动：
+     *   读进来的 v34 档比现在短 4 字节，memset 过之后 rngVersion 自然是 0，
+     *   而 0 的语义正好是"旧 rand 序列" —— 房间重放与玩家当年看到的一致。
+     *
+     * 所以这里不改任何字段，只把版本号改掉放行。
+     * 不做这一步，下面那句 != SAVE_VERSION 会把整个 v34 档归档拒掉。
+     * ================================================================ */
+    if (g_save.version == 34) {
+        g_save.version = SAVE_VERSION;
+    }
     if (g_save.version != SAVE_VERSION) {
         char oldp[MAX_PATH], arc[MAX_PATH + 24];   /* v3.0：留 ".v%d.bak" 的位置 */
         SavePathCand(0, oldp, sizeof(oldp));
@@ -1725,6 +1743,10 @@ void ContinueRun(void) {
      * roomSeed == 0（v29 老档）→ 当作"无房间层"，什么都不做。
      * ================================================================== */
     { extern int RoomReplay(int, int);
+      extern void rng_set_version(int);
+      /* 第 6 轮：**先定引擎再重放** —— 老档（0）走 C 标准库 rand 序列，
+         新档（2）走 xorshift32。顺序反了房间就会重放成另一套布局。 */
+      rng_set_version(g_save.rngVersion);
       if (g_save.roomSeed != 0 && g_save.roomCount > 0)
           (void)RoomReplay(g_save.roomSeed, g_save.roomCount);
       else { extern void CellMetaReset(void); CellMetaReset(); }
