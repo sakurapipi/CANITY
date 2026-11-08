@@ -1,7 +1,23 @@
-/* src/domain/throwing/shot_table.c —— 投掷物规格表（纯数据，零依赖）
+/* src/content/content_shots.c —— 投掷物静态数据（2026-11-09，第 5 轮）
  *
- * 数值全部照抄改动前的 throwing.c（2026-11-08 之前的行为），
- * 一行没调 —— 这一轮是"把散在三处的常量收拢"，不是平衡性调整。
+ * ## 这个文件是什么
+ *
+ * `content/` 层的第二块内容：**只放数据，不放逻辑**。
+ *
+ * 它原本住在 src/domain/throwing/shot_table.c —— 一直在领域层，
+ * 但领域层是"纯逻辑"的地方，纯数据表放这里名不正。
+ *
+ * 现在：
+ *   content_shots.c   数据（这张表 + 两个取值器）
+ *   throwing.c        逻辑（蓄力 / 飞行 / 命中判定）
+ *
+ * ## 加一个投掷物要改哪里
+ *
+ *   1. 这里加一行（kind / 名字 / 效果 / 噪音 / 伤害 / 类型 / 稀有度）
+ *   2. common.h 里的槽位常量（如果它占新槽位）
+ *   3. throwing.c 里写它的效果（烟雾/胶水/回声各自不同）—— 无法自动化
+ *
+ * 第 1 步将来由 tools/content_gen.py 自动改。
  */
 #include "shot_spec.h"
 
