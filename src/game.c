@@ -156,6 +156,7 @@ float smokeDim = 1.0f;      /* 烟幕内的光线衰减 */
 int monsterMuted = 0;       /* v1.20b：只静怪物的叫声（训练场） */
 /* ---- v1.17 训练场 ---- */
 int trainingMode = 0;
+int guideMode = 0;   /* 2026-11-08: 引导模式（B 键） */
 int trainingTotal = 0;          /* 累计伤害 */
 int trainingLast = 0;           /* 最近一次 */
 int trainingCount = 0;          /* 命中次数 */
@@ -431,7 +432,8 @@ int campaignMode = 0;
 int campaignStage = 0;
 /* StartGame() 统一清理模式标志；菜单入口先把要启动的模式排队，
    这样清理不会把 Endless / Daily / Campaign / Training 自己也清掉。 */
-enum { START_NORMAL = 0, START_ENDLESS, START_DAILY, START_CAMPAIGN, START_TRAINING };
+enum { START_NORMAL = 0, START_ENDLESS, START_DAILY, START_CAMPAIGN, START_TRAINING,
+       START_GUIDE };
 static int pendingStartMode = START_NORMAL;
 static int pendingCampaignStage = 0;
 static void ApplyCampaignRules(int stage);
@@ -1285,6 +1287,12 @@ int g_forceMod = -1;
 /* v3.1 训练场改成新手教程：一条长廊 + 一个可翻的箱子 + 一个不会动的靶子。
    不再摆安全屋/配电箱/出口 —— 教程只教「怎么操作」，不要求真的逃出去。 */
 static void BuildTrainingArena(void) {
+    /* 2026-11-08：引导模式强制展开分步教程，从第一步开始 */
+    if (guideMode) {
+        tutorialGuideOn = 1;
+        tutorialStep = TUT_MOVE;
+        tutorialStepTimer = 0.0f;
+    }
     /* 2026-11-08（第 11 轮）：七个教学站点，位置见 training_stations.c */
     { extern void TrainingStationsReset(void); TrainingStationsReset(); }
     for (int y = 0; y < MAP_HEIGHT; y++)
@@ -6445,6 +6453,10 @@ void StartGame(void) {
         campaignStage = startStage;
     } else if (startMode == START_TRAINING) {
         trainingMode = 1;
+        guideMode = 0;
+    } else if (startMode == START_GUIDE) {
+        trainingMode = 1;          /* 同一张训练地图 = 传送到引导场景 */
+        guideMode = 1;
     }
 
     currentState = STATE_PLAYING;
@@ -8202,6 +8214,13 @@ int CanityKeyDown(int vk, int repeat) {
                左边那列 1 2 3 … 本来就是快捷键暗示，但从来没接。
                试玩实测：「按 1 想选 New Run，完全没反应，
                必须方向键+回车」。现在按数字 = 选中该行 + 立刻执行。 */
+            /* 2026-11-08（用户要求）：按 B 进引导模式 */
+            if (vk == 'B') {
+                pendingStartMode = START_GUIDE;
+                StartGame();
+                uiDirty = 1;
+                return 0;
+            }
             {
                 int nk = -1;
                 if (vk >= '1' && vk <= '9')      nk = (int)vk - '1';
