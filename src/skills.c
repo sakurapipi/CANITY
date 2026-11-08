@@ -98,6 +98,8 @@ const SkillDef skillDefs[] = {
      {3200,0,0}, 0, SK_COUNTER_FREE, 0},
     {"COUNTERKILL", "Once per run: kill the scavenger as it grabs you", 2, 1,
      {4500,0,0}, 0, SK_COUNTER_BACK, 1},
+
+    {"SELFTEST", "自检节点", 4, 1, {1000,0,0}, 0, -1, 0},
 };
 
 typedef char skillDefs_count_check[(sizeof(skillDefs)/sizeof(skillDefs[0]) == SKILL_COUNT) ? 1 : -1];
@@ -791,6 +793,8 @@ static const float kNodeNX[SKILL_COUNT] = {
     /* 第 2 行 */ 0.0726f, 0.1947f, 0.3168f, 0.4390f, 0.5611f, 0.6832f, 0.8053f, 0.9274f,
     /* 第 3 行 */ 0.0726f, 0.1947f, 0.3168f, 0.4390f, 0.5611f, 0.6832f, 0.8053f, 0.9274f,
     /* 第 4 行 */ 0.0726f, 0.1947f, 0.3168f, 0.4390f, 0.5611f, 0.6832f, 0.8053f, 0.9274f,
+
+    0.07260f,
 };
 
 static const float kNodeNY[SKILL_COUNT] = {
@@ -800,6 +804,8 @@ static const float kNodeNY[SKILL_COUNT] = {
     0.44588f, 0.44588f, 0.44588f, 0.44588f, 0.44588f, 0.44588f, 0.44588f, 0.44588f,
     0.55412f, 0.55412f, 0.55412f, 0.55412f, 0.55412f, 0.55412f, 0.55412f, 0.55412f,
     0.66236f, 0.66236f, 0.66236f, 0.66236f, 0.66236f, 0.66236f, 0.66236f, 0.66236f,
+
+    0.77060f,
 };
 
 void SkillNodeNorm(int id, float* nx, float* ny) {
@@ -918,6 +924,8 @@ static const char* kShortNames[SKILL_COUNT] = {
     "FREE",   /* 37 */
     "BACK",   /* 38 */
     "KILL",   /* 39 */
+
+    "SELFT",
 };
 
 const char* SkillShortName(int id) {

@@ -164,10 +164,7 @@ def main(argv):
         return 0
 
     print()
-    print('  ✗ 这一版生成器**还不能真正写入** —— 五处插入点的锚点还没逐个校准。')
-    print('    诚实说明：现在写入会破坏文件。')
-    print('    下一步：为每处锚点写"插入 + 回读校验"，再做 --apply。')
-    return 1
+    return apply_skill(a)
 
 
 # ======================================================================
@@ -202,7 +199,10 @@ def _append_to_array(src, name, text):
     head = src[:_open]
     body = src[_open:close]
     tail = src[close:]
-    if not body.rstrip().endswith(','):
+    # 2026-11-09：尾部可能带注释（如 `"KILL", /* 39 */`），
+    # 先把注释剥掉再判断末尾有没有逗号，否则会多补一个。
+    tail_clean = re.sub(r'/\*.*?\*/', '', body, flags=re.S).rstrip()
+    if not tail_clean.endswith(','):
         body = body.rstrip() + ','
     body = body + '\n    ' + text + '\n'
     return head + body + tail
@@ -317,7 +317,98 @@ def self_test():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ======================================================================
+# 2026-11-09（A-2）：真正写入
+# ======================================================================
+
+def _enum_append(common, sym):
+    """在 SK_ 枚举的闭合 } 前加一项。"""
+    m = re.search(r'enum\s*\{[^}]*SK_QUIET[^}]*\}', common, re.S)
+    if not m:
+        raise RuntimeError('找不到 SK_ 枚举')
+    blk = m.group(0)
+    head = blk[:-1].rstrip()
+    if not head.endswith(','):
+        head += ','
+    head += '\n    %s   /* 生成器写入 */\n}' % sym
+    return common.replace(blk, head, 1)
+
+
+def _cost_append(common, add):
+    """SKILL_TOTAL_COST += add。"""
+    m = re.search(r'#define\s+SKILL_TOTAL_COST\s+(\d+)', common)
+    if not m:
+        raise RuntimeError('找不到 SKILL_TOTAL_COST')
+    new = int(m.group(1)) + add
+    return common.replace(m.group(0), '#define SKILL_TOTAL_COST %d' % new, 1)
+
+
+def apply_skill(a):
+    """执行全部插入。成功返回 0。"""
+    en, zh, short = a['en'], a['zh'], a['short']
+    cost, rank = int(a['cost']), int(a.get('rank', '1'))
+    branch = int(a.get('branch', '4'))
+
+    files = ('include/common.h', 'src/skills.c', 'src/ui.c')
+    orig = {f: io.open(os.path.join(ROOT, f), encoding='utf-8',
+                       errors='replace').read() for f in files}
+    try:
+        common = orig['include/common.h']
+        skills = orig['src/skills.c']
+        ui = orig['src/ui.c']
+
+        m = re.search(r'#define\s+SKILL_COUNT\s+(\d+)', common)
+        count = int(m.group(1))
+        common = common.replace(m.group(0), '#define SKILL_COUNT %d' % (count + 1), 1)
+
+        sym = 'SK_GEN_' + re.sub(r'\W', '_', en).upper()
+        common = _enum_append(common, sym)
+        common = _cost_append(common, cost * rank)
+
+        # 坐标：读表推下一格
+        def levels(name):
+            mm = re.search(name + r'\[\w+\]\s*=\s*\{(.*?)\};', skills, re.S)
+            b = re.sub(r'/\*.*?\*/', '', mm.group(1), flags=re.S)
+            v = [float(x.strip().rstrip('f')) for x in b.split(',') if x.strip()]
+            return sorted(set(v))
+
+        xs, ys = levels('kNodeNX'), levels('kNodeNY')
+        dx, dy = xs[1] - xs[0], ys[1] - ys[0]
+        col, row = count % 8, count // 8
+        nx, ny = xs[0] + col * dx, ys[0] + row * dy
+
+        row_txt = '{"%s", "%s", %d, %d, {%d,0,0}, 0, -1, 0},' % (en, zh, branch, rank, cost)
+        skills = _append_to_array(skills, 'skillDefs', row_txt)
+        skills = _append_to_array(skills, 'kNodeNX', '%.5ff,' % nx)
+        skills = _append_to_array(skills, 'kNodeNY', '%.5ff,' % ny)
+        skills = _append_to_array(skills, 'kShortNames', '"%s",' % short)
+        ui = _append_to_array(ui, 'kSkillList', '%d,' % count)
+
+        for rel, txt in (('include/common.h', common), ('src/skills.c', skills),
+                         ('src/ui.c', ui)):
+            io.open(os.path.join(ROOT, rel), 'w', encoding='utf-8',
+                    newline='\n').write(txt)
+        print('  ✓ 已写入 7 处（SKILL_COUNT=%d, 坐标 %.4f,%.4f）' % (count + 1, nx, ny))
+
+        # 立刻自检
+        r = subprocess.run([sys.executable, '-X', 'utf8', 'tools/content_check.py'],
+                           cwd=ROOT, capture_output=True, text=True,
+                           encoding='utf-8', errors='replace')
+        if r.returncode != 0:
+            raise RuntimeError('content_check 不通过')
+        print('  ✓ content_check 通过')
+        return 0
+    except Exception as e:
+        for rel, txt in orig.items():
+            io.open(os.path.join(ROOT, rel), 'w', encoding='utf-8',
+                    newline='\n').write(txt)
+        print('  ✗ 失败已全部还原：%s' % e)
+        return 1
+
+
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
+
+
 
 
