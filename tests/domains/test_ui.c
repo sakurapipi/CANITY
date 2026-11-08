@@ -109,9 +109,45 @@ static void test_menu_draws_without_crashing(void) {
     currentState = savedState;
 }
 
+
+/* ==================================================================
+ * HUD 截图（AD-66）
+ * ------------------------------------------------------------------
+ * DrawHUD 是 1,299 行的单函数，以前没有任何视觉回归。
+ * 设 CANITY_SHOT=<目录> 跑 test_runtime 会写出 shot_hud.ppm。
+ * ================================================================ */
+
+extern void DrawHUD(void);
+
+static void test_hud_draws_without_crashing(void) {
+    GameState savedState = currentState;
+    int i, nonBlack = 0;
+
+    currentState = STATE_PLAYING;
+    if (pixels && renderW > 0 && renderH > 0) {
+        for (i = 0; i < renderW * renderH; i++) pixels[i] = 0;
+        DrawHUD();
+        for (i = 0; i < renderW * renderH; i++) {
+            if (pixels[i] != 0) { nonBlack++; }
+        }
+        CHECK(nonBlack > 500, "drawing the HUD must actually put pixels on screen");
+    }
+
+    {
+        const char* dir = getenv("CANITY_SHOT");
+        if (dir && dir[0] && pixels && renderW > 0 && renderH > 0) {
+            char path[512];
+            snprintf(path, sizeof(path), "%s/shot_hud.ppm", dir);
+            write_ppm(path, renderW, renderH, pixels);
+        }
+    }
+    currentState = savedState;
+}
+
 void TestSuite_ui(void) {
     test_ach_geo_stays_inside_window();
     test_ach_geo_shrinks_rows_on_short_windows();
     test_clamp_row_text_never_overflows();
     test_menu_draws_without_crashing();
+    test_hud_draws_without_crashing();
 }

@@ -1721,7 +1721,58 @@ static void DrawCrosshair(void) {
     }
 }
 
+/* 主题房间字幕（右上角）。从 DrawHUD 里抽出来的第一块：
+ * 它只依赖 cellMeta / posX / posY 与公开的文本绘制，不碰任何外层局部变量，
+ * 所以可以整块搬成函数而不改变作用域。 */
+static void DrawHudThemeRoom(void) {
+            /* ==================================================================
+             * 2026-11-06（用户要求）：**右上角显示当前主题房间**
+             * ------------------------------------------------------------------
+             * 用户原话：「右上角新增一行字幕，告诉我当前的主题房间是什么」。
+             *
+             * 只在玩家**站在房间内部**时显示（roomId != 0）——
+             * 站在走廊里写"砖墙"没有意义，反而像是坏了。
+             * 画在敌人状态那一行**上面**，两者互不遮挡。
+             * ================================================================ */
+                extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
+                extern float posX, posY;
+                int cxp = (int)posX, cyp = (int)posY;
+                if (cxp >= 0 && cyp >= 0 && cxp < MAP_WIDTH && cyp < MAP_HEIGHT &&
+                    cellMeta[cyp][cxp].roomId != 0) {
+                    const char* tn = ThemeName((int)cellMeta[cyp][cxp].themeId,
+                                               g_lang == LANG_ZH);
+                    if (tn && tn[0]) {
+                        int tw4 = TextWidthWin(tn);
+                        DrawTextWin(winW - UIS(24) - tw4, winH - UIS(394) - UIS(30),
+                                    tn, 0x00C090E0u);
+                    }
+                }
+}
+
 void DrawHUD(void) {
+    /* ==================================================================
+     * DrawHUD 段落索引（第 3 轮加，2026-11-08）
+     * ------------------------------------------------------------------
+     * 这个函数原本 1,299 行、没有目录。改 HUD 前先看这张表，别通读。
+     *
+     *   ① 详细度档位（hudDetail 三档）
+     *   ② 资源条：ENERGY / LIGHT / RUN
+     *   ③ 金币行（带入 / 携带）
+     *   ④ 威胁值与敌情
+     *   ⑤ 每日任务行
+     *   ⑥ 事件行（EventNameZh/DescZh）
+     *   ⑦ 扳手次数
+     *   ⑧ 守门人锁定倒计时
+     *   ⑨ 拾取提示（钱袋 / 搜索 / 藏身）
+     *   ⑩ 跳脸虫 QTE
+     *   ⑪ 站在门口的进门提示
+     *   ⑫ 主题房间字幕 ← 已抽成 DrawHudThemeRoom()
+     *   ⑬ 蛛网缠绕倒计时
+     *   ⑭ 屏幕中心提示
+     *
+     * 想再抽一块：挑**只用 extern/公开函数、不引用外层局部变量**的段落，
+     * 它才能整块搬成 static 函数而不改变作用域。
+     * ================================================================== */
     if (currentState == STATE_PLAYING && !isMapOpen) DrawCrosshair();
     /* v2.1：Boss 血条（屏幕上方居中） */
 
@@ -2566,30 +2617,7 @@ void DrawHUD(void) {
                再上移 24 像素留出呼吸空间。 */
             DrawTextWin(winW - UIS(24) - tw3, winH - UIS(394), st, sc);
 
-            /* ==================================================================
-             * 2026-11-06（用户要求）：**右上角显示当前主题房间**
-             * ------------------------------------------------------------------
-             * 用户原话：「右上角新增一行字幕，告诉我当前的主题房间是什么」。
-             *
-             * 只在玩家**站在房间内部**时显示（roomId != 0）——
-             * 站在走廊里写"砖墙"没有意义，反而像是坏了。
-             * 画在敌人状态那一行**上面**，两者互不遮挡。
-             * ================================================================ */
-            {
-                extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
-                extern float posX, posY;
-                int cxp = (int)posX, cyp = (int)posY;
-                if (cxp >= 0 && cyp >= 0 && cxp < MAP_WIDTH && cyp < MAP_HEIGHT &&
-                    cellMeta[cyp][cxp].roomId != 0) {
-                    const char* tn = ThemeName((int)cellMeta[cyp][cxp].themeId,
-                                               g_lang == LANG_ZH);
-                    if (tn && tn[0]) {
-                        int tw4 = TextWidthWin(tn);
-                        DrawTextWin(winW - UIS(24) - tw4, winH - UIS(394) - UIS(30),
-                                    tn, 0x00C090E0u);
-                    }
-                }
-            }
+    DrawHudThemeRoom();   /* 第 3 轮：主题房间字幕抽成函数 */
         }
     }
 

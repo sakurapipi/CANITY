@@ -10,7 +10,7 @@
 | `domain/ui/ui_text.c` | ~250 | 点阵字 + 中文图集 + 宽度测量 |
 | `domain/ui/ui_pages.c` | ~285 | 成就页、AchCompute 几何、ClampRowText/WrapText |
 | `domain/ui/ui_menu.c` | ~1,410 | 主菜单整簇：面板/文字/改造树/银行页/校准条 |
-| `ui.c` | ~3,670 | HUD（1,299 行单函数）、商店、技能树页、设置、弹窗 |
+| `ui.c` | ~3,697 | HUD（1,299 行单函数，带段落索引）、商店、技能树页、设置、弹窗 |
 
 ## 契约
 `include/ui.h`（对外）+ `ui_text.h`（文本层）+ `ui_pages.h`（页面/几何）+
@@ -21,10 +21,23 @@
 - 不改 `UiTrack` / `AchCompute` 的几何语义 —— 菜单命中测试依赖同一份计算
 - 不把 `pixels` 写入顺序搞乱（HUD 必须最后画）
 
+## HUD 怎么改（第 3 轮补）
+
+`DrawHUD()` 是 1,299 行的单函数，**开头有一段"段落索引"**（14 个段落各画什么）。
+改 HUD 先看那张表，不要通读。
+
+想再抽一块成函数：挑**只用 extern/公开函数、不引用外层局部变量**的段落，
+它才能整块搬走而不改变作用域。第 3 轮抽的第一块是 `DrawHudThemeRoom()`
+（右上角主题房间字幕）—— 它只依赖 `cellMeta` / `posX` / `posY` 与公开文本绘制。
+
+其余段落大量互相引用外层局部变量（`labelX` / `barX` / `y1` / `hoverKind`…），
+机械抽函数会改变作用域，属于行为改动，需要单独一轮 + 逐段截图比对。
+
 ## 测试
 `python tools/build_validate.py` → PASS
 `tests/domains/test_ui.c`：成就页几何（3 种窗口）、文本截断、
-**菜单截图**（设 `CANITY_SHOT=<目录>` 会写出 `shot_menu.ppm`）。
+**菜单截图**（`shot_menu.ppm`）与 **HUD 截图**（`shot_hud.ppm`）——
+设 `CANITY_SHOT=<目录>` 跑 test_runtime 就会写出来。
 可见改动必须出图看 —— AD-66。
 
 ## 常见改动
