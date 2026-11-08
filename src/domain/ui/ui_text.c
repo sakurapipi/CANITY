@@ -5,7 +5,10 @@
  */
 #include "common.h"
 #include "render.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "lang.h"
 /* CjkDecodeOne / CjkRows 在 render.h 里，不需要额外的 cjk 头。 */
 #include "ui.h"

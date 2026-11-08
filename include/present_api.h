@@ -7,6 +7,9 @@
 
 #include "common.h"
 
+/* 窗口逻辑尺寸（呈现层） */
+extern int winW, winH;
+
 extern HWND g_hwnd;
 int CanityKeyDown(int vk, int repeat);
 void CanityMouseMove(int mx, int my);
