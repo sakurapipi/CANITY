@@ -17,6 +17,7 @@
 ## 测试
 `python tools/build_validate.py` → PASS
 关键行为：房间不越界 / 不放死口袋 / `PropBlocksAt` 与实际家具一致。
+（房间测试暂时还留在 test_runtime.c，将来拆到 test_map_rooms.c）
 
 ## 常见改动
 | 想改什么 | 动哪里 |

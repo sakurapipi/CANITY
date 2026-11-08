@@ -17,7 +17,8 @@
 
 ## 测试
 `python tools/build_validate.py` → PASS (12212 checks)
-关键行为：13 种 kind × 3 段（落地 / 撞墙 / 撞怪）效果一致。
+本域用例：`tests/domains/test_throwing.c`（3 个，含石头听觉范围、
+破锁只结算一次噪音、照明弹回血预算）。
 
 ## 常见改动
 | 想改什么 | 动哪里 |

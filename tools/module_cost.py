@@ -62,6 +62,9 @@ def extern_count(path):
     return len(re.findall(r'^\s*extern\s+', t, re.M))
 
 
+TESTS = os.path.join(ROOT, 'tests', 'domains')
+
+
 def measure():
     out = []
     for domain, (cs, hs, card) in sorted(DOMAINS.items()):
@@ -69,13 +72,16 @@ def measure():
         hdr = sum(count_lines(os.path.join(INC, h)) for h in hs)
         card_lines = count_lines(os.path.join(DOCS, card)) if card else 0
         ext = sum(extern_count(find_c(c)) for c in cs)
+        # 第 2 轮起：域专属测试也算"必读量" —— 改这个域要先看它的用例
+        test_lines = count_lines(os.path.join(TESTS, 'test_%s.c' % domain))
         out.append({
             'domain': domain,
             'impl': impl,
             'header': hdr,
             'card': card_lines,
+            'test': test_lines,
             'extern': ext,
-            'cost': impl + hdr + card_lines,
+            'cost': impl + hdr + card_lines + test_lines,
             'missing': [p for p in
                         ([find_c(c) for c in cs] +
                          [os.path.join(INC, h) for h in hs] +
@@ -96,9 +102,9 @@ def main():
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
 
-    print('  %-11s %7s %7s %6s %7s %8s' %
-          ('域', '实现', '契约头', '卡片', 'extern', '必读合计'))
-    print('  ' + '-' * 56)
+    print('  %-11s %7s %7s %6s %6s %7s %8s' %
+          ('域', '实现', '契约头', '卡片', '测试', 'extern', '必读合计'))
+    print('  ' + '-' * 64)
     over = 0
     for r in rows:
         flag = ''
@@ -107,9 +113,9 @@ def main():
             over += 1
         elif r['impl'] == 0 and r['header'] == 0:
             flag = '  （未拆分）'
-        print('  %-11s %7d %7d %6d %7d %8d%s' %
+        print('  %-11s %7d %7d %6d %6d %7d %8d%s' %
               (r['domain'], r['impl'], r['header'], r['card'],
-               r['extern'], r['cost'], flag))
+               r.get('test', 0), r['extern'], r['cost'], flag))
     print('')
     print('  预算 %d 行；超预算 %d 个域' % (args.budget, over))
     print('  注：game.c 9,557 行不在表里 —— 它就是要被拆掉的那一个。')

@@ -16,6 +16,7 @@
 ## 测试
 `python tools/build_validate.py` → PASS
 关键行为：前置未满足不可买 / keystone 只能 1 个 / 30 节点网格四向导航不落空位。
+（技能测试暂时还留在 test_runtime.c）
 
 ## 常见改动
 | 想改什么 | 动哪里 |

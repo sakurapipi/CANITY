@@ -85,7 +85,9 @@ run([GCC, *test_canity_sources(root), '-Iinclude', '-std=c99',
 run([cache / 'test_canity.exe'])
 
 # ---- 运行期集成：链接全部目标文件，控制台程序（不加 -mwindows）----
-run([GCC, 'tests/test_runtime.c', *objects, '-Iinclude', '-std=c99',
+test_srcs = ['tests/test_runtime.c'] + sorted(
+    str(q) for q in (root / 'tests' / 'domains').glob('*.c'))
+run([GCC, *test_srcs, *objects, '-Iinclude', '-std=c99',
      '-Wall', '-Wextra', *libs, '-o', cache / 'test_runtime.exe'])
 isolated = cache / 'test-data'
 isolated.mkdir(exist_ok=True)
