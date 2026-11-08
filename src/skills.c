@@ -217,8 +217,24 @@ int SkillSwitchable(int id) {
     return id>=0 && id<SKILL_COUNT && skillDefs[id].isKeystone && SkillOwned(id) && activeKeystone!=id;
 }
 int SkillSwitchKeystone(int id) {
-    if(!SkillSwitchable(id))return 0;
-    activeKeystone=id;return 1;
+    if (!SkillSwitchable(id)) return 0;
+    /* ==================================================================
+     * 2026-11-08（第 6 轮）：**换王冠要花钱**
+     * ------------------------------------------------------------------
+     * 原来这里只有两行、不扣任何东西 —— 买下 8 个王冠之后切换全免费，
+     * 最终所有人都拥有全部玩法，5 条分支变成装饰。
+     *
+     * 定价 2,000 金 ≈ 单局收入（2,433）的 82%：肉痛但不至于锁死。
+     * 资金检查与扣款都走 wallet（项目规定：花钱只走那一个入口）。
+     * ================================================================ */
+    {
+        extern int WalletCanPayBank(int);
+        extern int WalletSpendBank(int);
+        if (!WalletCanPayBank(SKILL_SWITCH_COST)) return 0;
+        if (!WalletSpendBank(SKILL_SWITCH_COST)) return 0;
+    }
+    activeKeystone = id;
+    return 1;
 }
 
 /* ------------------------------------------------------------------ */

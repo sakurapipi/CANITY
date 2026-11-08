@@ -64,8 +64,18 @@ int SkillBranchPoints(int branch);           /* 该分支已投入点数 */
 int SkillKeystoneUnlocked(int id);           /* 分支点数是否够 */
 int SkillCanBuy(int id);                     /* 是否可以买（点数/前置/核心/keystone 上限） */
 int SkillBuy(int id);                        /* 执行购买，返回 1 = 成功 */
-int SkillSwitchKeystone(int id);             /* 换 keystone：卸下旧的 + 花 3 核心 + 买新的 */
-int SkillSwitchable(int id);                 /* 是否处于"可以花核心换过去"的状态 */
+/* ==================================================================
+ * 2026-11-08（第 6 轮）：**换王冠要花钱**
+ * ------------------------------------------------------------------
+ * 之前 SkillSwitchKeystone() 不扣任何东西 —— 买下 8 个王冠后切换全免费，
+ * 所有人都拥有全部玩法，分支变成装饰。
+ * 头注释还写着"花 3 核心"，但核心货币在 v3.4 已废弃（cores 恒为 0）。
+ *
+ * 定价 2,000 金 ≈ 单局收入（2,433）的 82%：肉痛但不锁死。
+ * ================================================================ */
+#define SKILL_SWITCH_COST 2000
+int SkillSwitchKeystone(int id);             /* 换 keystone：花 SKILL_SWITCH_COST 金 */
+int SkillSwitchable(int id);                 /* 是否处于"可以花钱换过去"的状态 */
 int SkillOwned(int id);                      /* 是否已拥有（>=1 级） */
 const char* SkillName(int id);
 

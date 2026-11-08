@@ -417,6 +417,62 @@ static void test_skill_short_names_are_short(void) {
     CHECK(tooLong == 0, "short names must be <= 6 chars or the node box truncates them");
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 6 轮）：**换王冠要花钱**
+ * ------------------------------------------------------------------
+ * 之前切换完全免费 —— 买齐 8 个王冠后人人拥有全部玩法，分支成了装饰。
+ * 现在收 2,000 金（≈ 单局收入的 82%）。
+ * ================================================================ */
+
+extern int SkillSwitchKeystone(int id);
+extern int SkillSwitchable(int id);
+
+static void test_keystone_switch_costs_gold(void) {
+    extern int bankGold;
+    extern int SkillBuy(int id);
+    extern void SkillResetAll(void);
+    int savedGold;
+    int kid = -1, i;
+
+    /* 找一个王冠 */
+    for (i = 0; i < SKILL_COUNT; i++) {
+        extern const SkillDef skillDefs[];
+        if (skillDefs[i].isKeystone) { kid = i; break; }
+    }
+    CHECK(kid >= 0, "the table must contain at least one keystone");
+    if (kid < 0) return;
+
+    SkillResetAll();
+    bankGold = 0;
+    /* 免费拿到它（直接把等级与当前王冠设好，绕开价格） */
+    { extern int skillRank[]; extern int activeKeystone;
+      skillRank[kid] = 1; activeKeystone = -1; }
+    CHECK(SkillSwitchable(kid), "an owned keystone must be switchable when none is active");
+
+    /* 钱不够：必须失败，且不改变状态 */
+    bankGold = 0;
+    CHECK(SkillSwitchKeystone(kid) == 0,
+          "switching without enough gold must fail (it used to be free)");
+    {
+        extern int activeKeystone;
+        CHECK(activeKeystone != kid, "a failed switch must not activate the keystone");
+    }
+
+    /* 钱够：成功，并扣掉 SKILL_SWITCH_COST */
+    savedGold = 10000;
+    bankGold = savedGold;
+    CHECK(SkillSwitchKeystone(kid) == 1, "with enough gold the switch must succeed");
+    CHECK(bankGold == savedGold - SKILL_SWITCH_COST,
+          "switching must deduct exactly SKILL_SWITCH_COST");
+
+    /* 已经是当前王冠：不可再"切换"（不重复扣钱） */
+    CHECK(!SkillSwitchable(kid), "the active keystone must not be switchable to itself");
+
+    bankGold = 0;
+    SkillResetAll();
+}
+
 void TestSuite_progress(void) {
     test_daily();
     test_double_reward_rounds();
@@ -430,4 +486,5 @@ void TestSuite_progress(void) {
     test_skill_tree_data_is_consistent();
     test_skill_nodes_are_all_placeable();
     test_skill_short_names_are_short();
+    test_keystone_switch_costs_gold();
 }
