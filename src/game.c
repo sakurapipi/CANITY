@@ -7942,8 +7942,22 @@ void CanityMouseClick(int mx, int my) {
     g_mousePos.y = my;
 
     if (currentState == STATE_MAIN_MENU || currentState == STATE_PAUSED) {
+        /* 2026-11-08（第 6 轮）：**点空白处不该激活"当前选中项"**
+           —— 原来 HitTestMenu 没命中任何行，ActivateMenuItem 却照样执行，
+           等于"点空白 = 点光标那一行"，玩家一点角落就开局。 */
+        int hitRow = 0;
+        {
+            MenuGeo g3 = GetMenuGeo();
+            for (int i = 0; i < g3.count; i++) {
+                RECT r = RowRect(g3, i);
+                if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
+                    hitRow = 1;
+                    break;
+                }
+            }
+        }
         HitTestMenu(mx, my);
-        ActivateMenuItem();
+        if (hitRow) ActivateMenuItem();
         uiDirty = 1;
         return;
     }
