@@ -4,6 +4,7 @@
  * 入口：TestSuite_throwing()
  */
 #include "../test_common.h"
+#include "shot_spec.h"
 
 static void test_flare_heal_budget(void) {
     extern void  FlareHealTick(float);
@@ -326,6 +327,53 @@ static void test_effects_also_fire_when_hitting_a_wall(void) {
           "an echo bolt hitting a wall must still start a scan (wall branch)");
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 6 轮）：**投掷物规格表的契约**
+ * ------------------------------------------------------------------
+ * 表是新的唯一数据源（include/shot_spec.h）。它一旦漏行，
+ * ShotSpecFor 会返回默认行 —— 表现是"这个投掷物变成只会碎的石头"，
+ * 而且不会报错。所以必须有用例盯着"每种 kind 都有行"。
+ * ================================================================ */
+
+extern const ShotSpec* ShotSpecFor(int kind);
+extern int ShotSpecCount(void);
+extern const ShotSpec* ShotSpecAt(int i);
+
+static void test_shot_spec_covers_every_kind_in_use(void) {
+    /* 这些 kind 是 ThrowItem 会产出的全部（见 throwing.c 的 type->kind 映射） */
+    static const int kinds[] = { 1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13 };
+    int i;
+    for (i = 0; i < (int)(sizeof(kinds) / sizeof(kinds[0])); i++) {
+        const ShotSpec* sp = ShotSpecFor(kinds[i]);
+        CHECK(sp != 0, "every kind in use must have a spec row");
+        CHECK(sp->kind == kinds[i], "spec lookup must return the row for that kind");
+        CHECK(sp->name[0] != '\0', "every spec row must have a name (for logs)");
+    }
+}
+
+static void test_shot_spec_table_is_consistent(void) {
+    int i, n = ShotSpecCount();
+    CHECK(n >= 11, "the table must keep at least the 11 kinds currently in use");
+    for (i = 0; i < n; i++) {
+        const ShotSpec* sp = ShotSpecAt(i);
+        CHECK(sp != 0, "ShotSpecAt must return a row for every valid index");
+        /* 伤害为 0 的行不该声明护甲穿透——那是矛盾数据 */
+        if (sp->dmg == 0) {
+            CHECK(sp->ignoresArmor == 0, "a zero-damage shot must not declare armor pierce");
+        }
+    }
+    CHECK(ShotSpecAt(-1) == 0, "ShotSpecAt must reject negative index");
+    CHECK(ShotSpecAt(n) == 0, "ShotSpecAt must reject out-of-range index");
+}
+
+static void test_shot_spec_unknown_kind_is_safe(void) {
+    const ShotSpec* sp = ShotSpecFor(99);      /* 没人用的 kind */
+    CHECK(sp != 0, "unknown kind must still return a usable spec");
+    CHECK(sp->effect == FX_SHARDS, "unknown kind must fall back to plain shards");
+    CHECK(sp->dmg <= 1, "unknown kind must not become a high-damage weapon");
+}
+
 void TestSuite_throwing(void) {
     test_flare_heal_budget();
     test_stone_hearing_range();
@@ -334,4 +382,7 @@ void TestSuite_throwing(void) {
     test_glue_works_when_it_lands_on_open_floor();
     test_echo_works_when_it_lands_on_open_floor();
     test_effects_also_fire_when_hitting_a_wall();
+    test_shot_spec_covers_every_kind_in_use();
+    test_shot_spec_table_is_consistent();
+    test_shot_spec_unknown_kind_is_safe();
 }

@@ -12,6 +12,7 @@
 #include "state.h"
 #include "suspicion.h"
 #include "throwing.h"
+#include "shot_spec.h"
 #include "hints.h"
 #include "audio.h"
 #include "lang.h"
@@ -308,22 +309,27 @@ void ThrowItem(int type, float charge) {
  * 现在三处都走 ShotImpact()，投掷物不管在哪落地/撞墙，效果都一致。
  * ================================================================ */
 static void ShotImpact(int i, float x, float y) {
+    /* 2026-11-08（第 6 轮）：**分派只读规格表**
+       以前这里是一串 kind == 4 / 8 / 10 / 12 的魔法数字，
+       加一种投掷物要改三处。现在效果由 src/domain/throwing/shot_table.c
+       的 effect 字段决定 —— 加一种"同样是烟雾"的投掷物只加一行。 */
+    const ShotSpec* sp = ShotSpecFor(shot[i].kind);
     int kind = shot[i].kind;
 
     /* 任何投掷物落点都留一个"可疑位置"给听声怪 */
     EchoTryTrigger(x, y);
 
-    if (kind == 4) {
+    if (sp->effect == FX_SMOKE) {
         SpawnSmoke(x, y);
         return;
     }
-    if (kind == 8) {
+    if (sp->effect == FX_GLUE) {
         SpawnGlue(x, y);
         PlaySfx(SFX_GLUE, 0.85f);
         SpawnShards(x, y, shot[i].vx, shot[i].vy, shot[i].charge);
         return;
     }
-    if (kind == 10) {
+    if (sp->effect == FX_ECHO_SCAN) {
         /* 回声弹：声呐扫描 —— 揭地形 + 标记资源 + 暴露活物 */
         extern float echoScanT;
         extern float echoScanX, echoScanY;
@@ -355,7 +361,7 @@ static void ShotImpact(int i, float x, float y) {
           AudioPlayWorld(SFX_ECHO, x, y, 0.85f, 22.0f, 2); }
         return;
     }
-    if (kind == 12 || kind == 13) {
+    if (sp->effect == FX_PHASE) {
         extern void PhaseOnThrowLanded(int kind, float lx, float ly);
         PhaseOnThrowLanded(kind, x, y);
         return;
@@ -440,13 +446,12 @@ void UpdateShots(float dt) {
                 }
             }
             {
-                float nz = 14.0f;
+                /* 2026-11-08（第 6 轮）：噪音也读表 —— 不再按 kind 写死 */
+                const ShotSpec* nsp = ShotSpecFor(shot[i].kind);
+                float nz = nsp->noise;
                 /* v3.4：SILENT THROW（局内树 id 2）投掷物落地不再产生噪音 */
                 if (BenchSilentThrow()) nz = 0.0f;
-                if (shot[i].kind == 1)      nz = 8.0f + shot[i].charge * 12.0f;  /* 8 ~ 20 */
-                else if (shot[i].kind == 8) nz = 6.0f;
-                else if (shot[i].kind == 4) nz = 5.0f;
-                else if (shot[i].kind == 10) nz = 0.0f;                          /* 静音 */
+                if (nsp->noiseScaled) nz += shot[i].charge * 12.0f;   /* 投石 8 ~ 20 */
                 if (BenchSilentThrow()) nz = 0.0f;   /* v3.4：静投压过所有分支 */
                 /* v6 第 ㉟ 轮：**诱饵**（改造树第 2 列的第二顶点）
            投掷物噪音 ×3 —— 纯引怪流。第 ⑩ 轮加了没接。 */
@@ -523,8 +528,12 @@ void UpdateShots(float dt) {
                     if (shot[i].ignoreTargetTime > 0.0f && shot[i].ignoreTarget == t) continue;
                     if (Dist2(shot[i].x, shot[i].y, m->x, m->y) >= r * r) continue;
 
-                    int base = 1, type = DT_SHARD;
-                    g_dmgIgnoreArmor = 0;
+                    /* 默认值来自规格表；下面的特殊分支仍按需要覆盖
+                       （烟雾/胶水/镜片/信号枪的行为差异太大，函数指针表不划算） */
+                    const ShotSpec* msp = ShotSpecFor(shot[i].kind);
+                    int base = msp->dmg > 0 ? msp->dmg : 1;
+                    int type = (msp->dmgType < 0) ? DT_SHARD : msp->dmgType;
+                    g_dmgIgnoreArmor = msp->ignoresArmor;
                     if (shot[i].kind == 2) {            /* 砖头：钝击 12 点，蓄满 15 */
                         base = 12 + chargeBonus(shot[i].charge) * 3;
                         type = DT_BLUNT;
