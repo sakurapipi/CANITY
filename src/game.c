@@ -5034,7 +5034,12 @@ void Update(float dt) {
              * RunSpeedMul()
              * (sprinting ? SPRINT_MULT * (BenchSlide() ? 1.20f : 1.0f) * (1.0f + burstAdd) : 1.0f)   /* v3.4 SLIDE +20% */ * crankMul * (hatchSpeedT > 0.0f ? 1.25f : 1.0f);
 
-        /* 第 9 轮「以牙还牙」：受伤后 3 秒 +30% 移速 */
+        /* 2026-11-08（第 5 轮）：**战役移速倍率**（之前 6 个倍率全部零调用） */
+    {
+        extern float CampaignSpeedMulNow(void);
+        sp *= CampaignSpeedMulNow();
+    }
+    /* 第 9 轮「以牙还牙」：受伤后 3 秒 +30% 移速 */
     if (retaliateT > 0.0f) sp *= 1.30f;
     /* 第 8 轮「金币即力量」：每个强度档 +1.5% 移速，上限 +20% */
     {
@@ -5208,6 +5213,9 @@ void Update(float dt) {
                         else                   shardGain = 0;
                     }
                 }
+                /* 2026-11-08（第 5 轮）：战役金币倍率 */
+                { extern float CampaignGoldMulNow(void);
+                  shardGain = (int)(shardGain * CampaignGoldMulNow()); }
                 carryGold += shardGain;    /* v1.8：先记在待上缴里 */
                 /* 2026-11-08（第 4 轮）：HINT_GOLD 文案写好了却从没触发过 ——
                    第一次拿到金币时教一句"钱在结算时进银行"。 */
