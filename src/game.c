@@ -3707,6 +3707,25 @@ void WrenchStartSwing(float charge) {
        现在换成挥空的风声 + 一下轻微屏幕冲击。 */
     PlaySfx(SFX_THROW, 0.55f);
     AddShake(0.12f, 0.07f);
+    /* 第 3 轮：挥空也要有准星反馈（命中时会被更亮的标记覆盖） */
+    { extern float wrenchSwingFxT; wrenchSwingFxT = WRENCH_SWING_TIME * 1.6f; }
+}
+
+/* ==================================================================
+ * 2026-11-08（第 3 轮）：**测试钩子** —— 直接触发一次挥击
+ * ------------------------------------------------------------------
+ * 挥击平时由"按住左键 → 松开"驱动，测试里没有输入系统。
+ * 这个钩子只做状态机那几步（和真实按键后做的事一样），
+ * 生产路径不调用。先例：ScavengerGrabTest / RunUpgSetLevel。
+ * ================================================================== */
+void WrenchSwingStartForTest(float charge) {
+    if (charge < 0.0f) charge = 0.0f;
+    if (charge > 1.0f) charge = 1.0f;
+    wrenchSwingT     = WRENCH_SWING_TIME * DiffWrenchWindowMul();
+    wrenchSwingPower = 0.70f + 0.30f * charge;
+    wrenchSwingHit   = 0;
+    wrenchHitMask = 0;
+    wrenchSwingFxT = WRENCH_SWING_TIME * 1.6f;
 }
 
 /* ---- 每帧推进挥击动画，在命中帧结算 ---- */
@@ -3731,6 +3750,8 @@ void WrenchTick(float dt) {
 float wrenchCharge = 0.0f;    /* 0..1 */
 /* 第 1 轮：扳手命中闪光剩余秒数（HUD 画准星命中标记用） */
 float wrenchHitFlashT = 0.0f;
+/* 第 3 轮：**挥空**的暗标记（与挥击同长）—— 让"挥了但没打中"也看得见 */
+float wrenchSwingFxT  = 0.0f;
 static int  wrenchPrev = 0;
 static int  wrenchInit = 0;
 /* ===== v2.5.00 **装填闩** =====
@@ -5488,6 +5509,7 @@ void Update(float dt) {
     EnsureThrowSelectedValid();   /* v1.14：手里不能是空的 */
     if (lastHitTimer > 0.0f) lastHitTimer -= dt;   /* v1.15：命中数字淡出 */
     if (wrenchHitFlashT > 0.0f) wrenchHitFlashT -= dt;   /* 第 1 轮：扳手命中闪光 */
+    if (wrenchSwingFxT  > 0.0f) wrenchSwingFxT  -= dt;   /* 第 3 轮：挥空暗标记 */
     UpdateMonster(dt);
     { extern void UpdateMonster2(float); UpdateMonster2(dt); }
     { extern void UpdateMonster3(float); UpdateMonster3(dt); }   /* v2.4.12 第二只 */

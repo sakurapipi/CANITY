@@ -2655,12 +2655,19 @@ void DrawHUD(void) {
      * 没有任何确认 —— 分不清"打空了"和"打中了但怪没退"。
      * 这里在准星四周画四道短线，命中后 0.22 秒内淡出。
      * ================================================================== */
-    if (wrenchHitFlashT > 0.0f) {
-        extern float wrenchHitFlashT;
+    /* 第 3 轮：**挥空**也要有反馈 —— 命中用亮色，挥空用暗色。
+       原来打空时屏幕不动，玩家分不清"挥了没打中"和"没挥出去"。 */
+    if (wrenchHitFlashT > 0.0f || wrenchSwingFxT > 0.0f) {
+        extern float wrenchHitFlashT, wrenchSwingFxT;
+        int isHit = (wrenchHitFlashT > 0.0f);
         int cx3 = winW / 2, cy3 = winH / 2;
         int len = UIS(14), gap = UIS(6);
-        float a = wrenchHitFlashT / 0.22f;
-        unsigned int mc = 0x00FFE080u;
+        float a = isHit ? (wrenchHitFlashT / 0.22f)
+                        : (wrenchSwingFxT / (0.14f * 1.6f));
+        if (a > 1.0f) a = 1.0f;
+        if (a < 0.0f) a = 0.0f;
+        /* 命中 = 亮橙黄；挥空 = 灰蓝（明显不同，不糊弄得过去） */
+        unsigned int mc = isHit ? 0x00FFE080u : 0x00708090u;
         /* 直接写像素（PlotUiPixel 已随文本层搬到 ui_text.c，且是 static）——
            这里就一个 HUD 标记，不值得为它开新 API。 */
         {

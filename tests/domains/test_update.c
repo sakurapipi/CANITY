@@ -63,7 +63,34 @@ static void test_smoke_blinds_the_monster(void) {
     monster.active = 0;
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 3 轮）：**空挥扳手要有准星反馈**
+ * ------------------------------------------------------------------
+ * 实机反馈：空挥只有摆动 + 冷却，准星没有闪光 ——
+ * 玩家分不清"挥了但没打中"和"根本没挥出去"。
+ * 现在挥出去就置 wrenchSwingFxT（暗标记），命中另有更亮的。
+ * ================================================================ */
+
+static void test_empty_wrench_swing_leaves_a_visible_marker(void) {
+    extern float wrenchSwingFxT, wrenchHitFlashT;
+    extern void  WrenchSwingStartForTest(float charge);
+
+    enter_playing();
+    wrenchSwingFxT = 0.0f;
+    wrenchHitFlashT = 0.0f;
+
+    WrenchSwingStartForTest(0.5f);
+    CHECK(wrenchSwingFxT > 0.0f,
+          "swinging must set a visible marker even when nothing is hit");
+
+    /* 每帧递减，最终归零（不能永久留着） */
+    Update(0.05f);
+    CHECK(wrenchSwingFxT >= 0.0f, "the marker must decay, never go negative");
+}
+
 void TestSuite_update(void) {
     test_training_pad_refills_items();
     test_smoke_blinds_the_monster();
+    test_empty_wrench_swing_leaves_a_visible_marker();
 }

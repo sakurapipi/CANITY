@@ -204,6 +204,8 @@ void GenerateLevel(void);
 void UnstickPlayer(void);
 /* 第 1 轮：扳手命中闪光（HUD 用）*/
 extern float wrenchHitFlashT;
+/* 第 3 轮：挥空的暗标记（与挥击同长）*/
+extern float wrenchSwingFxT;
 int ShotBlocked(float x, float y);
 int SpotClear(float x, float y, float minD, int selfKind, int selfIdx);
 
