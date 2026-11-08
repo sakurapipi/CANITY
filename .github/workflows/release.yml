@@ -67,6 +67,7 @@ jobs:
         shell: msys2 {0}
         run: |
           python -X utf8 tools/build_sources.py --check
+          python -X utf8 tools/content_check.py
           python -X utf8 tools/build_validate.py
           cp canity_verify.exe canity.exe
 
