@@ -3689,6 +3689,8 @@ void WrenchStartSwing(float charge) {
             extern float pickupMsgTimer;
             pickupMsg = (g_lang == LANG_ZH) ? "扳手次数用完了" : "WRENCH USES SPENT";
             pickupMsgTimer = 1.2f;
+            /* 2026-11-08（第 4 轮）：HINT_WRENCH 文案写好了却从没触发过 */
+            { extern void HintOnce(int); HintOnce(6); }
             return;
         }
         wrenchLastUsed++;
@@ -5207,6 +5209,10 @@ void Update(float dt) {
                     }
                 }
                 carryGold += shardGain;    /* v1.8：先记在待上缴里 */
+                /* 2026-11-08（第 4 轮）：HINT_GOLD 文案写好了却从没触发过 ——
+                   第一次拿到金币时教一句"钱在结算时进银行"。 */
+                { extern void HintOnce(int); extern int HINT_GOLD_DUMMY(void);
+                  (void)HINT_GOLD_DUMMY; HintOnce(2); }
                 totalGoldEarned += shardGain;
                 PlaySfx(SFX_PICKUP, 0.55f);
                 MakeNoise(posX, posY, 8.0f * SkillSearchNoiseMul() * BenchSearchQuiet());

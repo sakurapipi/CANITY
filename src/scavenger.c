@@ -567,6 +567,8 @@ void UpdateScavenger(float dt) {
                              * (SCAV_CATCH_SAN_MAX - SCAV_CATCH_SAN_MIN);
                 if (loss > SCAV_CATCH_SAN_MAX) loss = SCAV_CATCH_SAN_MAX;
                 sanity -= loss * RunDamageTakenMul();
+                /* 2026-11-08（第 4 轮）：第一次被抓住时教"按 K 丢钱引开" */
+                { extern void HintOnce(int); HintOnce(5); }
                 /* 第 9 轮「以牙还牙」：挨了一下之后 3 秒跑更快 */
                 { extern int SkillCounterBackOwned(void);
                   extern float retaliateT;
