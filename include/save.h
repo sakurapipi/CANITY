@@ -8,7 +8,6 @@
 
 #include "common.h"
 #include "relics.h"
-#include "game.h"
 
 #define SAVE_MAGIC 0x43414E32u   /* "CAN2" */
 /* 存档**格式**版本。v5 在末尾追加了 HUD 详细度 / QTE 提示两个字段。

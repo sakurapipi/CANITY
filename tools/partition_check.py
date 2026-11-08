@@ -177,6 +177,24 @@ def check_content_hub_isolation(bad):
     return bad
 
 
+def check_game_h_is_private(bad):
+    """S5：game.h 只允许 game.c 与测试引用（其余文件请用 *_api.h）。"""
+    allowed = ('src/game.c', 'tests/')
+    for root, _d, fs in os.walk(os.path.join(ROOT, 'src')):
+        for f in sorted(fs):
+            if not f.endswith('.c'):
+                continue
+            p = os.path.join(root, f)
+            rel = os.path.relpath(p, ROOT).replace('\\', '/')
+            if any(rel.startswith(a) for a in allowed):
+                continue
+            src = io.open(p, encoding='utf-8', errors='replace').read()
+            for i, ln in enumerate(src.split('\n'), 1):
+                if '#include "game.h"' in ln:
+                    bad.append((rel, i, '#include "game.h"（请改用 *_api.h）'))
+    return bad
+
+
 def main():
     bad = []
     for p in iter_files():
@@ -205,8 +223,11 @@ def main():
     # 规则 S4：内容中枢不许反向依赖系统
     hub_bad = check_content_hub_isolation([])
 
-    if not bad and not save_bad and not owner_bad and not hub_bad:
-        print('partition: OK  (S1 系统头 / S2 存档 / S3 符号归属 / S4 中枢隔离)')
+    # 规则 S5：game.h 私有化
+    priv_bad = check_game_h_is_private([])
+
+    if not bad and not save_bad and not owner_bad and not hub_bad and not priv_bad:
+        print('partition: OK  (S1 系统头 / S2 存档 / S3 符号归属 / S4 中枢隔离 / S5 game.h 私有)')
         return 0
 
     if bad:
@@ -246,6 +267,13 @@ def main():
         print('为什么不行：中枢一旦认识系统，就变成上帝对象 ——')
         print('所有系统都认识它、它也认识所有系统，耦合又回到原样。')
         print('修法：中枢只允许 include common.h / content_db.h。')
+    if priv_bad:
+        print('partition: FAIL  —— 有 %d 处绕开 *_api.h 直接拿 game.h' % len(priv_bad))
+        for rel, ln, what in priv_bad:
+            print('  %-38s %4d  %s' % (rel, ln, what))
+        print()
+        print('为什么不行：game.h 是 game.c 的私有头。别的文件一旦引用它，')
+        print('就又能看到那 160 个全局，前面拆出来的边界立刻失效。')
     return 1
 
 
