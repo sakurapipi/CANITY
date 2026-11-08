@@ -1153,6 +1153,52 @@ static void test_new_save_records_rng_version(void) {
     }
 }
 
+
+/* ==================================================================
+ * 2026-11-08（第 14 轮）：**补 warden / collector 的零测试域**
+ * ------------------------------------------------------------------
+ * 架构审计：warden 只有 1/16 个函数被测试覆盖、collector 是 0/14。
+ * 这两个都是"会直接伤害玩家"的系统，一点覆盖都没有太危险。
+ *
+ * 本轮只做**只读断言**（状态查询 + 复位），不碰行为逻辑 ——
+ * 行为用例要构造完整对局，风险和工作量都不适合塞进这一轮。
+ * ================================================================ */
+
+extern int   WardenActive(void);
+extern int   WardenBlocking(void);
+extern int   WardenChasing(void);
+extern void  WardenReset(void);
+extern float WardenSpeedNow(void);
+extern float WardenChaseSpeedNow(void);
+
+static void test_warden_reset_clears_state(void) {
+    WardenReset();
+    CHECK(!WardenActive(), "after a reset the warden must be inactive");
+    CHECK(!WardenBlocking(), "a reset warden must not be blocking the exit");
+    CHECK(!WardenChasing(), "a reset warden must not be chasing");
+
+    /* 速度常量必须是正数（0 会让它永远站住，等于没威胁） */
+    CHECK(WardenSpeedNow() > 0.0f, "the warden patrol speed must be > 0");
+    CHECK(WardenChaseSpeedNow() > 0.0f, "the warden chase speed must be > 0");
+    CHECK(WardenChaseSpeedNow() >= WardenSpeedNow(),
+          "chasing must not be slower than patrolling");
+}
+
+extern int   CollectorActive(void);
+extern int   CollectorBounty(void);
+extern float CollectorX(void);
+extern float CollectorY(void);
+
+static void test_collector_starts_inactive(void) {
+    extern void CollectorReset(void);
+    CollectorReset();
+    CHECK(!CollectorActive(), "the collector must start inactive after a reset");
+    CHECK(CollectorBounty() >= 0, "bounty must never be negative");
+    /* 未出场时坐标不该是 NaN */
+    CHECK(CollectorX() == CollectorX(), "collector x must not be NaN");
+    CHECK(CollectorY() == CollectorY(), "collector y must not be NaN");
+}
+
 void TestSuite_world(void) {
     test_global_balance_invariants();
     test_theme_depth_bands();
@@ -1169,6 +1215,8 @@ void TestSuite_world(void) {
     test_room_props();
     test_prop_layers();
     test_new_save_records_rng_version();
+    test_warden_reset_clears_state();
+    test_collector_starts_inactive();
     test_rng_engines_are_deterministic_and_distinct();
     test_suspicion_best_uses_propagation();
     test_sound_propagation();
