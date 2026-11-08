@@ -244,9 +244,16 @@ def main():
     # 鼠标悬停：主菜单用 HitTestMenu，看 menuSelection 是否跟随
     cx = u32.GetSystemMetrics(0) // 2
     cy = u32.GetSystemMetrics(1) // 2
+    # 2026-11-08：基准值必须**点击前一刻**取 ——
+    # 前面按过 ENTER，它的 menuConfirm 是下一帧才消费的；
+    # 拿几帧之前的状态当基准会把"ENTER 的延迟效果"误判成"点击的效果"。
+    time.sleep(0.35)
+    st_before_click = g.ri("currentState")
     g.click_at(10, 10)          # 先把鼠标移开（点角落，不该触发任何菜单项）
-    check("空白处点击不误触发", g.ri("currentState") == st,
-          "state=%s" % STATE_NAME.get(g.ri("currentState"), "?"))
+    check("空白处点击不误触发", g.ri("currentState") == st_before_click,
+          "before=%s after=%s"
+          % (STATE_NAME.get(st_before_click, "?"),
+             STATE_NAME.get(g.ri("currentState"), "?")))
 
     # ---------- 安全屋（5 页签 + 行）----------
     print("\n[安全屋]")
