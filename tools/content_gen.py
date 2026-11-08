@@ -30,8 +30,10 @@
 import io
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -125,6 +127,8 @@ def main(argv):
         print(__doc__)
         return 2
     a = parse_args(argv[1:])
+    if '--self-test' in argv or a.get('self-test'):
+        return self_test()
     edits, err = plan_skill(a)
     if err:
         print('  ✗ %s' % err)
@@ -146,5 +150,154 @@ def main(argv):
     return 1
 
 
+# ======================================================================
+# 2026-11-09（第 8 轮）：--self-test —— 在临时副本上真跑一遍插入
+# ======================================================================
+
+def _array_span(src, name):
+    """找到 `name ... = {` 的花括号配对区间，返回 (开括号位置, 闭括号位置)。"""
+    m = re.search(re.escape(name) + r'[^=]*=\s*\{', src)
+    if not m:
+        return None
+    open_i = src.index('{', m.start())
+    depth = 0
+    i = open_i
+    while i < len(src):
+        if src[i] == '{':
+            depth += 1
+        elif src[i] == '}':
+            depth -= 1
+            if depth == 0:
+                return open_i, i
+        i += 1
+    return None
+
+
+def _append_to_array(src, name, text):
+    """在数组的闭合 } 前追加 text（自动补逗号）。"""
+    span = _array_span(src, name)
+    if not span:
+        raise RuntimeError('找不到数组 %s' % name)
+    _open, close = span
+    head = src[:_open]
+    body = src[_open:close]
+    tail = src[close:]
+    if not body.rstrip().endswith(','):
+        body = body.rstrip() + ','
+    body = body + '\n    ' + text + '\n'
+    return head + body + tail
+
+
+def _apply_on(root, en, zh, short, branch, rank, cost):
+    """在 root 指向的目录上执行全部插入。返回 (ok, 说明)。"""
+    def rd(rel):
+        return io.open(os.path.join(root, rel), encoding='utf-8', errors='replace').read()
+
+    def wr(rel, s):
+        io.open(os.path.join(root, rel), 'w', encoding='utf-8', newline='\n').write(s)
+
+    common = rd('include/common.h')
+    skills = rd('src/skills.c')
+    ui = rd('src/ui.c')
+
+    m = re.search(r'#define\s+SKILL_COUNT\s+(\d+)', common)
+    if not m:
+        return False, '找不到 SKILL_COUNT'
+    count = int(m.group(1))
+
+    # ① SKILL_COUNT +1
+    common = common.replace(m.group(0), '#define SKILL_COUNT %d' % (count + 1), 1)
+
+    # ② 枚举加一项（在 SK 枚举的闭合 } 前）
+    span = None
+    mm = re.search(r'enum\s*\{[^}]*SK_QUIET[^}]*\}', common, re.S)
+    if not mm:
+        return False, '找不到 SK_ 枚举'
+    enum_txt = mm.group(0)
+    new_enum = enum_txt[:-1].rstrip()
+    if not new_enum.endswith(','):
+        new_enum += ','
+    new_enum += '\n    SK_GEN_%s   /* 生成器测试项 */\n}' % re.sub(r'\W', '_', en)
+    common = common.replace(enum_txt, new_enum, 1)
+
+    # ③ 表行
+    skills = _append_to_array(
+        skills, 'skillDefs',
+        '{"%s", "%s", %d, %d, {%d,0,0}, 0, -1, 0},' % (en, zh, branch, rank, cost))
+
+    # ④ 坐标（下一格）
+    DX, DY = 0.1221, 0.1353
+    X0, Y0 = 0.5 - DX * 7 / 2, 0.5 - DY * 4 / 2
+    col, rowi = count % 8, count // 8
+    skills = _append_to_array(skills, 'kNodeNX', '%.4ff,' % (X0 + col * DX))
+    skills = _append_to_array(skills, 'kNodeNY', '%.4ff,' % (Y0 + rowi * DY))
+
+    # ⑤ 短名
+    skills = _append_to_array(skills, 'kShortNames', '"%s",' % short)
+
+    # ⑥ 绘制列表
+    ui = _append_to_array(ui, 'kSkillList', '%d,' % count)
+
+    wr('include/common.h', common)
+    wr('src/skills.c', skills)
+    wr('src/ui.c', ui)
+    return True, '插入完成'
+
+
+def _verify(root):
+    """用正则复查四表是否对齐。"""
+    def rd(rel):
+        return io.open(os.path.join(root, rel), encoding='utf-8', errors='replace').read()
+
+    common, skills, ui = rd('include/common.h'), rd('src/skills.c'), rd('src/ui.c')
+    count = int(re.search(r'#define\s+SKILL_COUNT\s+(\d+)', common).group(1))
+
+    def n_items(src, name):
+        span = _array_span(src, name)
+        body = src[span[0]:span[1]]
+        body = re.sub(r'/\*.*?\*/', '', body, flags=re.S)
+        return len([x for x in re.split(r'[,\s]+', body[1:]) if x.strip()])
+
+    return [
+        ('SKILL_COUNT = %d' % count, count == 41),
+        ('skillDefs 行数 == SKILL_COUNT',
+         len(re.findall(r'\{\s*"', _array_body(skills, 'skillDefs'))) == count),
+        ('kNodeNX 项数 == SKILL_COUNT', n_items(skills, 'kNodeNX') == count),
+        ('kNodeNY 项数 == SKILL_COUNT', n_items(skills, 'kNodeNY') == count),
+        ('kShortNames 项数 == SKILL_COUNT',
+         len(re.findall(r'"[^"]*"', _array_body(skills, 'kShortNames'))) == count),
+        ('kSkillList 项数 == SKILL_COUNT', n_items(ui, 'kSkillList') == count),
+    ]
+
+
+def _array_body(src, name):
+    span = _array_span(src, name)
+    return src[span[0]:span[1]] if span else ''
+
+
+def self_test():
+    tmp = tempfile.mkdtemp(prefix='canity_gen_')
+    try:
+        for rel in ('include', 'src'):
+            shutil.copytree(os.path.join(ROOT, rel), os.path.join(tmp, rel))
+        ok, why = _apply_on(tmp, 'GEN TEST', '生成器测试', 'GENTST', 4, 1, 2600)
+        if not ok:
+            print('  ✗ %s' % why)
+            return 1
+        print('  ✓ 副本上插入完成')
+        bad = 0
+        for label, good in _verify(tmp):
+            print('   %s %s' % ('✓' if good else '✗', label))
+            if not good:
+                bad += 1
+        print()
+        print('  %s 四表对齐' % ('✓' if bad == 0 else '✗ 有 %d 处不对齐' % bad))
+        return 0 if bad == 0 else 1
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
+
+
