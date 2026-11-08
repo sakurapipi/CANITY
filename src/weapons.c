@@ -1,5 +1,8 @@
 #include "weapons.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "entity.h"
 #include "skills.h"   /* posX/battery/stamina/sanity 在这里 */
 

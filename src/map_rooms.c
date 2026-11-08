@@ -20,7 +20,10 @@
 #include "room_template.h"
 #include "map_rooms.h"
 #include "core_rng.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 
 /* ==================================================================
  * 2026-11-08（第 6 轮）：**关卡重放要能跨版本复现**

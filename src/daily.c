@@ -36,7 +36,10 @@
 #include "common.h"
 #include "save.h"
 #include "daily.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "wallet.h"
 #include "audio.h"
 #include "lang.h"   /* LANG_ZH */

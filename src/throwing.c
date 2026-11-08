@@ -8,7 +8,10 @@
  *   · game.c 暴露的公开变量（下面 extern 声明）
  */
 #include "common.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "state.h"
 #include "suspicion.h"
 #include "throwing.h"

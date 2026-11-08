@@ -11,7 +11,10 @@
  */
 #include "common.h"
 #include "plat.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "render.h"
 #include "ui.h"
 #include "save.h"

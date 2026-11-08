@@ -8,7 +8,10 @@
  *   9×600 + 3×2000 + 3×1400 = 15600 金币，9 核心 —— 约 34 局主线
  */
 #include "common.h"
-#include "game.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
 #include "skills.h"
 #include "content_db.h"
 #include "upgrade_run.h"
