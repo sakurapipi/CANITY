@@ -29,8 +29,9 @@ DOCS = os.path.join(ROOT, 'docs', 'modules')
 # 域定义：域 -> (实现文件, 契约头, 卡片)
 DOMAINS = {
     'core':     ([], ['core.h'], None),
-    'phase':    ([], ['phase.h'], 'phase.md'),
-    'hatch':    (['hatch.c'], ['hatch.h'], 'hatch.md'),
+    'phase':    (['domain/phase/phase.c'], ['phase.h'], 'phase.md'),
+    'hatch':    (['hatch.c', 'domain/hatch/hatch_place.c'], ['hatch.h'], 'hatch.md'),
+    'collapse': (['domain/collapse/collapse.c'], ['collapse.h'], 'collapse.md'),
     'throwing': (['throwing.c'], ['throwing.h'], 'throwing.md'),
     'skills':   (['skills.c'], ['skills.h'], 'skills.md'),
     'lockbox':  (['lockbox.c'], ['lockbox.h'], 'lockbox.md'),
@@ -49,10 +50,13 @@ def count_lines(path):
 
 
 def find_c(name):
+    direct = os.path.join(SRC, name.replace('/', os.sep))
+    if os.path.exists(direct):
+        return direct
     for root, _, files in os.walk(SRC):
-        if name in files:
-            return os.path.join(root, name)
-    return os.path.join(SRC, name)
+        if os.path.basename(name) in files:
+            return os.path.join(root, os.path.basename(name))
+    return direct
 
 
 def extern_count(path):

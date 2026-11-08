@@ -65,6 +65,10 @@ typedef struct {
 extern Hatch hatches[MAX_HATCHES];
 extern int   hatchCount;
 
+/* 舱门带来的一次性 buff 计时（HUD 与玩法都会读）。
+ * 第 3 轮：定义搬到 src/domain/hatch/hatch_place.c，这里声明。 */
+extern float hatchLightsT, hatchGoldMulT, hatchBloodT, hatchSpeedT;
+
 void HatchReset(void);
 int  HatchAdd(float x, float y, int kind, int themeId);
 void HatchSetState(int idx, int state);          /* 唯一的状态写入口 */

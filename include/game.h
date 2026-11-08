@@ -196,6 +196,12 @@ int IsActionPressed(ActionId act);
 
 /* ---- 世界碰撞 ---- */
 int Blocked(float x, float y);
+/* 重新生成当前层（换层 / 崩塌重掷都走它）。
+ * 第 3 轮：collapse 域搬到 src/domain/collapse/ 后需要跨文件调用。 */
+void GenerateLevel(void);
+/* 落点被阻塞时把玩家挪到最近可站处（相位传送 / 藏身柜共用）。
+ * 第 3 轮：phase 域搬到 src/domain/phase/ 后需要跨文件调用。 */
+void UnstickPlayer(void);
 int ShotBlocked(float x, float y);
 int SpotClear(float x, float y, float minD, int selfKind, int selfIdx);
 
