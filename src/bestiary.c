@@ -23,100 +23,31 @@ int bestiaryCaught[BESTIARY_COUNT] = {0};
  * 程序化数据源：每个函数读的是**真实常量**，不是写死的数字
  * ================================================================== */
 
-static float bstSpeedHunter(void) { return monster.speed; }
-static float bstHearHunter(void)  { return 8.0f; }
-static float bstChaseHunter(void) { return 14.0f; }
 
 /* 2026-11-06：追光怪变成数组（lightBeasts[]），旧名字是宏指向 [0]。
    这里原来在函数体里写了 `extern Monster lightBeast;`，
    宏展开后变成 `extern Monster lightBeasts[0];` —— 非法声明。
    改成直接用 entity.h 里的声明即可。 */
-static float bstSpeedLight(void) { return lightBeast.speed; }
-static float bstHearLight(void)  { return 0.0f; }
-static float bstChaseLight(void) { return 10.0f; }
 
-static float bstSpeedJumper(void) { return 0.0f; }
-static float bstHearJumper(void)  { return 3.0f; }
-static float bstChaseJumper(void) { return 0.0f; }
 
-static float bstSpeedCollector(void) { extern float CollectorSpeedNow(void); return CollectorSpeedNow(); }
-static float bstHearCollector(void)  { return 0.0f; }
-static float bstChaseCollector(void) { return 10.0f; }
 
-static float bstSpeedScavenger(void) { extern float ScavengerSpeedNow(void); return ScavengerSpeedNow(); }
-static float bstHearScavenger(void)  { return 0.0f; }
-static float bstChaseScavenger(void) { return 25.0f; }
 
-static float bstSpeedWarden(void) { extern float WardenChaseSpeedNow(void); return WardenChaseSpeedNow(); }
-static float bstHearWarden(void)  { return 4.0f; }
-static float bstChaseWarden(void) { return 5.0f; }
 
 /* 2026-11-05 宝箱怪：数值全部从 mimic.h 的真实常量读，
    改一个常量图鉴自动跟着变（这是本文件的设计原则） */
 #include "mimic.h"
-static float bstSpeedMimic(void) { return MIM_SPEED_MUL; }       /* 相对玩家的倍数 */
-static float bstHearMimic(void)  { return 0.0f; }                /* 它不听声音，只装死 */
-static float bstChaseMimic(void) { return MIM_CHASE_TIME; }
+       /* 相对玩家的倍数 */
+                /* 它不听声音，只装死 */
 
 /* ---- 表：加一种怪 = 加一行 ---- */
-const BestiaryEntry bestiary[BESTIARY_COUNT] = {
-    {
-        "SOUND HUNTER", "听声鬼", "NOISE", "声音", 0,
-        bstSpeedHunter, bstHearHunter, bstChaseHunter,
-        "It is blind. It walks to the last sound it heard.",
-        "它看不见。它走向最后听到的声音。",
-        "Walk quietly, or throw something far away and let it go there.",
-        "走轻一点；或者把东西扔远，让它过去。"
-    },
-    {
-        "LIGHT BEAST", "追光鬼", "LIGHT", "光", 0,
-        bstSpeedLight, bstHearLight, bstChaseLight,
-        "It only sees your flashlight. It is fast.",
-        "它只看得见你的手电。很快。",
-        "Kill the light and it loses you. So does hiding.",
-        "关掉手电它就丢了目标。躲起来也行。"
-    },
-    {
-        "FACE JUMPER", "面相鬼", "QTE", "突袭", 0,
-        bstSpeedJumper, bstHearJumper, bstChaseJumper,
-        "It waits next to cover and springs when you are close.",
-        "它躲在掩体旁边，你靠近就扑出来。",
-        "Back off the moment you hear it. Break free when grabbed.",
-        "听到它的动静立刻后退。被抓时按提示挣脱。"
-    },
-    {
-        "THE COLLECTOR", "拾荒者", "GOLD", "金币", 0,
-        bstSpeedCollector, bstHearCollector, bstChaseCollector,
-        "It smells money. Slow, but it never stops.",
-        "它闻得到钱。慢，但不停。",
-        "Drop gold and it loses interest. Or strike it to take the bounty back.",
-        "丢钱它就不追了；或者打它把赃款抢回来。"
-    },
-    {
-        "THE SCAVENGER", "清道夫", "TIME", "时间", 0,
-        bstSpeedScavenger, bstHearScavenger, bstChaseScavenger,
-        "Stand still too long, or hide twice, and it comes for you.",
-        "你站着不动太久，或者躲两次，它就来找你。",
-        "It is slow. Keep moving, and never use the same locker twice.",
-        "它慢。保持移动，别连续用同一个柜子。"
-    },
-    {
-        "THE WARDEN", "守门人", "ROAD", "道路", 0,
-        bstSpeedWarden, bstHearWarden, bstChaseWarden,
-        "Once the breaker is on, something patrols the way out.",
-        "配电箱通电之后，有东西在出口那条路上巡逻。",
-        "It only sees motion. Stand still and it walks past you.",
-        "它只对移动有反应。站着不动它会走过去。"
-    },
-    {
-        "MIMIC", "宝箱怪", "TRAP", "陷阱", 0,
-        bstSpeedMimic, bstHearMimic, bstChaseMimic,
-        "It looks like a crate. It is not. You cannot kill it.",
-        "它长得像箱子。它不是。打不死。",
-        "Echo reveals it. Wrench flushes it out. Hiding loses it.",
-        "回声箭能照出来；扳手能敲出原形；躲起来能甩掉。"
-    },
-};
+/* ==================================================================
+ * 2026-11-09（第 4 轮）：**数据搬到 src/content/content_monsters.c**
+ * ------------------------------------------------------------------
+ * 这个文件现在只负责逻辑：三阶揭示、进度计数、查询。
+ * 表本体在 content/ 层，`bestiary[]` 的 extern 声明仍在 bestiary.h，
+ * 所以引用方一处都不用改。
+ * ================================================================ */
+
 
 /* ==================================================================
  * 认识进度

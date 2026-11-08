@@ -20,6 +20,13 @@ DESC = '图鉴是否登记进内容中枢（加了表行却不登记 = 中枢里
 
 def run():
     out = []
+    # 表在 content/ 层，登记逻辑在 bestiary.c —— 两个都要读
+    tbl = None
+    for c in ('src/content/content_monsters.c', 'src/bestiary.c'):
+        p = os.path.join(ROOT, c)
+        if os.path.isfile(p):
+            tbl = io.open(p, encoding='utf-8', errors='replace').read()
+            break
     best = io.open(os.path.join(ROOT, 'src', 'bestiary.c'),
                    encoding='utf-8', errors='replace').read()
 
@@ -30,7 +37,7 @@ def run():
 
     # 每个图鉴行的英文名都必须在登记循环的覆盖范围内
     body_m = re.search(r'const BestiaryEntry bestiary\[[^\]]*\]\s*=\s*\{(.*?)\n\};',
-                       best, re.S)
+                       tbl or best, re.S)
     rows = re.findall(r'\{\s*"([^"]+)"', body_m.group(1)) if body_m else []
     loop_ok = re.search(r'for\s*\(\s*i\s*=\s*0\s*;\s*i\s*<\s*BESTIARY_COUNT\s*;\s*i\+\+\s*\)',
                         best) is not None

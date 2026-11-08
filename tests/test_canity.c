@@ -759,7 +759,7 @@ static void test_mimic_contract(void) {
     const char* gm  = read_file("src/game.c");
     const char* mc  = read_file("src/mimic.c");
     const char* mh  = read_file("include/mimic.h");
-    const char* bs  = read_file("src/bestiary.c");
+    const char* bs = read_file("src/content/content_monsters.c");
     const char* rd  = read_file("src/render.c");
 
     /* ① 生成期替换必须在 ApplyLockboxes 之前 */

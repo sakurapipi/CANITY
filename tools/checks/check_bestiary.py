@@ -25,8 +25,16 @@ def run():
     out = []
     common = io.open(os.path.join(ROOT, 'include', 'common.h'),
                      encoding='utf-8', errors='replace').read()
-    best = io.open(os.path.join(ROOT, 'src', 'bestiary.c'),
-                   encoding='utf-8', errors='replace').read()
+    # 2026-11-09（第 4 轮）：表已搬到 content/ 层，先找那里，回退旧位置
+    cand = [os.path.join(ROOT, 'src', 'content', 'content_monsters.c'),
+            os.path.join(ROOT, 'src', 'bestiary.c')]
+    best = None
+    for c in cand:
+        if os.path.isfile(c):
+            best = io.open(c, encoding='utf-8', errors='replace').read()
+            break
+    if best is None:
+        return [(False, '找不到图鉴表（content_monsters.c / bestiary.c 都不在）')]
 
     # 2026-11-09：BESTIARY_COUNT 实际在 include/bestiary.h（不在 common.h）
     best_h = io.open(os.path.join(ROOT, 'include', 'bestiary.h'),
