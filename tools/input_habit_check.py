@@ -60,6 +60,11 @@ class Game:
         self.syms = {}
 
     def launch(self):
+        if not os.path.isfile(self.exe):
+            raise SystemExit(
+                "找不到游戏 exe：%s\n"
+                "先跑 python tools/build_validate.py 生成 canity_verify.exe，\n"
+                "或用 --exe / 环境变量 CANITY_EXE 指定路径。" % self.exe)
         self.proc = subprocess.Popen([self.exe])
         self.pid = self.proc.pid
         for _ in range(120):
@@ -186,11 +191,24 @@ def check(name, ok, detail=""):
     return ok
 
 
+    # 2026-11-08：原来写死 canity_2.0.1.exe（早就不存在）。
+    # 现在按"项目根的 canity_verify.exe → 环境变量"的顺序找，并给出明确报错。
+def _find_default_exe(here):
+    env = os.environ.get("CANITY_EXE")
+    if env and os.path.isfile(env):
+        return env
+    for name in ("canity_verify.exe", "canity.exe"):
+        p = os.path.join(here, name)
+        if os.path.isfile(p):
+            return p
+    return os.path.join(here, "canity_verify.exe")   # 让上层给出可读报错
+
+
 def main():
     ap = argparse.ArgumentParser()
     # 默认找仓库根目录下的构建产物；也可用 --exe 或 CANITY_EXE 环境变量指定
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    default_exe = os.environ.get("CANITY_EXE") or os.path.join(here, "canity_2.0.1.exe")
+    default_exe = _find_default_exe(here)
     ap.add_argument("--exe", default=default_exe)
     args = ap.parse_args()
 
