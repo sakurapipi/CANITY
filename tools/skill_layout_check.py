@@ -54,6 +54,7 @@ def parse_norm(src):
     spoke = re.search(r'kSpokeRadius\[\s*\d+\s*\]\s*=\s*\{([^}]*)\}', src)
     cross = re.search(r'kCrossRadius\s*=\s*([0-9.]+)f', src)
     inner = re.search(r'kInnerRadius\s*=\s*([0-9.]+)f', src)
+    ghost = re.search(r'kGhostR\[4\]\s*=\s*\{([^}]*)\}', src)
     if not (spoke and cross and inner):
         return None
     radii = [float(x.rstrip('f')) for x in re.findall(r'[0-9.]+f?', spoke.group(1))]
@@ -62,7 +63,9 @@ def parse_norm(src):
         'radii': radii,
         'cross_r': float(cross.group(1)),
         'inner_r': float(inner.group(1)),
-        'cross_off': 36.0,      # kCrossAngleOff = 2π/10 = 36°
+        'cross_off': 108.0,     # 跨支王冠：-90 + 108 = 18° 起跳
+        'ghost_r': ([float(x.strip().rstrip('f')) for x in ghost.group(1).split(',') if x.strip()]
+                    if ghost else []),
     }
 
     sectors = None
@@ -93,18 +96,25 @@ def norm_pos(id_, cfg, origin_id, count):
     if id_ == origin_id:
         return 0.5, 0.5
     sectors = cfg['sectors']
+    if 30 <= id_ <= 33:
+        # 幽灵流派：-54°，半径读 kGhostR
+        gr = cfg.get('ghost_r') or []
+        r = gr[id_ - 30] if len(gr) > id_ - 30 else 0.26
+        ang = -math.pi / 2 + 2 * math.pi * 0.1
+        return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
     if id_ < 16:
         branch, row = id_ // 4, id_ % 4
     elif id_ >= 26:
         branch, row = 4, id_ - 26
     elif 20 <= id_ <= 24:
-        ang = -math.pi / 2 + 2 * math.pi * ((id_ - 20) + 0.5) / 5.0
+        # 与 C 一致：-90 + 72*(i-20)/5 + 18°（不再用 +0.5 的老写法）
+        ang = -math.pi / 2 + 2 * math.pi * (id_ - 20) / 5.0 + 2 * math.pi / 20.0
         r = cfg['inner_r']
         return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
     else:
         # 16..19：最外环，角度错开 36°
-        ang = (-math.pi / 2 + 2 * math.pi * (id_ - 16) / sectors
-               + math.radians(cfg['cross_off']))
+        ang = (-math.pi / 2 + math.radians(cfg['cross_off'])
+               + 2 * math.pi * (id_ - 16) / sectors)
         r = cfg['cross_r']
         return 0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r
     ang = -math.pi / 2 + 2 * math.pi * branch / sectors
