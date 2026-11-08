@@ -531,6 +531,8 @@ static inline int IsActionDown(ActionId act) {
     return keys[vk];
 }
 /* v8: 给外部模块用的公开包装（原来 IsActionDown 是 static） */
+
+/* ==================== 输入 ==================== */
 int ActionIsDown(int act) { return IsActionDown((ActionId)act); }
 
 
@@ -590,6 +592,8 @@ void EnsureThrowSelectedValid(void) {
 }
 
 /* v1.16 烟幕：落地生成，最多 MAX_SMOKE 朵 */
+
+/* ==================== 实体 · 怪物 ==================== */
 void SpawnSmoke(float x, float y) {
     for (int i = 0; i < MAX_SMOKE; i++) {
         if (smokes[i].active) continue;
@@ -670,6 +674,8 @@ int DecoyIntercept(void) {
 /* v3.3 胶水：落地生成一滩粘胶，半径 GLUE_RADIUS，持续 GLUE_LIFE。
    占满 MAX_GLUE 时**顶掉剩余时间最短的那个**（不是拒绝）——
    否则玩家在同一个门口连扔两瓶，第二瓶会静默消失。 */
+
+/* ==================== 实体 · 怪物 ==================== */
 void SpawnGlue(float x, float y) {
     int best = -1;
     float bestLife = 1e9f;
@@ -729,6 +735,8 @@ int SegmentInSmoke(float x0, float y0, float x1, float y1) {
  * 所以这里直接把那个槽重新激活就行 —— 不需要找新位置，
  * 也不会突破 MAX_CONTAINERS。
  * ================================================================ */
+
+/* ==================== 实体 · 怪物 ==================== */
 void MimicSpawnShell(int slot, float x, float y) {
     if (slot < 0 || slot >= MAX_CONTAINERS) return;
     containers[slot].x        = x;
@@ -744,6 +752,8 @@ void MimicSpawnShell(int slot, float x, float y) {
     uiDirty = 1;
 }
 
+
+/* ==================== 实体 · 怪物 ==================== */
 int MonsterCollect(Monster** out, int maxOut, int includeLightBeast) {
     int n = 0;
     for (int i = 0; i < MON_HUNTER_MAX && n < maxOut; i++)
@@ -754,6 +764,8 @@ int MonsterCollect(Monster** out, int maxOut, int includeLightBeast) {
 }
 
 /* 对所有猎手执行一次「瘫痪」——TIME STOP / STATIC FIELD 共用 */
+
+/* ==================== 实体 · 怪物 ==================== */
 void MonsterStunAll(float seconds) {
     Monster* list[MON_HUNTER_MAX + 1];
     int n = MonsterCollect(list, MON_HUNTER_MAX + 1, 1);
@@ -766,6 +778,8 @@ void MonsterStunAll(float seconds) {
 }
 
 /* 玩家是否在某朵烟里 */
+
+/* ==================== 玩家 · 移动/手电 ==================== */
 int PlayerInSmoke(void) {
     for (int i = 0; i < MAX_SMOKE; i++) {
         if (!smokes[i].active) continue;
@@ -893,6 +907,8 @@ void UpdateDynamicRes(double renderMs) {
     }
 }
 
+
+/* ==================== 输入 ==================== */
 void PollInput(void) {
     static int prevDown[256];
 
@@ -1169,6 +1185,8 @@ int SettingsRowCount(void) {
  *
  * 统一走这个函数：落点阻塞就在周围 1~4 格里找一个能站的。
  * ================================================================== */
+
+/* ==================== 玩家 · 移动/手电 ==================== */
 void UnstickPlayer(void) {
     if (!Blocked(posX, posY)) return;
     static const float ND[8][2] = {
@@ -1226,6 +1244,8 @@ int Blocked(float x, float y) {
    Blocked() 带 0.24 的半径，那是给玩家用的；弹丸如果也用它，
    出生点附近稍微贴墙就会立刻判定为「撞墙」—— 瓶子一扔就碎。
    这里改成取所在格子的中心来判断，边界行为稳定。 */
+
+/* ==================== 道具 · 投掷 ==================== */
 int ShotBlocked(float x, float y) {
     int cx = (int)floorf(x), cy = (int)floorf(y);
     if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return 1;
@@ -1798,6 +1818,8 @@ void FindFarthestCell(float* outX, float* outY) {
 #define LOCKBOX_PCT_CAP         70      /* 封顶（2026-11-05 用户：80 → 70，减轻开锁疲劳） */
 #define LOCKBOX_MIN_UNLOCKED     2      /* 永远留这么多个不锁的 */
 
+
+/* ==================== 道具 · 投掷 ==================== */
 static int LockboxPctForFloor(int lv) {
     if (lv < LOCKBOX_PCT_MIN_FLOOR) return 0;
     int pct = LOCKBOX_PCT_BASE + (lv - LOCKBOX_PCT_MIN_FLOOR) * LOCKBOX_PCT_STEP;
@@ -1955,6 +1977,8 @@ int ThemeRoomBudgetForLevel(int level, int training) {
     return want;
 }
 
+
+/* ==================== 世界 · 关卡 ==================== */
 void GenerateLevel(void) {
     /* ==================================================================
      * **崩塌标记的生命周期**
@@ -3065,6 +3089,8 @@ void UpdateExplored(void) {
         }
     }
 }
+
+/* ==================== 玩家 · 理智/体力 ==================== */
 int BatteryMax(void) {
     /* v2.2：SAVER 的 "cap -5" 代价现在真的生效 */
     /* ==================================================================
@@ -3080,6 +3106,8 @@ int BatteryMax(void) {
 }
 
 /* 手电每秒耗电：ECO 升级每级 -12% */
+
+/* ==================== 玩家 · 理智/体力 ==================== */
 float BatteryDrainRate(void) { return BATTERY_DRAIN * BenchBatterySaver() * SkillEcoMul() * RelicBatteryMul() * modBatteryMul * BenchFlashDrainMul() * RunUpgFlashMul(); }   /* v2.7 省电 */
 
 /* 安全屋回智速度：REST 升级每级 +25% */
@@ -3088,6 +3116,8 @@ float SafeHealRate(void) {
 }
 
 /* v1.8：理智流失随层数增长（原版是常量，导致经济净正、玩家不死） */
+
+/* ==================== 玩家 · 理智/体力 ==================== */
 float SanityDrainRate(void) {
     float base = isEndlessRun ? ENDLESS_SANITY_DRAIN : SANITY_DRAIN;
     int lv = currentLevel > 0 ? currentLevel - 1 : 0;
@@ -3151,6 +3181,8 @@ static int   calibStartLatch = 0;
 
    倍数 = 1 + min(1, CARRY / 历史最高)   → 1.0 ~ 2.0
    带 <20% 历史最高时利润 ×0.5（惩罚躺平：不能永远只带一点点） */
+
+/* ==================== 进度 · 存档 ==================== */
 int BankPreviewGain(int survived) {
     int profit=carryGold-carryAtRunStart;if(profit<0)profit=0;
     float pm=1.0f;
@@ -3158,6 +3190,8 @@ int BankPreviewGain(int survived) {
       profit=(int)(profit*pm*ExtractDepthMul(currentLevel)*ContractExitMul()*SkillExtractMul()+0.5f);}
     return WalletPreviewSettle(survived,profit);
 }
+
+/* ==================== 进度 · 存档 ==================== */
 void BankSettle(int survived) {
     lastRunGold=carryGold; lastRunCaught=CatchCountThisRun();
     int profit = carryGold - carryAtRunStart;   /* v6：本局净赚 = 现在 - 开局 */
@@ -3264,6 +3298,8 @@ float ExtractDepthMul(int level) {
      让钱主要影响「被听见」，玩家还有「走慢一点」的应对空间。 */
 
 /* 怪物当前的威胁分（不含金币） */
+
+/* ==================== 实体 · 怪物 ==================== */
 float MonsterThreatScore(void) {
 
     float sSpeed   = (THREAT_REF_SPEED  > 0.01f) ? monster.speed / THREAT_REF_SPEED : 1.0f;
@@ -3285,12 +3321,16 @@ float EndlessDepthBonus(int level) {
     return b;
 }
 
+
+/* ==================== 玩家 · 理智/体力 ==================== */
 float SanityMax(void) {
     float m = 100.0f + RelicMaxSanAdd()+BenchSanityAdd();
     if (m < 25.0f) m = 25.0f;
     return m;
 }
 
+
+/* ==================== 玩家 · 理智/体力 ==================== */
 float StaminaMax(void) {
     /* v3.0：改造树「耐力」+30 */
     float m = 100.0f + (float)RunStaminaAdd() + (float)BenchStaminaBonus();
@@ -3302,6 +3342,8 @@ float StaminaMax(void) {
 }
 
 /* v2.3：武器能量上限 */
+
+/* ==================== 玩家 · 理智/体力 ==================== */
 int EnergyMax(void) { return BenchEnergyMax((int)ENERGY_MAX); }   /* v2.7：弹匣/电池库/嗜血 */
 
 int UpgradeLevel(int kind) {
@@ -3380,6 +3422,8 @@ int WeaponDamageType(int id) {
 /* v2.1：对外统一的粒子接口。tint: 0 玻璃 / 1 血 / 2 尘 */
 
 /* 生成玻璃金币：撞击点产生随机扩散的金币 */
+
+/* ==================== 实体 · 怪物 ==================== */
 void SpawnShards(float x, float y, float vx, float vy, float charge) {
     int count = 6 + (int)(charge * 6);  /* 6~12 个金币 */
     for (int i = 0; i < MAX_SHOTS * SHARD_COUNT && count > 0; i++) {
@@ -3440,6 +3484,8 @@ int   echoMarkActive[ECHO_MARK_MAX];
 float echoMarkT[ECHO_MARK_MAX];      /* 剩余寿命（秒） */
 int   echoMarkKind[ECHO_MARK_MAX];   /* EMK_* */
 
+
+/* ==================== 道具 · 投掷 ==================== */
 void EchoMarksReset(void) {
     for (int i = 0; i < ECHO_MARK_MAX; i++) {
         echoMarkActive[i] = 0;
@@ -3450,6 +3496,8 @@ void EchoMarksReset(void) {
 }
 
 /* 在 (sx,sy) 周围 rad 格内记录所有怪物 */
+
+/* ==================== 道具 · 投掷 ==================== */
 void EchoMarksScan(float sx, float sy, float rad) {
     extern int   trainingMode;
 
@@ -3533,6 +3581,8 @@ void EchoMarksScan(float sx, float sy, float rad) {
 }
 
 /* 每帧推进标记寿命 —— 信息有时效才是信息 */
+
+/* ==================== 道具 · 投掷 ==================== */
 void EchoMarksTick(float dt) {
     for (int i = 0; i < ECHO_MARK_MAX; i++) {
         if (!echoMarkActive[i]) continue;
@@ -3832,6 +3882,8 @@ static void WrenchKnockUpdate(float dt) {
 /* v8：每日“不能开手电”/ SALVAGE keystone 会禁止点灯。
    所有自动点灯路径（摇电、满电重亮、读档）都必须走这里，
    否则玩家可以靠摇电绕过每日限制。 */
+
+/* ==================== 玩家 · 移动/手电 ==================== */
 static int FlashlightUseAllowed(void) {
     /* ==================================================================
      * 2026-11-06（**P1-1**）：**SK_SALVAGE 不再永久禁灯**
@@ -3850,6 +3902,8 @@ static int FlashlightUseAllowed(void) {
 /* 2026-11-05：给 HUD 用 —— 玩家是否真的站在门口。
    安全区（1.4 格）比门口（1.05 格）大，所以「在安全区里但没进门」
    是一段真实存在的状态，提示要能区分这两件事。 */
+
+/* ==================== 玩家 · 移动/手电 ==================== */
 int PlayerAtExit(void) {
     return (breakerOpen && Dist2(posX, posY, exitX, exitY) < EXIT_ENTER_R2 * EXIT_ENTER_R2);
 }
@@ -6688,6 +6742,8 @@ void StartGame(void) {
 
 /* 成就辅助：解锁并保存 */
 /* v6：UnlockAchievement 搬到 achievements.c（含 Steam 上报）*/
+
+/* ==================== 进度 · 存档 ==================== */
 static void UnlockAchievement(int idx) { extern void AchUnlock(int); AchUnlock(idx); }
 
 /* v6：改转发 */
@@ -6778,6 +6834,8 @@ static void CheckAchievements(void) {
        TEN MINUTES 的标记，清掉它就是错。已删除。 */
 }
 
+
+/* ==================== 输入 ==================== */
 void PauseGame(void) {
     /* v6：**出口弹窗状态必须重置** —— 否则暂停→主菜单→新局会带着
        上一次的弹窗标志进来，开局即被冻结。 */
@@ -6917,6 +6975,8 @@ void ApplySetting(int item, int value) {
     uiDirty = 1;
 }
 
+
+/* ==================== 输入 ==================== */
 void ActivateMenuItem(void) {
     /* v3.4：Hub 页 0 的「携带档位」行 —— 回车循环 25/50/75/100% */
     /* v6：银行页回车 = 切换携带比例 */
@@ -7366,6 +7426,8 @@ void CloseSkillPick(void) {
     uiDirty = 1;
 }
 
+
+/* ==================== 输入 ==================== */
 void ActivateHubRow(void) {
     /* v2.8：HUB 只剩技能树一页（基础属性升级已折进节点），节点式操作，
        Esc 回主菜单。原来那套"6 行升级 + Back 行"的分支整段删掉了。 */
@@ -7400,6 +7462,8 @@ void ActivateHubRow(void) {
     uiDirty = 1;
 }
 
+
+/* ==================== 输入 ==================== */
 void ActivateSettingRow(void) {
     int rows = SettingsRowCount();
     if (settingsSelection < 0 || settingsSelection >= rows) return;
@@ -7491,6 +7555,8 @@ void SkillDragMove(int mx, int my);
 void SkillDragEnd(void);
 int  SkillIsDragging(void);
 
+
+/* ==================== 输入 ==================== */
 void MouseToLogical(int* mx, int* my) {
     int cw = 0, ch = 0;
     PlatWindowSize(&cw, &ch);
@@ -8603,6 +8669,8 @@ int CanityKeyDown(int vk, int repeat) {
 #ifndef CANITY_WEB
 /* 地图形态变了之后刷新鼠标状态：**只有全屏图**才释放光标。
    小地图是角落叠层，鼠标继续锁在中心，边走边看。 */
+
+/* ==================== 世界 · 关卡 ==================== */
 static void MapCursorRefresh(void) {
     int wantCursor = (isMapOpen && mapFullScreen) ? 1 : 0;
     ForceCursor(wantCursor);
