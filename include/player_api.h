@@ -76,4 +76,12 @@ extern int sprintedThisLevel;
 
 extern float playerMoveSpeedNow;
 
+/* 来自 game.c 的乘法器（先补声明，定义仍在 game.c） */
+extern float modBatteryMul;
+extern float modSanityMul;
+extern float modNoiseMul;
+extern float modSpeedMul;
+
+
+
 #endif
