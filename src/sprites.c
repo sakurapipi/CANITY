@@ -399,18 +399,19 @@ static void BakeWrench(void) {
 /* ------------------------------------------------------------------ */
 /* 投掷物（左手持）                                                     */
 /* ------------------------------------------------------------------ */
-static void BakeItem(int id, int kind) {
-    cvClear();
-    float c = CANVAS_W * 0.5f, cy = 128.0f;
-    unsigned int main = 0x0040A060u, dark = 0x00102818u, hi = 0x0080E0A0u;
+typedef struct {
+    float c;
+    float cy;
+    unsigned int main;
+    unsigned int dark;
+    unsigned int hi;
+} ItemBakeContext;
 
-    switch (kind) {
-    case 0: main = 0x00E04020u; dark = 0x00300808u; hi = 0x00FFC080u;  break; /* 光球 */
-    case 2: main = 0x00808088u; dark = 0x00181820u; hi = 0x00C8C8D0u;   break; /* 烟雾 */
-    case 5: main = 0x00C04818u; dark = 0x00301008u; hi = 0x00FFA040u;  break; /* 玩偶 */
-    case 6: main = 0x00C8C040u; dark = 0x00302810u; hi = 0x00F0F080u;  break; /* 胶水 */
-    default: main = 0x00B0C8D8u; dark = 0x00203040u; hi = 0x00F0FFFFu;   break; /* 石弹 / 音叉 */
-    }
+static void BakeItemGlove(const ItemBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float cy = bake->cy; (void)cy;
+    (void)bake;
+    {
     /* ===== v2.4.60 **左手（手套）重画** =====
        原来只是一个扁椭圆 —— 在 3D 场景里读起来像"一团棕色"，
        而且尺寸 36×22 太小，缩到 69px 之后几乎看不见（用户：「左手没有东西」）。
@@ -444,7 +445,16 @@ static void BakeItem(int id, int kind) {
         cvLine(c + 25, cy + 54, c + 33, cy + 34, 3.0f, gloveHi, 0.4f);
     }
 
-    if (kind == 0) {
+    
+    }
+}
+
+static void BakeItemFlare(const ItemBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float cy = bake->cy; (void)cy;
+    (void)bake;
+    {
+
         /* ==================================================================
          * 2026-11-07（v2.4.2）：**照明弹重画**
          * ------------------------------------------------------------------
@@ -557,7 +567,16 @@ static void BakeItem(int id, int kind) {
         cvSpeckle((int)c + 2, (int)cy - 70, 24, 6, 0x00FFC050u, 0.62f);
         cvSpeckle((int)c + 1, (int)cy - 58, 14, 3, flameCore, 0.45f);
 
-    } else if (kind == 8) {
+    
+    }
+}
+
+static void BakeItemStone(const ItemBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float cy = bake->cy; (void)cy;
+    (void)bake;
+    {
+
         /* ===== v2.4.59 **投石（石弹）** =====
            地标：**不规则的多边形石头 + 手心里的裂口**
            旧版是一根绿玻璃瓶 —— 和"投石"两个字完全没关系，
@@ -603,7 +622,16 @@ static void BakeItem(int id, int kind) {
         /* 底部阴影（压在手掌上） */
         cvLine(c - 18, cy + 20, c + 30, cy + 16, 7.0f, 0x00000000u, 0.35f);
 
-    } else if (kind == 9) {
+    
+    }
+}
+
+static void BakeItemEcho(const ItemBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float cy = bake->cy; (void)cy;
+    (void)bake;
+    {
+
         /* ===== v2.4.59 **回声（音叉）** =====
            地标：**两根平行叉股 + 底部一个圆形共鸣腔**
            旧版是烟雾弹换色（灰圆柱）—— 完全看不出"声"。
@@ -637,20 +665,19 @@ static void BakeItem(int id, int kind) {
         /* 球上一个发光的缝 —— "它在响" */
         cvLine(c - 12, cy + 20, c + 12, cy + 20, 3.0f, 0x00A0E8FFu, 0.9f);
 
-    } else if (kind == 0) {
-        /* ===== 光球 / 荧光棒 =====
-           地标：**一根细长直棒 + 顶端一团发光球**
-           填黑 = 一条竖线 + 一个圆点，最简也最好认。 */
-        cvLine(c, cy - 64, c, cy + 34, 18.0f, 0x000A0C10u, 1.0f);
-        cvLine(c, cy - 62, c, cy + 32, 13.0f, main, 1.0f);
-        cvLine(c - 4, cy - 58, c - 4, cy + 28, 4.0f, hi, 0.7f);
-        /* 顶端发光球 */
-        cvEllipse(c, cy - 66, 26.0f, 24.0f, 0x000A0C10u, 1.0f);
-        cvEllipse(c, cy - 66, 22.0f, 20.0f, main, 1.0f);
-        cvEllipse(c - 6, cy - 72, 10.0f, 8.0f, 0x00FFFFFFu, 0.55f);
-        cvGlow(c, cy - 66, 46.0f, 0x00FF8040u, 0.30f);
+    
+    }
+}
 
-    } else if (kind == 2) {
+static void BakeItemSmoke(const ItemBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float cy = bake->cy; (void)cy;
+    unsigned int main = bake->main; (void)main;
+    unsigned int dark = bake->dark; (void)dark;
+    unsigned int hi = bake->hi; (void)hi;
+    (void)bake;
+    {
+
         /* ===== 烟雾弹 =====
            地标：**粗短圆柱 + 顶部一圈拉环 + 两侧出烟孔**
            和瓶子最大的区别是"矮胖"，填黑是个方墩子。 */
@@ -666,7 +693,16 @@ static void BakeItem(int id, int kind) {
         /* 筒身受光 */
         cvLine(c - 18, cy - 26, c - 18, cy + 30, 8.0f, hi, 0.45f);
 
-    } else if (kind == 5) {
+    
+    }
+}
+
+static void BakeItemDecoy(const ItemBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float cy = bake->cy; (void)cy;
+    (void)bake;
+    {
+
         /* ==================================================================
          * 2026-11-05 重做：**假人玩偶（诱饵）**
          * ------------------------------------------------------------------
@@ -809,7 +845,19 @@ static void BakeItem(int id, int kind) {
         cvLine(c - 18, cy - 56, c - 12, cy - 30, 2.4f, dollLit, 0.5f);
         cvLine(c - 24, cy - 14, c - 30, cy + 18, 2.4f, dollLit, 0.4f);
 
-    } else if (kind == 6) {
+    
+    }
+}
+
+static void BakeItemGlue(const ItemBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float cy = bake->cy; (void)cy;
+    unsigned int main = bake->main; (void)main;
+    unsigned int dark = bake->dark; (void)dark;
+    unsigned int hi = bake->hi; (void)hi;
+    (void)bake;
+    {
+
         /* ===== 胶水瓶 =====
            地标：**矮胖罐 + 一根斜出的粗滴管嘴**
            读作"会挤的东西"。 */
@@ -822,8 +870,30 @@ static void BakeItem(int id, int kind) {
         /* 罐身受光 */
         cvLine(c - 16, cy - 10, c - 16, cy + 30, 8.0f, hi, 0.45f);
         cvLine(c - 20, cy + 22, c + 20, cy + 22, 4.0f, dark, 0.5f);
+    
     }
+}
 
+static void BakeItem(int id, int kind) {
+    cvClear();
+    float c = CANVAS_W * 0.5f, cy = 128.0f;
+    unsigned int main = 0x0040A060u, dark = 0x00102818u, hi = 0x0080E0A0u;
+
+    switch (kind) {
+    case 0: main = 0x00E04020u; dark = 0x00300808u; hi = 0x00FFC080u;  break; /* 光球 */
+    case 2: main = 0x00808088u; dark = 0x00181820u; hi = 0x00C8C8D0u;   break; /* 烟雾 */
+    case 5: main = 0x00C04818u; dark = 0x00301008u; hi = 0x00FFA040u;  break; /* 玩偶 */
+    case 6: main = 0x00C8C040u; dark = 0x00302810u; hi = 0x00F0F080u;  break; /* 胶水 */
+    default: main = 0x00B0C8D8u; dark = 0x00203040u; hi = 0x00F0FFFFu;   break; /* 石弹 / 音叉 */
+    }
+    const ItemBakeContext bake = { c, cy, main, dark, hi };
+    BakeItemGlove(&bake);
+    if (kind == 0) BakeItemFlare(&bake);
+    else if (kind == 8) BakeItemStone(&bake);
+    else if (kind == 9) BakeItemEcho(&bake);
+    else if (kind == 2) BakeItemSmoke(&bake);
+    else if (kind == 5) BakeItemDecoy(&bake);
+    else if (kind == 6) BakeItemGlue(&bake);
     cvFinish(&g_sprites[id]);
 }
 
@@ -872,71 +942,32 @@ static void Limb(float x0, float y0, float x1, float y1, float w0, float w1,
    导致绘制跑到画布外、越界写，把后续精灵烘焙一起搞坏。 */
 #define ECHO_CY 150.0f
 
-static void BakeMonster(int id, int kind, int pose) {
-    cvClear();
-    float c = CANVAS_W * 0.5f;
+typedef struct MonsterBakeContext {
+    int kind;
+    int pose;
+    float c;
+    int side;
+    int walk;
+    float baseY;
+    unsigned int edge;
+    unsigned int body;
+    unsigned int hi;
+    float H;
+    float footY;
+    float headY;
+    float cx;
+} MonsterBakeContext;
 
-    int side = (pose >= 2) ? 1 : 0;
-    int walk = (pose == 1 || pose == 3) ? 1 : 0;
+/* Variant: kind == 10 */
+static void BakeMonsterEcho(const MonsterBakeContext* bake) {
+    float c = bake->c; (void)c;
+    unsigned int edge = bake->edge; (void)edge;
+    unsigned int body = bake->body; (void)body;
+    unsigned int hi = bake->hi; (void)hi;
+    float cx = bake->cx; (void)cx;
+    (void)bake;
+    {
 
-    /* v3.0：走路时**不再整体下沉** —— 原来 baseY+4 让脚每次迈步都往地里踩 */
-    /* v2.4-rc P1：244 -> 254。画布 256 高、缩放后是 128；
-       原来底部留 12px（缩放后 6px），物件看起来悬空 5% 高度。
-       贴到 254 之后包围盒底边就是画布底边，落地才实。 */
-    float baseY = 254.0f;
-    float lean  = walk ? 3.0f : 0.0f;
-
-    /* 每个物种的调色板：暗边 / 中间调 / 受光 */
-    unsigned int edge = 0x00080A0Eu, body = 0x00262C38u, hi = 0x003E4658u;
-    float heightK = 1.0f;
-
-    switch (kind) {
-    case 0:  /* 寻声鬼：瘦高，冷灰蓝 */
-        edge = 0x00080A0Eu; body = 0x00262C38u; hi = 0x003E4658u; heightK = 1.00f; break;
-    case 1:  /* 追光鬼：更细长，偏白 */
-        edge = 0x000A0C10u; body = 0x00303A48u; hi = 0x00526074u; heightK = 1.12f; break;
-    case 2:  /* 偷电怪：矮胖，偏绿 */
-        edge = 0x00060A08u; body = 0x00223428u; hi = 0x003A5442u; heightK = 0.78f; break;
-    case 3:  /* 跳脸虫：暖褐 */
-        edge = 0x000C0806u; body = 0x00342A20u; hi = 0x00524030u; heightK = 0.62f; break;
-    case 4:  /* 影子：紫黑，几乎没实体 */
-        edge = 0x0006040Cu; body = 0x001C1628u; hi = 0x002E2444u; heightK = 1.05f; break;
-    case 5:  /* 盲螨：土黄，极扁 */
-        edge = 0x000C0A04u; body = 0x00322914u; hi = 0x00503820u; heightK = 0.45f; break;
-    /* v2.4.4 **统一暗色**（用户要求）：身体不再各自上色 ——
-       多彩会削弱模型本身的明暗精度。现在三只怪的身体都是中性暗灰，
-       只留极小的色相偏移；**颜色只留给识别特征**（口袋 / 爪 / 眼 / 灯）。 */
-    case 7:  /* 拾荒者：中性暗灰，略暖 */
-        edge = 0x00080A0Au; body = 0x00292A2Cu; hi = 0x0045474Cu; heightK = 0.74f; break;
-    /* ===== 听声鬼变体（2026-11-03）=====
-       同族识别点必须保住：**无眼、牙齿下颌、瘦长肢体、冷色、不用高饱和**。
-       区分靠**体态与地标**，不靠颜色（art_direction 铁律一 / 五）。 */
-    case 11: /* 听声鬼·匍匐者：更矮更宽，冷灰偏土 —— 像趴着听地面 */
-        edge = 0x000A0A08u; body = 0x002A2A26u; hi = 0x00444138u; heightK = 0.76f; break;
-    case 12: /* 听声鬼·长颈：更高更瘦，冷灰偏紫 —— 像把耳朵伸到天花板 */
-        edge = 0x0008090Bu; body = 0x00252A34u; hi = 0x003C4456u; heightK = 1.22f; break;
-    case 8:  /* 清道夫：中性暗灰，略冷绿 */
-        edge = 0x00070A08u; body = 0x00282E2Au; hi = 0x00444C46u; heightK = 1.26f; break;
-    case 9:  /* 守门人：中性暗灰，略冷蓝 */
-        edge = 0x00080A0Cu; body = 0x002A2E36u; hi = 0x00464C58u; heightK = 0.96f; break;
-    case 10: /* 回声：不是生物，是「正在发声的东西」—— 冷白偏青 */
-        edge = 0x00020A0Eu; body = 0x001A3848u; hi = 0x005AA8C8u; heightK = 0.90f; break;
-    default: /* 回响：钟形 */
-        edge = 0x000A080Cu; body = 0x002A2234u; hi = 0x00443850u; heightK = 1.00f; break;
-    }
-
-    float H = 196.0f * heightK;         /* v2.2：拉满画布高度，怪物才显得高 */
-    float footY = baseY;
-    float headY = footY - H;
-    float cx = c + lean;
-
-    /* ================= 人形：寻声鬼 / 追光鬼 / 偷电怪 ================= */
-    /* ===== v2.4.2 回声（按 include/art_direction.h 设计）=====
-       它不是生物，所以：**没有眼睛、没有四肢**（避免和第怪物混淆）。
-       地标 = 三层同心环 + 中心一个尖角菱形核心。
-       同心环 = 「正在向外广播声音」，尖角 = 恐怖该有的锐利感。
-       玩家一眼就知道「那是个声源标记」，不会当成怪。 */
-    if (kind == 10) {
         /* 三层同心环，越外越暗 */
         for (int r3 = 3; r3 >= 1; r3--) {
             float rr = 10.0f + (float)r3 * 14.0f;
@@ -965,7 +996,18 @@ static void BakeMonster(int id, int kind, int pose) {
         /* 上下各一缕外泄的尖刺（不对称：上面长、下面短） */
         cvLine(cx, ECHO_CY - 26.0f, cx - 4.0f, ECHO_CY - 62.0f, 3.0f, hi, 0.5f);
         cvLine(cx, ECHO_CY + 26.0f, cx + 3.0f, ECHO_CY + 44.0f, 3.0f, hi, 0.5f);
-    } else if (kind == 13) {
+    
+    }
+}
+
+/* Variant: kind == 13 */
+static void BakeMonsterMimic(const MonsterBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    unsigned int body = bake->body; (void)body;
+    (void)bake;
+    {
+
         /* ============================================================
          * 宝箱怪现形态（2026-11-05）
          * ------------------------------------------------------------
@@ -1041,25 +1083,34 @@ static void BakeMonster(int id, int kind, int pose) {
         /* ---- ⑤ 两点眼：在口腔上方，极小的红 —— 铁律九（威胁要高对比）---- */
         cvEllipse(c - 16.0f, topY - 4.0f, 3.5f, 3.0f, 0x00FF4020u, 1.0f);
         cvEllipse(c + 16.0f, topY - 4.0f, 3.5f, 3.0f, 0x00FF4020u, 1.0f);
-    } else if (kind == 0 || kind == 1 || kind == 2 || kind == 7 || kind == 8 || kind == 9
-               || kind == 11 || kind == 12) {
-        float narrow = (kind == 1) ? 0.82f : (kind == 2 ? 1.35f : 1.0f);   /* 体型胖瘦 */
-        /* v2.4.1 审美规范：体型必须和移速一致（见 include/art_direction.h 铁律四） */
-        if (kind == 7) narrow = 1.42f;   /* 拾荒者：最宽，负重 */
-        if (kind == 8) narrow = 0.60f;   /* 清道夫：最瘦 */
-        if (kind == 9) narrow = 1.62f;   /* 守门人：宽肩立柱 */
-        /* 听声鬼变体：宽度也要和"怎么移动"一致（铁律四）
-           · 匍匐者贴着地面爬/挪，肩更宽、重心更低
-           · 长颈几乎不带体积，瘦成一根 */
-        if (kind == 11) narrow = 1.34f;
-        if (kind == 12) narrow = 0.52f;
-        float shoulderW = 30.0f * narrow;
-        if (side) shoulderW *= 0.68f;
+    
+    }
+}
 
-        float shoulderY = headY + H * 0.22f;
-        float waistY    = headY + H * 0.55f;
-        float pelvisY   = headY + H * 0.66f;
+/* Variant: kind == 0 || kind == 1 || kind == 2 || kind == 7 || kind == 8 || kind == 9 || kind == 11 || kind == 12 */
+typedef struct {
+    const MonsterBakeContext* mon;   /* 不能叫 monster：那是 common.h 的宏 */
+    float shoulderW;
+    float shoulderY;
+    float waistY;
+    float pelvisY;
+    float hry;
+    float hrx;
+    float hy;
+} HumanoidBakeContext;
 
+static void BakeHumanoidLegs(const HumanoidBakeContext* shape) {
+    int pose = shape->mon->pose; (void)pose;
+    int walk = shape->mon->walk; (void)walk;
+    unsigned int edge = shape->mon->edge; (void)edge;
+    unsigned int body = shape->mon->body; (void)body;
+    unsigned int hi = shape->mon->hi; (void)hi;
+    float footY = shape->mon->footY; (void)footY;
+    float cx = shape->mon->cx; (void)cx;
+    float shoulderW = shape->shoulderW; (void)shoulderW;
+    float pelvisY = shape->pelvisY; (void)pelvisY;
+    (void)shape;
+    {
         /* --- 腿：大腿 + 小腿 + 脚，两段各带一点弯 --- */
         /* v3.0：**迈步**而不是「两腿对称外张」（建模审查 #2）。
            原来走路帧两腿同时外张（膝 ±5.8px、踝 ±0.1px），
@@ -1080,6 +1131,21 @@ static void BakeMonster(int id, int kind, int pose) {
             cvEllipse(ankleX, footY - 3.0f - (walk ? ph * 2.0f : 0.0f), 7.0f, 3.4f, edge, 1.0f);
         }
 
+
+    }
+}
+
+static void BakeHumanoidTorso(const HumanoidBakeContext* shape) {
+    unsigned int edge = shape->mon->edge; (void)edge;
+    unsigned int body = shape->mon->body; (void)body;
+    unsigned int hi = shape->mon->hi; (void)hi;
+    float cx = shape->mon->cx; (void)cx;
+    float shoulderW = shape->shoulderW; (void)shoulderW;
+    float shoulderY = shape->shoulderY; (void)shoulderY;
+    float waistY = shape->waistY; (void)waistY;
+    float pelvisY = shape->pelvisY; (void)pelvisY;
+    (void)shape;
+    {
         /* --- 骨盆 --- */
         float pel[8] = { cx - shoulderW * 0.36f, pelvisY - 10,
                          cx + shoulderW * 0.36f, pelvisY - 10,
@@ -1114,6 +1180,21 @@ static void BakeMonster(int id, int kind, int pose) {
         /* 脊柱中线 */
         cvLine(cx, shoulderY + 4, cx, pelvisY, 2.0f, edge, 0.6f);
 
+
+    }
+}
+
+static void BakeHumanoidArms(const HumanoidBakeContext* shape) {
+    int walk = shape->mon->walk; (void)walk;
+    unsigned int edge = shape->mon->edge; (void)edge;
+    unsigned int body = shape->mon->body; (void)body;
+    unsigned int hi = shape->mon->hi; (void)hi;
+    float H = shape->mon->H; (void)H;
+    float cx = shape->mon->cx; (void)cx;
+    float shoulderW = shape->shoulderW; (void)shoulderW;
+    float shoulderY = shape->shoulderY; (void)shoulderY;
+    (void)shape;
+    {
         /* --- 手臂：上臂 + 前臂 + 爪 --- */
         float armSwing = walk ? 0.0f : 0.0f;
         for (int s2 = -1; s2 <= 1; s2 += 2) {
@@ -1131,6 +1212,21 @@ static void BakeMonster(int id, int kind, int pose) {
             }
         }
 
+
+    }
+}
+
+static void BakeHumanoidNeck(const HumanoidBakeContext* shape) {
+    int kind = shape->mon->kind; (void)kind;
+    unsigned int edge = shape->mon->edge; (void)edge;
+    unsigned int body = shape->mon->body; (void)body;
+    unsigned int hi = shape->mon->hi; (void)hi;
+    float H = shape->mon->H; (void)H;
+    float headY = shape->mon->headY; (void)headY;
+    float cx = shape->mon->cx; (void)cx;
+    float shoulderY = shape->shoulderY; (void)shoulderY;
+    (void)shape;
+    {
         /* --- 脖子 ---
            长颈变体的地标就在这：脖子拉到 0.34H、细到 6px，
            于是**头、脖子、肩三段之间出现明显的负空间**，
@@ -1144,23 +1240,42 @@ static void BakeMonster(int id, int kind, int pose) {
             Limb(cx, headY + H * 0.19f, cx, shoulderY + 2.0f, 13.0f, 17.0f, edge, body, hi);
         }
 
-        /* --- 头 --- */
-        /* 头型也是区分点：
-           · 匍匐者：头更扁更宽（贴地听声，下颌横向铺开）
-           · 长颈：头更小更长（远端的耳朵） */
-        float hry = (kind == 2) ? 15.0f
-                  : (kind == 11) ? 15.0f
-                  : (kind == 12) ? 21.0f : 19.0f;
-        float hrx = (kind == 2) ? 17.0f
-                  : (kind == 11) ? 19.0f
-                  : (kind == 12) ? 11.0f : 15.0f;
-        float hy = headY + hry + 2.0f;
+
+    }
+}
+
+static void BakeHumanoidHead(const HumanoidBakeContext* shape) {
+    unsigned int edge = shape->mon->edge; (void)edge;
+    unsigned int body = shape->mon->body; (void)body;
+    unsigned int hi = shape->mon->hi; (void)hi;
+    float cx = shape->mon->cx; (void)cx;
+    float hry = shape->hry; (void)hry;
+    float hrx = shape->hrx; (void)hrx;
+    float hy = shape->hy; (void)hy;
+    (void)shape;
+    {
         cvEllipse(cx, hy, hrx + 2.0f, hry + 2.0f, edge, 1.0f);
         cvEllipse(cx, hy - 1.0f, hrx, hry, body, 1.0f);
         cvEllipse(cx - hrx * 0.30f, hy - hry * 0.30f, hrx * 0.45f, hry * 0.40f, hi, 0.75f);
 
-        /* ===== v2.4.1 三只新怪的脸与地标（审美规范见 art_direction.h）===== */
-        if (kind == 7) {
+
+    }
+}
+
+static void BakeHumanoidCollectorDetails(const HumanoidBakeContext* shape) {
+    unsigned int edge = shape->mon->edge; (void)edge;
+    unsigned int body = shape->mon->body; (void)body;
+    unsigned int hi = shape->mon->hi; (void)hi;
+    float H = shape->mon->H; (void)H;
+    float cx = shape->mon->cx; (void)cx;
+    float shoulderW = shape->shoulderW; (void)shoulderW;
+    float shoulderY = shape->shoulderY; (void)shoulderY;
+    float hry = shape->hry; (void)hry;
+    float hrx = shape->hrx; (void)hrx;
+    float hy = shape->hy; (void)hy;
+    (void)shape;
+    {
+
             /* --- 拾荒者：独眼 + 背上的大麻袋 --- */
             /* 麻袋：一个大圆，最高点超过头顶（地标 #1） */
             float bagX = cx - shoulderW * 1.55f;
@@ -1181,7 +1296,25 @@ static void BakeMonster(int id, int kind, int pose) {
             Limb(cx + shoulderW * 0.95f, shoulderY + H * 0.18f,
                  bagX + shoulderW * 0.85f, bagY + H * 0.02f,
                  10.0f, 7.0f, edge, body, hi);
-        } else if (kind == 8) {
+        
+    }
+}
+
+static void BakeHumanoidScavengerDetails(const HumanoidBakeContext* shape) {
+    unsigned int edge = shape->mon->edge; (void)edge;
+    unsigned int body = shape->mon->body; (void)body;
+    unsigned int hi = shape->mon->hi; (void)hi;
+    float H = shape->mon->H; (void)H;
+    float footY = shape->mon->footY; (void)footY;
+    float cx = shape->mon->cx; (void)cx;
+    float shoulderW = shape->shoulderW; (void)shoulderW;
+    float shoulderY = shape->shoulderY; (void)shoulderY;
+    float hry = shape->hry; (void)hry;
+    float hrx = shape->hrx; (void)hrx;
+    float hy = shape->hy; (void)hy;
+    (void)shape;
+    {
+
             /* --- 清道夫：无眼 + 两条垂到地上的长臂（地标 #1）--- */
             for (int a2 = -1; a2 <= 1; a2 += 2) {
                 /* 不对称：右侧手臂更长（铁律二 ASYMMETRY） */
@@ -1204,7 +1337,21 @@ static void BakeMonster(int id, int kind, int pose) {
             /* 咧开的裂缝嘴 */
             cvLine(cx - hrx * 0.55f, hy + hry * 0.55f,
                    cx + hrx * 0.55f, hy + hry * 0.40f, 3.0f, 0x00020303u, 0.95f);
-        } else if (kind == 9) {
+        
+    }
+}
+
+static void BakeHumanoidWardenDetails(const HumanoidBakeContext* shape) {
+    int pose = shape->mon->pose; (void)pose;
+    float footY = shape->mon->footY; (void)footY;
+    float headY = shape->mon->headY; (void)headY;
+    float cx = shape->mon->cx; (void)cx;
+    float shoulderW = shape->shoulderW; (void)shoulderW;
+    float shoulderY = shape->shoulderY; (void)shoulderY;
+    float hrx = shape->hrx; (void)hrx;
+    (void)shape;
+    {
+
             /* ================================================================
              * v2.4.86 **守门人：按审美铁律重做（第 3 版）**
              * ----------------------------------------------------------------
@@ -1346,8 +1493,18 @@ static void BakeMonster(int id, int kind, int pose) {
                     cvEllipse(sx, s1, 4.0f, 5.0f, wBody, 1.0f);
                 }
             }
-        }
-        if (kind == 0) {
+        
+    }
+}
+
+static void BakeHumanoidHunterFace(const HumanoidBakeContext* shape) {
+    float cx = shape->mon->cx; (void)cx;
+    float hry = shape->hry; (void)hry;
+    float hrx = shape->hrx; (void)hrx;
+    float hy = shape->hy; (void)hy;
+    (void)shape;
+    {
+
             /* 寻声鬼：没有眼睛 —— 它靠听。取而代之的是一张咧开的下颌。 */
             float jaw[8] = { cx - hrx * 0.85f, hy + 4,
                              cx + hrx * 0.85f, hy + 4,
@@ -1363,7 +1520,18 @@ static void BakeMonster(int id, int kind, int pose) {
             /* 眼窝：两个凹坑，不发光 */
             cvEllipse(cx - hrx * 0.42f, hy - 4, 5.0f, 4.0f, 0x00020406u, 0.9f);
             cvEllipse(cx + hrx * 0.42f, hy - 4, 5.0f, 4.0f, 0x00020406u, 0.9f);
-        } else if (kind == 11) {
+        
+    }
+}
+
+static void BakeHumanoidCrawlerFace(const HumanoidBakeContext* shape) {
+    float cx = shape->mon->cx; (void)cx;
+    float hry = shape->hry; (void)hry;
+    float hrx = shape->hrx; (void)hrx;
+    float hy = shape->hy; (void)hy;
+    (void)shape;
+    {
+
             /* ===== 听声鬼·匍匐者（第二只）=====
                同族识别点：无眼、牙齿下颌 —— 保住。
                自己的地标：**下颌横向铺得比头还宽**，而且牙是密集短牙，
@@ -1383,7 +1551,20 @@ static void BakeMonster(int id, int kind, int pose) {
             /* 无眼，但有**两条横向听缝**（不是眼窝 —— 斜切，像耳裂） */
             cvLine(cx - hrx * 0.72f, hy - 6, cx - hrx * 0.18f, hy - 4, 2.6f, 0x00020406u, 0.95f);
             cvLine(cx + hrx * 0.18f, hy - 4, cx + hrx * 0.72f, hy - 6, 2.6f, 0x00020406u, 0.95f);
-        } else if (kind == 12) {
+        
+    }
+}
+
+static void BakeHumanoidLongNeckFace(const HumanoidBakeContext* shape) {
+    unsigned int edge = shape->mon->edge; (void)edge;
+    unsigned int hi = shape->mon->hi; (void)hi;
+    float cx = shape->mon->cx; (void)cx;
+    float hry = shape->hry; (void)hry;
+    float hrx = shape->hrx; (void)hrx;
+    float hy = shape->hy; (void)hy;
+    (void)shape;
+    {
+
             /* ===== 听声鬼·长颈（第三只）=====
                同族识别点：无眼、牙齿下颌 —— 保住。
                自己的地标：**头很小、下颌窄长、头顶一根竖立的听针**。
@@ -1406,14 +1587,35 @@ static void BakeMonster(int id, int kind, int pose) {
             /* 无眼：两处凹陷，比第一只更小更偏外 */
             cvEllipse(cx - hrx * 0.50f, hy - 3, 3.4f, 2.8f, 0x00020406u, 0.9f);
             cvEllipse(cx + hrx * 0.50f, hy - 3, 3.4f, 2.8f, 0x00020406u, 0.9f);
-        } else if (kind == 1) {
+        
+    }
+}
+
+static void BakeHumanoidLightHunterFace(const HumanoidBakeContext* shape) {
+    float cx = shape->mon->cx; (void)cx;
+    float hrx = shape->hrx; (void)hrx;
+    float hy = shape->hy; (void)hy;
+    (void)shape;
+    {
+
             /* 追光鬼：一对又大又亮的眼睛（它追光） */
             cvEllipse(cx - hrx * 0.40f, hy - 2, 7.0f, 6.0f, 0x00080A10u, 1.0f);
             cvEllipse(cx + hrx * 0.40f, hy - 2, 7.0f, 6.0f, 0x00080A10u, 1.0f);
             cvEllipse(cx - hrx * 0.40f, hy - 2, 5.0f, 4.2f, 0x00D8F4FFu, 1.0f);
             cvEllipse(cx + hrx * 0.40f, hy - 2, 5.0f, 4.2f, 0x00D8F4FFu, 1.0f);
             cvGlow(cx, hy - 2, 26.0f, 0x0060C0FFu, 0.30f);
-        } else if (kind == 2) {
+        
+    }
+}
+
+static void BakeHumanoidLeechFace(const HumanoidBakeContext* shape) {
+    unsigned int edge = shape->mon->edge; (void)edge;
+    float cx = shape->mon->cx; (void)cx;
+    float shoulderY = shape->shoulderY; (void)shoulderY;
+    float hy = shape->hy; (void)hy;
+    (void)shape;
+    {
+
             /* ===== v2.4.85 **这是绿色残留的真凶** =====
                原来这里是 `} else {`（没有条件）——
                于是**任何不是 kind 0/1 的怪都会被画上三只绿色小眼睛**，
@@ -1433,10 +1635,72 @@ static void BakeMonster(int id, int kind, int pose) {
                 cvLine(bx, shoulderY + 4, bx + 4.0f, shoulderY - 22.0f, 4.0f, edge, 1.0f);
                 cvLine(bx, shoulderY + 4, bx + 4.0f, shoulderY - 22.0f, 2.4f, 0x0040A060u, 0.9f);
             }
-        }
+        
+    }
+}
 
-    /* ================= 非人形 ================= */
-    } else if (kind == 5) {
+static void BakeMonsterHumanoid(const MonsterBakeContext* bake) {
+    int kind = bake->kind;
+    int side = bake->side;
+    float H = bake->H;
+    float headY = bake->headY;
+    float narrow = (kind == 1) ? 0.82f : (kind == 2 ? 1.35f : 1.0f);   /* 体型胖瘦 */
+    /* v2.4.1 审美规范：体型必须和移速一致（见 include/art_direction.h 铁律四） */
+    if (kind == 7) narrow = 1.42f;   /* 拾荒者：最宽，负重 */
+    if (kind == 8) narrow = 0.60f;   /* 清道夫：最瘦 */
+    if (kind == 9) narrow = 1.62f;   /* 守门人：宽肩立柱 */
+    /* 听声鬼变体：宽度也要和"怎么移动"一致（铁律四）
+       · 匍匐者贴着地面爬/挪，肩更宽、重心更低
+       · 长颈几乎不带体积，瘦成一根 */
+    if (kind == 11) narrow = 1.34f;
+    if (kind == 12) narrow = 0.52f;
+    float shoulderW = 30.0f * narrow;
+    if (side) shoulderW *= 0.68f;
+
+    float shoulderY = headY + H * 0.22f;
+    float waistY    = headY + H * 0.55f;
+    float pelvisY   = headY + H * 0.66f;
+
+    /* --- 头 --- */
+    /* 头型也是区分点：
+       · 匍匐者：头更扁更宽（贴地听声，下颌横向铺开）
+       · 长颈：头更小更长（远端的耳朵） */
+    float hry = (kind == 2) ? 15.0f
+              : (kind == 11) ? 15.0f
+              : (kind == 12) ? 21.0f : 19.0f;
+    float hrx = (kind == 2) ? 17.0f
+              : (kind == 11) ? 19.0f
+              : (kind == 12) ? 11.0f : 15.0f;
+    float hy = headY + hry + 2.0f;
+    const HumanoidBakeContext shape = {
+        bake, shoulderW, shoulderY, waistY, pelvisY, hry, hrx, hy
+    };
+    BakeHumanoidLegs(&shape);
+    BakeHumanoidTorso(&shape);
+    BakeHumanoidArms(&shape);
+    BakeHumanoidNeck(&shape);
+    BakeHumanoidHead(&shape);
+    if (kind == 7) BakeHumanoidCollectorDetails(&shape);
+    else if (kind == 8) BakeHumanoidScavengerDetails(&shape);
+    else if (kind == 9) BakeHumanoidWardenDetails(&shape);
+    if (kind == 0) BakeHumanoidHunterFace(&shape);
+    else if (kind == 11) BakeHumanoidCrawlerFace(&shape);
+    else if (kind == 12) BakeHumanoidLongNeckFace(&shape);
+    else if (kind == 1) BakeHumanoidLightHunterFace(&shape);
+    else if (kind == 2) BakeHumanoidLeechFace(&shape);
+}
+
+/* Variant: kind == 5 */
+static void BakeMonsterMite(const MonsterBakeContext* bake) {
+    int walk = bake->walk; (void)walk;
+    unsigned int edge = bake->edge; (void)edge;
+    unsigned int body = bake->body; (void)body;
+    unsigned int hi = bake->hi; (void)hi;
+    float footY = bake->footY; (void)footY;
+    float cx = bake->cx; (void)cx;
+    (void)bake;
+    {
+
         /* 盲螨：五节横body + 八条细腿 */
         for (int i = 0; i < 5; i++) {
             float sx = cx - 52.0f + (float)i * 26.0f;
@@ -1452,7 +1716,20 @@ static void BakeMonster(int id, int kind, int pose) {
             Limb(sx, footY - 32.0f, kx, footY - 12.0f, 4.0f, 3.0f, edge, body, hi);
             Limb(kx, footY - 12.0f, kx + (float)((i & 1) ? 6 : -6), footY, 3.0f, 2.0f, edge, body, hi);
         }
-    } else if (kind == 3) {
+    
+    }
+}
+
+/* Variant: kind == 3 */
+static void BakeMonsterJumper(const MonsterBakeContext* bake) {
+    unsigned int edge = bake->edge; (void)edge;
+    unsigned int body = bake->body; (void)body;
+    unsigned int hi = bake->hi; (void)hi;
+    float footY = bake->footY; (void)footY;
+    float cx = bake->cx; (void)cx;
+    (void)bake;
+    {
+
         /* 跳脸虫：圆身 + 四对足 + 正面的大嘴 */
         float rr = 40.0f;
         float cy2 = footY - 52.0f;
@@ -1470,7 +1747,20 @@ static void BakeMonster(int id, int kind, int pose) {
             float lx = cx + cosf(a) * 58.0f, ly = cy2 + sinf(a) * 40.0f;
             Limb(cx, cy2 - 6.0f, lx, ly, 6.0f, 3.0f, edge, body, hi);
         }
-    } else if (kind == 4) {
+    
+    }
+}
+
+/* Variant: kind == 4 */
+static void BakeMonsterShade(const MonsterBakeContext* bake) {
+    unsigned int edge = bake->edge; (void)edge;
+    unsigned int body = bake->body; (void)body;
+    unsigned int hi = bake->hi; (void)hi;
+    float footY = bake->footY; (void)footY;
+    float cx = bake->cx; (void)cx;
+    (void)bake;
+    {
+
         /* 影子：只有一团边缘 + 撕裂的下摆，没有实心身体 */
         for (int i = 0; i < 5; i++) {
             float sx = cx + (float)(i - 2) * 12.0f;
@@ -1485,7 +1775,21 @@ static void BakeMonster(int id, int kind, int pose) {
         /* 一对极小的紫眼 —— 影子几乎没有实体，只留两点 */
         cvEllipse(cx - 8, footY - 88.0f, 3.0f, 2.4f, 0x007040A0u, 0.9f);
         cvEllipse(cx + 8, footY - 88.0f, 3.0f, 2.4f, 0x007040A0u, 0.9f);
-    } else {
+    
+    }
+}
+
+/* Variant: fallback */
+static void BakeMonsterResonator(const MonsterBakeContext* bake) {
+    unsigned int edge = bake->edge; (void)edge;
+    unsigned int body = bake->body; (void)body;
+    unsigned int hi = bake->hi; (void)hi;
+    float H = bake->H; (void)H;
+    float footY = bake->footY; (void)footY;
+    float cx = bake->cx; (void)cx;
+    (void)bake;
+    {
+
         /* 回响：倒挂的钟形 + 纵向裂口 */
         float top = footY - H;
         float bell[10] = {
@@ -1508,7 +1812,92 @@ static void BakeMonster(int id, int kind, int pose) {
         }
         cvEllipse(cx, top + 16, 10.0f, 6.0f, 0x00060408u, 1.0f);
         cvEllipse(cx, top + 16, 6.0f, 3.4f, 0x00A0FFC0u, 0.85f);
+    
     }
+}
+
+static void BakeMonster(int id, int kind, int pose) {
+    cvClear();
+    float c = CANVAS_W * 0.5f;
+
+    int side = (pose >= 2) ? 1 : 0;
+    int walk = (pose == 1 || pose == 3) ? 1 : 0;
+
+    /* v3.0：走路时**不再整体下沉** —— 原来 baseY+4 让脚每次迈步都往地里踩 */
+    /* v2.4-rc P1：244 -> 254。画布 256 高、缩放后是 128；
+       原来底部留 12px（缩放后 6px），物件看起来悬空 5% 高度。
+       贴到 254 之后包围盒底边就是画布底边，落地才实。 */
+    float baseY = 254.0f;
+    float lean  = walk ? 3.0f : 0.0f;
+
+    /* 每个物种的调色板：暗边 / 中间调 / 受光 */
+    unsigned int edge = 0x00080A0Eu, body = 0x00262C38u, hi = 0x003E4658u;
+    float heightK = 1.0f;
+
+    switch (kind) {
+    case 0:  /* 寻声鬼：瘦高，冷灰蓝 */
+        edge = 0x00080A0Eu; body = 0x00262C38u; hi = 0x003E4658u; heightK = 1.00f; break;
+    case 1:  /* 追光鬼：更细长，偏白 */
+        edge = 0x000A0C10u; body = 0x00303A48u; hi = 0x00526074u; heightK = 1.12f; break;
+    case 2:  /* 偷电怪：矮胖，偏绿 */
+        edge = 0x00060A08u; body = 0x00223428u; hi = 0x003A5442u; heightK = 0.78f; break;
+    case 3:  /* 跳脸虫：暖褐 */
+        edge = 0x000C0806u; body = 0x00342A20u; hi = 0x00524030u; heightK = 0.62f; break;
+    case 4:  /* 影子：紫黑，几乎没实体 */
+        edge = 0x0006040Cu; body = 0x001C1628u; hi = 0x002E2444u; heightK = 1.05f; break;
+    case 5:  /* 盲螨：土黄，极扁 */
+        edge = 0x000C0A04u; body = 0x00322914u; hi = 0x00503820u; heightK = 0.45f; break;
+    /* v2.4.4 **统一暗色**（用户要求）：身体不再各自上色 ——
+       多彩会削弱模型本身的明暗精度。现在三只怪的身体都是中性暗灰，
+       只留极小的色相偏移；**颜色只留给识别特征**（口袋 / 爪 / 眼 / 灯）。 */
+    case 7:  /* 拾荒者：中性暗灰，略暖 */
+        edge = 0x00080A0Au; body = 0x00292A2Cu; hi = 0x0045474Cu; heightK = 0.74f; break;
+    /* ===== 听声鬼变体（2026-11-03）=====
+       同族识别点必须保住：**无眼、牙齿下颌、瘦长肢体、冷色、不用高饱和**。
+       区分靠**体态与地标**，不靠颜色（art_direction 铁律一 / 五）。 */
+    case 11: /* 听声鬼·匍匐者：更矮更宽，冷灰偏土 —— 像趴着听地面 */
+        edge = 0x000A0A08u; body = 0x002A2A26u; hi = 0x00444138u; heightK = 0.76f; break;
+    case 12: /* 听声鬼·长颈：更高更瘦，冷灰偏紫 —— 像把耳朵伸到天花板 */
+        edge = 0x0008090Bu; body = 0x00252A34u; hi = 0x003C4456u; heightK = 1.22f; break;
+    case 8:  /* 清道夫：中性暗灰，略冷绿 */
+        edge = 0x00070A08u; body = 0x00282E2Au; hi = 0x00444C46u; heightK = 1.26f; break;
+    case 9:  /* 守门人：中性暗灰，略冷蓝 */
+        edge = 0x00080A0Cu; body = 0x002A2E36u; hi = 0x00464C58u; heightK = 0.96f; break;
+    case 10: /* 回声：不是生物，是「正在发声的东西」—— 冷白偏青 */
+        edge = 0x00020A0Eu; body = 0x001A3848u; hi = 0x005AA8C8u; heightK = 0.90f; break;
+    default: /* 回响：钟形 */
+        edge = 0x000A080Cu; body = 0x002A2234u; hi = 0x00443850u; heightK = 1.00f; break;
+    }
+
+    float H = 196.0f * heightK;         /* v2.2：拉满画布高度，怪物才显得高 */
+    float footY = baseY;
+    float headY = footY - H;
+    float cx = c + lean;
+
+    /* ================= 人形：寻声鬼 / 追光鬼 / 偷电怪 ================= */
+    /* ===== v2.4.2 回声（按 include/art_direction.h 设计）=====
+       它不是生物，所以：**没有眼睛、没有四肢**（避免和第怪物混淆）。
+       地标 = 三层同心环 + 中心一个尖角菱形核心。
+       同心环 = 「正在向外广播声音」，尖角 = 恐怖该有的锐利感。
+       玩家一眼就知道「那是个声源标记」，不会当成怪。 */
+    MonsterBakeContext bake = { kind, pose, c, side, walk, baseY, edge, body, hi, H, footY, headY, cx };
+    if (kind == 10) {
+        BakeMonsterEcho(&bake);
+    } else if (kind == 13) {
+        BakeMonsterMimic(&bake);
+    } else if (kind == 0 || kind == 1 || kind == 2 || kind == 7 || kind == 8 || kind == 9
+               || kind == 11 || kind == 12) {
+        BakeMonsterHumanoid(&bake);
+    } else if (kind == 5) {
+        BakeMonsterMite(&bake);
+    } else if (kind == 3) {
+        BakeMonsterJumper(&bake);
+    } else if (kind == 4) {
+        BakeMonsterShade(&bake);
+    } else {
+        BakeMonsterResonator(&bake);
+    }
+
 
     /* 左缘轮廓光：让剪影在暗场里"立"起来 */
     {
@@ -1673,12 +2062,18 @@ static void BakeHatch(int id, int frame) {
     cvFinish(&g_sprites[id]);
 }
 
-static void BakeProp(int id, int kind) {
-    cvClear();
-    float c = CANVAS_W * 0.5f;
-    float baseY = 244.0f;
+typedef struct PropBakeContext {
+    float c;
+    float baseY;
+} PropBakeContext;
 
-    if (kind == 0) {            /* 箱子（2026-11-06 按 art_direction.h 重做） */
+/* Variant: kind == 0 */
+static void BakePropCrate(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+            /* 箱子（2026-11-06 按 art_direction.h 重做） */
         /* ==================================================================
          * 用户截图：「箱子边框都露出来了……这些东西你都没有按照审美代码。」
          *
@@ -1748,7 +2143,17 @@ static void BakeProp(int id, int kind) {
         /* ---- ⑥ 木纹：稀疏竖条，不做过密噪点 ---- */
         cvSpeckle((int)c, (int)(baseY - 46), 38, 22, 0x00301808u, 0.28f);
 
-    } else if (kind == 14) {    /* 相位信标：地面模型（2026-11-06 重做） */
+    
+    }
+}
+
+/* Variant: kind == 14 */
+static void BakePropBeaconGround(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+    /* 相位信标：地面模型（2026-11-06 重做） */
         /* ==================================================================
          * 用户反馈：「你得在地上建的模像一个那个信标一样，然后冒光的」。
          *
@@ -1805,7 +2210,17 @@ static void BakeProp(int id, int kind) {
         cvLine(c - 9, by0 + 30, c - 6, by0 + 26, 2.5f, 0x004A463Eu, 1.0f);
         cvLine(c + 9, by0 + 30, c + 6, by0 + 26, 2.5f, 0x004A463Eu, 1.0f);
 
-    } else if (kind == 16) {    /* 缚丝蛛（2026-11-06） */
+    
+    }
+}
+
+/* Variant: kind == 16 */
+static void BakePropSpider(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+    /* 缚丝蛛（2026-11-06） */
         /* ==================================================================
          * 用户原话：「蜘蛛怪的建模什么的全部都没有」。
          *
@@ -1868,7 +2283,17 @@ static void BakeProp(int id, int kind) {
         cvLine(cxx - 16, bodyY - 2, cxx + 16, bodyY - 2, 2.0f, 0x00807090u, 0.35f);
         cvLine(cxx - 14, bodyY + 4, cxx + 14, bodyY + 4, 2.0f, 0x00807090u, 0.30f);
 
-    } else if (kind == 15) {    /* 相位信标：手持模型（2026-11-06） */
+    
+    }
+}
+
+/* Variant: kind == 15 */
+static void BakePropBeaconHand(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+    /* 相位信标：手持模型（2026-11-06） */
         /* ==================================================================
          * 用户要求：「手持建模也没有做」。
          * 竖持的小装置：手柄 + 主体 + 顶端两颗充能点。
@@ -1902,7 +2327,17 @@ static void BakeProp(int id, int kind) {
         /* 底部 AO */
         cvLine(cxx - 10, hy1 - 2, cxx + 10, hy1 - 2, 3.0f, 0x00000000u, 0.30f);
 
-    } else if (kind == 1) {     /* 配电箱（v2.4.7 重新建模） */
+    
+    }
+}
+
+/* Variant: kind == 1 */
+static void BakePropBreaker(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+     /* 配电箱（v2.4.7 重新建模） */
         /* 按 art_direction.h 重设计：
              地标 ① 顶部两根**瓷瓶 + 垂下的导线**（剪影上凸出柜体上沿）
              地标 ② 右侧伸出的**闸刀拉杆 + 红球手柄**（剪影上唯一的斜出物）
@@ -1951,13 +2386,33 @@ static void BakeProp(int id, int kind) {
 
         /* ---- ⑧ 斜角（体积感）---- */
         cvBevel(c - 25, baseY - 110, c + 25, baseY - 4, 3.0f, 0.42f);
-    } else if (kind == 2) {     /* 出口：门框 + 光 */
+    
+    }
+}
+
+/* Variant: kind == 2 */
+static void BakePropExit(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+     /* 出口：门框 + 光 */
         float b[8] = { c - 40, baseY - 150, c + 40, baseY - 150, c + 40, baseY, c - 40, baseY };
         cvPoly(b, 4, 0x000A0C10u, 1.0f);
         float b2[8] = { c - 33, baseY - 142, c + 33, baseY - 142, c + 33, baseY - 4, c - 33, baseY - 4 };
         cvPolyGrad(b2, 4, 0x00C0E8FFu, 0x00306080u, 1.0f);
         cvGlow(c, baseY - 70, 60.0f, 0x0060C0FFu, 0.35f);
-    } else if (kind == 4) {     /* 翻过的空箱：盖子掀开、里面发黑 */
+    
+    }
+}
+
+/* Variant: kind == 4 */
+static void BakePropOpenCrate(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+     /* 翻过的空箱：盖子掀开、里面发黑 */
         float base[8] = { c - 44, baseY - 58, c + 44, baseY - 58, c + 44, baseY, c - 44, baseY };
         cvPoly(base, 4, 0x000A0806u, 1.0f);
         float inner[8] = { c - 38, baseY - 52, c + 38, baseY - 52, c + 38, baseY - 5, c - 38, baseY - 5 };
@@ -1971,7 +2426,17 @@ static void BakeProp(int id, int kind) {
         float lid2[8] = { c - 42, baseY - 60, c - 36, baseY - 98, c + 34, baseY - 105, c + 40, baseY - 64 };
         cvPolyGrad(lid2, 4, 0x00906A40u, 0x00302014u, 1.0f);
         cvLine(c - 44, baseY - 58, c + 44, baseY - 58, 3.0f, 0x00201810u, 0.9f);
-    } else if (kind == 5) {     /* 未解锁的箱子：普通木箱 + 正面金锁 */
+    
+    }
+}
+
+/* Variant: kind == 5 */
+static void BakePropLockedCrate(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+     /* 未解锁的箱子：普通木箱 + 正面金锁 */
         float b[8] = { c - 46, baseY - 96, c + 46, baseY - 96, c + 46, baseY, c - 46, baseY };
         cvPoly(b, 4, 0x000A0806u, 1.0f);
         float b2[8] = { c - 40, baseY - 90, c + 40, baseY - 90, c + 40, baseY - 4, c - 40, baseY - 4 };
@@ -1990,7 +2455,17 @@ static void BakeProp(int id, int kind) {
         cvLine(c + 10, baseY - 58, c + 10, baseY - 72, 4.0f, 0x00E0C050u, 1.0f);
         cvLine(c - 10, baseY - 72, c + 10, baseY - 72, 4.0f, 0x00E0C050u, 1.0f);
         cvEllipse(c, baseY - 40, 4.0f, 5.0f, 0x00201808u, 1.0f);
-    } else if (kind == 7) {
+    
+    }
+}
+
+/* Variant: kind == 7 */
+static void BakePropMimicCrate(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+
         /* ============================================================
          * 宝箱怪伪装态（2026-11-05）
          * ------------------------------------------------------------
@@ -2027,7 +2502,17 @@ static void BakeProp(int id, int kind) {
         cvLine(c - 2, baseY - 48, c + 14, baseY - 48, 9.0f, 0x00C8A040u, 1.0f);
         cvLine(c + 1, baseY - 48, c + 11, baseY - 48, 5.0f, 0x00FFE890u, 0.8f);
         cvEllipse(c, baseY - 62, 3.0f, 3.5f, 0x00140C04u, 1.0f);
-    } else if (kind == 6) {     /* 藏身点：垃圾桶 */
+    
+    }
+}
+
+/* Variant: kind == 6 */
+static void BakePropTrash(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+     /* 藏身点：垃圾桶 */
         float body[8] = { c - 34, baseY - 150, c + 34, baseY - 150, c + 42, baseY, c - 42, baseY };
         cvPoly(body, 4, 0x000A0C0Au, 1.0f);
         float body2[8] = { c - 28, baseY - 144, c + 28, baseY - 144, c + 35, baseY - 5, c - 35, baseY - 5 };
@@ -2049,7 +2534,17 @@ static void BakeProp(int id, int kind) {
         /* 桶口内壁：上沿受光、内圈暗 */
         cvLine(c - 30, baseY - 152, c + 30, baseY - 152, 2.0f, 0x00FFFFFFu, 0.30f);
         cvLine(c - 28, baseY - 146, c + 28, baseY - 146, 2.0f, 0x00000000u, 0.35f);
-    } else {
+    
+    }
+}
+
+/* Variant: fallback */
+static void BakePropSceneFixture(const PropBakeContext* bake) {
+    float c = bake->c; (void)c;
+    float baseY = bake->baseY; (void)baseY;
+    (void)bake;
+    {
+
         /* 安全屋（v2.2 第三次重做）
            第一版是营火 -> 一颗蛋。第二版是沙袋+立杆+油灯 -> 一根路灯 + 两块鹅卵石 + 一张饼。
            教训（来自精灵审计）：
@@ -2167,7 +2662,39 @@ static void BakeProp(int id, int kind) {
                 cvLine(bx - w * 0.5f + 10.0f, by - h * 0.5f + 2, bx + w * 0.5f - 10.0f, by - h * 0.5f + 2, 1.4f, 0x007C6A44u, 0.6f);
             }
         }
+    
     }
+}
+
+static void BakeProp(int id, int kind) {
+    cvClear();
+    float c = CANVAS_W * 0.5f;
+    float baseY = 244.0f;
+    PropBakeContext bake = { c, baseY };
+    if (kind == 0) {
+        BakePropCrate(&bake);
+    } else if (kind == 14) {
+        BakePropBeaconGround(&bake);
+    } else if (kind == 16) {
+        BakePropSpider(&bake);
+    } else if (kind == 15) {
+        BakePropBeaconHand(&bake);
+    } else if (kind == 1) {
+        BakePropBreaker(&bake);
+    } else if (kind == 2) {
+        BakePropExit(&bake);
+    } else if (kind == 4) {
+        BakePropOpenCrate(&bake);
+    } else if (kind == 5) {
+        BakePropLockedCrate(&bake);
+    } else if (kind == 7) {
+        BakePropMimicCrate(&bake);
+    } else if (kind == 6) {
+        BakePropTrash(&bake);
+    } else {
+        BakePropSceneFixture(&bake);
+    }
+
     cvFinish(&g_sprites[id]);
 }
 
