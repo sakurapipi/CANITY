@@ -84,4 +84,10 @@ extern float modSpeedMul;
 
 
 
+/* 原 game.c 的 static 状态（第 21 轮提升为模块可见） */
+extern unsigned wrenchHitMask;
+extern int wrenchPrev;
+extern int wrenchInit;
+extern int wrenchArmed;
+
 #endif

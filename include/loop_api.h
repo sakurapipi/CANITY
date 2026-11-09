@@ -45,4 +45,20 @@ void RunRngSeed(unsigned int seed);
 unsigned int RunRngState(void);
 void RunRngSetState(unsigned int st);
 
+/* 原 game.c 的 static 状态（第 21 轮提升为模块可见） */
+extern float tutorialTimer;
+extern float tutorialActionTimer;
+extern float tutorialStepTimer;
+extern float tutorialStartX;
+extern float tutorialStartY;
+extern float tutorialStartDirX;
+extern float tutorialStartDirY;
+extern int tutorialLightOff;
+extern int tutorialThrown;
+extern int tutorialKnocked;
+extern int tutorialMapOpened;
+extern int pendingSkillDraft;
+extern int pendingStartMode;
+extern int pendingCampaignStage;
+
 #endif

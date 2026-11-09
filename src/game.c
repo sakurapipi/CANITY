@@ -187,8 +187,8 @@ enum {
     TUT_EXIT,
     TUT_DONE
 };
-static float tutorialTimer = 0.0f;        /* 完成后的回菜单倒计时 */
-static float tutorialActionTimer = 0.0f;  /* 持续动作计时（冲刺/摇电） */
+float tutorialTimer = 0.0f;        /* 完成后的回菜单倒计时 */
+float tutorialActionTimer = 0.0f;  /* 持续动作计时（冲刺/摇电） */
 /* ==================================================================
  * 2026-11-06（**P1-4 教程死锁的兜底**）
  * ------------------------------------------------------------------
@@ -201,13 +201,13 @@ static float tutorialActionTimer = 0.0f;  /* 持续动作计时（冲刺/摇电�
  * 教程的目的是把操作教一遍，不是拦住玩家。
  * ================================================================== */
 #define TUTORIAL_STEP_TIMEOUT 12.0f
-static float tutorialStepTimer = 0.0f;
-static float tutorialStartX = 0.0f, tutorialStartY = 0.0f;
-static float tutorialStartDirX = 1.0f, tutorialStartDirY = 0.0f;
-static int   tutorialLightOff = 0;        /* 手电关过再开 */
-static int   tutorialThrown = 0;
-static int   tutorialKnocked = 0;
-static int   tutorialMapOpened = 0;       /* 地图至少打开过一次 */
+float tutorialStepTimer = 0.0f;
+float tutorialStartX = 0.0f, tutorialStartY = 0.0f;
+float tutorialStartDirX = 1.0f, tutorialStartDirY = 0.0f;
+int   tutorialLightOff = 0;        /* 手电关过再开 */
+int   tutorialThrown = 0;
+int   tutorialKnocked = 0;
+int   tutorialMapOpened = 0;       /* 地图至少打开过一次 */
 SmokeCloud smokes[MAX_SMOKE];
 GlueZone  glues[MAX_GLUE];     /* v3.3 粘胶区域 */
 float echoScanT = 0.0f;        /* v3.3 回声弹剩余秒数 */
@@ -399,7 +399,7 @@ ScoreBreakdown lastScore;     /* 上一次结算的分项 */
 int skillPickOptions[INRUN_CHOICES] = {-1, -1, -1};
 int skillPickSel = 0;
 int pickMode = 0;
-static int pendingSkillDraft=0;      /* v2.0：0 = 局内技能，1 = 遗物 */
+int pendingSkillDraft=0;      /* v2.0：0 = 局内技能，1 = 遗物 */
 /* 2026-11-06（v2.4.1 第 3 轮）：第 6 / 12 层**技能与遗物同时触发**，
    两次是独立选择。这两个计数只用于界面提示"第几次 / 共几次"，
    不参与任何逻辑判断 —— 用当前持有状态去推是不可能的。 */
@@ -436,8 +436,8 @@ int campaignStage = 0;
    这样清理不会把 Endless / Daily / Campaign / Training 自己也清掉。 */
 enum { START_NORMAL = 0, START_ENDLESS, START_DAILY, START_CAMPAIGN, START_TRAINING,
        START_GUIDE };
-static int pendingStartMode = START_NORMAL;
-static int pendingCampaignStage = 0;
+int pendingStartMode = START_NORMAL;
+int pendingCampaignStage = 0;
 static void ApplyCampaignRules(int stage);
 
 /* v2.0 战役：5 个手工场景，固定种子 + 各自的规则 */
@@ -997,7 +997,7 @@ POINT g_mousePos = {0, 0};
    按 M 切换形态，按 M 关闭。再按 M 会先切形态，再按一次才关闭。 */
 int mapFullScreen = 0;
 /* v2.5: 1 = 小地图是靠按住 TAB 开着的，松开要自动关 */
-static int mapHeld = 0;
+int mapHeld = 0;
 
 /* 该设置项是否是键位绑定（value 指向 g_bindings 的某一项）。
    是的话返回对应 ActionId，否则返回 -1。
@@ -3647,7 +3647,7 @@ static int WrenchSwingFrame(void) {
 }
 
 /* ---- 真正结算击退（在命中帧调用一次）---- */
-static unsigned int wrenchHitMask=0;
+unsigned int wrenchHitMask=0;
 static void WrenchApplyHit(float power) {
 
     /* ============================================================
@@ -3829,8 +3829,8 @@ float pawnCd = 0.0f;
 /* 第 9 轮：以牙还牙的加速剩余秒数 / 反杀是否已用（每局一次） */
 float retaliateT = 0.0f;
 int   counterKillUsed = 0;
-static int  wrenchPrev = 0;
-static int  wrenchInit = 0;
+int  wrenchPrev = 0;
+int  wrenchInit = 0;
 /* ===== v2.5.00 **装填闩** =====
    用户报告：「每次进游戏老是误触消耗一次扳手次数。」
 
@@ -3841,7 +3841,7 @@ static int  wrenchInit = 0;
 
    现在加一个闩：reset 之后必须**先松开过一次**，才允许开始蓄力。
    拿鼠标点进游戏 → 松开 → 之后才是真正的一挥。 */
-static int  wrenchArmed = 1;
+int  wrenchArmed = 1;
 
 static void WrenchKnockUpdate(float dt) {
     extern int lockActive, isCharging;

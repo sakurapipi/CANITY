@@ -90,4 +90,7 @@ float GoldExitAt(int level);
 
 float EndlessDepthBonus(int level);
 
+/* 原 game.c 的 static 状态（第 21 轮提升为模块可见） */
+extern int mapHeld;
+
 #endif
