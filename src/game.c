@@ -172,21 +172,7 @@ int tutorialStep = 0;
    现在进 Tutorial 只显示一行「按 B 激活引导」，按 B 才展开分步引导。 */
 int tutorialGuideOn = 0;
 int tutorialDone = 0;
-enum {
-    TUT_MOVE = 0,
-    TUT_LOOK,
-    TUT_SPRINT,
-    TUT_LIGHT,
-    TUT_MAP,
-    TUT_SEARCH,
-    TUT_CRANK,
-    TUT_THROW,
-    TUT_KNOCK,
-    TUT_HIDE,       /* 第 4 轮：被追的时候该往哪躲 —— 玩家原话「要怎么躲」 */
-    TUT_BREAKER,
-    TUT_EXIT,
-    TUT_DONE
-};
+/* TUT_ 枚举已搬到 loop_api.h（2026-11-09） */
 float tutorialTimer = 0.0f;        /* 完成后的回菜单倒计时 */
 float tutorialActionTimer = 0.0f;  /* 持续动作计时（冲刺/摇电） */
 /* ==================================================================
@@ -1478,7 +1464,6 @@ static void BuildTrainingArena(void) {
 /* v3.1 新手教程：一步一步检测玩家真的做了动作                          */
 /* ------------------------------------------------------------------ */
 
-int TutorialStepTotal(void) { return TUT_DONE - TUT_MOVE; }
 int TutorialStepNumber(void) {
     if (tutorialDone) return TutorialStepTotal();
     return tutorialStep + 1;

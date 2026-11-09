@@ -61,4 +61,21 @@ extern int pendingSkillDraft;
 extern int pendingStartMode;
 extern int pendingCampaignStage;
 
+/* 教程步骤枚举（原 game.c，拆块需要） */
+enum {
+    TUT_MOVE = 0,
+    TUT_LOOK,
+    TUT_SPRINT,
+    TUT_LIGHT,
+    TUT_MAP,
+    TUT_SEARCH,
+    TUT_CRANK,
+    TUT_THROW,
+    TUT_KNOCK,
+    TUT_HIDE,       /* 第 4 轮：被追的时候该往哪躲 —— 玩家原话「要怎么躲」 */
+    TUT_BREAKER,
+    TUT_EXIT,
+    TUT_DONE
+};
+
 #endif
