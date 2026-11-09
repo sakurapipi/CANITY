@@ -5,6 +5,15 @@
  */
 #include "threat_telegraph.h"
 #include "common.h"
+#include "collapse.h"
+#include "echo_marks.h"
+#include "item_effects.h"
+#include "lang.h"
+#include "phase.h"
+#include "state.h"
+#include "upgrade_run.h"
+#include "warden.h"
+#include "wrench.h"
 #include "control_effect.h"
 #include "spider.h"
 #include "hatch.h"
@@ -835,7 +844,7 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor, int baseSpr) {
         return;
     }
 
-    extern int bossLevel;
+
     /* 变体由调用方指定：第一只 SPR_MON_HUNTER、第二只 HUNTER2、第三只 HUNTER3。
        原来这里写死 HUNTER/LIGHT 二选一，所以三只长得一样。 */
     int spr = (baseSpr > 0) ? baseSpr
@@ -848,7 +857,7 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor, int baseSpr) {
     /* v2.4.6：听声怪 / 追光怪 也走同一套距离衰减 */
     lightK *= ProximityLight(m->x, m->y);
 
-    if (bossLevel && m == &monster) {
+    if (bossLevel && m == Hunter0()) {
         halfH = 1.45f;
         tint = 0x00FF2010u;      /* Boss 泛红 */
         tintMix = 0.35f;
@@ -878,16 +887,16 @@ static void DrawBeastSprite(Monster* m, unsigned int eyeColor, int baseSpr) {
 }
 
 static void DrawMonster2Sprite(void) {
-    if (!monster2.active) return;
-    DrawBeastSprite(&monster2, 0x00ff0000, SPR_MON_HUNTER2);
+    if (!Hunter1()->active) return;
+    DrawBeastSprite(Hunter1(), 0x00ff0000, SPR_MON_HUNTER2);
 }
 /* 第三只听声鬼（120 秒后出现）。配色再暗一档，
    三只同屏时玩家能从轮廓上分出"又来了一只"。 */
 static void DrawMonster3Sprite(void) {
-    if (!monster3.active) return;
-    DrawBeastSprite(&monster3, 0x00c02050, SPR_MON_HUNTER3);
+    if (!Hunter2()->active) return;
+    DrawBeastSprite(Hunter2(), 0x00c02050, SPR_MON_HUNTER3);
 }
-static void DrawMonsterSprite(void) { DrawBeastSprite(&monster, 0x00ff4020u, SPR_MON_HUNTER); }
+static void DrawMonsterSprite(void) { DrawBeastSprite(Hunter0(), 0x00ff4020u, SPR_MON_HUNTER); }
 
 /* v1.8 偷电怪：体型 55%，暗色，只有被手电光锥照到才可见。
    "看不见但电量在掉" 就是它的压迫感来源，所以这里宁可画得几乎融进黑里。 */
@@ -1203,8 +1212,8 @@ static void DrawTintedBeast(int spr, float wx, float wy, float halfH,
 static void DrawNewMonsters(void) {
     /* ---- 拾荒者：**只换麻袋颜色**，身体保持原样 ---- */
     {
-        extern int   CollectorActive(void), CollectorHasMoney(void);
-        extern float CollectorX(void), CollectorY(void);
+
+
         if (CollectorActive()) {
             /* v2.4.66：整体染色会把明暗关系洗掉，观感廉价。
                现在只把**麻袋**（烘焙时画的洋红 key）换成白/金，
@@ -1217,8 +1226,8 @@ static void DrawNewMonsters(void) {
     }
     /* ---- 清道夫：高瘦 + 病绿；开柜门时眼白转红 ---- */
     {
-        extern int   ScavengerActive(void), ScavengerRifling(void);
-        extern float ScavengerX(void), ScavengerY(void), ScavengerWarnT(void);
+
+
         if (ScavengerActive()) {
             /* v2.4.7：撬柜门 **或** 正在翻箱子，两种都算警戒 */
             int grabbing = (ScavengerWarnT() > 0.0f) || ScavengerRifling();
@@ -1229,9 +1238,9 @@ static void DrawNewMonsters(void) {
     }
     /* ---- 守门人：**两个烘焙变体，眼睛颜色直接烘死** ---- */
     {
-        extern int   WardenActive(void);
-        extern int   WardenChasing(void);
-        extern float WardenX(void), WardenY(void);
+
+
+
         if (WardenActive()) {
             /* v2.4.81 **不再用洋红 key 换色**。
                调研结论：颜色变化用调色盘是对的，但**前提是 key 色绝对不能漏到屏幕上**。
@@ -1246,7 +1255,7 @@ static void DrawNewMonsters(void) {
     }
     /* ---- 回声：极矮 + 冷白微光，强度越弱越暗 ---- */
     {
-        extern SuspicionPoint susp[SUSP_MAX];
+
         for (int i = 0; i < SUSP_MAX; i++) {
             if (susp[i].strength <= 0.0f) continue;
             if (susp[i].source != SUSP_THROW) continue;
@@ -1266,8 +1275,8 @@ static void DrawNewMonsters(void) {
    用最小的箱子道具当模型，但外面套一圈金色脉冲，
    肉眼一眼能认出「那是钱」。金额越大脉冲越亮。 */
 static void DrawMoneyBagModel(int idx) {
-    extern float MoneyBagX(int), MoneyBagY(int), MoneyBagLife(int);
-    extern int MoneyBagAmount(int);
+
+
     if (MoneyBagAmount(idx) <= 0) return;
     float wx = MoneyBagX(idx), wy = MoneyBagY(idx);
     float lf = MoneyBagLife(idx);
@@ -1343,101 +1352,56 @@ static void DcyDashRect(int x0, int y0, int x1, int y1, unsigned int c, float a)
     for (int y = y0; y <= y1; y += 2) { DcyPut(x0, y, c, a); DcyPut(x1, y, c, a); }
 }
 
-static void DrawDecoyModel(int idx) {
-    extern Decoy decoysArr[MAX_DECOY];
-    if (idx < 0 || idx >= MAX_DECOY) return;
-    if (!decoysArr[idx].active) return;
+typedef struct {
+    const Decoy* d;
+    float pulse;
+    int cx;
+    int baseY;
+    int h;
+    int armed;
+    int legH;
+    int bodyH;
+    int neckH;
+    int headD;
+    int headR;
+    int headDrop;
+    int wt;
+    int wb;
+    int weave;
+    int fine;
+    float dim;
+    unsigned int cEdge;
+    unsigned int cLit;
+    unsigned int cMid;
+    unsigned int cShd;
+    unsigned int cDeep;
+    unsigned int cSeam;
+    unsigned int cRope;
+    unsigned int cRopeL;
+    unsigned int cStraw;
+    unsigned int cHead;
+} DecoyDrawContext;
 
-    Decoy* d = &decoysArr[idx];
+static unsigned int DecoyClothShade(const DecoyDrawContext* ctx, int px, int halfW) {
+    return px * 5 < -halfW * 3 ? ctx->cLit :
+           px * 5 < -halfW     ? ctx->cMid :
+           px * 5 <  halfW     ? ctx->cMid :
+           px * 5 <  halfW * 3 ? ctx->cShd : ctx->cDeep;
+}
 
-    /* 叫声脉冲：shoutT 刚重置时最大，之后衰减 —— 视觉上「它刚叫过」 */
-    float pulse = 1.0f;
-    if (d->armed) {
-        float p = d->shoutT / DECOY_SHOUT_EVERY;      /* 1 → 0 */
-        if (p > 1.0f) p = 1.0f;
-        if (p > 0.82f) pulse = 1.0f + (p - 0.82f) / 0.18f * 0.22f;   /* 最高 +22% */
-    }
-
-    SpriteBox sb = ProjectSprite(d->x, d->y, 0.0f, 0.55f * pulse);
-    if (!sb.ok) return;
-    int cx = (sb.x0 + sb.x1) / 2;
-    int baseY = sb.y1;                 /* 脚底 */
-    int h = (sb.y1 - sb.y0);           /* 整体高度 */
-    if (h < 8) return;                 /* 太远就别画，免得糊成一个点 */
-
-    /* ==================================================================
-     * **两个形态**（2026-11-05 用户要求）
-     * ----------------------------------------------------------------
-     * 反馈：「两个形态的差异度不大，就是有没有光的区别。」
-     * 旧版确实只改了亮度和一点点颜色 —— 剪影一模一样，
-     * 玩家在暗场里根本分不出它到底在不在叫。
-     *
-     * 现在给两个**几何上不同**的形态（铁律二／铁律三十：状态变体要能认出
-     * 是同一个角色，但要一眼看出状态不同）：
-     *
-     *   形态 A「静默」（刚落地，还没开始叫）
-     *     · 身体被压扁：bodyH 40%（不是 44%）→ 像一袋软布
-     *     · 肩膀收窄：wt -1
-     *     · **头低垂**：headDrop 往下沉 h/16，几乎埋进肩膀
-     *     · 稻草**垂着**（重力）
-     *     · 嘴是缝起来的十字
-     *     · 两眼全暗
-     *
-     *   形态 B「鸣叫」（已激活，正在引怪）
-     *     · 身体挺直：bodyH 46%，肩膀 +1（胸口撑开）
-     *     · **头抬起来**：headDrop = 0，脖子完全露出来
-     *     · 稻草**炸开**（在震动）
-     *     · 嘴**张开**：深色菱形口 + 锯齿边，里面是暗红
-     *     · 单眼琥珀亮起 + 光晕
-     *     · **两圈声音波纹**从嘴部向外扩散
-     *
-     * 判读顺序（缩小到 20px 也成立）：
-     *   ① 头是不是埋在肩膀里  ② 嘴是缝的还是张的  ③ 有没有波纹
-     * ================================================================ */
-    const int armed = d->armed ? 1 : 0;
-
-    /* 纵向：静默态身体被压扁，头往下沉 */
-    int legH   = h * 28 / 100;
-    int bodyH  = h * (armed ? 46 : 40) / 100;
-    int neckH  = h * (armed ? 6 : 8) / 100;
-    int headD  = h - legH - bodyH - neckH;
-    if (headD < 3) headD = 3;
-    int headR  = headD / 2;
-    if (headR < 2) headR = 2;
-
-    /* 头低垂：静默态往下沉，几乎埋进肩膀 —— 最直观的形态差 */
-    int headDrop = armed ? 0 : (h / 16);
-
-    /* 横向：鸣叫时胸口撑开，静默时塌下去 */
-    int wt = h / 11 + (armed ? 1 : 0);  if (wt < 2) wt = 2;
-    int wb = h / 8;                     if (wb <= wt) wb = wt + 1;
-
-    /* ---- 尺寸门槛：够大才开高成本细节 ---- */
-    const int weave = (h >= 34);        /* 织纹：太小会变噪点 */
-    const int fine  = (h >= 48);        /* 精细件：膝盖/脚/补丁 */
-
-    /* ---- 调色板：和 sprites.c 的 SPR_ITEM_DECOY 对齐 ---- */
-    float dim  = d->armed ? 1.0f : 0.78f;
-    const unsigned int cEdge = 0x00161A1Cu;
-    const unsigned int cLit  = d->armed ? 0x00B4A88Cu : 0x00887E68u;
-    const unsigned int cMid  = d->armed ? 0x00938A72u : 0x006E6656u;
-    const unsigned int cShd  = d->armed ? 0x00625C4Eu : 0x00463F36u;
-    const unsigned int cDeep = d->armed ? 0x00403A30u : 0x002C2720u;  /* 5 段的第 5 档 */
-    const unsigned int cSeam = 0x00302820u;
-    const unsigned int cRope = 0x00806848u;
-    const unsigned int cRopeL= 0x00B09060u;
-    const unsigned int cStraw= 0x00C8A040u;
-    const unsigned int cHead = d->armed ? 0x00C0B498u : 0x008A8070u;
-
-    /* ================================================================
-     * 5 段明暗（手段②）：把一个平面从左到右切成 5 档。
-     * 3 档像贴纸，5 档才有圆柱的体积。
-     * ============================================================== */
-    #define DCY_SHADE(px, halfW) \
-        (((px) * 5 < -(halfW) * 3) ? cLit  : \
-         ((px) * 5 < -(halfW) * 1) ? cMid  : \
-         ((px) * 5 <  (halfW) * 1) ? cMid  : \
-         ((px) * 5 <  (halfW) * 3) ? cShd  : cDeep)
+static void DrawDecoyLegs(const DecoyDrawContext* ctx) {
+    int cx = ctx->cx;
+    int baseY = ctx->baseY;
+    int h = ctx->h;
+    int legH = ctx->legH;
+    int wb = ctx->wb;
+    int weave = ctx->weave;
+    int fine = ctx->fine;
+    float dim = ctx->dim;
+    unsigned int cEdge = ctx->cEdge;
+    unsigned int cLit = ctx->cLit;
+    unsigned int cMid = ctx->cMid;
+    unsigned int cSeam = ctx->cSeam;
 
     /* ================= 腿（先画，脚在最下） ================= */
     {
@@ -1461,7 +1425,7 @@ static void DrawDecoyModel(int idx) {
             DcyPut(lx1 + outK, py, cEdge, 0.95f);
             for (int k = -legW; k <= legW; k++) {
                 /* 5 段明暗按 k/legW 走 */
-                unsigned int c = DCY_SHADE(k, legW);
+                unsigned int c = DecoyClothShade(ctx, k, legW);
                 /* 脚掌区域更宽 + 更亮（受光面朝上） */
                 if (i < footH) { c = (k < 0) ? cLit : cMid; }
                 DcyCloth(lx0 + k, py, c, dim * ao, weave);
@@ -1484,6 +1448,26 @@ static void DrawDecoyModel(int idx) {
             }
         }
     }
+}
+
+static void DrawDecoyArms(const DecoyDrawContext* ctx) {
+    int cx = ctx->cx;
+    int baseY = ctx->baseY;
+    int h = ctx->h;
+    int armed = ctx->armed;
+    int legH = ctx->legH;
+    int bodyH = ctx->bodyH;
+    int wt = ctx->wt;
+    int wb = ctx->wb;
+    int weave = ctx->weave;
+    int fine = ctx->fine;
+    float dim = ctx->dim;
+    unsigned int cEdge = ctx->cEdge;
+    unsigned int cLit = ctx->cLit;
+    unsigned int cMid = ctx->cMid;
+    unsigned int cShd = ctx->cShd;
+    unsigned int cSeam = ctx->cSeam;
+    unsigned int cStraw = ctx->cStraw;
 
     /* ================================================================
      * 两条手臂 —— 关键改动：**跟着身体轮廓走**，并且留真实的负空间
@@ -1585,6 +1569,21 @@ static void DrawDecoyModel(int idx) {
         }
         #undef DCY_HALFW
     }
+}
+
+static void DrawDecoyBody(const DecoyDrawContext* ctx) {
+    int cx = ctx->cx;
+    int baseY = ctx->baseY;
+    int legH = ctx->legH;
+    int bodyH = ctx->bodyH;
+    int wt = ctx->wt;
+    int wb = ctx->wb;
+    int weave = ctx->weave;
+    int fine = ctx->fine;
+    float dim = ctx->dim;
+    unsigned int cEdge = ctx->cEdge;
+    unsigned int cShd = ctx->cShd;
+    unsigned int cSeam = ctx->cSeam;
 
     /* ================= 身体：梨形 + 5 段明暗 + 织纹 + 两条麻袋缝 ================= */
     {
@@ -1595,7 +1594,7 @@ static void DrawDecoyModel(int idx) {
             DcyPut(cx - halfW - 1, py, cEdge, 0.95f);
             DcyPut(cx + halfW + 1, py, cEdge, 0.95f);
             for (int x = -halfW; x <= halfW; x++)
-                DcyCloth(cx + x, py, DCY_SHADE(x, halfW), dim, weave);
+                DcyCloth(cx + x, py, DecoyClothShade(ctx, x, halfW), dim, weave);
         }
         /* 手段⑤ 两条麻袋竖缝：从肩走到胯，虚线 —— 让它像"布做的" */
         if (fine) {
@@ -1633,6 +1632,23 @@ static void DrawDecoyModel(int idx) {
             if (fine) DcyBar(cx - 1, cx + 1, hemY + 1, cSeam, 0.7f);
         }
     }
+}
+
+static void DrawDecoyNeck(const DecoyDrawContext* ctx) {
+    int cx = ctx->cx;
+    int baseY = ctx->baseY;
+    int h = ctx->h;
+    int legH = ctx->legH;
+    int bodyH = ctx->bodyH;
+    int neckH = ctx->neckH;
+    int wt = ctx->wt;
+    int wb = ctx->wb;
+    int fine = ctx->fine;
+    float dim = ctx->dim;
+    unsigned int cEdge = ctx->cEdge;
+    unsigned int cSeam = ctx->cSeam;
+    unsigned int cRope = ctx->cRope;
+    unsigned int cRopeL = ctx->cRopeL;
 
     /* ================= 脖子 + 绕颈麻绳（地标） ================= */
     {
@@ -1672,6 +1688,27 @@ static void DrawDecoyModel(int idx) {
             }
         }
     }
+}
+
+static void DrawDecoyHead(const DecoyDrawContext* ctx) {
+    float pulse = ctx->pulse;
+    int cx = ctx->cx;
+    int baseY = ctx->baseY;
+    int armed = ctx->armed;
+    int legH = ctx->legH;
+    int bodyH = ctx->bodyH;
+    int neckH = ctx->neckH;
+    int headD = ctx->headD;
+    int headR = ctx->headR;
+    int headDrop = ctx->headDrop;
+    int weave = ctx->weave;
+    float dim = ctx->dim;
+    unsigned int cEdge = ctx->cEdge;
+    unsigned int cLit = ctx->cLit;
+    unsigned int cMid = ctx->cMid;
+    unsigned int cShd = ctx->cShd;
+    unsigned int cSeam = ctx->cSeam;
+    unsigned int cHead = ctx->cHead;
 
     /* ================= 头 ================= */
     {
@@ -1768,6 +1805,23 @@ static void DrawDecoyModel(int idx) {
             }
         }
 
+    }
+}
+
+static void DrawDecoyRipples(const DecoyDrawContext* ctx) {
+    const Decoy* d = ctx->d;
+    float pulse = ctx->pulse;
+    int cx = ctx->cx;
+    int baseY = ctx->baseY;
+    int h = ctx->h;
+    int armed = ctx->armed;
+    int legH = ctx->legH;
+    int bodyH = ctx->bodyH;
+    int neckH = ctx->neckH;
+    int headR = ctx->headR;
+    int headDrop = ctx->headDrop;
+
+    int headCY = baseY - legH - bodyH - neckH - headR + headDrop;
         /* ==================================================================
          * **声音波纹**：鸣叫态独有的第三层判读
          * ----------------------------------------------------------------
@@ -1795,8 +1849,81 @@ static void DrawDecoyModel(int idx) {
                 }
             }
         }
+
+}
+
+static void DrawDecoyModel(int idx) {
+
+    if (idx < 0 || idx >= MAX_DECOY) return;
+    if (!decoysArr[idx].active) return;
+
+    Decoy* d = &decoysArr[idx];
+
+    /* 叫声脉冲：shoutT 刚重置时最大，之后衰减 —— 视觉上「它刚叫过」 */
+    float pulse = 1.0f;
+    if (d->armed) {
+        float p = d->shoutT / DECOY_SHOUT_EVERY;      /* 1 → 0 */
+        if (p > 1.0f) p = 1.0f;
+        if (p > 0.82f) pulse = 1.0f + (p - 0.82f) / 0.18f * 0.22f;   /* 最高 +22% */
     }
-    #undef DCY_SHADE
+
+    SpriteBox sb = ProjectSprite(d->x, d->y, 0.0f, 0.55f * pulse);
+    if (!sb.ok) return;
+    int cx = (sb.x0 + sb.x1) / 2;
+    int baseY = sb.y1;                 /* 脚底 */
+    int h = (sb.y1 - sb.y0);           /* 整体高度 */
+    if (h < 8) return;                 /* 太远就别画，免得糊成一个点 */
+
+    /* Quiet: slumped body and closed mouth. Armed: raised head and ripples. */
+    const int armed = d->armed ? 1 : 0;
+
+    /* 纵向：静默态身体被压扁，头往下沉 */
+    int legH   = h * 28 / 100;
+    int bodyH  = h * (armed ? 46 : 40) / 100;
+    int neckH  = h * (armed ? 6 : 8) / 100;
+    int headD  = h - legH - bodyH - neckH;
+    if (headD < 3) headD = 3;
+    int headR  = headD / 2;
+    if (headR < 2) headR = 2;
+
+    /* 头低垂：静默态往下沉，几乎埋进肩膀 —— 最直观的形态差 */
+    int headDrop = armed ? 0 : (h / 16);
+
+    /* 横向：鸣叫时胸口撑开，静默时塌下去 */
+    int wt = h / 11 + (armed ? 1 : 0);  if (wt < 2) wt = 2;
+    int wb = h / 8;                     if (wb <= wt) wb = wt + 1;
+
+    /* ---- 尺寸门槛：够大才开高成本细节 ---- */
+    const int weave = (h >= 34);        /* 织纹：太小会变噪点 */
+    const int fine  = (h >= 48);        /* 精细件：膝盖/脚/补丁 */
+
+    /* ---- 调色板：和 sprites.c 的 SPR_ITEM_DECOY 对齐 ---- */
+    float dim  = d->armed ? 1.0f : 0.78f;
+    const unsigned int cEdge = 0x00161A1Cu;
+    const unsigned int cLit  = d->armed ? 0x00B4A88Cu : 0x00887E68u;
+    const unsigned int cMid  = d->armed ? 0x00938A72u : 0x006E6656u;
+    const unsigned int cShd  = d->armed ? 0x00625C4Eu : 0x00463F36u;
+    const unsigned int cDeep = d->armed ? 0x00403A30u : 0x002C2720u;  /* 5 段的第 5 档 */
+    const unsigned int cSeam = 0x00302820u;
+    const unsigned int cRope = 0x00806848u;
+    const unsigned int cRopeL= 0x00B09060u;
+    const unsigned int cStraw= 0x00C8A040u;
+    const unsigned int cHead = d->armed ? 0x00C0B498u : 0x008A8070u;
+
+    const DecoyDrawContext ctx = {
+        d, pulse, cx, baseY, h, armed,
+        legH, bodyH, neckH, headD, headR, headDrop,
+        wt, wb, weave, fine, dim,
+        cEdge, cLit, cMid, cShd, cDeep, cSeam,
+        cRope, cRopeL, cStraw, cHead
+    };
+
+    DrawDecoyLegs(&ctx);
+    DrawDecoyArms(&ctx);
+    DrawDecoyBody(&ctx);
+    DrawDecoyNeck(&ctx);
+    DrawDecoyHead(&ctx);
+    DrawDecoyRipples(&ctx);
 }
 
 static void DrawShotModel(int idx) {
@@ -2040,7 +2167,7 @@ static void DrawShotSprite(int idx) {
    这才是正确的「地面贴花」画法。 */
 static void DrawGluePuddle(void) {
     spriteLight = 1.0f;
-    extern GlueZone glues[MAX_GLUE];
+
     for (int i = 0; i < MAX_GLUE; i++) {
         if (!glues[i].active) continue;
         float t = glues[i].life / GLUE_LIFE;         /* 1 → 0 */
@@ -2110,7 +2237,7 @@ static void DrawGluePuddle(void) {
 static void DrawSmokeCloud(void) {
     spriteLight = 1.0f;      /* v2.1：烟团不从精灵衰减继承 */
 
-    extern SmokeCloud smokes[MAX_SMOKE];
+
     for (int i = 0; i < MAX_SMOKE; i++) {
         if (!smokes[i].active) continue;
         float t = smokes[i].life / SMOKE_LIFE;      /* 1 → 0 */
@@ -2227,7 +2354,7 @@ static void DrawExitBeamSprite(void) {
     /* 呼吸脉冲：通电时让远处注意到「那边在动」 */
     float pulse = 1.0f;
     if (breakerOpen) {
-        extern float gameTime;
+
         pulse = 0.82f + 0.18f * sinf(gameTime * 2.4f);
     }
 
@@ -2325,7 +2452,7 @@ static void DrawExitBeamSprite(void) {
 /* v3.0 改造树「听觉」：把最近的噪音源标成地面一点，玩家能"听"到方向 */
 /* v3.0：靠近可藏家具时给一圈冷色描边 —— 让玩家一眼看出"这个能躲" */
 static void DrawHideSpotHighlight(void) {
-    extern int hideSpotNear;
+
     if (hideSpotNear < 0 || hideSpotNear >= hideSpotCount) return;
     HideSpot* h = &hideSpots[hideSpotNear];
     if (!h->active) return;
@@ -2342,7 +2469,7 @@ static void DrawHideSpotHighlight(void) {
 
 static void DrawHearingMarker(void) {
     if (!BenchHearing()) return;
-    extern float noiseDisplay, noiseSrcX, noiseSrcY;
+
     if (noiseDisplay <= 0.01f) return;
     float dx = noiseSrcX - posX, dy = noiseSrcY - posY;
     if (dx * dx + dy * dy > 400.0f) return;   /* 20 格内才显示 */
@@ -2371,10 +2498,12 @@ int DebugHatchScreenBox(int idx, float hx, float hy, int* x0, int* y0, int* x1, 
     return s.ok;
 }
 
-void RenderSprites(void) {
-    struct { float d2; int kind, idx; } list[MAX_SPRITES];
-    int n = 0;
+typedef struct {
+    float d2;
+    int kind, idx;
+} SpriteDrawEntry;
 
+static int CollectSpriteScenery(SpriteDrawEntry* list, int n) {
     for (int i = 0; i < containerCount; i++) {
         if (!containers[i].active) continue;
         if (n >= MAX_SPRITES) break;
@@ -2408,8 +2537,8 @@ void RenderSprites(void) {
     }
     /* v2.4-rc：房间家具也走同一个渲染列表，共享深度排序与光照 */
     {
-        extern RoomProp roomProps[MAX_ROOM_PROPS];
-        extern int roomPropCount;
+
+
         for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++) {
             if (!roomProps[i].active) continue;
             if (n >= MAX_SPRITES) break;
@@ -2430,6 +2559,10 @@ void RenderSprites(void) {
             n++;
         }
     }
+    return n;
+}
+
+static int CollectSpriteActorsAndMarkers(SpriteDrawEntry* list, int n) {
     if (breaker.active) {
         if (n < MAX_SPRITES) {
             list[n].d2 = Dist2(breaker.x, breaker.y, posX, posY);
@@ -2438,9 +2571,9 @@ void RenderSprites(void) {
             n++;
         }
     }
-    if (monster.active) {
+    if (Hunter0()->active) {
         if (n < MAX_SPRITES) {
-            list[n].d2 = Dist2(monster.x, monster.y, posX, posY);
+            list[n].d2 = Dist2(Hunter0()->x, Hunter0()->y, posX, posY);
             list[n].kind = 2;
             list[n].idx = 0;
             n++;
@@ -2449,15 +2582,15 @@ void RenderSprites(void) {
     /* v2.4.12：第二只听声怪也进渲染列表 */
     {
 
-        if (monster2.active && n < MAX_SPRITES) {
-            list[n].d2 = Dist2(monster2.x, monster2.y, posX, posY);
+        if (Hunter1()->active && n < MAX_SPRITES) {
+            list[n].d2 = Dist2(Hunter1()->x, Hunter1()->y, posX, posY);
             list[n].kind = 13;
             list[n].idx = 0;
             n++;
         }
         /* 第三只（120 秒后出现） */
-        if (monster3.active && n < MAX_SPRITES) {
-            list[n].d2 = Dist2(monster3.x, monster3.y, posX, posY);
+        if (Hunter2()->active && n < MAX_SPRITES) {
+            list[n].d2 = Dist2(Hunter2()->x, Hunter2()->y, posX, posY);
             list[n].kind = 14;
             list[n].idx = 0;
             n++;
@@ -2487,8 +2620,8 @@ void RenderSprites(void) {
      * 它之前只有逻辑、没有入渲染列表 —— 玩家完全看不见。
      * ================================================================ */
     {
-        extern int SpiderActive(void);
-        extern float SpiderX(void), SpiderY(void);
+
+
         if (SpiderActive()) {
             if (n < MAX_SPRITES) {
                 float sx = SpiderX(), sy = SpiderY();
@@ -2502,8 +2635,8 @@ void RenderSprites(void) {
 
     /* 2026-11-06：**相位信标的世界模型**（用户要求） */
     {
-        extern int phasePlaced;
-        extern float phaseX, phaseY;
+
+
         if (phasePlaced) {
             if (n < MAX_SPRITES) {
                 list[n].d2 = Dist2(phaseX, phaseY, posX, posY);
@@ -2523,6 +2656,10 @@ void RenderSprites(void) {
             n++;
         }
     }    /* v1.8 偷电怪 */
+    return n;
+}
+
+static int CollectSpriteEffectsAndExit(SpriteDrawEntry* list, int n) {
     for (int i = 0; i < LEECH_MAX; i++) {
         if (!leeches[i].active) continue;
         if (n >= MAX_SPRITES) break;
@@ -2579,6 +2716,10 @@ void RenderSprites(void) {
         n++;
     }
 
+    return n;
+}
+
+static void SortSpriteEntries(SpriteDrawEntry* list, int n) {
     /* 插入排序：远的先画 */
     for (int i = 1; i < n; i++) {
         int j = i - 1;
@@ -2593,6 +2734,94 @@ void RenderSprites(void) {
         list[j + 1].idx = idx;
     }
 
+}
+
+static void DrawListedHatch(int hi) {
+    /* 2026-11-06：舱门（两扇对开，4 帧） */
+    if (hi >= 0 && hi < MAX_HATCHES && hatches[hi].active) {
+        /* 帧号由开门进度决定；SEALED=0，OPEN/FIRED=3 */
+        float o = HatchOpen01(hi);
+        int f = (int)(o * 3.0f + 0.5f);
+        if (f < 0) f = 0;
+        if (f > 3) f = 3;
+        int spr = SPR_HATCH_0 + f;
+        DrawBakedPropArt(spr, hatches[hi].x, hatches[hi].y, 0.0f, 0.72f, 1.0f);
+
+        /* ================================================================
+         * 2026-11-06（第 8 轮）：**主题指示灯改由渲染器直接画**
+         * ----------------------------------------------------------------
+         * 原来灯是烘进精灵的三块洋红 key，靠 SpriteAccentSet 换色。
+         * 两个问题：
+         *   ① 传给 accent 的是 cell_meta 的**墙面混色权重**（12~34/255），
+         *      那根本不是颜料，换上去只会变黑；
+         *   ② 128 画布 + 双线性放大之后几乎没有纯洋红像素，
+         *      判据匹配不上，灯就一直是洋红色。
+         * 现在：精灵里不画灯，这里按投影框在门框顶部点三颗。
+         * ================================================================ */
+        {
+            /* 门框顶部三颗指示灯。用与精灵同一套投影，所以会跟着透视缩。
+               ProjectSprite 就是本文件的静态函数，直接调。 */
+            SpriteBox sb = ProjectSprite(hatches[hi].x, hatches[hi].y, 0.0f, 0.72f);
+            if (sb.ok) {
+                int boxH = sb.y1 - sb.y0;
+                int boxW = sb.x1 - sb.x0;
+                if (boxH > 8 && boxW > 8) {
+                    unsigned int lamp = HatchLampRGB(hatches[hi].themeId);
+                    /* 灯的亮度跟手电走：暗场里也该有一点自发光感 */
+                    float litK = SpriteShade(sb.ty, 0.12f);
+                    if (litK < 0.45f) litK = 0.45f;   /* 指示灯自己发亮 */
+                    int ly = sb.y0 + boxH / 12;
+                    int lr = boxH / 50;  if (lr < 1) lr = 1;   /* 灯要小，别抢门 */
+                    int lw = lr * 2 + 1;
+                    for (int k = 0; k < 3; k++) {
+                        int lx = sb.x0 + boxW * (3 + k * 4) / 12;
+                        for (int dy = 0; dy < lw; dy++) {
+                            for (int dx = 0; dx < lw; dx++) {
+                                int px = lx + dx, py = ly + dy;
+                                if (px < 0 || px >= renderW) continue;
+                                if (py < 0 || py >= renderH) continue;
+                                /* ================================================================
+                                 * 2026-11-06（用户实测）：**指示灯原来没有深度测试**
+                                 * ----------------------------------------------------------------
+                                 * "特殊房间的装置出现 3 个点，全局都能看得到，穿墙都能看得到"。
+                                 * 原因是这里直接调 PutPixelBlend —— 它只做混合，不查 zBuffer。
+                                 * 精灵本身走了 DrawSpriteSubZ（有 z），
+                                 * 唯独这三颗灯绕过了深度。
+                                 * ================================================================ */
+                                if (sb.ty >= zBuffer[px]) continue;
+                                PutPixelBlend(px, py, lamp, litK);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void DrawListedRoomProp(int ri) {
+    /* v2.4-rc P3：房间家具（分层伪立体） */
+    if (ri >= 0 && ri < MAX_ROOM_PROPS && roomProps[ri].active) {
+        /* ================================================================
+         * 2026-11-06（**精灵数过多导致掉帧**）
+         * ----------------------------------------------------------------
+         * 用户实测：「货架算三个精灵，箱子算两个精灵，精灵过多，
+         * 每次路过都掉帧。」
+         *
+         * 分层伪立体的视觉收益，远小于它带来的绘制开销 ——
+         * 尤其 36x36 之后一层有更多家具。
+         * 现在**每个家具只画 1 个精灵**，改由 searchLeft 承担内容量：
+         *   货架 3 次 / 木箱堆 2 次 / 控制台 2 次
+         * ================================================================ */
+        int oneSpr = SPR_PROP_SHELF;
+        if (roomProps[ri].kind == ROOMPROP_CONSOLE)     oneSpr = SPR_PROP_CONSOLE;
+        else if (roomProps[ri].kind == ROOMPROP_CRATES) oneSpr = SPR_PROP_CRATE;
+        DrawBakedPropArt(oneSpr, roomProps[ri].x, roomProps[ri].y, 0.0f, 0.62f, 1.0f);
+
+    }
+}
+
+static void DrawSpriteEntries(const SpriteDrawEntry* list, int n) {
     for (int i = 0; i < n; i++) {
         switch (list[i].kind) {
             case 0: DrawCrateSprite(list[i].idx); break;
@@ -2611,108 +2840,26 @@ void RenderSprites(void) {
             case 10: DrawSlashSprite(); break;
             case 12: DrawHideSpotSprite(list[i].idx); break;   /* v3.0 藏身点 */
         case 19: {   /* 2026-11-06：缚丝蛛 */
-            extern float SpiderX(void), SpiderY(void);
+
             DrawBakedPropArt(SPR_PROP_SPIDER, SpiderX(), SpiderY(), 0.0f, 0.30f, 1.0f);
             break;
         }
         case 18: {   /* 2026-11-06：相位信标（地面模型） */
-            extern float phaseX, phaseY;
+
             /* 半身高 0.34 -> 0.50：第一版太小，暗场里像块石头 */
             DrawBakedPropArt(SPR_PROP_PHASE, phaseX, phaseY, 0.0f, 0.50f, 1.25f);
             break;
         }
-        case 17: {   /* 2026-11-06：舱门（两扇对开，4 帧） */
-            int hi = list[i].idx;
-            if (hi >= 0 && hi < MAX_HATCHES && hatches[hi].active) {
-                /* 帧号由开门进度决定；SEALED=0，OPEN/FIRED=3 */
-                float o = HatchOpen01(hi);
-                int f = (int)(o * 3.0f + 0.5f);
-                if (f < 0) f = 0;
-                if (f > 3) f = 3;
-                int spr = SPR_HATCH_0 + f;
-                DrawBakedPropArt(spr, hatches[hi].x, hatches[hi].y, 0.0f, 0.72f, 1.0f);
-
-                /* ================================================================
-                 * 2026-11-06（第 8 轮）：**主题指示灯改由渲染器直接画**
-                 * ----------------------------------------------------------------
-                 * 原来灯是烘进精灵的三块洋红 key，靠 SpriteAccentSet 换色。
-                 * 两个问题：
-                 *   ① 传给 accent 的是 cell_meta 的**墙面混色权重**（12~34/255），
-                 *      那根本不是颜料，换上去只会变黑；
-                 *   ② 128 画布 + 双线性放大之后几乎没有纯洋红像素，
-                 *      判据匹配不上，灯就一直是洋红色。
-                 * 现在：精灵里不画灯，这里按投影框在门框顶部点三颗。
-                 * ================================================================ */
-                {
-                    /* 门框顶部三颗指示灯。用与精灵同一套投影，所以会跟着透视缩。
-                       ProjectSprite 就是本文件的静态函数，直接调。 */
-                    SpriteBox sb = ProjectSprite(hatches[hi].x, hatches[hi].y, 0.0f, 0.72f);
-                    if (sb.ok) {
-                        int boxH = sb.y1 - sb.y0;
-                        int boxW = sb.x1 - sb.x0;
-                        if (boxH > 8 && boxW > 8) {
-                            unsigned int lamp = HatchLampRGB(hatches[hi].themeId);
-                            /* 灯的亮度跟手电走：暗场里也该有一点自发光感 */
-                            float litK = SpriteShade(sb.ty, 0.12f);
-                            if (litK < 0.45f) litK = 0.45f;   /* 指示灯自己发亮 */
-                            int ly = sb.y0 + boxH / 12;
-                            int lr = boxH / 50;  if (lr < 1) lr = 1;   /* 灯要小，别抢门 */
-                            int lw = lr * 2 + 1;
-                            for (int k = 0; k < 3; k++) {
-                                int lx = sb.x0 + boxW * (3 + k * 4) / 12;
-                                for (int dy = 0; dy < lw; dy++) {
-                                    for (int dx = 0; dx < lw; dx++) {
-                                        int px = lx + dx, py = ly + dy;
-                                        if (px < 0 || px >= renderW) continue;
-                                        if (py < 0 || py >= renderH) continue;
-                                        /* ================================================================
-                                         * 2026-11-06（用户实测）：**指示灯原来没有深度测试**
-                                         * ----------------------------------------------------------------
-                                         * "特殊房间的装置出现 3 个点，全局都能看得到，穿墙都能看得到"。
-                                         * 原因是这里直接调 PutPixelBlend —— 它只做混合，不查 zBuffer。
-                                         * 精灵本身走了 DrawSpriteSubZ（有 z），
-                                         * 唯独这三颗灯绕过了深度。
-                                         * ================================================================ */
-                                        if (sb.ty >= zBuffer[px]) continue;
-                                        PutPixelBlend(px, py, lamp, litK);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            break;
-        }
-        case 16: {   /* v2.4-rc P3：房间家具（分层伪立体） */
-            extern RoomProp roomProps[MAX_ROOM_PROPS];
-            int ri = list[i].idx;
-            if (ri >= 0 && ri < MAX_ROOM_PROPS && roomProps[ri].active) {
-                /* ================================================================
-                 * 2026-11-06（**精灵数过多导致掉帧**）
-                 * ----------------------------------------------------------------
-                 * 用户实测：「货架算三个精灵，箱子算两个精灵，精灵过多，
-                 * 每次路过都掉帧。」
-                 *
-                 * 分层伪立体的视觉收益，远小于它带来的绘制开销 ——
-                 * 尤其 36x36 之后一层有更多家具。
-                 * 现在**每个家具只画 1 个精灵**，改由 searchLeft 承担内容量：
-                 *   货架 3 次 / 木箱堆 2 次 / 控制台 2 次
-                 * ================================================================ */
-                int oneSpr = SPR_PROP_SHELF;
-                if (roomProps[ri].kind == ROOMPROP_CONSOLE)     oneSpr = SPR_PROP_CONSOLE;
-                else if (roomProps[ri].kind == ROOMPROP_CRATES) oneSpr = SPR_PROP_CRATE;
-                DrawBakedPropArt(oneSpr, roomProps[ri].x, roomProps[ri].y, 0.0f, 0.62f, 1.0f);
-                break;
-                break;
-            }
-            break;
-        }
+        case 17: DrawListedHatch(list[i].idx); break;
+        case 16: DrawListedRoomProp(list[i].idx); break;
             case 11: DrawExtraSprite(list[i].idx); break;
             case 7: DrawFlowerSprite(); break;
             default: DrawExitBeamSprite(); break;
         }
     }
+}
+
+static void DrawSpriteOverlays(void) {
     /* v1.18：烟幕团（不参与深度排序，直接在最后叠加） */
     DrawHideSpotHighlight();   /* v3.0 藏身点靠近提示 */
     DrawHearingMarker();   /* v3.0 听觉 */
@@ -2720,7 +2867,7 @@ void RenderSprites(void) {
     DrawGluePuddle();   /* v3.3 地面胶水 */
     /* v3.3：诱饵玩偶 */
     {
-        extern Decoy decoysArr[MAX_DECOY];
+
         for (int di = 0; di < MAX_DECOY; di++)
             if (decoysArr[di].active) DrawDecoyModel(di);
     }
@@ -2730,6 +2877,17 @@ void RenderSprites(void) {
     DrawNewMonsters();
 
     DrawShardSprite();
+}
+
+void RenderSprites(void) {
+    SpriteDrawEntry list[MAX_SPRITES];
+    int n = 0;
+    n = CollectSpriteScenery(list, n);
+    n = CollectSpriteActorsAndMarkers(list, n);
+    n = CollectSpriteEffectsAndExit(list, n);
+    SortSpriteEntries(list, n);
+    DrawSpriteEntries(list, n);
+    DrawSpriteOverlays();
 }
 
 /* ------------------------------------------------------------------ */
@@ -2754,8 +2912,8 @@ static void RenderPostBand(int y0, int y1);
  * 逻辑与分带函数完全复用（RenderFloorBand/WallBand/PostBand），
  * 只是不分片 —— 画面结果逐像素相同，只是慢一些。
  * ================================================================== */
-void InitWorkers(void) { }
-void ShutdownWorkers(void) { }
+void InitWorkers(void) { /* PLATFORM_NOOP: The browser renderer runs serially and owns no native worker threads. */ }
+void ShutdownWorkers(void) { /* PLATFORM_NOOP: The browser renderer runs serially and owns no native worker threads. */ }
 void RunPhase(int phase) {
     if (phase == 1) { RenderFloorBand(0, renderH); return; }
     if (phase == 2) { RenderWallBand(0, renderW); return; }
@@ -2959,7 +3117,7 @@ static void RenderFloorBand(int y0, int y1) {
         float reachF = 1.0f - rowDistance / 5.5f;
         if (reachF < 0.0f) reachF = 0.0f;
         reachF *= reachF;
-        extern float smokeDim;
+
         float shadow = (ambF * 0.28f + (lightOnF ? reachF * 0.95f : 0.0f)) * smokeDim;
         int shadowI = (int)(shadow * 256.0f);
         if (shadowI < 0) shadowI = 0;
@@ -2992,8 +3150,8 @@ static void RenderFloorBand(int y0, int y1) {
         int tintMul = (int)(shadow * 256.0f * 1.7f);
         if (tintMul < 0) tintMul = 0;
         if (tintMul > 1024) tintMul = 1024;
-        extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
-        extern int roomCount;
+
+
 
         for (int x = 0; x < renderW; x++) {
             int cX = (int)fx, cY = (int)fy;
@@ -3103,314 +3261,342 @@ static void RenderFloorBand(int y0, int y1) {
 }
 
 /* 墙体：DDA 求交后整列查表，内层只有一次乘法和一次写 */
+typedef struct {
+    float rayDirX;
+    float rayDirY;
+    int mapX;
+    int mapY;
+    int side;
+    float perpWallDist;
+} WallRay;
+
+static WallRay CastWallRay(int x) {
+    float cameraX = 2.0f * x / (float)renderW - 1.0f;
+    float rayDirX = dirX + planeX * cameraX;
+    float rayDirY = dirY + planeY * cameraX;
+
+    int mapX = (int)posX, mapY = (int)posY;
+    float deltaDistX = (rayDirX == 0) ? 1e30f : fabsf(1.0f / rayDirX);
+    float deltaDistY = (rayDirY == 0) ? 1e30f : fabsf(1.0f / rayDirY);
+    float sideDistX, sideDistY;
+    int stepX, stepY, hit = 0, side = 0;
+
+    if (rayDirX < 0) { stepX = -1; sideDistX = (posX - mapX) * deltaDistX; }
+    else { stepX = 1; sideDistX = (mapX + 1.0f - posX) * deltaDistX; }
+    if (rayDirY < 0) { stepY = -1; sideDistY = (posY - mapY) * deltaDistY; }
+    else { stepY = 1; sideDistY = (mapY + 1.0f - posY) * deltaDistY; }
+
+    while (hit == 0) {
+        if (sideDistX < sideDistY) { sideDistX += deltaDistX; mapX += stepX; side = 0; }
+        else { sideDistY += deltaDistY; mapY += stepY; side = 1; }
+        if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) break;
+        if (worldMap[mapY][mapX] > 0) hit = 1;
+    }
+
+    float perpWallDist = (side == 0) ? (sideDistX - deltaDistX) : (sideDistY - deltaDistY);
+    if (perpWallDist < 0.1f) perpWallDist = 0.1f;
+    zBuffer[x] = perpWallDist;
+    WallRay result = { rayDirX, rayDirY, mapX, mapY, side, perpWallDist };
+    return result;
+}
+
+static void RenderWallSurface(int x, int halfH, const WallRay* ray) {
+    float rayDirX = ray->rayDirX;
+    float rayDirY = ray->rayDirY;
+    int mapX = ray->mapX;
+    int mapY = ray->mapY;
+    int side = ray->side;
+    float perpWallDist = ray->perpWallDist;
+    /* v1.13 真俯仰：墙的下沿(v=-眼高)与上沿(v=1-眼高)各自旋转后投影。
+       同一列 z 不变 → 屏幕上仍是线性，贴图线性采样依然正确。 */
+    int lineHeight = (int)(renderH / perpWallDist);
+    (void)lineHeight;
+    const float eyeH = 0.5f;
+    float vb2 = (-eyeH) * pitchCos - perpWallDist * pitchSin;
+    float db2 = (-eyeH) * pitchSin + perpWallDist * pitchCos;
+    float vt2 = (1.0f - eyeH) * pitchCos - perpWallDist * pitchSin;
+    float dt2 = (1.0f - eyeH) * pitchSin + perpWallDist * pitchCos;
+    if (db2 < 0.05f) db2 = 0.05f;
+    if (dt2 < 0.05f) dt2 = 0.05f;
+    int yBottom = (int)((float)halfH - vb2 * (float)focal / db2);
+    int yTop    = (int)((float)halfH - vt2 * (float)focal / dt2);
+    if (yBottom <= yTop) return;
+    int startF = yTop;
+    int drawStart = yTop < 0 ? 0 : yTop;
+    int drawEnd = yBottom > renderH ? renderH : yBottom;
+    if (drawEnd <= drawStart) return;
+
+    float wallX = (side == 0) ? (posY + perpWallDist * rayDirY) : (posX + perpWallDist * rayDirX);
+    wallX -= floorf(wallX);
+    int texX = (int)(wallX * (float)TEX_WIDTH);
+    if (texX < 0) texX = 0;
+    if (texX > TEX_WIDTH - 1) texX = TEX_WIDTH - 1;
+    if ((side == 0 && rayDirX > 0) || (side == 1 && rayDirY < 0)) texX = TEX_WIDTH - texX - 1;
+
+    float span = (float)(yBottom - yTop);
+    if (span < 1.0f) span = 1.0f;
+    float step = (float)TEX_HEIGHT / span;
+    /* v2.0：每像素吃掉的 texel 数 → mip 级。step>1.5 说明在缩小，退到低一级 */
+    int mipLod = 0;
+    {
+        float st = step;
+        while (st > 1.5f && mipLod < MIP_LEVELS - 1) { st *= 0.5f; mipLod++; }
+    }
+    const unsigned int* mipSrc = mipChain[mipLod];
+    int mipW = TEX_WIDTH >> mipLod;
+    int mipMaskY = (TEX_HEIGHT >> mipLod) - 1;
+    int mipShift = mipLod;
+    float texPos = (float)(drawStart - startF) * step;
+
+    /* v1.9 光照：
+       ① 距离衰减改成 1/(1+d*k) 曲线 —— 近处亮、远处平滑收黑，没有硬断崖
+       ② 距离雾：远处叠加一点冷色（青蓝），空间感立刻出来
+       ③ 手电光斑用 smoothstep 软边，不再是硬切一刀 */
+    /* v1.10：手电削弱。
+       原来开灯只有 1/(1+d*0.22) 的衰减 —— 10 格外还亮着，等于整张地图都看得见。
+       现在拆成两部分：
+         环境光 amb：永远很暗（开灯 0.42 倍，关灯更暗）
+         手电项   ：有效距离 8 格，按 (1-d/8)² 衰减，超出即 0
+       所以光照范围由"手电照到哪"决定，不再是"整条走廊"。 */
+    int lightOnW = (flashlightOn && battery > 0.0f);
+    float amb = 1.0f / (1.0f + perpWallDist * (lightOnW ? 0.70f : 0.50f));
+    /* v1.12：手电换成和荧光棒同一套光效 ——
+       锥形（横向 flashTab）× 平方距离衰减，再叠一层暖色加色。
+       原来只有"乘法提亮"，画面偏冷、也不像有个灯泡在照。 */
+    float reach = 1.0f - perpWallDist / (9.0f*BenchLightRangeMul());
+    if (reach < 0.0f) reach = 0.0f;
+    reach *= reach;
+    float flash = flashTab[x];
+    float torch = lightOnW ? (flash * reach * 0.62f) : 0.0f;
+
+    float lit = (amb * 0.26f + torch) * smokeDim;
+    if (side == 1) lit *= 0.62f;
+
+    float cone = flash - 0.35f;
+    if (cone < 0.0f) cone = 0.0f;
+    cone = cone * cone * (3.0f - 2.0f * cone > 1.0f ? 1.0f : 3.0f - 2.0f * cone);   /* smoothstep */
+
+    /* 距离雾（冷色，加法叠加，零额外采样） */
+    float fog = perpWallDist * 0.085f;
+    if (fog > 0.85f) fog = 0.85f;
+    if (!lightOnW) fog *= 0.25f;    /* 留一点，纯粹压黑会没有纵深 */
+
+    /* 光斑也受有效距离约束：远处不许再加亮 */
+    /* 光球照明：命中点离任一荧光棒越近越亮（暖色） */
+    float hx = posX + rayDirX * perpWallDist;
+    float hy = posY + rayDirY * perpWallDist;
+    float fl = FlareLightAt(hx, hy);
+    lit += fl;
+    if (lit > 1.35f) lit = 1.35f;
+
+    /* v1.12：手电改**白光**（略偏冷），和荧光棒的暖橙拉开差别 */
+    int addR = (int)((cone * reach * (float)(themeLitR + 24) * 0.42f + fog * (float)themeAmbR
+                      + fl * 210.0f + torch * (float)themeLitR) * smokeDim);
+    int addG = (int)((cone * reach * (float)(themeLitG + 24) * 0.42f + fog * (float)themeAmbG
+                      + fl * 150.0f + torch * (float)themeLitG) * smokeDim);
+    int addB = (int)((cone * reach * (float)(themeLitB + 24) * 0.42f + fog * (float)themeAmbB
+                      + fl * 78.0f  + torch * (float)themeLitB) * smokeDim);
+
+    /* ==================================================================
+     * 2026-11-06（v2.4-rc C4）：**主题房间的补光色**
+     * ------------------------------------------------------------------
+     * 计划里明确"不做第二套纹理集"（双倍纹理常驻内存），
+     * 所以房间的辨识度靠**墙面补光**表现：
+     *   同一张贴图，但这个房间的光偏冷/偏橙/偏紫。
+     *
+     * 成本：**每列一次**（不是每像素），普通区直接返回 0 跳过。
+     * 这也是为什么不做地板 —— 地板是逐像素的，加查表会掉帧。
+     * ================================================================ */
+    {
+
+        int tr = 0, tg = 0, tb = 0;
+        if (CellTintRGB(mapX, mapY, &tr, &tg, &tb)) {
+            float k = smokeDim;          /* 浓烟里补光同样被压 */
+            addR += (int)(tr * k);
+            addG += (int)(tg * k);
+            addB += (int)(tb * k);
+        }
+    }
+    /* ==================================================================
+     * 2026-11-06（用户要求）：**房间外墙要有"装修过"的样子**
+     * ------------------------------------------------------------------
+     * 只有色调变化不够 —— 玩家还是分不出"这是房间"和"这是走廊"。
+     * 这里取出房间外墙的标记与主题色，在下面的像素循环里画一条**腰线**：
+     * 墙面 26%~34% 高度处一条横向色带（主题色偏亮），
+     * 上下各留一格暗边。现实里那是瓷砖腰线 / 护墙板的分界。
+     *
+     * 每列算一次，不进像素循环 —— 循环里只多两次比较。
+     * ================================================================ */
+    int bandR = 0, bandG = 0, bandB = 0, hasBand = 0;
+    int bandLo1 = 17, bandHi1 = 22, bandLo2 = -1, bandHi2 = -1;
+    {
+
+
+        int tr2 = 0, tg2 = 0, tb2 = 0;
+        /* ==================================================================
+         * 2026-11-06（用户实测）：**只有房间**内**侧该是主题色**
+         * ------------------------------------------------------------------
+         * 用户原话：「房间里面是蓝的，然后外墙什么都看不出来，跟普通墙差不多」，
+         * 并且指出「有一部分墙体是双面墙体，里面是蓝色的，外面是迷宫的时候
+         * 也可以看到里面是蓝色的」。
+         *
+         * 根因：房间外墙是**一格**，从房间内和从迷宫里看到的是同一格。
+         * 现在按"观察者那一侧"判断：只有视点这一侧的邻格是房间内部
+         * （roomId != 0）时才上主题色，外面看就是普通墙。
+         * ================================================================ */
+        int nbX = mapX, nbY = mapY;
+        /* 2026-11-09：原来这里用的是射线循环里局部变量 stepX/stepY，
+           搬进 RenderWallSurface 时没跟过来。按投射约定就地重建。 */
+        int stepX = (rayDirX > 0.0f) ? 1 : -1;
+        int stepY = (rayDirY > 0.0f) ? 1 : -1;
+        if (side == 0) nbX -= stepX; else nbY -= stepY;
+        int fromInsideRoom = 0;
+        if (nbX >= 0 && nbY >= 0 && nbX < MAP_WIDTH && nbY < MAP_HEIGHT)
+            fromInsideRoom = (cellMeta[nbY][nbX].roomId != 0);
+        if (fromInsideRoom && CellIsRoomWall(mapX, mapY, &tr2, &tg2, &tb2)) {
+            /* ==================================================================
+             * 2026-11-06（用户要求）：**七种主题不能长一个样**
+             * ------------------------------------------------------------------
+             * 用户原话：「大多数都长得差不多……每一个特色也不是很明确，
+             *           里面的设计审美概念都不是很明确」。
+             *
+             * 之前所有主题共用同一条腰线（vy 17..22）。现在按主题给
+             * **不同的腰线剖面**：位置、宽度、条数都不同，
+             * 于是站在房间里一眼能分清这是哪种空间。
+             *
+             * vy 是 0..63 的墙面竖直坐标（0 = 天花，63 = 地面）：
+             *   砖墙   踢脚线：低、窄           (54..58)
+             *   监狱   两道横栏：中上 + 中下    (14..17, 34..37)
+             *   地狱   顶部压边：高、厚         (6..14)
+             *   病房   腰线 + 踢脚：双细线      (28..31, 56..58)
+             *   冰窖   细腰线：极高             (20..23)
+             *   锈工厂 粗腰带：中、最宽         (26..36)
+             *   血肉   无腰线，改成底部渐暗     (56..63)
+             * ================================================================ */
+
+            int th = (int)cellMeta[mapY][mapX].themeId;
+            if (th < 0 || th >= THEME_COUNT) th = 0;
+            bandLo1 = 54; bandHi1 = 58; bandLo2 = -1; bandHi2 = -1;
+            switch (th) {
+            case 0: bandLo1 = 54; bandHi1 = 58; break;            /* 砖墙：踢脚 */
+            case 1: bandLo1 = 14; bandHi1 = 17;                   /* 监狱：双横栏 */
+                    bandLo2 = 34; bandHi2 = 37; break;
+            case 2: bandLo1 = 6;  bandHi1 = 14; break;            /* 地狱：顶部压边 */
+            case 3: bandLo1 = 28; bandHi1 = 31;                   /* 病房：双细线 */
+                    bandLo2 = 56; bandHi2 = 58; break;
+            case 4: bandLo1 = 20; bandHi1 = 23; break;            /* 冰窖：高细线 */
+            case 5: bandLo1 = 26; bandHi1 = 36; break;            /* 锈工厂：宽腰带 */
+            case 6: bandLo1 = 56; bandHi1 = 63; break;            /* 血肉：底部压暗 */
+            default: break;
+            }
+            /* 腰线色 = 主题色 × 3.2，并给一个下限，暗主题也能看出来 */
+            bandR = tr2 * 26 / 10; if (bandR < 26) bandR = 26;
+            bandG = tg2 * 26 / 10; if (bandG < 22) bandG = 22;
+            bandB = tb2 * 26 / 10; if (bandB < 22) bandB = 22;
+            hasBand = 1;
+        }
+    }
+
+    int k8 = (int)(lit * 256.0f);
+    if (k8 < 0) k8 = 0;
+    else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;
+    k8 = shadeLut[k8];      /* gamma 校正，和地板共用同一张表 */
+
+    unsigned int* dst = pixels + (size_t)drawStart * renderW + x;
+
+    /* v1.9：墙脚 / 墙顶 AO —— 沿墙面上下各压暗 16 像素，
+       墙角有了"厚度"，不再是均匀一片贴图 */
+    int aoBot = drawEnd - 16;
+    int aoTop = drawStart + 16;
+
+    /* v2.1：竖直方向的光斑。
+       原来亮度只按 x 算（flashTab[x]），同一列从上到下完全一样，
+       整面墙就是一块均匀灰板 —— 贴纸感的真正来源。
+       这里预生成 64 项竖直权重（中间亮、上下收），每像素多一次查表。 */
+    int vLut[64];
+    {
+        for (int i = 0; i < 64; i++) {
+            float v = ((float)i + 0.5f) / 64.0f;
+            float dv = v - 0.46f;                    /* 略偏上：视线落点在下半 */
+            float fall = 1.0f - dv * dv * 3.2f;      /* 中间 1，两端 <0 */
+            if (fall < 0.18f) fall = 0.18f;
+            vLut[i] = (int)(fall * 256.0f);
+        }
+    }
+
+    for (int y = drawStart; y < drawEnd; y++) {
+        int texY = ((int)texPos) & (TEX_HEIGHT - 1);
+        texPos += step;
+        /* v2.0：走了 mip 就按低位采样（lod 0 时与原路径完全等价） */
+        unsigned int t = mipSrc[((texY >> mipShift) & mipMaskY) * mipW + (texX >> mipShift)];
+        int vy = (int)(((float)(y - drawStart) * 64.0f) / (float)(drawEnd - drawStart + 1));
+        if (vy < 0) vy = 0;
+        if (vy > 63) vy = 63;
+        int k8v = (k8 * vLut[vy]) >> 8;              /* 竖直光斑 */
+        k8v += bump[texY][texX];                     /* v2.0：凹凸 */
+        if (k8v < 0) k8v = 0;
+        if (k8v > 1023) k8v = 1023;
+        int r = (int)(((t >> 16) & 0xFF) * k8v) >> 8;
+        int g = (int)(((t >> 8) & 0xFF) * k8v) >> 8;
+        int b = (int)((t & 0xFF) * k8v) >> 8;
+
+        r += addR; g += addG; b += addB;
+
+        /* 房间腰线：vy 0..63 的竖直坐标，26%~34% 处一条亮带，
+           紧贴它上下各一格暗边 —— 有明暗对比才读得出"这是装饰" */
+        if (hasBand) {
+            int inBand = (vy >= bandLo1 && vy <= bandHi1);
+            if (bandLo2 >= 0 && vy >= bandLo2 && vy <= bandHi2) inBand = 1;
+            if (inBand) {
+                r += bandR; g += bandG; b += bandB;
+            } else if (vy == bandLo1 - 1 || vy == bandHi1 + 1) {
+                r -= 18; g -= 18; b -= 18;
+                if (r < 0) r = 0;
+                if (g < 0) g = 0;
+                if (b < 0) b = 0;
+            }
+        }
+
+        if (r > 255) r = 255;
+        if (g > 255) g = 255;
+        if (b > 255) b = 255;
+        *dst = (unsigned int)((r << 16) | (g << 8) | b);
+        dst += renderW;
+    }
+
+    /* v1.9：AO 从逐像素判断里挪出来，改成两段小循环。
+       热点循环里少两次比较 + 三次乘法，而这两段只有 32 行。 */
+    {
+        int yb0 = aoBot > drawStart ? aoBot : drawStart;
+        unsigned int* p = pixels + (size_t)yb0 * renderW + x;
+        for (int y = yb0; y < drawEnd; y++, p += renderW) {
+            int f = 256 - (y - aoBot) * 13;
+            if (f < 116) f = 116;
+            unsigned int c = *p;
+            int rr = (int)((c >> 16) & 0xFF) * f >> 8;
+            int gg = (int)((c >> 8) & 0xFF) * f >> 8;
+            int bb = (int)(c & 0xFF) * f >> 8;
+            *p = (unsigned int)((rr << 16) | (gg << 8) | bb);
+        }
+        int yet = aoTop < drawEnd ? aoTop : drawEnd;
+        p = pixels + (size_t)drawStart * renderW + x;
+        for (int y = drawStart; y < yet; y++, p += renderW) {
+            int f = 256 - (aoTop - y) * 11;
+            if (f < 140) f = 140;
+            unsigned int c = *p;
+            int rr = (int)((c >> 16) & 0xFF) * f >> 8;
+            int gg = (int)((c >> 8) & 0xFF) * f >> 8;
+            int bb = (int)(c & 0xFF) * f >> 8;
+            *p = (unsigned int)((rr << 16) | (gg << 8) | bb);
+        }
+    }
+}
+
 static void RenderWallBand(int x0, int x1) {
     int halfH = renderH / 2;
     for (int x = x0; x < x1; x++) {
-        float cameraX = 2.0f * x / (float)renderW - 1.0f;
-        float rayDirX = dirX + planeX * cameraX;
-        float rayDirY = dirY + planeY * cameraX;
-
-        int mapX = (int)posX, mapY = (int)posY;
-        float deltaDistX = (rayDirX == 0) ? 1e30f : fabsf(1.0f / rayDirX);
-        float deltaDistY = (rayDirY == 0) ? 1e30f : fabsf(1.0f / rayDirY);
-        float sideDistX, sideDistY;
-        int stepX, stepY, hit = 0, side = 0;
-
-        if (rayDirX < 0) { stepX = -1; sideDistX = (posX - mapX) * deltaDistX; }
-        else { stepX = 1; sideDistX = (mapX + 1.0f - posX) * deltaDistX; }
-        if (rayDirY < 0) { stepY = -1; sideDistY = (posY - mapY) * deltaDistY; }
-        else { stepY = 1; sideDistY = (mapY + 1.0f - posY) * deltaDistY; }
-
-        while (hit == 0) {
-            if (sideDistX < sideDistY) { sideDistX += deltaDistX; mapX += stepX; side = 0; }
-            else { sideDistY += deltaDistY; mapY += stepY; side = 1; }
-            if (mapX < 0 || mapX >= MAP_WIDTH || mapY < 0 || mapY >= MAP_HEIGHT) break;
-            if (worldMap[mapY][mapX] > 0) hit = 1;
-        }
-
-        float perpWallDist = (side == 0) ? (sideDistX - deltaDistX) : (sideDistY - deltaDistY);
-        if (perpWallDist < 0.1f) perpWallDist = 0.1f;
-        zBuffer[x] = perpWallDist;
-
-        /* v1.13 真俯仰：墙的下沿(v=-眼高)与上沿(v=1-眼高)各自旋转后投影。
-           同一列 z 不变 → 屏幕上仍是线性，贴图线性采样依然正确。 */
-        int lineHeight = (int)(renderH / perpWallDist);
-        (void)lineHeight;
-        const float eyeH = 0.5f;
-        float vb2 = (-eyeH) * pitchCos - perpWallDist * pitchSin;
-        float db2 = (-eyeH) * pitchSin + perpWallDist * pitchCos;
-        float vt2 = (1.0f - eyeH) * pitchCos - perpWallDist * pitchSin;
-        float dt2 = (1.0f - eyeH) * pitchSin + perpWallDist * pitchCos;
-        if (db2 < 0.05f) db2 = 0.05f;
-        if (dt2 < 0.05f) dt2 = 0.05f;
-        int yBottom = (int)((float)halfH - vb2 * (float)focal / db2);
-        int yTop    = (int)((float)halfH - vt2 * (float)focal / dt2);
-        if (yBottom <= yTop) continue;
-        int startF = yTop;
-        int drawStart = yTop < 0 ? 0 : yTop;
-        int drawEnd = yBottom > renderH ? renderH : yBottom;
-        if (drawEnd <= drawStart) continue;
-
-        float wallX = (side == 0) ? (posY + perpWallDist * rayDirY) : (posX + perpWallDist * rayDirX);
-        wallX -= floorf(wallX);
-        int texX = (int)(wallX * (float)TEX_WIDTH);
-        if (texX < 0) texX = 0;
-        if (texX > TEX_WIDTH - 1) texX = TEX_WIDTH - 1;
-        if ((side == 0 && rayDirX > 0) || (side == 1 && rayDirY < 0)) texX = TEX_WIDTH - texX - 1;
-
-        float span = (float)(yBottom - yTop);
-        if (span < 1.0f) span = 1.0f;
-        float step = (float)TEX_HEIGHT / span;
-        /* v2.0：每像素吃掉的 texel 数 → mip 级。step>1.5 说明在缩小，退到低一级 */
-        int mipLod = 0;
-        {
-            float st = step;
-            while (st > 1.5f && mipLod < MIP_LEVELS - 1) { st *= 0.5f; mipLod++; }
-        }
-        const unsigned int* mipSrc = mipChain[mipLod];
-        int mipW = TEX_WIDTH >> mipLod;
-        int mipMaskY = (TEX_HEIGHT >> mipLod) - 1;
-        int mipShift = mipLod;
-        float texPos = (float)(drawStart - startF) * step;
-
-        /* v1.9 光照：
-           ① 距离衰减改成 1/(1+d*k) 曲线 —— 近处亮、远处平滑收黑，没有硬断崖
-           ② 距离雾：远处叠加一点冷色（青蓝），空间感立刻出来
-           ③ 手电光斑用 smoothstep 软边，不再是硬切一刀 */
-        /* v1.10：手电削弱。
-           原来开灯只有 1/(1+d*0.22) 的衰减 —— 10 格外还亮着，等于整张地图都看得见。
-           现在拆成两部分：
-             环境光 amb：永远很暗（开灯 0.42 倍，关灯更暗）
-             手电项   ：有效距离 8 格，按 (1-d/8)² 衰减，超出即 0
-           所以光照范围由"手电照到哪"决定，不再是"整条走廊"。 */
-        int lightOnW = (flashlightOn && battery > 0.0f);
-        float amb = 1.0f / (1.0f + perpWallDist * (lightOnW ? 0.70f : 0.50f));
-        /* v1.12：手电换成和荧光棒同一套光效 ——
-           锥形（横向 flashTab）× 平方距离衰减，再叠一层暖色加色。
-           原来只有"乘法提亮"，画面偏冷、也不像有个灯泡在照。 */
-        float reach = 1.0f - perpWallDist / (9.0f*BenchLightRangeMul());
-        if (reach < 0.0f) reach = 0.0f;
-        reach *= reach;
-        float flash = flashTab[x];
-        float torch = lightOnW ? (flash * reach * 0.62f) : 0.0f;
-        extern float smokeDim;
-        float lit = (amb * 0.26f + torch) * smokeDim;
-        if (side == 1) lit *= 0.62f;
-
-        float cone = flash - 0.35f;
-        if (cone < 0.0f) cone = 0.0f;
-        cone = cone * cone * (3.0f - 2.0f * cone > 1.0f ? 1.0f : 3.0f - 2.0f * cone);   /* smoothstep */
-
-        /* 距离雾（冷色，加法叠加，零额外采样） */
-        float fog = perpWallDist * 0.085f;
-        if (fog > 0.85f) fog = 0.85f;
-        if (!lightOnW) fog *= 0.25f;    /* 留一点，纯粹压黑会没有纵深 */
-
-        /* 光斑也受有效距离约束：远处不许再加亮 */
-        /* 光球照明：命中点离任一荧光棒越近越亮（暖色） */
-        float hx = posX + rayDirX * perpWallDist;
-        float hy = posY + rayDirY * perpWallDist;
-        float fl = FlareLightAt(hx, hy);
-        lit += fl;
-        if (lit > 1.35f) lit = 1.35f;
-
-        /* v1.12：手电改**白光**（略偏冷），和荧光棒的暖橙拉开差别 */
-        int addR = (int)((cone * reach * (float)(themeLitR + 24) * 0.42f + fog * (float)themeAmbR
-                          + fl * 210.0f + torch * (float)themeLitR) * smokeDim);
-        int addG = (int)((cone * reach * (float)(themeLitG + 24) * 0.42f + fog * (float)themeAmbG
-                          + fl * 150.0f + torch * (float)themeLitG) * smokeDim);
-        int addB = (int)((cone * reach * (float)(themeLitB + 24) * 0.42f + fog * (float)themeAmbB
-                          + fl * 78.0f  + torch * (float)themeLitB) * smokeDim);
-
-        /* ==================================================================
-         * 2026-11-06（v2.4-rc C4）：**主题房间的补光色**
-         * ------------------------------------------------------------------
-         * 计划里明确"不做第二套纹理集"（双倍纹理常驻内存），
-         * 所以房间的辨识度靠**墙面补光**表现：
-         *   同一张贴图，但这个房间的光偏冷/偏橙/偏紫。
-         *
-         * 成本：**每列一次**（不是每像素），普通区直接返回 0 跳过。
-         * 这也是为什么不做地板 —— 地板是逐像素的，加查表会掉帧。
-         * ================================================================ */
-        {
-            extern int CellTintRGB(int, int, int*, int*, int*);
-            int tr = 0, tg = 0, tb = 0;
-            if (CellTintRGB(mapX, mapY, &tr, &tg, &tb)) {
-                float k = smokeDim;          /* 浓烟里补光同样被压 */
-                addR += (int)(tr * k);
-                addG += (int)(tg * k);
-                addB += (int)(tb * k);
-            }
-        }
-        /* ==================================================================
-         * 2026-11-06（用户要求）：**房间外墙要有"装修过"的样子**
-         * ------------------------------------------------------------------
-         * 只有色调变化不够 —— 玩家还是分不出"这是房间"和"这是走廊"。
-         * 这里取出房间外墙的标记与主题色，在下面的像素循环里画一条**腰线**：
-         * 墙面 26%~34% 高度处一条横向色带（主题色偏亮），
-         * 上下各留一格暗边。现实里那是瓷砖腰线 / 护墙板的分界。
-         *
-         * 每列算一次，不进像素循环 —— 循环里只多两次比较。
-         * ================================================================ */
-        int bandR = 0, bandG = 0, bandB = 0, hasBand = 0;
-        int bandLo1 = 17, bandHi1 = 22, bandLo2 = -1, bandHi2 = -1;
-        {
-            extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
-            extern int CellIsRoomWall(int, int, int*, int*, int*);
-            int tr2 = 0, tg2 = 0, tb2 = 0;
-            /* ==================================================================
-             * 2026-11-06（用户实测）：**只有房间**内**侧该是主题色**
-             * ------------------------------------------------------------------
-             * 用户原话：「房间里面是蓝的，然后外墙什么都看不出来，跟普通墙差不多」，
-             * 并且指出「有一部分墙体是双面墙体，里面是蓝色的，外面是迷宫的时候
-             * 也可以看到里面是蓝色的」。
-             *
-             * 根因：房间外墙是**一格**，从房间内和从迷宫里看到的是同一格。
-             * 现在按"观察者那一侧"判断：只有视点这一侧的邻格是房间内部
-             * （roomId != 0）时才上主题色，外面看就是普通墙。
-             * ================================================================ */
-            int nbX = mapX, nbY = mapY;
-            if (side == 0) nbX -= stepX; else nbY -= stepY;
-            int fromInsideRoom = 0;
-            if (nbX >= 0 && nbY >= 0 && nbX < MAP_WIDTH && nbY < MAP_HEIGHT)
-                fromInsideRoom = (cellMeta[nbY][nbX].roomId != 0);
-            if (fromInsideRoom && CellIsRoomWall(mapX, mapY, &tr2, &tg2, &tb2)) {
-                /* ==================================================================
-                 * 2026-11-06（用户要求）：**七种主题不能长一个样**
-                 * ------------------------------------------------------------------
-                 * 用户原话：「大多数都长得差不多……每一个特色也不是很明确，
-                 *           里面的设计审美概念都不是很明确」。
-                 *
-                 * 之前所有主题共用同一条腰线（vy 17..22）。现在按主题给
-                 * **不同的腰线剖面**：位置、宽度、条数都不同，
-                 * 于是站在房间里一眼能分清这是哪种空间。
-                 *
-                 * vy 是 0..63 的墙面竖直坐标（0 = 天花，63 = 地面）：
-                 *   砖墙   踢脚线：低、窄           (54..58)
-                 *   监狱   两道横栏：中上 + 中下    (14..17, 34..37)
-                 *   地狱   顶部压边：高、厚         (6..14)
-                 *   病房   腰线 + 踢脚：双细线      (28..31, 56..58)
-                 *   冰窖   细腰线：极高             (20..23)
-                 *   锈工厂 粗腰带：中、最宽         (26..36)
-                 *   血肉   无腰线，改成底部渐暗     (56..63)
-                 * ================================================================ */
-                extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
-                int th = (int)cellMeta[mapY][mapX].themeId;
-                if (th < 0 || th >= THEME_COUNT) th = 0;
-                bandLo1 = 54; bandHi1 = 58; bandLo2 = -1; bandHi2 = -1;
-                switch (th) {
-                case 0: bandLo1 = 54; bandHi1 = 58; break;            /* 砖墙：踢脚 */
-                case 1: bandLo1 = 14; bandHi1 = 17;                   /* 监狱：双横栏 */
-                        bandLo2 = 34; bandHi2 = 37; break;
-                case 2: bandLo1 = 6;  bandHi1 = 14; break;            /* 地狱：顶部压边 */
-                case 3: bandLo1 = 28; bandHi1 = 31;                   /* 病房：双细线 */
-                        bandLo2 = 56; bandHi2 = 58; break;
-                case 4: bandLo1 = 20; bandHi1 = 23; break;            /* 冰窖：高细线 */
-                case 5: bandLo1 = 26; bandHi1 = 36; break;            /* 锈工厂：宽腰带 */
-                case 6: bandLo1 = 56; bandHi1 = 63; break;            /* 血肉：底部压暗 */
-                default: break;
-                }
-                /* 腰线色 = 主题色 × 3.2，并给一个下限，暗主题也能看出来 */
-                bandR = tr2 * 26 / 10; if (bandR < 26) bandR = 26;
-                bandG = tg2 * 26 / 10; if (bandG < 22) bandG = 22;
-                bandB = tb2 * 26 / 10; if (bandB < 22) bandB = 22;
-                hasBand = 1;
-            }
-        }
-
-        int k8 = (int)(lit * 256.0f);
-        if (k8 < 0) k8 = 0;
-        else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;
-        k8 = shadeLut[k8];      /* gamma 校正，和地板共用同一张表 */
-
-        unsigned int* dst = pixels + (size_t)drawStart * renderW + x;
-
-        /* v1.9：墙脚 / 墙顶 AO —— 沿墙面上下各压暗 16 像素，
-           墙角有了"厚度"，不再是均匀一片贴图 */
-        int aoBot = drawEnd - 16;
-        int aoTop = drawStart + 16;
-
-        /* v2.1：竖直方向的光斑。
-           原来亮度只按 x 算（flashTab[x]），同一列从上到下完全一样，
-           整面墙就是一块均匀灰板 —— 贴纸感的真正来源。
-           这里预生成 64 项竖直权重（中间亮、上下收），每像素多一次查表。 */
-        int vLut[64];
-        {
-            for (int i = 0; i < 64; i++) {
-                float v = ((float)i + 0.5f) / 64.0f;
-                float dv = v - 0.46f;                    /* 略偏上：视线落点在下半 */
-                float fall = 1.0f - dv * dv * 3.2f;      /* 中间 1，两端 <0 */
-                if (fall < 0.18f) fall = 0.18f;
-                vLut[i] = (int)(fall * 256.0f);
-            }
-        }
-
-        for (int y = drawStart; y < drawEnd; y++) {
-            int texY = ((int)texPos) & (TEX_HEIGHT - 1);
-            texPos += step;
-            /* v2.0：走了 mip 就按低位采样（lod 0 时与原路径完全等价） */
-            unsigned int t = mipSrc[((texY >> mipShift) & mipMaskY) * mipW + (texX >> mipShift)];
-            int vy = (int)(((float)(y - drawStart) * 64.0f) / (float)(drawEnd - drawStart + 1));
-            if (vy < 0) vy = 0;
-            if (vy > 63) vy = 63;
-            int k8v = (k8 * vLut[vy]) >> 8;              /* 竖直光斑 */
-            k8v += bump[texY][texX];                     /* v2.0：凹凸 */
-            if (k8v < 0) k8v = 0;
-            if (k8v > 1023) k8v = 1023;
-            int r = (int)(((t >> 16) & 0xFF) * k8v) >> 8;
-            int g = (int)(((t >> 8) & 0xFF) * k8v) >> 8;
-            int b = (int)((t & 0xFF) * k8v) >> 8;
-
-            r += addR; g += addG; b += addB;
-
-            /* 房间腰线：vy 0..63 的竖直坐标，26%~34% 处一条亮带，
-               紧贴它上下各一格暗边 —— 有明暗对比才读得出"这是装饰" */
-            if (hasBand) {
-                int inBand = (vy >= bandLo1 && vy <= bandHi1);
-                if (bandLo2 >= 0 && vy >= bandLo2 && vy <= bandHi2) inBand = 1;
-                if (inBand) {
-                    r += bandR; g += bandG; b += bandB;
-                } else if (vy == bandLo1 - 1 || vy == bandHi1 + 1) {
-                    r -= 18; g -= 18; b -= 18;
-                    if (r < 0) r = 0;
-                    if (g < 0) g = 0;
-                    if (b < 0) b = 0;
-                }
-            }
-
-            if (r > 255) r = 255;
-            if (g > 255) g = 255;
-            if (b > 255) b = 255;
-            *dst = (unsigned int)((r << 16) | (g << 8) | b);
-            dst += renderW;
-        }
-
-        /* v1.9：AO 从逐像素判断里挪出来，改成两段小循环。
-           热点循环里少两次比较 + 三次乘法，而这两段只有 32 行。 */
-        {
-            int yb0 = aoBot > drawStart ? aoBot : drawStart;
-            unsigned int* p = pixels + (size_t)yb0 * renderW + x;
-            for (int y = yb0; y < drawEnd; y++, p += renderW) {
-                int f = 256 - (y - aoBot) * 13;
-                if (f < 116) f = 116;
-                unsigned int c = *p;
-                int rr = (int)((c >> 16) & 0xFF) * f >> 8;
-                int gg = (int)((c >> 8) & 0xFF) * f >> 8;
-                int bb = (int)(c & 0xFF) * f >> 8;
-                *p = (unsigned int)((rr << 16) | (gg << 8) | bb);
-            }
-            int yet = aoTop < drawEnd ? aoTop : drawEnd;
-            p = pixels + (size_t)drawStart * renderW + x;
-            for (int y = drawStart; y < yet; y++, p += renderW) {
-                int f = 256 - (aoTop - y) * 11;
-                if (f < 140) f = 140;
-                unsigned int c = *p;
-                int rr = (int)((c >> 16) & 0xFF) * f >> 8;
-                int gg = (int)((c >> 8) & 0xFF) * f >> 8;
-                int bb = (int)(c & 0xFF) * f >> 8;
-                *p = (unsigned int)((rr << 16) | (gg << 8) | bb);
-            }
-        }
+        WallRay ray = CastWallRay(x);
+        RenderWallSurface(x, halfH, &ray);
     }
 }
 
@@ -3529,7 +3715,7 @@ static void DrawViewModel(void) {
     /* v3.0：**藏进柜子还举着扳手**是最出戏的一处 ——
        无战斗改造后第一人称模型不该再出现，藏身时更要藏起来。 */
     {
-        extern int hiddenIn;
+
 #if NO_COMBAT
         /* ===== v2.4.62 **这就是"左手看不到"的根因** =====
            原来写的是 `if (hiddenIn >= 0 || 1) return;` ——
@@ -3588,7 +3774,7 @@ static void DrawViewModel(void) {
          帧 4  回位：接近原位、98%
     */
     {
-        extern float wrenchSwingT;
+
         if (wrenchSwingT > 0.0f) {
             float prog = 1.0f - wrenchSwingT / 0.14f;
             if (prog < 0.0f) prog = 0.0f;
@@ -3639,8 +3825,8 @@ static void DrawViewModel(void) {
 
     /* 左手：托着当前选中的投掷物 */
     {
-        extern int flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
-        extern int phaseBeacons;   /* 2026-11-06 相位投掷物 */
+
+           /* 2026-11-06 相位投掷物 */
         /* v6 **槽位表必须和 ITEM_SLOT_COUNT(6) 一致** ——
            原来用旧的 8 个变量初始化 6 元素数组：多出初值被丢弃，
            索引整体错位（槽 2..5 读到砖头/酸液/燃烧瓶等已删除物品）。 */
@@ -3695,7 +3881,7 @@ void Render3D(void) {
     /* 第 3 轮：有东西靠近时手电会抖一下（威胁预告的环境征兆）。
        只在"手电开着"时有意义，且只是一个乘系数 —— 不新增分支。 */
     if (lightOn) {
-        extern float TelegraphFlicker(void);
+
         float tf = TelegraphFlicker();
         if (tf > 0.0f) flick *= (1.0f - tf * 0.55f);
     }
@@ -3743,7 +3929,7 @@ void Render3D(void) {
      *   这里只做一次乘算，而且 alpha 为 1 时可以整块清零。
      * ================================================================== */
     {
-        extern float screenBlackout;
+
         float sb = screenBlackout;
         if (sb > 0.0f) {
             if (sb > 1.0f) sb = 1.0f;
@@ -3777,12 +3963,12 @@ void Render3D(void) {
      * ================================================================== */
     {
         /* 头文件已有原型，这里不要再写一遍（会撞类型） */
-        extern float ControlTimeLeft(void);
+
         if (ControlActive() && ControlCurrent() == CTRL_SPIDER_WEB) {
             /* 越接近挣脱越淡（5 秒起步 -> 2 秒下限） */
             /* 强度归一化**直接引用常量** ——
                之前写死 (t-2)/3，下限从 2 改到 1 之后公式就不同步了。 */
-            extern float ControlTimeLeft(void);
+
             float t = ControlTimeLeft();
             float span = SPIDER_WEB_WINDOW - SPIDER_WEB_MIN;
             float k = (span > 0.01f) ? (t - SPIDER_WEB_MIN) / span : 0.0f;
@@ -3871,7 +4057,7 @@ void Render3D(void) {
    玩家实测：「绿点是我吗？中间青点是谁？两个黄点是什么？出口在哪？」
    原来一个标注都没有，只能靠猜。 */
 static void DrawMapLegend(void) {
-    extern int winW, winH;
+
     struct { unsigned int col; const char* zh; const char* en; } items[6] = {
         /* v3.3 **图例颜色两两分开** ——
            试玩实测：「YOU 和 SAFE 都是绿色，FUSE 和 HIDE 都是青色，两两分不清」。
@@ -3883,7 +4069,7 @@ static void DrawMapLegend(void) {
         { 0x004090FFu, "安全屋",  "SAFE"   },   /* 蓝（原绿，与 YOU 撞） */
         { 0x0090E0FFu, "藏身点","HIDE"   },   /* 浅青 */
     };
-    extern int g_lang;
+
     int rowH = TextHeightWin() + UIS(6);
     int boxW = UIS(150);
     int boxH = rowH * 6 + UIS(16);
@@ -4091,9 +4277,9 @@ void RenderMap(void) {
      *   资源用实心方块（安静、好找），威胁用菱形 + 亮芯（更刺眼）。
      * ================================================================== */
     {
-        extern float echoMarkX[], echoMarkY[], echoMarkT[];
-        extern int   echoMarkActive[], echoMarkKind[];
-        extern float gameTime;
+
+
+
         int flash = ((int)(gameTime * 6.0f) & 1);   /* 宝箱怪红闪：每秒 3 次 */
         for (int i = 0; i < 24; i++) {
             if (!echoMarkActive[i]) continue;
@@ -4149,7 +4335,7 @@ void RenderMap(void) {
         /* 2026-11-05：**数字必须跟着强化走**。
            原来写死 "-10/S"，玩家升了「小地图省电」还是显示 -10，等于骗人。
            另外全屏地图现在**不耗电**（游戏也暂停），所以标 FREE 而不是数字。 */
-        extern float RunUpgMapDrainPct(void);
+
         static char labelBuf[80];
         if (mapFullScreen)
             snprintf(labelBuf, sizeof(labelBuf), "MAP  FREE   M: CLOSE   HOLD TAB");

@@ -90,7 +90,8 @@ static char* read_loop_sources(void) {
         "src/loop_player.c", "src/loop_player_tick.c", "src/loop_world.c",
         "src/loop_items.c", "src/loop_interaction.c", "src/loop_input.c",
         "src/loop_particles.c", "src/loop_present.c", "src/loop_settings.c",
-        "src/loop_rng.c"
+        "src/loop_rng.c", "src/loop_frame.c", "src/loop_desktop_input.c",
+        "src/loop_start.c", "src/loop_progress.c"
     };
     char* result = (char*)malloc(1);
     size_t length = 0;
@@ -175,21 +176,21 @@ static void test_no_unwired_api(void) {
         { "DailyGoldMul",            "src/loop_level.c" },
         { "DailyNoiseMul",           "src/loop_level.c" },
         { "DailyForbidSprint",       "src/loop_tutorial.c" },
-        { "DailyForbidLight",        "src/game.c" },
+        { "DailyForbidLight",        "src/loop_player.c" },   /* 重构后调用点搬到这里 */
         { "DailySecondSpawnOffset",  "src/entity.c" },
         { "DailyGoldTierBonus",      "src/economy.c" },   /* 强度档在 economy.c */
-        { "DailyForbidHide",         "src/game.c" },
+        { "DailyForbidHide",         "src/loop_frame.c" },
         { "DailyForbidWrench",       "src/loop_wrench.c" },
         { "DailyForbidMonsterMap",   "src/ui.c" },
         /* 每日任务本身 */
-        { "DailyTick",               "src/game.c" },
-        { "DailySetProgress",        "src/game.c" },
+        { "DailyTick",               "src/loop_frame.c" },
+        { "DailySetProgress",        "src/loop_frame.c" },
         /* 威胁值：五项效果 */
         { "ThreatSpeedCap",          "src/entity.c" },
         { "ThreatHearMul",           "src/entity.c" },
         { "ThreatChaseBonus",        "src/entity.c" },
         { "ThreatSpawnAdvance",      "src/entity.c" },
-        { "ThreatReset",             "src/game.c" },
+        { "ThreatReset",             "src/loop_start.c" },
         { "ThreatAddForTier",        "src/bench.c" },
         /* 战绩 / 图鉴 */
         { "BestiaryMarkEscaped",     "src/entity.c" },
@@ -198,25 +199,22 @@ static void test_no_unwired_api(void) {
         /* 每日修正上一条遥测 */
         { "CatchCountThisRun",       "src/game.c" },
         /* 战役 5 关的规则（第 ⑧ 轮写好，第 ㉓ 轮才接上） */
-        { "CampaignFlashlightLocked", "src/game.c" },
+        { "CampaignFlashlightLocked", "src/loop_frame.c" },
         { "CampaignNoiseAlertMul",    "src/entity.c" },
         { "CampaignNoGiveUp",         "src/entity.c" },
         { "CampaignWardenImmediate",  "src/warden.c" },
         { "CampaignExitDistNow",      "src/loop_level.c" },
         /* v6 第 24 轮：出口必须真的按配电箱坐标算 */
         { "FindFarthestFromCell",    "src/loop_level.c" },
-        /* v6 round 35: bench capstone B (added round 10, never wired) */
-        { "BenchBullRush",           "src/loop_player_tick.c" },
-        { "BenchBurst",              "src/loop_player_tick.c" },
-        { "BenchLure",               "src/throwing.c" },
-        /* 2026-11-09：原指向 game.c 的局部 extern（重构后已移除）。
-           **注意：bench.c 里它是 `{ return 0; }` 空实现** —— 这条断言
-           只保证"名字在"，不保证"真的接线"，别把它当功能验证。 */
-        { "BenchRecover",            "src/bench.c" },
+        /* Current tree consumers; runtime effect assertions live in test_progress. */
+        { "BenchMoveMul",            "src/loop_player_tick.c" },
+        { "BenchStaminaMul",         "src/loop_player.c" },
+        { "BenchKnockStunMul",       "src/loop_wrench.c" },
+        { "BenchHealMul",            "src/loop_player.c" },
         /* v6 round 36: THREAT 5th effect + daily modifier display */
         { "ThreatCooldownDelta",     "src/entity.c" },
-        { "DailyModTextEn",          "src/game.c" },
-        { "DailyRestrictTextEn",     "src/game.c" },
+        { "DailyModTextEn",          "src/loop_start.c" },
+        { "DailyRestrictTextEn",     "src/loop_start.c" },
         /* 内置程序化配乐：合成器必须真的被音频线程调用，不能只是编译进去 */
         { "MusicProcMix",            "src/audio.c" },
         { "MusicProcSetScene",       "src/music.c" },

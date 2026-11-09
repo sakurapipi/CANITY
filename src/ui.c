@@ -5,6 +5,11 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "item_effects.h"
+#include "run_rewards.h"
+#include "state.h"
+#include "threat_telegraph.h"
+#include "wrench.h"
 
 /* 商店/改造树的返回按钮（实现在本文件靠后，这里先声明） */
 void ShopBackButtonRect(int* x0, int* y0, int* x1, int* y1);
@@ -52,7 +57,7 @@ int  ShopBackButtonAt(int mx, int my);
 /* 前置声明 */
 
 /* 成就页固定显示 10 行；面板/行高/列表起点都走 UIS，按窗口高度等比缩放 */
-/* ACH_VISIBLE_ROWS 已移到 include/ui_pages.h（成就页拆出去后两边都要用）*/
+
 #define ACH_PANEL_W      UIS(600)
 #define ACH_PANEL_H      UIS(400)
 
@@ -211,7 +216,7 @@ int UIS(int v) {
  * 这里所有尺寸都以 **TH（文字高度）** 为单位，两种分辨率才一致。
  * ============================================================ */
 
-/* SkillTreeLayout 与 SkillTreeCompute 已搬到 include/ui_menu.h（第 2 轮）*/
+
 /* 分支主色：只用在标题、进度条、连线上，不参与节点状态色 */
 static const unsigned int kBranchColor[7] = {   /* v6：5 项（branch=4 = 跨支行） */
     0x0040D8FFu,   /* A 潜行 青 */
@@ -548,7 +553,7 @@ MenuGeo GetMenuGeo(void) {
             /* 2026-11-06（v2.4.1 第 3 轮）：第 6/12 层会连着给两次奖励，
                标题必须说清"这是第几次"，否则玩家以为界面卡住了、
                或者以为第二次是浪费。 */
-            extern int skillPickRound, skillPickTotal;
+
             static char pickTitle[96];
             const char* base = (pickMode == 1)
                 ? Tr("CHOOSE A RELIC", "选择遗物")
@@ -557,7 +562,7 @@ MenuGeo GetMenuGeo(void) {
                用户要的是"看得出这一局正在形成什么玩法"，
                而不是只看到一排技能名。 */
             {
-                extern BuildTag BuildDominant(void);
+
                 BuildTag d = BuildDominant();
                 const char* bn = (d != BUILD_NONE) ? BuildName(d, g_lang == LANG_ZH) : NULL;
                 if (skillPickTotal > 1 && bn)
@@ -620,7 +625,7 @@ MenuGeo GetMenuGeo(void) {
             memset(&g, 0, sizeof(g));
             g.title = "ACHIEVEMENTS";
             /* v6：行数按当前分类筛选后的数量（否则会滚到空白行） */
-            { extern int AchVisibleCount(void); g.count = AchVisibleCount(); }
+            {  g.count = AchVisibleCount(); }
             if (g.count < 1) g.count = 1;
             g.rowH = A.rowH;
             g.panel = A.panel;
@@ -954,7 +959,7 @@ static float skDragVX = 0.0f, skDragVY = 0.0f;
  * 而不是四条互不相干的竖线。
  * ================================================================== */
 static void SkillWorldPos(int id, float* wx, float* wy) {
-    extern float SkillNodeX(int), SkillNodeY(int);
+
     /* 把 0..1 映射到世界坐标的宽高 */
     /* 世界尺度 ×6：
        归一化间距 0.10 → 世界 0.60·SK_WX，而节点宽 0.55·SK_WX，
@@ -985,7 +990,7 @@ void SkillResetView(void) {
     /* v6：**不再是「把树丢回世界原点」** ——
        那是原来 HOME 的行为，按一下整棵树跑到屏幕左上角。
        现在 HOME = 回到当前选中的技能，缩放回到 0.85。 */
-    extern int hubSelection;
+
     skVK = 0.78f;
     SkillCenterOn(hubSelection);
 }
@@ -1142,8 +1147,8 @@ static int SkSY(float wy) { return (int)(wy * skVK + skVY); }
    「带着这些钱走人，还是再贪一层？」—— 这是整个经济链的情绪核心。
    面板上必须写清楚：撤离能拿多少、深入大概能多赚多少。 */
 static void DrawExitChoice(void) {
-    extern int exitChoiceOpen, currentLevel;
-    extern float ExtractDepthMul(int level);
+
+
     if (!exitChoiceOpen) return;
 
     /* ===== v2.4.45 **出口二选一面板重做** =====
@@ -1219,7 +1224,7 @@ static void DrawExitChoice(void) {
 
     /* ---- 选项 1：撤离 ---- */
     {
-        extern int BankPreviewGain(int);
+
         int quit=BankPreviewGain(1);
 
         char kb[16], lb[64], vb[48];
@@ -1235,7 +1240,7 @@ static void DrawExitChoice(void) {
 
     /* ---- 选项 2：深入 ---- */
     {
-        extern float ExtractDepthMul(int);
+
         char kb[16], lb[64], vb[64];
         snprintf(kb, sizeof(kb), "[2]");
         snprintf(lb, sizeof(lb), "%s", Tr("GO DEEPER", "继续深入"));
@@ -1267,86 +1272,16 @@ static void DrawExitChoice(void) {
    布局走固定的「世界网格」(SK_WX × SK_WY)，屏幕映射全靠相机
    screen = world * VK + VX。所以缩放/平移只是改三个浮点数，
    加技能也只需要往 kSkillList 里加一个 id，网格自动排。 */
-void DrawSkillTree(void) {
-    /* v6 **自检接线** —— SkillsSelfTest 原来全工程 0 调用点，
-       护栏写好了却没人用。这里在首次进入技能树时跑一次，
-       失败就把原因写进 pickupMsg（玩家和开发都能看到）。 */
-    {
-        static int skTested = 0;
-        if (!skTested) {
-            skTested = 1;
-            /* v6 **自检失败不再弹窗给玩家** ——
-               这是给开发看的护栏，玩家看到 "SKILL DATA ERROR: 35"
-               只会以为游戏坏了。改成静默（需要排查时加 DSH_SKILL_DEBUG）。 */
-            /* v7 第 ㊿ 轮：**结果不再丢掉**
-               原来 `(void)r;` 把返回值扔了 —— 护栏装了没插电。
-               现在失败时写进 output debug 字符串，开发能看到，
-               玩家不受打扰。 */
-            {
-                int r = SkillsSelfTest();
-                if (r) {
-                    char m[96];
-                    snprintf(m, sizeof(m),
-                             "[CANITY] SKILL DATA SELF-TEST FAILED: code=%d "
-                             "(SKILL_TOTAL_COST vs real table)", r);
-                    PlatLog(m);
-                }
-            }
-        }
-    }
-    SkillTreeLayout L;
-    SkillTreeCompute(&L);
-    int TH = TextHeightWin();
-    int sel = hubSelection;
-    if (SkillListIndex(sel) < 0) sel = kSkillList[0];
-    hubSelection = sel;
+typedef struct {
+    SkillTreeLayout layout;
+    int TH, sel, innerL, innerR, gTop, gBot;
+} SkillTreeDrawContext;
 
-    /* 首次进入把视图居中到第 0 行 */
-    /* ===== v6 **相机自愈守卫** =====
-       用户截图：进 HUB 一个节点都看不到（整页空白），说明 skVX/skVY 跑飞了
-       （NaN / 巨大值），所有节点被 gTop..gBot 裁掉。
-       这里每帧检查一次，只要状态非法就强制回到选中节点。 */
-    {
-        int bad = 0;
-        if (!(skVK >= SK_K_MIN && skVK <= SK_K_MAX)) bad = 1;
-        if (!(skVX > -20000.0f && skVX < 20000.0f)) bad = 1;
-        if (!(skVY > -20000.0f && skVY < 20000.0f)) bad = 1;
-        if (bad) { skVK = 0.78f; SkillCenterOn(hubSelection); }
-    }
-    /* 首次进入：居中到第一行 */
-    {
-        static int skCentred = 0;
-        if (!skCentred) {
-            skCentred = 1;
-            skVK = 0.78f;
-            SkillCenterOn(hubSelection);
-        }
-    }
-
-
-    int innerL = L.panel.left + L.padX;
-    int innerR = L.panel.right - L.padX;
-    int gTop = L.curY + TH + TH / 2;          /* 图区上界 */
-    int gBot = L.panel.bottom - TH * 4;        /* 图区下界 = 详情条顶边 */
-    /* v6 **图区下界要留够详情条的空间** ——
-       详情条三行从 panel.bottom - TH*4 开始，而节点高 0.62*SK_WY*skVK，
-       原来 gBot 正好等于详情首行 y，第 3 行的节点会压上去。
-       再让出「一个节点高 + 半行」，保证压不到。 */
-    /* ---------- 顶部固定栏 ---------- */
-    /* 2026-11-08（实机反馈）：标题原来画在节点**之前**，
-       节点压上去把 "SKILL TREE" 盖成 "SK*LL T**EE"。
-       这里只留一个占位的绘制标记，真正的标题挪到节点循环之后。 */
-    {
-        int owned = 0;
-        for (int k = 0; k < SKILL_LIST_COUNT; k++)
-            if (skillRank[kSkillList[k]] > 0) owned++;
-        char b[80];
-        sprintf(b, "%d / %d NODES", owned, SKILL_LIST_COUNT);
-        DrawTextWin(innerL, L.curY, b, 0x0060D0FFu);
-        { extern int bankGold; sprintf(b, "GOLD %d", bankGold); }
-        DrawTextWin(innerR - TextWidthWin(b), L.curY, b, 0x00FFC040u);
-    }
-
+static void DrawSkillTreeCanvas(const SkillTreeDrawContext* context) {
+    int TH = context->TH;
+    int sel = context->sel;
+    int gTop = context->gTop;
+    int gBot = context->gBot;
     /* ---------- 图区（可缩放/平移） ---------- */
     {
         int nodeW = (int)(SK_WX * 0.55f * SK_NODE_K);
@@ -1446,7 +1381,7 @@ void DrawSkillTree(void) {
             {
                 char nm[40];
                 /* v6：节点里画短名，详情条才用全长名 */
-                { extern const char* SkillShortName(int);
+                { 
                   sprintf(nm, "%s", SkillShortName(id)); }
                 /* ============================================================
                  * 修：**节点名被截成 3 个字**
@@ -1459,8 +1394,8 @@ void DrawSkillTree(void) {
                  * ============================================================ */
                 unsigned int tc = owned ? 0x0090FFB0u : (canBuy ? 0x00FFE080u : 0x00787878u);
                 {
-                    extern void DrawTextSmallWin(int, int, const char*, unsigned int);
-                    extern int  DrawTextSmallWidth(const char*);
+
+
                     int sw = DrawTextSmallWidth(nm);
                     if (sw > nw2 - 4) ClampRowText(nm, nw2 - 4);
                     sw = DrawTextSmallWidth(nm);
@@ -1491,7 +1426,14 @@ void DrawSkillTree(void) {
             }
         }
     }
+}
 
+static void DrawSkillTreeDetails(const SkillTreeDrawContext* context) {
+    SkillTreeLayout L = context->layout;
+    int TH = context->TH;
+    int sel = context->sel;
+    int innerL = context->innerL;
+    int innerR = context->innerR;
     /* ---------- 底部固定：缩放值 + 详情 + 提示 ---------- */
     {
         const SkillDef* d = &skillDefs[sel];
@@ -1575,6 +1517,91 @@ void DrawSkillTree(void) {
         DrawTextCenterWin((bx0 + bx1) / 2, (by0 + by1) / 2 - TextHeightWin() / 2,
                           Tr("BACK", "返回"), 0x00E8C040u);
     }
+}
+
+void DrawSkillTree(void) {
+    /* v6 **自检接线** —— SkillsSelfTest 原来全工程 0 调用点，
+       护栏写好了却没人用。这里在首次进入技能树时跑一次，
+       失败就把原因写进 pickupMsg（玩家和开发都能看到）。 */
+    {
+        static int skTested = 0;
+        if (!skTested) {
+            skTested = 1;
+            /* v6 **自检失败不再弹窗给玩家** ——
+               这是给开发看的护栏，玩家看到 "SKILL DATA ERROR: 35"
+               只会以为游戏坏了。改成静默（需要排查时加 DSH_SKILL_DEBUG）。 */
+            /* v7 第 ㊿ 轮：**结果不再丢掉**
+               原来 `(void)r;` 把返回值扔了 —— 护栏装了没插电。
+               现在失败时写进 output debug 字符串，开发能看到，
+               玩家不受打扰。 */
+            {
+                int r = SkillsSelfTest();
+                if (r) {
+                    char m[96];
+                    snprintf(m, sizeof(m),
+                             "[CANITY] SKILL DATA SELF-TEST FAILED: code=%d "
+                             "(SKILL_TOTAL_COST vs real table)", r);
+                    PlatLog(m);
+                }
+            }
+        }
+    }
+    SkillTreeLayout L;
+    SkillTreeCompute(&L);
+    int TH = TextHeightWin();
+    int sel = hubSelection;
+    if (SkillListIndex(sel) < 0) sel = kSkillList[0];
+    hubSelection = sel;
+
+    /* 首次进入把视图居中到第 0 行 */
+    /* ===== v6 **相机自愈守卫** =====
+       用户截图：进 HUB 一个节点都看不到（整页空白），说明 skVX/skVY 跑飞了
+       （NaN / 巨大值），所有节点被 gTop..gBot 裁掉。
+       这里每帧检查一次，只要状态非法就强制回到选中节点。 */
+    {
+        int bad = 0;
+        if (!(skVK >= SK_K_MIN && skVK <= SK_K_MAX)) bad = 1;
+        if (!(skVX > -20000.0f && skVX < 20000.0f)) bad = 1;
+        if (!(skVY > -20000.0f && skVY < 20000.0f)) bad = 1;
+        if (bad) { skVK = 0.78f; SkillCenterOn(hubSelection); }
+    }
+    /* 首次进入：居中到第一行 */
+    {
+        static int skCentred = 0;
+        if (!skCentred) {
+            skCentred = 1;
+            skVK = 0.78f;
+            SkillCenterOn(hubSelection);
+        }
+    }
+
+
+    int innerL = L.panel.left + L.padX;
+    int innerR = L.panel.right - L.padX;
+    int gTop = L.curY + TH + TH / 2;          /* 图区上界 */
+    int gBot = L.panel.bottom - TH * 4;        /* 图区下界 = 详情条顶边 */
+    /* v6 **图区下界要留够详情条的空间** ——
+       详情条三行从 panel.bottom - TH*4 开始，而节点高 0.62*SK_WY*skVK，
+       原来 gBot 正好等于详情首行 y，第 3 行的节点会压上去。
+       再让出「一个节点高 + 半行」，保证压不到。 */
+    /* ---------- 顶部固定栏 ---------- */
+    /* 2026-11-08（实机反馈）：标题原来画在节点**之前**，
+       节点压上去把 "SKILL TREE" 盖成 "SK*LL T**EE"。
+       这里只留一个占位的绘制标记，真正的标题挪到节点循环之后。 */
+    {
+        int owned = 0;
+        for (int k = 0; k < SKILL_LIST_COUNT; k++)
+            if (skillRank[kSkillList[k]] > 0) owned++;
+        char b[80];
+        sprintf(b, "%d / %d NODES", owned, SKILL_LIST_COUNT);
+        DrawTextWin(innerL, L.curY, b, 0x0060D0FFu);
+        {  sprintf(b, "GOLD %d", bankGold); }
+        DrawTextWin(innerR - TextWidthWin(b), L.curY, b, 0x00FFC040u);
+    }
+
+    const SkillTreeDrawContext context = { L, TH, sel, innerL, innerR, gTop, gBot };
+    DrawSkillTreeCanvas(&context);
+    DrawSkillTreeDetails(&context);
 }
 
 /* 逻辑画布坐标 -> 节点 id（没点中 -1）。
@@ -1781,8 +1808,8 @@ static void DrawHudThemeRoom(void) {
              * 站在走廊里写"砖墙"没有意义，反而像是坏了。
              * 画在敌人状态那一行**上面**，两者互不遮挡。
              * ================================================================ */
-                extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
-                extern float posX, posY;
+
+
                 int cxp = (int)posX, cyp = (int)posY;
                 if (cxp >= 0 && cyp >= 0 && cxp < MAP_WIDTH && cyp < MAP_HEIGHT &&
                     cellMeta[cyp][cxp].roomId != 0) {
@@ -1796,46 +1823,29 @@ static void DrawHudThemeRoom(void) {
                 }
 }
 
-void DrawHUD(void) {
-    /* ==================================================================
-     * DrawHUD 段落索引（第 3 轮加，2026-11-08）
-     * ------------------------------------------------------------------
-     * 这个函数原本 1,299 行、没有目录。改 HUD 前先看这张表，别通读。
-     *
-     *   ① 详细度档位（hudDetail 三档）
-     *   ② 资源条：ENERGY / LIGHT / RUN
-     *   ③ 金币行（带入 / 携带）
-     *   ④ 威胁值与敌情
-     *   ⑤ 每日任务行
-     *   ⑥ 事件行（EventNameZh/DescZh）
-     *   ⑦ 扳手次数
-     *   ⑧ 守门人锁定倒计时
-     *   ⑨ 拾取提示（钱袋 / 搜索 / 藏身）
-     *   ⑩ 跳脸虫 QTE
-     *   ⑪ 站在门口的进门提示
-     *   ⑫ 主题房间字幕 ← 已抽成 DrawHudThemeRoom()
-     *   ⑬ 蛛网缠绕倒计时
-     *   ⑭ 屏幕中心提示
-     *
-     * 想再抽一块：挑**只用 extern/公开函数、不引用外层局部变量**的段落，
-     * 它才能整块搬成 static 函数而不改变作用域。
-     * ================================================================== */
-    if (currentState == STATE_PLAYING && !isMapOpen) DrawCrosshair();
-    /* v2.1：Boss 血条（屏幕上方居中） */
+typedef struct HudBarLayout {
+    int barW, barH, labelX, barX, rowGap, y1, y2;
+} HudBarLayout;
+
+static HudBarLayout HudBuildBarLayout(void) {
+    /* 手电电量 / 体力：左下两条细条，标签按实际文字宽度排版 */
+    int barW = UIS(180), barH = UIS(12);
+    int labelX = UIS(20);
+    /* v3.0：能量条已删，只剩 LIGHT / RUN 两条，按最宽标签算起点 */
+    int barX = labelX + TextWidthWin("LIGHT") + UIS(14);
+    /* v1.9：两行标签原来固定差 UIS(22)，而一行文字就有 30 逻辑像素高，
+       于是 LIGHT 和 RUN 叠在一起（截图里能看到两个词压成一团）。
+       现在行距 = 实际文字高度 + 一点间隙，任何窗口尺寸都不会重叠。 */
+    int rowGap = TextHeightWin() + UIS(8);
+    int y1 = winH - UIS(60) - rowGap;
+    int y2 = y1 + rowGap;
 
 
+    HudBarLayout layout = { barW, barH, labelX, barX, rowGap, y1, y2 };
+    return layout;
+}
 
-
-
-
-
-
-
-
-
-
-
-
+static void DrawHudRunHeader(int effDetail) {
     char buf[96];
 
     /* ------------------------------------------------------------------ */
@@ -1855,11 +1865,6 @@ void DrawHUD(void) {
      * 常驻只留 4 项（LEVEL / GOLD / SANITY / THREAT>0），
      * 按住 Tab 临时展开完整 HUD —— 信息没删，只是默认不糊在脸上。
      * ================================================================ */
-    int effDetail = hudDetail;
-    {
-        extern int keys[256];
-        if (keys[VK_TAB]) effDetail = 2;   /* 按住 Tab = 临时 Full */
-    }
 
     int goldRowEnd = 0;   /* v2.4.90 顶行金币栏的右边界 */
     sprintf(buf, Tr("LEVEL %d", "第 %d 层"), currentLevel);
@@ -1885,7 +1890,7 @@ void DrawHUD(void) {
        颜色：暖金 0xFFC040（和 LEVEL 的绿色、词条的橙色都区分开）
        宽度不够时退化成 G12.3k 这种缩写。 */
     {
-        extern int carryGold;
+
         static char gbuf[48];
         int gx0 = UIS(20) + TextWidthWin(buf) + UIS(16);
 
@@ -1970,7 +1975,7 @@ void DrawHUD(void) {
          *
          * 现在：中文用中文名；横幅放不下时，把说明塞进底部提示行。
          * ================================================================ */
-        extern int g_lang;
+
 
         int avail = winW - ex - UIS(12);
         {
@@ -1985,8 +1990,8 @@ void DrawHUD(void) {
 
         /* v7 第 62 轮：CampaignRule 全工程 0 调用点 —— 每关改的规则从没告诉过玩家 */
         {
-            extern int campaignMode, campaignStage;
-            extern float levelBanner;
+
+
             if (campaignMode && levelBanner > 3.0f) {
                 const char* r = (g_lang == LANG_ZH) ? CampaignRuleZh(campaignStage)
                                                     : CampaignRule(campaignStage);
@@ -2001,7 +2006,7 @@ void DrawHUD(void) {
 
         /* 规则说明：只在**本层刚开始的 6 秒**显示，不长期占屏 */
         {
-            extern float levelBanner;
+
             if (levelBanner > 3.0f) {
                 const char* desc = (g_lang == LANG_ZH) ? EventDescZh(levelEvent)
                                                        : EventDescEn(levelEvent);
@@ -2049,7 +2054,7 @@ void DrawHUD(void) {
          * 这里用 PENDING 行删掉后腾出的位置，不占新空间。
          * ================================================================ */
         if (dailyMode) {
-            extern int g_lang;
+
             if (DailyDone()) {
                 sprintf(buf, "DAILY  COMPLETE");
                 DrawTextWin(UIS(12), hy, buf, PAL_GOLD);
@@ -2067,31 +2072,6 @@ void DrawHUD(void) {
        玩家实测「一整个小时都是 PENDING 12」，既看不懂又永远不变。
        待上缴金币只在安全屋/结算页显示就够了。 */
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     }
 
     {
@@ -2100,6 +2080,10 @@ void DrawHUD(void) {
         if (dg) DrawTextCenterWin(winW / 2, UIS(18), "DRAIN", 0x00FF3030u);
     }
 
+}
+
+static void DrawHudVitalsAndStatus(int effDetail) {
+    char buf[96];
     /* v2.9：左列改用文字高累加，不再写死 18/52/86 ——
        1080p 下原来 LEVEL 15..80 和 SANITY 44..109 压 36px（报告 严重 #3）。 */
     int hudTH = TextHeightWin();
@@ -2125,7 +2109,7 @@ void DrawHUD(void) {
                       直接对应银行结算的倍数（倍数 = 1 + 这个值）
        放在 FUSES 下面，和上面三行同一列。 */
     {
-        extern int carryGold, bankHistMax;
+
         int hudY3 = hudY2 + hudTH + UIS(4);
         /* ===== v2.4.30 **新怪状态行（只保留能改变玩家决定的）** =====
            用户问「这行字有没有实用价值，没有就删掉」，判断标准定成一条：
@@ -2148,7 +2132,7 @@ void DrawHUD(void) {
              SCAVENGER RIFLING ...   留 —— 你的箱子正在被吃掉，赶紧回去
         */
         {
-            extern int   ScavengerRifling(void);
+
             const char* st = NULL;
             unsigned int stc = 0x00D0D0D0u;
 
@@ -2165,7 +2149,7 @@ void DrawHUD(void) {
 
         /* v7：丢钱滑条（按住 K 时展开） */
         {
-            extern int moneyDropOpen, moneyDropPct, carryGold;
+
             if (moneyDropOpen) {
                 int damt = (int)((long long)carryGold * moneyDropPct / 100);
                 char sb2[128];
@@ -2208,8 +2192,8 @@ void DrawHUD(void) {
        但界面上从来没告诉玩家「还剩几次 / 冷却多久」。
        放在 BOOST 下面一行，和左侧 HUD 同一列。 */
     {
-        extern int   wrenchCharges, wrenchLastUsed;
-        extern float wrenchCd;
+
+
 
         /* ===== v2.4.65 **等级 0 也要显示** =====
            扳手在等级 0 就已经能用（2 次/层），
@@ -2321,6 +2305,9 @@ void DrawHUD(void) {
         }
     }
 
+}
+
+static void DrawHudInventory(void) {
     /* v1.14：**右上角**滚动道具栏。
        原来放在左侧中部，和关卡主题名（如 ICE VAULT）撞在一起。
        现在右对齐贴右上角，纵向排列，滚轮切换时平滑滚动。
@@ -2350,7 +2337,7 @@ void DrawHUD(void) {
         lastT = nowT;
         {
             /* v1.17：只给"有货的槽位"排序号，空槽不参与滚动 */
-                extern int phaseBeacons;
+
                 int cArr[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts,
                                              decoys, phaseBeacons };;
             int selVis = 0;
@@ -2368,7 +2355,7 @@ void DrawHUD(void) {
     counts[2] = smokeBombs;
     counts[3] = gluePots;
     counts[4] = echoBolts;
-    { extern int phaseBeacons;
+    { 
       counts[5] = decoys; counts[6] = phaseBeacons; }
     counts[5] = decoys;
 
@@ -2444,6 +2431,10 @@ void DrawHUD(void) {
         }
     }
 
+}
+
+static void DrawHudWorldHints(void) {
+    char buf[96];
     /* ------------------------------------------------------------------ */
     /* 跳脸虫 QTE                                                        */
     /* ------------------------------------------------------------------ */
@@ -2455,7 +2446,7 @@ void DrawHUD(void) {
        所以玩家不需要学第二个位置；有搜索提示时让位给搜索。
        文字会呼吸（alpha 脉动），因为这是"现在就能做"的动作。 */
     {
-        extern int MoneyBagNearestToPlayer(void);
+
         int bagAmt = MoneyBagNearestToPlayer();
         /* 2026-11-05：**拾取提示和藏身提示会画在同一行** ——
            实测截图里 "PRESS E - HIDE" 和 "PRESS E PICK UP 272 GOLD"
@@ -2511,19 +2502,9 @@ void DrawHUD(void) {
        （用户截图：「中间那条黄色的重要提示会丢失」）。
        现在它作为**最后一层**单独绘制，永远在最上面。 */
 
-    /* 手电电量 / 体力：左下两条细条，标签按实际文字宽度排版 */
-    int barW = UIS(180), barH = UIS(12);
-    int labelX = UIS(20);
-    /* v3.0：能量条已删，只剩 LIGHT / RUN 两条，按最宽标签算起点 */
-    int barX = labelX + TextWidthWin("LIGHT") + UIS(14);
-    /* v1.9：两行标签原来固定差 UIS(22)，而一行文字就有 30 逻辑像素高，
-       于是 LIGHT 和 RUN 叠在一起（截图里能看到两个词压成一团）。
-       现在行距 = 实际文字高度 + 一点间隙，任何窗口尺寸都不会重叠。 */
-    int rowGap = TextHeightWin() + UIS(8);
-    int y1 = winH - UIS(60) - rowGap;
-    int y2 = y1 + rowGap;
+}
 
-
+static void DrawHudSafeHints(void) {
     /* v2.5：站在安全区里 → 屏幕下方给一行提示（用户要求的那行字） */
     if (playerInSafe && currentState == STATE_PLAYING) {
         const char* hint = NULL;
@@ -2549,8 +2530,8 @@ void DrawHUD(void) {
              * 屏幕上只有「T: 商店 空格: 校准」，玩家会以为自己已经到出口了。
              * 现在这一圈里直接写「走进光柱」。
              * ============================================================ */
-            extern int PlayerAtExit(void);
-            extern int breakerOpen;
+
+
             const char* shopHint = (breakerOpen && !PlayerAtExit())
                 ? Tr("STEP INTO THE LIGHT", "走进光柱")
                 : Tr("T: SHOP    SPACE: CALIBRATE", "T：商店    空格：校准");
@@ -2585,19 +2566,6 @@ void DrawHUD(void) {
 
     /* v3.0：**能量条已删除** —— 武器取消后这一整套都没意义了 */
 
-
-
-
-
-
-
-
-
-
-
-
-
-
     /* ===== v3.3：**旧的「开局四行说明」整块删除** =====
        用户要求：「旧的局内引导完全删掉，因为我们已经有引导模式了」。
        现在有 Tutorial 模式里的分步引导（TUTORIAL n/11，见 DrawTutorialPanel），
@@ -2609,10 +2577,13 @@ void DrawHUD(void) {
        全部移除。tutorialOff 变量还在 game.c 里（按键处理会置 1），
        但已经没有绘制点了，不影响编译。 */
 
+}
+
+static void DrawHudCoverAndThreat(void) {
     /* ===== v3.0 逃生向 HUD：藏身提示 + 被发现状态 =====
        怪已经打不死了，「它现在有没有在追我」是唯一需要盯的信息。 */
     {
-        extern int hideSpotNear, hiddenIn, hoverKind;
+
 
         /* ① 藏身提示 */
         if (hiddenIn >= 0) {
@@ -2622,7 +2593,7 @@ void DrawHUD(void) {
             /* v3.0：藏在藏身点里 —— **两行提示**（用户要求）
                第 1 行：空格开始校准小游戏（或显示冷却剩余）
                第 2 行：T 打开商店面板 */
-            extern float calibCooldown;
+
             int hy = winH - UIS(150);
             int lh = TextHeightWin() + UIS(4);
 
@@ -2647,11 +2618,11 @@ void DrawHUD(void) {
                  PRESS E - REPAIR 450   (YOU HAVE 60)      ← 钱够：正常色
                  PRESS E - REPAIR 450   (SHORT 390)        ← 钱不够：红色
             */
-            extern HideSpot hideSpots[];
-            extern int hideRepairCount;
+
+
 
             if (hideSpotNear < HIDESPOT_MAX && hideSpots[hideSpotNear].broken) {
-                extern int carryGold;   /* 它是 int，见 game.c */
+                   /* 它是 int，见 game.c */
                 float cost = HIDESPOT_REPAIR_BASE;
                 for (int rc = 0; rc < hideRepairCount; rc++) cost *= HIDESPOT_REPAIR_STEP;
                 if (cost > 99999.0f) cost = 99999.0f;
@@ -2684,11 +2655,11 @@ void DrawHUD(void) {
         }
 
         /* ② 敌人状态（三态雷达）—— 怪不可杀后这是唯一的威胁指标 */
-        if (monster.active && currentState == STATE_PLAYING) {
+        if (Hunter0()->active && currentState == STATE_PLAYING) {
             const char* st = NULL;
             unsigned int sc = 0x0080FF80u;
-            if (monster.state == 1)      { st = Tr("HUNTING", "追捕中"); sc = 0x00FF3020u; }
-            else if (monster.state == 2) { st = Tr("SEARCHING", "搜寻中"); sc = 0x00E0A020u; }
+            if (Hunter0()->state == 1)      { st = Tr("HUNTING", "追捕中"); sc = 0x00FF3020u; }
+            else if (Hunter0()->state == 2) { st = Tr("SEARCHING", "搜寻中"); sc = 0x00E0A020u; }
             else                          { st = Tr("WANDERING", "游荡"); sc = 0x0080C080u; }
             int tw3 = TextWidthWin(st);
             /* v6 **让开右下角的小地图** ——
@@ -2709,7 +2680,7 @@ void DrawHUD(void) {
     /* 第 3 轮：**挥空**也要有反馈 —— 命中用亮色，挥空用暗色。
        原来打空时屏幕不动，玩家分不清"挥了没打中"和"没挥出去"。 */
     if (wrenchHitFlashT > 0.0f || wrenchSwingFxT > 0.0f) {
-        extern float wrenchHitFlashT, wrenchSwingFxT;
+
         int isHit = (wrenchHitFlashT > 0.0f);
         int cx3 = winW / 2, cy3 = winH / 2;
         int len = UIS(14), gap = UIS(6);
@@ -2719,8 +2690,7 @@ void DrawHUD(void) {
         if (a < 0.0f) a = 0.0f;
         /* 命中 = 亮橙黄；挥空 = 灰蓝（明显不同，不糊弄得过去） */
         unsigned int mc = isHit ? 0x00FFE080u : 0x00708090u;
-        /* 直接写像素（PlotUiPixel 已随文本层搬到 ui_text.c，且是 static）——
-           这里就一个 HUD 标记，不值得为它开新 API。 */
+        /* This small HUD marker writes directly to the current UI pixel buffer. */
         {
             int pts[8][2];
             int k;
@@ -2740,7 +2710,6 @@ void DrawHUD(void) {
         }
     }
 
-
     /* ==================================================================
      * 2026-11-08（第 4 轮）：**躲在柜子里时的反馈**
      * ------------------------------------------------------------------
@@ -2751,11 +2720,11 @@ void DrawHUD(void) {
      * 中间模糊区不显示，免得误导。
      * ================================================================ */
     if (hiddenIn >= 0) {
-        extern float TelegraphNearestDist(void);
+
         float nd = TelegraphNearestDist();
         /* 2026-11-08（实机反馈）：三段全覆盖。
            原来 8~12 格什么都不画 —— 玩家以为卡了。 */
-        extern int HideStatusBand(float);
+
         {
             int band = HideStatusBand(nd);
             const char* hs;
@@ -2781,6 +2750,14 @@ void DrawHUD(void) {
         }
     }
 
+}
+
+static void DrawHudLightBar(const HudBarLayout* layout) {
+    const int barW = layout->barW;
+    const int barH = layout->barH;
+    const int labelX = layout->labelX;
+    const int barX = layout->barX;
+    const int y1 = layout->y1;
     DrawTextWin(labelX, y1 - UIS(3), "LIGHT", 0x00A0A0A0u);
     /* 手电条颜色：开启=黄绿，关闭但有电=暗黄，无电=暗红 */
     unsigned int lightBarCol;
@@ -2808,18 +2785,21 @@ void DrawHUD(void) {
        小地图自己的标题栏已经写着「MAP -10/S  HOLD TAB  M: FULL」，
        这里再挂一条既重复，又正好压在小地图上（用户截图确认）。 */
 
+}
+
+static void DrawHudPerception(void) {
     /* ===== v3.0 改造树感知系：预知 + 心眼 ===== */
     {
-        extern int hiddenIn;
 
-        extern float posX, posY;
+
+
         if (currentState == STATE_PLAYING) {
             /* ① 预知：怪物进 8 格 → 屏幕边缘泛红（不需要看见它） */
             /* v6 每日限制：怪物不上小地图 —— 预知/心眼一起失效 */
-            { extern int DailyForbidMonsterMap(void);
+            { 
               if (DailyForbidMonsterMap()) goto skip_monster_hints; }
-            if (BenchPremonition() && monster.active) {
-                float dx = monster.x - posX, dy = monster.y - posY;
+            if (BenchPremonition() && Hunter0()->active) {
+                float dx = Hunter0()->x - posX, dy = Hunter0()->y - posY;
                 float d2 = dx * dx + dy * dy;
                 if (d2 < 64.0f) {
                     /* 越近越红：边缘一圈渐变 */
@@ -2837,8 +2817,8 @@ void DrawHUD(void) {
             }
             skip_monster_hints:
             /* ② 心眼：藏身时显示怪物距离 */
-            if (BenchInnerEye() && hiddenIn >= 0 && monster.active) {
-                float dx = monster.x - posX, dy = monster.y - posY;
+            if (BenchInnerEye() && hiddenIn >= 0 && Hunter0()->active) {
+                float dx = Hunter0()->x - posX, dy = Hunter0()->y - posY;
                 float dm = sqrtf(dx * dx + dy * dy);
                 char ibuf[64];
                 /* v3.0：挪到**顶部固定带**并加底色 ——
@@ -2860,7 +2840,7 @@ void DrawHUD(void) {
 
     /* v3.0：**噪音环** —— 扔瓶子/敲墙后显示声音强度，2.2 秒衰减 */
     {
-        extern float noiseDisplay;
+
         if (noiseDisplay > 0.01f && currentState == STATE_PLAYING) {
             int nr = UIS(26);   /* v3.0：固定半径，只让亮度随强度变 —— 原来半径也变，四角乱跳 */
             int ncx = winW / 2, ncy = winH / 2;
@@ -2875,21 +2855,22 @@ void DrawHUD(void) {
         }
     }
 
+}
+
+static void DrawHudDamageHints(const HudBarLayout* layout) {
+    const int barW = layout->barW;
+    const int barH = layout->barH;
+    const int labelX = layout->labelX;
+    const int barX = layout->barX;
+    const int rowGap = layout->rowGap;
+    const int y1 = layout->y1;
+    const int y2 = layout->y2;
+    (void)barW; (void)barH; (void)labelX; (void)barX;
+    (void)rowGap; (void)y1; (void)y2;
     DrawTextWin(labelX, y2 - UIS(3), "RUN", 0x00A0A0A0u);
     UiBar(barX, y2, barW, barH, stamina / StaminaMax(),
           (stamina < 25.0f) ? UI_BAR_WARN : UI_BAR_NORMAL, 0x0040C060u);
     /* v3.0：**武器行已删除** */
-
-
-
-
-
-
-
-
-
-
-
 
     /* v1.15：命中伤害数字（屏幕中央偏下，向上浮 + 淡出） */
     if (0 && lastHitTimer > 0.0f && lastHitDamage > 0) {
@@ -2960,7 +2941,19 @@ void DrawHUD(void) {
         }
     }
 #endif
+}
 
+static void DrawHudInteractionHints(const HudBarLayout* layout) {
+    const int barW = layout->barW;
+    const int barH = layout->barH;
+    const int labelX = layout->labelX;
+    const int barX = layout->barX;
+    const int rowGap = layout->rowGap;
+    const int y1 = layout->y1;
+    const int y2 = layout->y2;
+    (void)barW; (void)barH; (void)labelX; (void)barX;
+    (void)rowGap; (void)y1; (void)y2;
+    /* v3.0：**武器行已删除** */
 
     /* ==================================================================
      * 2026-11-06（用户实测）：**被蛛网缠住时的屏内倒计时**
@@ -3014,7 +3007,7 @@ void DrawHUD(void) {
         else if (hoverKind == 3) {
             /* 2026-11-06：家具可以搜（货架 3 次 / 木箱堆 2 次 / 控制台 2 次）。
                提示里带上还剩几次 —— 否则玩家不知道"还能不能翻"。 */
-            extern RoomProp roomProps[MAX_ROOM_PROPS];
+
             int left = 0;
             if (hoverIndex >= 0 && hoverIndex < MAX_ROOM_PROPS)
                 left = roomProps[hoverIndex].searchLeft;
@@ -3030,7 +3023,7 @@ void DrawHUD(void) {
            进度条占 py+30..py+38，所以这里放到 +UIS(46)，
            顺序读起来也顺：标题 -> 进度条 -> 后果。 */
         if (hoverKind == 4) {
-            extern const char* HatchEffectLine(int idx);
+
             const char* eff = HatchEffectLine(hoverIndex);
             if (eff && eff[0]) {
                 int tw2 = TextWidthWin(eff);
@@ -3060,8 +3053,19 @@ void DrawHUD(void) {
 
     /* v2.6：SAFE ZONE 原来单独占一条带（winH/2+40），会和主题名/武器行抢位置。
        现在并进 FUSES 那一行（见上方的 FUSES 绘制），不再单独画。 */
+}
 
-
+static void DrawHudChargeHints(const HudBarLayout* layout) {
+    const int barW = layout->barW;
+    const int barH = layout->barH;
+    const int labelX = layout->labelX;
+    const int barX = layout->barX;
+    const int rowGap = layout->rowGap;
+    const int y1 = layout->y1;
+    const int y2 = layout->y2;
+    (void)barW; (void)barH; (void)labelX; (void)barX;
+    (void)rowGap; (void)y1; (void)y2;
+    /* v3.0：**武器行已删除** */
 
     /* 蓄力投掷进度条：按住鼠标左键时显示 */
     int mouseFree = (currentState != STATE_PLAYING) || (isMapOpen && mapFullScreen);
@@ -3092,8 +3096,8 @@ void DrawHUD(void) {
            现在：手上选了投掷物 → CHARGING THROW；
                  没选（或该槽空）→ CHARGING KNOCK（真的只是敲击）。 */
         {
-            extern int throwSelected;
-            extern int flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
+
+
             int cnt[6] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
             int hasItem = (throwSelected >= 0 && throwSelected < 6 && cnt[throwSelected] > 0);
             DrawTextCenterWin(winW / 2, by - UIS(24),
@@ -3109,8 +3113,8 @@ void DrawHUD(void) {
 
     /* v3.0：**大招提示** —— 拿到之后在 HUD 上告诉玩家「按 Q」 */
     {
-        extern int runUltimate, ultUsed;
-        extern const InRunDef inRunDefs[];
+
+
         if (runUltimate >= 0 && currentState == STATE_PLAYING) {
             const char* nm = (runUltimate < INRUN_COUNT)
                 ? inRunDefs[runUltimate].name : "?";
@@ -3122,7 +3126,19 @@ void DrawHUD(void) {
                         ultUsed ? 0x00606060u : 0x00FFD040u);
         }
     }
+}
 
+static void DrawHudCalibrationHints(const HudBarLayout* layout) {
+    const int barW = layout->barW;
+    const int barH = layout->barH;
+    const int labelX = layout->labelX;
+    const int barX = layout->barX;
+    const int rowGap = layout->rowGap;
+    const int y1 = layout->y1;
+    const int y2 = layout->y2;
+    (void)barW; (void)barH; (void)labelX; (void)barX;
+    (void)rowGap; (void)y1; (void)y2;
+    /* v3.0：**武器行已删除** */
 
     /* v3.0：**校准倒计时常驻显示** ——
        用户两次反馈「倒计时没有加进去」。
@@ -3130,7 +3146,7 @@ void DrawHUD(void) {
        根本看不到还剩多久。
        现在只要在游戏中且冷却中，就显示在 RUN 条下方一行。 */
     if (currentState == STATE_PLAYING) {
-        extern float calibCooldown;
+
         char cd[48];
         unsigned int cdc;
         if (calibActive) {
@@ -3145,7 +3161,7 @@ void DrawHUD(void) {
                试玩实测：「HUD 底部常驻 CALIB READY，我按空格两次什么都没发生。
                这行字在提示一个当前不存在的操作。」
                校准只在安全屋或藏身点里能开（见 game.c 的 inSafe || hiddenIn >= 0）。 */
-            extern int playerInSafe, hiddenIn;
+
             if (playerInSafe || hiddenIn >= 0) {
                 sprintf(cd, Tr("CALIB READY", "校准就绪"));
                 cdc = 0x0060FF90u;
@@ -3164,9 +3180,9 @@ void DrawHUD(void) {
         {
             int px2 = labelX + TextWidthWin(cd) + UIS(20);
             int py2 = y2 + rowGap - UIS(6);
-            extern int tutorialGuideOn;
-            extern int trainingMode;
-            extern Decoy decoysArr[MAX_DECOY];
+
+
+
 
             if (trainingMode && !tutorialGuideOn) {
                 const char* gtxt = Tr("[B] GUIDE", "[B] 引导");
@@ -3206,8 +3222,31 @@ void DrawHUD(void) {
     /* 金币（GOLD）是大厅货币，游戏过程中用不到 —— 不放进 HUD。
        「M CLOSE MAP」也删掉了：地图标题上已经写着
        「M: FULL  M: CLOSE」，再在底部挂一行是重复的。 */
-
 }
+
+static void DrawHudActionHints(const HudBarLayout* layout) {
+    DrawHudDamageHints(layout);
+    DrawHudInteractionHints(layout);
+    DrawHudChargeHints(layout);
+    DrawHudCalibrationHints(layout);
+}
+
+void DrawHUD(void) {
+    /* Keep this order: later units intentionally overlay earlier drawing. */
+    if (currentState == STATE_PLAYING && !isMapOpen) DrawCrosshair();
+    int effDetail = keys[VK_TAB] ? 2 : hudDetail;
+    DrawHudRunHeader(effDetail);
+    DrawHudVitalsAndStatus(effDetail);
+    DrawHudInventory();
+    DrawHudWorldHints();
+    HudBarLayout bars = HudBuildBarLayout();
+    DrawHudSafeHints();
+    DrawHudCoverAndThreat();
+    DrawHudLightBar(&bars);
+    DrawHudPerception();
+    DrawHudActionHints(&bars);
+}
+
 
 /* v3.1：新手教程的顶部提示条。步骤文案和推进逻辑都在 game.c，
    这里只负责画，避免两边各维护一套步骤。 */
@@ -3219,7 +3258,7 @@ static void DrawTutorialPanel(void) {
        所以这行已经挪到左下角 CALIB 那一行的右边了（见 DrawHUD）。
        这里只负责「别画面板」。 */
     {
-        extern int tutorialGuideOn;
+
         if (!tutorialGuideOn) return;
     }
 
@@ -3306,9 +3345,9 @@ static void DrawSaveStatusBanner(void) {
                避免和缝里的画面抢注意力
 */
 void DrawPickupToast(void) {
-    extern const char* pickupMsg;
-    extern float pickupMsgTimer;
-    extern int hiddenIn;
+
+
+
 
     if (!pickupMsg || pickupMsgTimer <= 0.0f) return;
 
@@ -3325,7 +3364,7 @@ void DrawPickupToast(void) {
        按 art_direction.h 铁律十三：**事件提示不该和功能 UI 抢同一块区域**。
        模态面板打开时它是最重要的东西，其他提示一律让路。 */
     {
-        extern int exitChoiceOpen, settingsPopupOpen;
+
         if (exitChoiceOpen) return;
         if (settingsPopupOpen) return;
     }
@@ -3387,9 +3426,7 @@ void DrawPickupToast(void) {
 
 
 
-void RenderFrame(void) {
-    UiLayoutBegin();
-
+static void RenderFrameScene(void) {
     int showScene = (currentState == STATE_PLAYING) ||
                     (currentState == STATE_PAUSED) ||
                     (currentState == STATE_SETTINGS && prevState == STATE_PAUSED) ||
@@ -3457,11 +3494,13 @@ void RenderFrame(void) {
     } else {
         memset(pixels, 0, (size_t)renderW * renderH * sizeof(unsigned int));
     }
+}
 
+static void RenderFrameMenus(void) {
     /* 文字也在这一层，先合成再一次性呈现；弹窗必须在列表文字之后画 */
     if (currentState != STATE_PLAYING) {
         int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
-        UiDrawMenuPages();   /* 第 2 轮：菜单整簇搬到 domain/ui/ui_menu.c */
+        UiDrawMenuPages();   /* Menu composition has one shared entry point. */
         if (popupOpen) {
             DrawPopupPanel();
             DrawPopupText();
@@ -3478,14 +3517,16 @@ void RenderFrame(void) {
         DrawHUD();
         DrawTutorialPanel();
     }
+}
 
+static void RenderFrameOcclusion(void) {
     /* v3.0：**帧末覆盖层** —— 不管什么状态都要画
        （锁盘只在游戏中打开；藏身遮罩也只在游戏中生效）。
        原来这两块写在 if (currentState != STATE_PLAYING) 分支里，
        结果玩游戏时锁盘一帧都不显示、藏身也没有任何视觉反馈。 */
     DrawLockOverlay();
     {
-        extern int hiddenIn;
+
         /* v3.3：**只在真正游玩时做藏身遮罩** ——
            用户两次反馈：
              ①「打开商店之后，商店界面会被隐藏点覆盖」
@@ -3527,9 +3568,9 @@ void RenderFrame(void) {
                但必须够小：**4 行**（3 状态 + 1 操作横排），
                位置放在**观察缝的下沿之下**，绝不压住缝。 */
             {
-                extern float calibCooldown;
-                extern int calibActive;
-                extern float battery, stamina, sanity;
+
+
+
 
                 char sSan[48], sBat[48], sSta[48];
                 char l1[48], l2[32], l3[32];
@@ -3553,7 +3594,7 @@ void RenderFrame(void) {
                        藏身回电是新机制，光看数字缓慢上涨不够明确，
                        直接在电量后面缀上实时速率。 */
                     {
-                        extern int flashlightOn;
+
                         float rr = HIDE_BATTERY_REGEN * (flashlightOn ? 0.5f : 1.0f);
                         if (bp >= 100)
                             sprintf(sBat, Tr("BATTERY  100%%  FULL",
@@ -3642,7 +3683,10 @@ void RenderFrame(void) {
                现在完全不遮 —— 躲进去只是不能动、不会被抓，
                视野和平时一样。 */
             (void)0;
+}   /* 2026-11-09 补：RenderFrameOcclusion 少一个闭合括号 */
+}
 
+static void RenderFrameCalibration(void) {
     /* ===== v3.0：**校准条画在所有图层之上** =====
        用户反复反馈「躲在柜子里看不到判定轴」。
        之前试过「校准时跳过遮罩」，但只要还有别的覆盖层（低理智红晕、
@@ -3674,7 +3718,7 @@ void RenderFrame(void) {
 
     }
 
-
+static void PresentComposedFrame(void) {
     /* ==================================================================
      * 2026-11-06（网页版 R1）：**呈现整体交给平台层**
      * ------------------------------------------------------------------
@@ -3722,6 +3766,15 @@ void RenderFrame(void) {
     }
 }
 
+void RenderFrame(void) {
+    UiLayoutBegin();
+    RenderFrameScene();
+    RenderFrameMenus();
+    RenderFrameOcclusion();
+    RenderFrameCalibration();
+    PresentComposedFrame();
+}
+
 
 /* ================================================================== */
 /* v2.2 UI 主题实现（合并进 ui.c，因为要用到本文件的 static 绘制原语）    */
@@ -3731,7 +3784,7 @@ void RenderFrame(void) {
 
 #define UI_INSET 20
 
-void UiInit(void) { }
+void UiInit(void) { /* FIXED_RESULT: UI has no initialization-owned state; resources are initialized by their owners. */ }
 
 void UiPanel9(int x0, int y0, int x1, int y1, int hot) {
     if (!SpritesReady()) return;

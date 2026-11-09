@@ -78,6 +78,7 @@ int IsKeyBindItem(const SettingItem* it);
 extern float g_shakeOffX, g_shakeOffY;
 extern float bobPhase;
 void AddShake(float seconds, float mag);
+void PresentTickFeedback(float dt);
 extern int hubPage;
 void UiLayoutBegin(void);
 void DumpUILayout(const char* path);
@@ -108,8 +109,19 @@ void SpawnParticles(float x, float y, int tint);
 void SpawnShards(float x, float y, float vx, float vy, float charge);
 /* v3.3：粘胶区域（实现放在 entity.c） */;
 
-extern int g_shardTint;
 
 void AddHitFlash(float amount);
+
+
+/* Shared animation clock and mouse-look input. */
+extern float gameTime;
+void CanityMouseLook(int dx, int dy);
+
+/* 技能树拖拽/复位（定义在 ui.c，第 31 轮补声明） */
+void SkillDragStart(int mx, int my);
+void SkillDragMove(int mx, int my);
+void SkillDragEnd(void);
+int  SkillIsDragging(void);
+void SkillResetView(void);
 
 #endif

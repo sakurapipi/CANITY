@@ -23,9 +23,14 @@ import sys
 from collections import defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GAME = os.path.join(ROOT, "src", "game.c")
-
-src = io.open(GAME, encoding="utf-8").read()
+# 2026-11-09：按键判定在重构后从 game.c 搬到了 loop_desktop_input.c，
+# 只读 game.c 会误报 `[DEAD] Space`。改成两个文件一起扫。
+SCAN = [
+    os.path.join(ROOT, "src", "game.c"),
+    os.path.join(ROOT, "src", "loop_desktop_input.c"),
+]
+src = "\n".join(io.open(p, encoding="utf-8", errors="replace").read()
+                 for p in SCAN if os.path.isfile(p))
 lines = src.split("\n")
 
 # ---- 抓所有按键判定 + 它所在的状态 ----
