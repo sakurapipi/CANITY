@@ -78,4 +78,10 @@ enum {
     TUT_DONE
 };
 
+extern int tutorialStep;
+
+extern int uiDirty;
+
+extern int tutorialGuideOn;
+
 #endif

@@ -1464,10 +1464,6 @@ static void BuildTrainingArena(void) {
 /* v3.1 新手教程：一步一步检测玩家真的做了动作                          */
 /* ------------------------------------------------------------------ */
 
-int TutorialStepNumber(void) {
-    if (tutorialDone) return TutorialStepTotal();
-    return tutorialStep + 1;
-}
 
 const char* TutorialObjective(void) {
     static char buf[160];
@@ -1546,22 +1542,6 @@ const char* TutorialHint(void) {
     }
 }
 
-void TutorialBegin(void) {
-    tutorialStep = TUT_MOVE;
-    tutorialDone = 0;
-    tutorialTimer = 0.0f;
-    tutorialActionTimer = 0.0f;
-    tutorialStartX = posX;
-    tutorialStartY = posY;
-    tutorialStartDirX = dirX;
-    tutorialStartDirY = dirY;
-    tutorialLightOff = 0;
-    tutorialThrown = 0;
-    tutorialKnocked = 0;
-    tutorialMapOpened = 0;
-    uiDirty = 1;
-    tutorialGuideOn = 0;   /* v3.3：进训练营默认不展开引导 */
-}
 
 static void TutorialAdvance(void) {
     if (tutorialStep >= TUT_DONE) return;
