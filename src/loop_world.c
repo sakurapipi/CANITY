@@ -7,7 +7,13 @@
  * 后续：GenerateLevel 一系的函数会陆续搬进来。
  */
 #include "common.h"
+#include "entity.h"
+#include "state.h"
 #include "world_api.h"
 
 float GoldBreakerAt(int level) { return (25.0f + 3.0f * (float)level) * EndlessDepthBonus(level); }
 float GoldExitAt(int level)    { return (30.0f + 6.0f * (float)level) * EndlessDepthBonus(level); }
+
+int PlayerAtExit(void) {
+    return (breakerOpen && Dist2(posX, posY, exitX, exitY) < EXIT_ENTER_R2 * EXIT_ENTER_R2);
+}

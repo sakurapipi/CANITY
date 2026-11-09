@@ -90,4 +90,8 @@ extern int wrenchPrev;
 extern int wrenchInit;
 extern int wrenchArmed;
 
+float BatteryDrainRate(void);
+
+float SafeHealRate(void);
+
 #endif

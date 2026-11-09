@@ -994,9 +994,6 @@ int BindActionOfItem(const SettingItem* it) {
     return -1;
 }
 
-int IsKeyBindItem(const SettingItem* it) {
-    return it->kind == SET_LIST && BindActionOfItem(it) >= 0;
-}
 
 /* VK 码 -> 显示名（改绑提示、QTE 提示共用）。
    在 optKeys 里找不到的（比如一些扩展键）返回 NULL，调用方自己兜底。 */
@@ -3073,12 +3070,7 @@ int BatteryMax(void) {
 /* 手电每秒耗电：ECO 升级每级 -12% */
 
 /* ==================== 玩家 · 理智/体力 ==================== */
-float BatteryDrainRate(void) { return BATTERY_DRAIN * BenchBatterySaver() * SkillEcoMul() * RelicBatteryMul() * modBatteryMul * BenchFlashDrainMul() * RunUpgFlashMul(); }   /* v2.7 省电 */
-
 /* 安全屋回智速度：REST 升级每级 +25% */
-float SafeHealRate(void) {
-    return SAFE_HEAL_RATE * (1.0f + SkillRestAdd() + RelicHealAdd())*(HasKeystone(SK_LASTRESORT)?0.5f:1.0f);   /* REST + IRON LUNG */
-}
 
 /* v1.8：理智流失随层数增长（原版是常量，导致经济净正、玩家不死） */
 
@@ -3288,11 +3280,6 @@ float EndlessDepthBonus(int level) {
 
 
 /* ==================== 玩家 · 理智/体力 ==================== */
-float SanityMax(void) {
-    float m = 100.0f + RelicMaxSanAdd()+BenchSanityAdd();
-    if (m < 25.0f) m = 25.0f;
-    return m;
-}
 
 
 /* ==================== 玩家 · 理智/体力 ==================== */
@@ -3309,8 +3296,6 @@ float StaminaMax(void) {
 /* v2.3：武器能量上限 */
 
 /* ==================== 玩家 · 理智/体力 ==================== */
-int EnergyMax(void) { return BenchEnergyMax((int)ENERGY_MAX); }   /* v2.7：弹匣/电池库/嗜血 */
-
 int UpgradeLevel(int kind) {
     switch (kind) {
         case 0: return upgBattery;
@@ -3869,9 +3854,6 @@ static int FlashlightUseAllowed(void) {
    是一段真实存在的状态，提示要能区分这两件事。 */
 
 /* ==================== 玩家 · 移动/手电 ==================== */
-int PlayerAtExit(void) {
-    return (breakerOpen && Dist2(posX, posY, exitX, exitY) < EXIT_ENTER_R2 * EXIT_ENTER_R2);
-}
 
 /* 训练场每帧补货：无限道具、不掉理智、标本固定不动。
  * 第 4 轮从 Update() 抽出来 —— 它只用全局与 dt，不碰外层局部变量。 */

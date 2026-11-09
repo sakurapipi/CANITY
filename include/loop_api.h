@@ -84,4 +84,6 @@ extern int uiDirty;
 
 extern int tutorialGuideOn;
 
+int IsKeyBindItem(const SettingItem* it);
+
 #endif
