@@ -97,7 +97,7 @@ void NeutralTick(float dt) {
 
     /* ---- ② 被落地照明棒吸引：靠近但保持距离 ---- */
     {
-        extern Thrown thrown[MAX_THROWN];   /* 真实类型在 game.h */
+           /* 真实类型在 game.h */
         int best = -1; float bestD2 = MOTE_LIGHT_ATTRACT * MOTE_LIGHT_ATTRACT;
         for (int i = 0; i < MAX_THROWN; i++) {
             if (!thrown[i].active) continue;

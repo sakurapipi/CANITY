@@ -15,7 +15,10 @@
  * 它**不可杀**：没有 MIM_DEAD。扳手只能逼它现形和击退。
  */
 #include "common.h"
+#include "monster_rules.h"
+#include "item_effects.h"
 #include "mimic.h"
+#include "bestiary.h"
 #include "loop_api.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -55,10 +58,10 @@ void MimicReset(void) {
    只挑 content == 0 且 locked == 0 的箱子 ——
    保险丝箱（content == 1）绝不能被替换，否则整层无解。 */
 void MimicTrySpawn(int level, int containerTotal) {
-    if (level < MIM_START_LEVEL) return;
+    if (level < MonsterMinimumFloor(SPAWN_MIMIC)) return;
     if (mimicCount >= MIM_MAX) return;
 
-    int pct = (level >= MIM_LATE_LEVEL) ? MIM_PCT_LATE : MIM_PCT_EARLY;
+    int pct = MonsterFloorChance(SPAWN_MIMIC,level);
     if ((rand() % 100) >= pct) return;
 
     /* 挑一个普通空箱 */
@@ -99,19 +102,22 @@ void MimicTrySpawn(int level, int containerTotal) {
 
 static void MimicReveal(Mimic* m, int bitten) {
     if (!m || m->state != MIM_DISGUISED) return;
+    BestiaryMarkSeen(BST_ID_MIMIC);
+    BestiaryNoteFloor(BST_ID_MIMIC, currentLevel);
     m->state = MIM_ANGRY;
     m->timer = 0.0f;
     m->noiseT = MIM_NOISE_T;      /* 现形后 2 秒发第一声 */
     PlaySfx(SFX_GLASS, 0.85f);
     SpawnParticles(m->x, m->y, 2);
     if (bitten) {
+        BestiaryMarkCaught(BST_ID_MIMIC);
         sanity -= MIM_SCARE_SANITY;
         if (sanity < 0.0f) sanity = 0.0f;
-        pickupMsg = g_lang == LANG_ZH ? "箱子咬了你一口！" : "THE BOX BIT YOU!";
-        pickupMsgTimer = 1.6f;
+        (void)0; /* Enemy encounter narration removed. */
+        (void)0; /* No encounter-toast timer. */
     } else {
-        pickupMsg = g_lang == LANG_ZH ? "扳手敲出了原形！" : "THE WRENCH FLUSHED IT OUT";
-        pickupMsgTimer = 1.6f;
+        (void)0; /* Enemy encounter narration removed. */
+        (void)0; /* No encounter-toast timer. */
     }
     uiDirty = 1;
 }
@@ -121,14 +127,15 @@ static void MimicReveal(Mimic* m, int bitten) {
 /* ------------------------------------------------------------------ */
 
 static void MimicVanish(Mimic* m) {
-    if (!m) return;
+    if (!m || m->state == MIM_GONE) return;
+    BestiaryMarkEscaped(BST_ID_MIMIC);
     m->state = MIM_GONE;
     /* 2026-11-05：**在原地留下空壳** —— 这是全部奖励的载体。
        它生成时占着一个 container 槽并把它 active=0 掉，
        这里把那个槽原样激活即可，不需要新位置。 */
     if (m->containerIdx >= 0) {
         containers[m->containerIdx].mimicHost = 0;   /* 解除占用 */
-        extern void MimicSpawnShell(int slot, float x, float y);
+
         MimicSpawnShell(m->containerIdx, m->x, m->y);
     }
     m->containerIdx = -1;
@@ -139,8 +146,8 @@ static void MimicVanish(Mimic* m) {
 
     PlaySfx(SFX_POWER, 0.7f);
     SpawnParticles(m->x, m->y, 2);
-    pickupMsg = g_lang == LANG_ZH ? "它钻回墙里了" : "IT SLIPPED INTO THE WALL";
-    pickupMsgTimer = 1.4f;
+    (void)0; /* Enemy encounter narration removed. */
+    (void)0; /* No encounter-toast timer. */
     uiDirty = 1;
 }
 
@@ -171,9 +178,11 @@ void MimicOnEchoHit(int containerIdx) {
         if (m->state != MIM_DISGUISED && m->state != MIM_SEEN) continue;
         if (m->containerIdx != containerIdx) continue;
         m->marked = 1;
+        BestiaryMarkSeen(BST_ID_MIMIC);
+        BestiaryNoteFloor(BST_ID_MIMIC, currentLevel);
         PlaySfx(SFX_PICKUP, 0.5f);
-        pickupMsg = g_lang == LANG_ZH ? "回声不对 —— 这箱子里有东西" : "ECHO IS WRONG - SOMETHING IS INSIDE";
-        pickupMsgTimer = 1.8f;
+        (void)0; /* Enemy encounter narration removed. */
+        (void)0; /* No encounter-toast timer. */
         uiDirty = 1;
     }
 }
@@ -261,10 +270,8 @@ void MimicTick(float dt) {
             if (dx * dx + dy * dy < 2.6f * 2.6f) {
                 m->seenTimer++;
                 if (m->seenTimer == 90) {     /* 只提示一次 */
-                    pickupMsg = g_lang == LANG_ZH
-                        ? "这个箱子在轻轻起伏……"
-                        : "THIS CRATE IS BREATHING...";
-                    pickupMsgTimer = 2.2f;
+                    (void)0; /* Enemy encounter narration removed. */
+                    (void)0; /* No encounter-toast timer. */
                     uiDirty = 1;
                 }
             } else {
@@ -283,7 +290,7 @@ void MimicTick(float dt) {
                 sanity -= MIM_CATCH_SANITY;
                 if (sanity < 0.0f) sanity = 0.0f;
                 /* 强制脱手全部投掷物 */
-                { extern int bottles, flares, smokeBombs, gluePots, echoBolts, decoys;
+                { 
                   bottles = 0; flares = 0; smokeBombs = 0; gluePots = 0;
                   echoBolts = 0; decoys = 0; }
                 PlaySfx(SFX_GLASS, 1.0f);

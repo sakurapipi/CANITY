@@ -2,6 +2,8 @@
  * Keep stage order and random-number consumption unchanged during refactoring.
  */
 #include "common.h"
+#include "room_theme.h"
+#include "map_topology.h"
 #include "control_effect.h"
 #include "echo_marks.h"
 #include "neutral.h"
@@ -290,8 +292,8 @@ static void ApplyLockboxes(void) {
  * 原来这段只在**房间生成之前**跑，房间门外挖出来的新死路没人处理。
  * ================================================================ */
 static void BraidDeadEnds(void) {
-    if (collapsedLevel) return;   /* 崩塌层故意更堵 */
-    for (int pass = 0; pass < 4; pass++) {
+    /* Collapse maps obey the same connectivity/dead-end bounds. */
+    for (int pass = 0; pass < 8; pass++) {
         for (int y = 1; y < MAP_HEIGHT - 1; y++) {
             for (int x = 1; x < MAP_WIDTH - 1; x++) {
                 if (worldMap[y][x]) continue;
@@ -333,12 +335,8 @@ static void BraidDeadEnds(void) {
     }
 }
 
-int ThemeRoomBudgetForLevel(int level, int training) {
-    if (training) return 0;                  /* 训练营：一间都不放 */
-    int want = (level <= 2) ? 1 : 2;         /* 前两层 1 间，之后 2 间 */
-    if (want > MAX_THEME_ROOMS_PER_FLOOR) want = MAX_THEME_ROOMS_PER_FLOOR;
-    return want;
-}
+int ThemeRoomBudgetForLevel(int level,int training) {(void)level;return training?0:1;}
+
 
 static void ApplyCampaignRules(int stage) {
     /* v6：改成**表驱动** —— 规则细节全在 campaign.c 的 kCampaign[] 里，
@@ -394,7 +392,7 @@ static void ResetFloorSystems(void) {
     }   /* v2.4.94 封喉表 + 第二只计时 + 理智档位重置 */
     }
     {   /* v7：拾荒者按强度档决定是否出现 */
-        CollectorSpawnIfEligible();
+        CollectorReset();
     }
     {   /* v7：扳手次数每层补满 */
 
@@ -562,7 +560,7 @@ static void GenerateMazeTopology(void) {
 }
 
 static void CollectFloorCandidates(LevelBuildWorkspace* work) {
-    posX = 1.5f; posY = 1.5f;
+    if(!campaignMode){posX = 1.5f; posY = 1.5f;}
     dirX = 1.0f; dirY = 0.0f;
     ApplyFov();
 
@@ -573,7 +571,7 @@ static void CollectFloorCandidates(LevelBuildWorkspace* work) {
     /* 出口门：固定在出生点正前方（右侧），锁死等待配电箱通电 */
     /* 生成迷宫时保证出生点右侧有通路 */
     worldMap[1][2] = 0; worldMap[1][3] = 0;  /* 确保右侧有路 */
-    FindFarthestCell(&exitX, &exitY);   /* v2.1：离出生点最远的空格 */
+    if(!campaignMode)FindFarthestCell(&exitX, &exitY);   /* v2.1：离出生点最远的空格 */
 
     /* ==================================================================
      * 2026-11-06（v2.4-rc）：**容器候选必须从出生点可达**
@@ -593,7 +591,8 @@ static void CollectFloorCandidates(LevelBuildWorkspace* work) {
             for (int x = 0; x < MAP_WIDTH; x++) reach[y][x] = 0;
         int rqx[MAP_WIDTH * MAP_HEIGHT], rqy[MAP_WIDTH * MAP_HEIGHT];
         int rh = 0, rt = 0;
-        if (worldMap[1][1] == 0) { reach[1][1] = 1; rqx[rt] = 1; rqy[rt] = 1; rt++; }
+        int sx=(int)posX,sy=(int)posY;
+        if(sx>0 && sy>0 && sx<MAP_WIDTH-1 && sy<MAP_HEIGHT-1 && !worldMap[sy][sx]){reach[sy][sx]=1;rqx[rt]=sx;rqy[rt]=sy;rt++;}
         while (rh < rt) {
             int cx = rqx[rh], cy = rqy[rh]; rh++;
             static const int ddx[4] = { 1, -1, 0, 0 };
@@ -615,7 +614,7 @@ static void CollectFloorCandidates(LevelBuildWorkspace* work) {
     for (int y = 1; y < MAP_HEIGHT - 1; y++) {
         for (int x = 1; x < MAP_WIDTH - 1; x++) {
             if (worldMap[y][x] == 0 && reach[y][x] &&
-                Dist2((float)x, (float)y, 1.5f, 1.5f) > 16.0f) {
+                Dist2(x+.5f,y+.5f,posX,posY) > 16.0f) {
                 work->cells[work->emptyCount][0] = x;
                 work->cells[work->emptyCount][1] = y;
                 work->emptyCount++;
@@ -633,7 +632,7 @@ static void CollectFloorCandidates(LevelBuildWorkspace* work) {
      * ================================================================ */
     {
         if (!(CampaignExitDistNow() > 1.01f)) {
-            FindFarthestCell(&exitX, &exitY);
+            if(!campaignMode)FindFarthestCell(&exitX, &exitY);
         }
     }
     /* ==================================================================
@@ -841,7 +840,7 @@ static int ConfigureFloorResources(void) {
 static void PlaceFloorContainers(LevelBuildWorkspace* work) {
     int attempts = 0;
     /* 阶段1：保证 fusesNeeded 个箱子 */
-    while (containerCount < fusesNeeded && containerCount < MAX_CONTAINERS && attempts < 512) {
+    while (work->emptyCount>0 && containerCount < fusesNeeded && containerCount < MAX_CONTAINERS && attempts < 512) {
         attempts++;
         int idx = rand() % work->emptyCount;
         float cx = work->cells[idx][0] + 0.5f, cy = work->cells[idx][1] + 0.5f;
@@ -1025,6 +1024,9 @@ static void DistributeFloorLoot(void) {
     MimicReset();
     MimicTrySpawn(currentLevel, containerCount);
     ApplyLockboxes();
+    for(int i=0;i<containerCount;i++){int x=(int)containers[i].x,y=(int)containers[i].y;
+        if(x>=0 && y>=0 && x<MAP_WIDTH && y<MAP_HEIGHT && cellMeta[y][x].roomId){containers[i].locked=1;containers[i].lockType=(currentLevel+cellMeta[y][x].themeId)%LOCK_TYPE_COUNT;containers[i].lockCode=(int)(rng_world_next()&0xFFF);}}
+
 
         /* 修复死局 Bug：优先保证能通关（放满 fusesNeeded）。
    只有在箱子极其充裕（多出 2 个以上）时，才留格子给其他物品。 */
@@ -1128,9 +1130,7 @@ static void DistributeFloorLoot(void) {
 
 static void SpawnFloorPopulation(void) {
         {
-        int nt = rand() % THEME_ENABLED;
-        if (nt == themeId) nt = (nt + 1) % THEME_ENABLED;
-        GenerateThemeTextures(nt);
+        GenerateThemeTextures(campaignMode?CampaignThemeNow():dailyMode?DailyVisualThemeNow():RoomThemeForFloor(currentLevel));
     }
     SpawnMonster();
     /* ================================================================
@@ -1245,11 +1245,7 @@ static void SpawnFloorPopulation(void) {
         }
     }
 
-    /* v1.8：图鉴解锁 —— 本层出现的怪记一笔 */
-    for (int i = 0; i < EXTRA_MAX; i++) {
-        if (extras[i].active) BestiaryMarkSeen(4 + extras[i].kind);
-    }
-    if (bossLevel) BestiaryMarkSeen(7);
+    /* Retired extras/bosses have no current catalog identity. */
 
     /* v2.0 CARTOGRAPHER：开局就把安全屋和配电箱的位置标在小地图上 */
     if (SkillCartoUnlock()) {
@@ -1265,20 +1261,10 @@ static void SpawnFloorPopulation(void) {
         }
     }
     { 
-      BestiaryMarkSeen(0); BestiaryNoteFloor(0, currentLevel); }   /* 寻声鬼：每层都有 */
-    /* 第 1 轮：**首次遇到就报名字** —— 玩家原话「不知道哪个怪是哪个」。
-       只在第一次（本进程内）播，不打断后续节奏。 */
-    { 
-      if (BestiaryAnnounce(0)) {
-        pickupMsg = (g_lang == LANG_ZH)
-            ? "新威胁：听声鬼 —— 它看不见，走向最后听到的声音"
-            : "NEW THREAT: SOUND HUNTER - blind, walks to the last sound";
-        pickupMsgTimer = 3.2f;
-      } }
-    if (lightBeast.active) { BestiaryMarkSeen(1); BestiaryNoteFloor(1, currentLevel); }           /* 追光鬼 */
-    if (currentLevel >= LEECH_MIN_LEVEL) { BestiaryMarkSeen(2); BestiaryNoteFloor(2, currentLevel); }   /* 偷电怪 */
-    { 
-      if (SpiderActive()) { BestiaryMarkSeen(3); BestiaryNoteFloor(3, currentLevel); } }       /* 跳脸虫 */
+      BestiaryMarkSeen(BST_ID_HUNTER); BestiaryNoteFloor(BST_ID_HUNTER, currentLevel); }   /* 寻声鬼：每层都有 */
+    /* Discovery is recorded silently in the archive. */
+    if (lightBeast.active) { BestiaryMarkSeen(BST_ID_LIGHT); BestiaryNoteFloor(BST_ID_LIGHT, currentLevel); }           /* 追光鬼 */
+    /* Leeches and spiders are live entities without catalog rows; never borrow IDs 2/3. */
 
     /* 记录本局见过的词条种类（算难度乘子用） */
     if (levelMod >= 0) {
@@ -1335,7 +1321,7 @@ static void PlaceFloorBreaker(const LevelBuildWorkspace* work) {
 
     /* 配电箱：放在离出生点 15 格以上的远处，迫使玩家深入探索 */
     breaker.active = 0;
-    for (int t = 0; t < 256; t++) {
+    for (int t = 0; work->emptyCount>0 && t < 256; t++) {
         int idx = rand() % work->emptyCount;
         float bx = work->cells[idx][0] + 0.5f, by = work->cells[idx][1] + 0.5f;
         float dFromSpawn = Dist2(bx, by, 1.5f, 1.5f);
@@ -1413,15 +1399,34 @@ static void PlaceFloorBreaker(const LevelBuildWorkspace* work) {
 void GenerateLevel(void) {
     static LevelBuildWorkspace work;
     ResetFloorSystems();
+    memset(&roomTheme,0,sizeof(roomTheme));
     if (trainingMode) {
         TrainingBuildArena();
         return;
     }
+    GenerateThemeTextures(campaignMode?CampaignThemeNow():dailyMode?DailyVisualThemeNow():RoomThemeForFloor(currentLevel));
     GenerateMazeTopology();
+    if(campaignMode)CampaignBuildFloor();
+    /* Pure topology gate. An invalid random layout falls back to a connected
+       open maintenance floor, with no room/props/hatches to trap the player. */
+    if(!MapTopologyAccepts(MapTopologyMeasure(&worldMap[0][0],MAP_WIDTH,MAP_HEIGHT))){
+        for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)worldMap[y][x]=(x==0 || y==0 || x>=MAP_WIDTH-1 || y>=MAP_HEIGHT-1)?1:0;
+        CellMetaReset();RoomPropReset();roomCount=0;HatchReset();RoomThemeBind();
+    }
     CollectFloorCandidates(&work);
+    if(work.emptyCount==0){
+        /* A malformed authored/legacy room must not feed rand()%0. */
+        CellMetaReset();RoomPropReset();HatchReset();roomCount=0;RoomThemeBind();
+        for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)worldMap[y][x]=(x==0 || y==0 || x==MAP_WIDTH-1 || y==MAP_HEIGHT-1);
+        posX=3.5f;posY=18.5f;exitX=32.5f;exitY=18.5f;
+        CollectFloorCandidates(&work);
+    }
     work.contCap = ConfigureFloorResources();
     PlaceFloorContainers(&work);
     DistributeFloorLoot();
     SpawnFloorPopulation();
+    if(isEndlessRun && currentLevel>10){float pressure=fminf(.65f,(currentLevel-10)*.025f);modSanityMul*=1+pressure;modBatteryMul*=1+pressure*.6f;modNoiseMul*=1+pressure*.4f;}
     PlaceFloorBreaker(&work);
+    RoomThemePlaceVault();
+    CollectorSpawnIfEligible();
 }

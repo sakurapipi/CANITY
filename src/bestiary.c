@@ -40,13 +40,7 @@ int bestiaryCaught[BESTIARY_COUNT] = {0};
                 /* 它不听声音，只装死 */
 
 /* ---- 表：加一种怪 = 加一行 ---- */
-/* ==================================================================
- * 2026-11-09（第 4 轮）：**数据搬到 src/content/content_monsters.c**
- * ------------------------------------------------------------------
- * 这个文件现在只负责逻辑：三阶揭示、进度计数、查询。
- * 表本体在 content/ 层，`bestiary[]` 的 extern 声明仍在 bestiary.h，
- * 所以引用方一处都不用改。
- * ================================================================ */
+/* Bestiary queries consume the shared content_monsters table via bestiary.h. */
 
 
 /* ==================================================================
@@ -79,32 +73,39 @@ int BestiaryIsSeen(int id) {
     return (bestiarySeen >> id) & 1;
 }
 
-/* 第 1 轮：本进程内已经播报过的怪（不进存档） */
-static int bestiaryAnnounced = 0;
+/* Discovery is silent; this module owns knowledge, not narration. */
 
-int BestiaryAnnounce(int id) {
-    if (id < 0 || id >= BESTIARY_COUNT) return 0;
-    if (bestiaryAnnounced & (1 << id)) return 0;
-    bestiaryAnnounced |= (1 << id);
-    return 1;
+
+
+
+int BestiaryIsActive(int id) {
+    return id >= 0 && id < BESTIARY_COUNT;
 }
-
+int BestiaryActiveCount(void) {
+    int n=0;for(int i=0;i<BESTIARY_COUNT;i++)n+=BestiaryIsActive(i);return n;
+}
+int BestiaryCountSeen(int seenMask) {
+    int count = 0;
+    for (int id = 0; id < BESTIARY_COUNT; id++)
+        if (BestiaryIsActive(id) && ((unsigned)seenMask & (1u << id))) count++;
+    return count;
+}
 int BestiarySeenAll(void) {
-    for (int i = 0; i < BESTIARY_COUNT; i++)
-        if (!BestiaryIsSeen(i)) return 0;
+    for (int id = 0; id < BESTIARY_COUNT; id++)
+        if (BestiaryIsActive(id) && !BestiaryIsSeen(id)) return 0;
     return 1;
 }
 
 void BestiaryMarkEscaped(int id) {
     if (id < 0 || id >= BESTIARY_COUNT) return;
     BestiaryMarkSeen(id);
-    bestiaryEscapes[id]++;
+    if (bestiaryEscapes[id] < INT_MAX) bestiaryEscapes[id]++;
 }
 
 void BestiaryMarkCaught(int id) {
     if (id < 0 || id >= BESTIARY_COUNT) return;
     BestiaryMarkSeen(id);
-    bestiaryCaught[id]++;
+    if (bestiaryCaught[id] < INT_MAX) bestiaryCaught[id]++;
 }
 
 /* ==================================================================
@@ -130,16 +131,20 @@ void BestiaryNoteFloor(int id, int level) {
     if (id < 0 || id >= BESTIARY_COUNT) return;
     if (s_lastFloor[id] == level) return;      /* 同一层只记一次 */
     s_lastFloor[id] = level;
-    s_floorsSeen[id]++;
+    if (s_floorsSeen[id] < INT_MAX) s_floorsSeen[id]++;
 }
 
+int BestiaryFloorsSeen(int id) {
+    return id >= 0 && id < BESTIARY_COUNT ? s_floorsSeen[id] : 0;
+}
 int BestiaryStage(int id) {
     if (id < 0 || id >= BESTIARY_COUNT) return BST_HIDDEN;
     if (!BestiaryIsSeen(id)) return BST_HIDDEN;
     int e = bestiaryEscapes[id];
     int f = s_floorsSeen[id];
     /* 两条路取更快的那条 */
-    int progress = (e * 2 > f) ? (e * 2) : f;   /* 逃 1 次 ≈ 遇到 2 层 */
+    int doubledEscapes = e >= 3 ? 6 : e * 2;
+    int progress = doubledEscapes > f ? doubledEscapes : f;   /* 逃 1 次 ≈ 遇到 2 层 */
     if (progress >= 5) return BST_COUNTER;
     if (progress >= 3) return BST_BEHAVED;
     return BST_NAMED;
@@ -170,5 +175,38 @@ int BestiaryDanger(int id) {
 
 void BestiaryBeginFloor(void) {
     BestiaryRegister();   /* 第 3 轮：保证图鉴已登记进中枢 */ for(int i=0;i<BESTIARY_COUNT;++i)s_lastFloor[i]=-1; }
-void BestiarySave(int* a) { for(int i=0;i<BESTIARY_COUNT;++i) {a[i]=bestiaryEscapes[i];a[6+i]=bestiaryCaught[i];a[12+i]=s_floorsSeen[i];} }
-void BestiaryLoad(const int* a) { for(int i=0;i<BESTIARY_COUNT;++i) {bestiaryEscapes[i]=a[i]>0?a[i]:0;bestiaryCaught[i]=a[6+i]>0?a[6+i]:0;s_floorsSeen[i]=a[12+i]>0?a[12+i]:0;}BestiaryBeginFloor(); }
+
+
+
+typedef char bestiary_storage_capacity_check[(BESTIARY_COUNT == BESTIARY_LEGACY_COUNT + 1) ? 1 : -1];
+
+void BestiarySave(int* a) {
+    if (!a) return;
+    for (int i = 0; i < BESTIARY_LEGACY_COUNT; i++) {
+        a[i] = bestiaryEscapes[i];
+        a[BESTIARY_LEGACY_COUNT+i] = bestiaryCaught[i];
+        a[2*BESTIARY_LEGACY_COUNT+i] = s_floorsSeen[i];
+    }
+}
+void BestiaryLoad(const int* a) {
+    memset(bestiaryEscapes, 0, sizeof(bestiaryEscapes));
+    memset(bestiaryCaught, 0, sizeof(bestiaryCaught));
+    memset(s_floorsSeen, 0, sizeof(s_floorsSeen));
+    if (a) for (int i = 0; i < BESTIARY_LEGACY_COUNT; i++) {
+        bestiaryEscapes[i] = a[i] > 0 ? a[i] : 0;
+        bestiaryCaught[i] = a[BESTIARY_LEGACY_COUNT+i] > 0 ? a[BESTIARY_LEGACY_COUNT+i] : 0;
+        s_floorsSeen[i] = a[2*BESTIARY_LEGACY_COUNT+i] > 0 ? a[2*BESTIARY_LEGACY_COUNT+i] : 0;
+    }
+    BestiaryBeginFloor();
+}
+void BestiarySaveExtra(int* a) {
+    if (!a) return;
+    a[0] = bestiaryEscapes[BST_ID_MIMIC];
+    a[1] = bestiaryCaught[BST_ID_MIMIC];
+    a[2] = s_floorsSeen[BST_ID_MIMIC];
+}
+void BestiaryLoadExtra(const int* a) {
+    bestiaryEscapes[BST_ID_MIMIC] = a && a[0] > 0 ? a[0] : 0;
+    bestiaryCaught[BST_ID_MIMIC] = a && a[1] > 0 ? a[1] : 0;
+    s_floorsSeen[BST_ID_MIMIC] = a && a[2] > 0 ? a[2] : 0;
+}

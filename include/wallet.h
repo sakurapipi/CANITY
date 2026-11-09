@@ -37,4 +37,9 @@ int WalletWithdraw(int n);
 void WalletSettle(int survived, int profit);
 int WalletPreviewSettle(int survived, int profit);
 
+
+/* Run-start principal and settlement preview. */
+extern int carryAtRunStart;
+int BankPreviewGain(int survived);
+
 #endif /* CANITY_WALLET_H */

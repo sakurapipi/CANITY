@@ -30,16 +30,16 @@ static void PlatClockInit(void) {
     s_clockReady = 1;
 }
 
-void PlatInit(void) { }   /* 桌面端在 WinMain 里建窗，这里无事可做 */
+void PlatInit(void) { /* PLATFORM_NOOP: Native startup/window messages own this operation; browser polling/probe hooks are unused. */ }   /* 桌面端在 WinMain 里建窗，这里无事可做 */
 
-int PlatShowPerf(double pixMs, double sprMs, double texMs, double totalMs) {
+int PlatShowPerf(double pixMs, double sprMs, double texMs, double totalMs) { /* STUB: Optional native PlatShowPerf hook is not implemented/tracked; its neutral result is explicit. */
     (void)pixMs; (void)sprMs; (void)texMs; (void)totalMs;
     return 0;
 }
 
-void PlatMarkReady(void) { }
+void PlatMarkReady(void) { /* PLATFORM_NOOP: Native startup/window messages own this operation; browser polling/probe hooks are unused. */ }
 
-int PlatSelfTestRequested(void) { return 0; }
+int PlatSelfTestRequested(void) { /* PLATFORM_NOOP: Native startup/window messages own this operation; browser polling/probe hooks are unused. */ return 0; }
 
 unsigned int PlatTicksMs(void) { return (unsigned int)GetTickCount(); }
 
@@ -288,7 +288,7 @@ void PlatSetCursorLock(int on) {
     }
 }
 
-int PlatCursorLocked(void) { return 0; }   /* Win32 后端不跟踪；占位给网页端用 */
+int PlatCursorLocked(void) { /* STUB: Optional native PlatCursorLocked hook is not implemented/tracked; its neutral result is explicit. */ return 0; }   /* Win32 后端不跟踪；占位给网页端用 */
 
 void PlatCursorPos(int* x, int* y) {
     POINT p;
@@ -304,10 +304,10 @@ void PlatCursorPos(int* x, int* y) {
 
 void PlatRequestQuit(void) { PostQuitMessage(0); }
 
-int PlatTakeWheel(int* d, int* x, int* y) { (void)d; (void)x; (void)y; return 0; }
+int PlatTakeWheel(int* d, int* x, int* y) { /* PLATFORM_NOOP: Native startup/window messages own this operation; browser polling/probe hooks are unused. */ (void)d; (void)x; (void)y; return 0; }
 
-int PlatTakeMouseMove(int* x, int* y) { (void)x; (void)y; return 0; }
-int PlatTakeMouseClick(int* x, int* y) { (void)x; (void)y; return 0; }
+int PlatTakeMouseMove(int* x, int* y) { /* PLATFORM_NOOP: Native startup/window messages own this operation; browser polling/probe hooks are unused. */ (void)x; (void)y; return 0; }
+int PlatTakeMouseClick(int* x, int* y) { /* PLATFORM_NOOP: Native startup/window messages own this operation; browser polling/probe hooks are unused. */ (void)x; (void)y; return 0; }
 
 void PlatSetCapture(int on) {
     if (!g_hwnd) return;
@@ -446,7 +446,7 @@ void PlatLog(const char* msg) {
     if (msg) OutputDebugStringA(msg);
 }
 
-void PlatSfx(int id, float gain) {
+void PlatSfx(int id, float gain) { /* STUB: Optional native PlatSfx hook is not implemented/tracked; its neutral result is explicit. */
     (void)id;
     (void)gain;
 }

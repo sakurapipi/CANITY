@@ -37,7 +37,7 @@ INTERESTING = [
     "relicTotal", "totalKills", "curWeapon", "weaponCd", "weaponAtkCharge",
     "flashlightOn", "breakerOpen", "isCharging", "throwSelected",
     "posX", "posY", "dirX", "dirY", "planeX", "planeY",
-    "monster", "lightBeast", "leeches", "extras", "containers", "breaker",
+    "monHunters", "lightBeast", "leeches", "extras", "containers", "breaker",
     "safeRoom", "shots", "shards_debris", "thrown", "smokes",
     "g_save", "g_achievements", "skillRank", "relicOwned", "attachOwned",
     "weaponRank", "weaponXp", "weaponAttach",

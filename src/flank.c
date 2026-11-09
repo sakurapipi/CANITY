@@ -22,8 +22,8 @@
 #include "entity.h"
 #include "audio.h"
 
-void FlankBuild(void) { }
-void FlankReset(void) { }
+void FlankBuild(void) { /* FIXED_RESULT: Retired mechanic compatibility hook; no extra threats or coordinated blocking are generated. */ }
+void FlankReset(void) { /* FIXED_RESULT: Retired mechanic compatibility hook; no extra threats or coordinated blocking are generated. */ }
 
 /* ==================================================================
  * v2.4.99 **分离力已删除**
@@ -40,7 +40,7 @@ void FlankReset(void) { }
  *
  * 结论：**不推了**。两只各自独立寻路，爱重叠就重叠。
  * ================================================================ */
-void FlankUpdate(float dt) {
+void FlankUpdate(float dt) { /* FIXED_RESULT: Retired mechanic compatibility hook; no extra threats or coordinated blocking are generated. */
     (void)dt;
 }
 
@@ -49,19 +49,19 @@ void FlankUpdate(float dt) {
  * ================================================================== */
 void FlankOnCaught(void) {
     
-    if (monster.active) monster.huntTimer = 0.0f;
-    if (monster2.active) {
-        monster2.huntTimer = 0.0f;
-        monster2.stun = 0.0f;
+    if (Hunter0()->active) Hunter0()->huntTimer = 0.0f;
+    if (Hunter1()->active) {
+        Hunter1()->huntTimer = 0.0f;
+        Hunter1()->stun = 0.0f;
     }
 }
 
 /* ---- 下面这些接口保留但已空转（调用点不用改）---- */
-int FlankChokeOnExitPath(float px, float py, float* gx, float* gy) {
+int FlankChokeOnExitPath(float px, float py, float* gx, float* gy) { /* FIXED_RESULT: Retired mechanic compatibility hook; no extra threats or coordinated blocking are generated. */
     (void)px; (void)py; (void)gx; (void)gy;
     return 0;
 }
-int   FlankBlocksPlayer(float nx, float ny) { (void)nx; (void)ny; return 0; }
+int   FlankBlocksPlayer(float nx, float ny) { /* FIXED_RESULT: Retired mechanic compatibility hook; no extra threats or coordinated blocking are generated. */ (void)nx; (void)ny; return 0; }
 /* 2026-11-08（第 13 轮）：FlankIsBlocking 是常量桩（全工程零调用），已删 */
 /* 2026-11-08（第 13 轮）：FlankGoalX 是常量桩（全工程零调用），已删 */
 /* 2026-11-08（第 13 轮）：FlankGoalY 是常量桩（全工程零调用），已删 */

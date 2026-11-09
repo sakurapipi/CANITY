@@ -22,7 +22,7 @@ void ExtrasReset(void) {
 }
 
 /* v2.2：补一只游荡怪（EV_MIRROR 用）—— v7 起不生成任何东西 */
-void ExtrasSpawnOne(int idx) {
+void ExtrasSpawnOne(int idx) { /* FIXED_RESULT: Retired mechanic compatibility hook; no extra threats or coordinated blocking are generated. */
     (void)idx;
 }
 
@@ -33,11 +33,11 @@ void ExtrasSpawnForLevel(int level) {
 }
 
 /* v7：没有游荡怪了，这里只做空转（保留接口，render/EV 不用改） */
-void UpdateExtras(float dt) {
+void UpdateExtras(float dt) { /* FIXED_RESULT: Retired mechanic compatibility hook; no extra threats or coordinated blocking are generated. */
     (void)dt;
 }
 
-int ExtrasCount(void) { return 0; }
+int ExtrasCount(void) { /* FIXED_RESULT: Retired mechanic compatibility hook; no extra threats or coordinated blocking are generated. */ return 0; }
 
 const Extra* ExtraAt(int i) {
     if (i < 0 || i >= EXTRA_MAX) return NULL;

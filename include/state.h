@@ -50,7 +50,7 @@ extern int   bankCarryPct;         /* 下一个携带比例档位 0..20 */
 
 /* 强度档位（16 档，T0~T15）—— 只影响听觉与机制，永不影响移速 */
 int   GoldTier(void);              /* 当前档位 0~15 */
-float GoldTierMul(void);           /* 当前档位的强度倍率 1.00~1.80 */
+float GoldTierMul(void);           /* 当前档位的强度倍率 1.00~1.75 */
 float GoldHearMul(void);           /* 听觉半径倍数 */
 float GoldSpeedMul(void);          /* 恒为 1.0，保留给旧调用点 */
 
@@ -116,5 +116,18 @@ extern float wrenchCd;             /* 冷却制下剩余冷却 */
  *   extras.c 整个文件               —— 三只游荡怪已删
  *   bossLevel / bossMaxHp / bossDefeated —— BOSS 已删（恒为 0）
  */
+
+/* Collector/scavenger observations shared by gameplay and presentation. */
+float CollectorSpeedNow(void);
+
+float ScavengerSpeedNow(void);
+
+int   CollectorHasMoney(void);
+
+int   ScavengerRifling(void);
+
+void CollectorBurstBounty(void);
+
+int MoneyBagNearestToPlayer(void);
 
 #endif /* CANITY_STATE_H */

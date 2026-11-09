@@ -4,6 +4,7 @@
  * 契约：include/ui_pages.h
  */
 #include "common.h"
+#include "ui_theme.h"
 #include "render.h"
 #include "loop_api.h"
 #include "player_api.h"
@@ -119,10 +120,10 @@ void UiDrawAchievementsPage(MenuGeo g) {
     BlendRectWin(A.panel.left, A.panel.top, A.panel.right, A.panel.bottom,
                  0x000a1016u, 0.96f);
     FrameRectWin(A.panel.left, A.panel.top, A.panel.right, A.panel.bottom,
-                 0x00801818u, 0.85f, UIS(2));
+                 UI_ACCENT, 0.85f, UIS(2));
 
     int cx = (A.panel.left + A.panel.right) / 2;
-    DrawTextCenterWin(cx, A.titleY, "ACHIEVEMENTS", PAL_GOLD);
+    DrawTextCenterWin(cx, A.titleY, "ACHIEVEMENTS", UI_ACCENT);
 
     int left  = A.panel.left + A.padX;
     int right = A.panel.right - A.padX;
@@ -140,7 +141,7 @@ void UiDrawAchievementsPage(MenuGeo g) {
      *   TAB 提示挪到**底部操作栏**（那里本来就有 R x2 RESET / WHEEL ZOOM 之类）
      * ================================================================ */
     {
-        extern int achFilter, AchVisibleCount(void), AchUnlockedInFilter(void);
+
         static char cnt[48];
 
         /* 左：分类名（短，不会被挤） */
@@ -149,7 +150,7 @@ void UiDrawAchievementsPage(MenuGeo g) {
            这里按语言选。 */
         {
 
-            extern const char* AchCatNameZh(int cat);
+
             const char* catName = (g_lang == 1) ? AchCatNameZh(achFilter)
                                                 : AchCatNameEn(achFilter);
             DrawTextWin(left, A.titleY, catName, PAL_CYAN);
@@ -157,7 +158,7 @@ void UiDrawAchievementsPage(MenuGeo g) {
 
         /* 右：该类进度 */
         sprintf(cnt, "%d/%d", AchUnlockedInFilter(), AchVisibleCount());
-        DrawTextWin(right - TextWidthWin(cnt), A.titleY, cnt, PAL_GOLD);
+        DrawTextWin(right - TextWidthWin(cnt), A.titleY, cnt, UI_ACCENT);
     }
 
     int boxS = TH / 2;                  /* 状态小方块 */
@@ -252,7 +253,7 @@ void UiDrawAchievementsPage(MenuGeo g) {
                     char rw[24];
                     sprintf(rw, "+%d", d->reward);
                     DrawTextWin(right - pw - TH / 2 - TextWidthWin(rw), y, rw,
-                                isSel ? PAL_GOLD : 0x00A08040u);
+                                isSel ? UI_ACCENT : 0x00A08040u);
                 }
                 DrawTextWin(right - pw, y, pr,
                             a->unlocked ? 0x0040D060u : (isSel ? 0x00C8C8C8u : 0x00747880u));

@@ -32,6 +32,9 @@
  */
 #include "difficulty.h"
 #include "common.h"
+#include "monster_rules.h"
+#include "bestiary.h"
+#include "item_effects.h"
 #include "campaign.h"
 #include "entity.h"
 #include "loop_api.h"
@@ -105,7 +108,7 @@
 #define WARDEN_SPOT_STEP      0.12f
 
 static float wdSpotTimeNow(void) {
-    extern int currentLevel;
+
     int lv = currentLevel > 0 ? currentLevel : 1;
     float t = WARDEN_SPOT_MAX - WARDEN_SPOT_STEP * (float)(lv - 1);
     if (t > WARDEN_SPOT_MAX) t = WARDEN_SPOT_MAX;
@@ -262,7 +265,7 @@ static int wdMaxDepth = 0;
 static int wdFarX = 0, wdFarY = 0;
 
 static void wdBfsBuild(void) {
-    extern float exitX, exitY;
+
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++)
             wdB[y][x] = -1;
@@ -430,9 +433,10 @@ void WardenReset(void) {
 
 /* 通电之后才出现：站在配电箱旁边 */
 void WardenSpawnIfPowered(void) {
-    extern int breakerOpen;
-    extern Breaker breaker;
-    extern float exitX, exitY;
+    if(!CampaignWardenImmediate() && !MonsterEligible(SPAWN_WARDEN,currentLevel))return;
+
+
+
 
     if (!breakerOpen) return;
     if (!breaker.active) {
@@ -504,7 +508,7 @@ void WardenSpawnIfPowered(void) {
     warden.lastY = oy;
     wdBfsBuild();
 
-    { extern void BestiaryMarkSeen(int); BestiaryMarkSeen(5); }
+    {  BestiaryMarkSeen(BST_ID_WARDEN); BestiaryNoteFloor(BST_ID_WARDEN, currentLevel); }
     PlaySfx(SFX_STEP, 0.5f);
 }
 
@@ -521,9 +525,9 @@ void WardenSpawnIfPowered(void) {
 
    不是死亡、不掉理智，只是把你搬到最远的地方。 */
 static void SendPlayerToStart(void) {
-    extern float posX, posY;
-    extern float exitX, exitY;
-    extern int   resetInputState;
+
+
+
 
     float bestX = 2.5f, bestY = 2.5f;
     int bestD = -1;
@@ -575,8 +579,8 @@ static void SendPlayerToStart(void) {
      * 传送 = 强制离开藏身点，状态必须一起清。
      * ============================================================ */
     {
-        extern int hiddenIn;
-        extern int uiDirty;
+
+
         if (hiddenIn >= 0) {
             hiddenIn = -1;
             uiDirty = 1;
@@ -589,9 +593,8 @@ static void SendPlayerToStart(void) {
     AddHitFlash(0.6f);
     AddShake(0.22f, 0.18f);
     PlaySfx(SFX_SCREAM, 0.55f);
-    pickupMsg = (g_lang == LANG_ZH) ? "被扔到了离出口最远的地方"
-                                    : "THROWN TO THE FARTHEST POINT";
-    pickupMsgTimer = 2.2f;
+    (void)0; /* Enemy encounter narration removed. */
+    (void)0; /* No encounter-toast timer. */
 }
 
 /* v2.4.54：调试用的 WardenStateName / WardenBlockT 已删除 */
@@ -617,13 +620,15 @@ float WardenSpotFrac(void) {
 }
 int WardenLost(void)    { return warden.state == WD_LOST; }
 
-void UpdateWarden(float dt) {
-    { extern int trainingMode; if (trainingMode) return; }
-    if (!warden.active) return;
+/* Private warden phases; keep the original short-circuit order. */
+static int WardenPreflight(float dt) {
 
-    extern float posX, posY;
-    extern float exitX, exitY;
-    extern float playerMoveSpeedNow;
+    {  if (trainingMode) return 0; }
+    if (!warden.active) return 0;
+
+
+
+
 
     if (warden.coolT > 0.0f) {
         warden.coolT -= dt;
@@ -643,9 +648,9 @@ void UpdateWarden(float dt) {
         float tdx = posX - warden.x, tdy = posY - warden.y;
         if (tdx * tdx + tdy * tdy < WARDEN_TOUCH_R * WARDEN_TOUCH_R) {
             SendPlayerToStart();
-            pickupMsg = (g_lang == LANG_ZH) ? "守门人把你推开了" : "THE WARDEN SHOVES YOU BACK";
-            pickupMsgTimer = 2.0f;
-            return;
+            (void)0; /* Enemy encounter narration removed. */
+            (void)0; /* No encounter-toast timer. */
+            return 0;
         }
     }
 
@@ -655,18 +660,22 @@ void UpdateWarden(float dt) {
        这是烟雾弹对守门人唯一能主动打断追捕的手段，
        没有它的话「被锁定 = 必被抓」，烟就是废的。 */
     {
-        extern int PointInSmoke(float, float);
+
         if (PointInSmoke(warden.x, warden.y) &&
             (warden.state == WD_CHASE || warden.state == WD_RUSH)) {
             warden.state = WD_PATROL;
             warden.stateT = 0.0f;
             warden.sightHold = 0.0f;
-            pickupMsg = (g_lang == LANG_ZH) ? "守门人在烟里失去了你"
-                                            : "THE WARDEN LOST YOU IN THE SMOKE";
-            pickupMsgTimer = 1.8f;
+            (void)0; /* Enemy encounter narration removed. */
+            (void)0; /* No encounter-toast timer. */
         }
     }
 
+
+    return 1;
+}
+
+static int WardenTickState(float dt) {
     switch (warden.state) {
 
     /* ---------- 堵门：站在出口，计时 ---------- */
@@ -677,8 +686,8 @@ void UpdateWarden(float dt) {
         float pdx = posX - exitX, pdy = posY - exitY;
         if (pdx * pdx + pdy * pdy < WARDEN_EXIT_R * WARDEN_EXIT_R) {
             SendPlayerToStart();
-            pickupMsg = (g_lang == LANG_ZH) ? "出口被守门人堵住了" : "THE WARDEN GUARDS THE EXIT";
-            pickupMsgTimer = 2.0f;
+            (void)0; /* Enemy encounter narration removed. */
+            (void)0; /* No encounter-toast timer. */
         }
 
         if (warden.blockT <= 0.0f) {
@@ -692,7 +701,7 @@ void UpdateWarden(float dt) {
             warden.tx = exitX + (dx / d) * WARDEN_RETREAT;
             warden.ty = exitY + (dy / d) * WARDEN_RETREAT;
         }
-        return;
+        return 0;
     }
 
     /* ---------- 撤退：走远，冷却 ---------- */
@@ -708,7 +717,7 @@ void UpdateWarden(float dt) {
             warden.ty = exitY;
         }
         /* 巡逻端点也要更新一下，免得刚撤退完就往出口跑 */
-        return;
+        return 0;
     }
 
     /* ---------- 追击：5 秒内无代价直接看到你 ---------- */
@@ -718,11 +727,10 @@ void UpdateWarden(float dt) {
             /* 5 秒到了 → 失去视野，变白（没电形态），停 5 秒 */
             warden.state = WD_LOST;
             warden.stateT = 0.0f;
-            pickupMsg = (g_lang == LANG_ZH) ? "守门人失去了视野"
-                                            : "THE WARDEN LOST SIGHT";
-            pickupMsgTimer = 1.8f;
+            (void)0; /* Enemy encounter narration removed. */
+            (void)0; /* No encounter-toast timer. */
             PlaySfx(SFX_STEP, 0.6f);
-            return;
+            return 0;
         }
         /* **追击**：走「从玩家出发的 BFS 梯度」，不是直线。
            原来用 AIMoveToward 直线 + 沿墙滑，墙角处会顶住不动。
@@ -746,13 +754,13 @@ void UpdateWarden(float dt) {
             float tdx = posX - warden.x, tdy = posY - warden.y;
             if (tdx * tdx + tdy * tdy < WARDEN_TOUCH_R * WARDEN_TOUCH_R) {
                 SendPlayerToStart();
-                pickupMsg = (g_lang == LANG_ZH) ? "守门人抓住了你！" : "THE WARDEN CAUGHT YOU!";
-                pickupMsgTimer = 2.2f;
+                (void)0; /* Enemy encounter narration removed. */
+                (void)0; /* No encounter-toast timer. */
                 warden.state = WD_LOST;      /* 抓住之后它也「泄力」5 秒 */
                 warden.stateT = 0.0f;
             }
         }
-        return;
+        return 0;
     }
 
     /* ---------- 失明：5 秒，白模，重新开始 ---------- */
@@ -765,7 +773,7 @@ void UpdateWarden(float dt) {
             warden.tx = exitX;
             warden.ty = exitY;
         }
-        return;
+        return 0;
     }
 
     /* ---------- 赶去出口：发现玩家之后 ---------- */
@@ -781,19 +789,19 @@ void UpdateWarden(float dt) {
                 warden.headingToExit = 0;
                 warden.tx = exitX;
                 warden.ty = exitY;
-                return;
+                return 0;
             }
             /* **真正站到位了才开计时** —— 这是修 bug① 的关键 */
             warden.state = WD_BLOCK;
             warden.blockCount++;
             warden.blockT = WARDEN_BLOCK_TIME;
             PlaySfx(SFX_HEART, 0.8f);
-            pickupMsg = (g_lang == LANG_ZH) ? "守卫堵住了出口" : "THE WARDEN BLOCKS THE EXIT";
-            pickupMsgTimer = 2.0f;
-            return;
+            (void)0; /* Enemy encounter narration removed. */
+            (void)0; /* No encounter-toast timer. */
+            return 0;
         }
         wdStepGradient(&warden.x, &warden.y, WARDEN_RUSH_SPEED, dt, 0);
-        return;
+        return 0;
     }
 
     /* ---------- 巡逻 ---------- */
@@ -804,8 +812,13 @@ void UpdateWarden(float dt) {
     }
 
     /* ============ 感知：**视野锥** ============ */
+
+    return 1;
+}
+
+static int WardenObservePlayer(float dt) {
     if (warden.coolT <= 0.0f) {
-        extern float playerMoveSpeedNow;   /* 视野半径 / 听觉半径都按它分档 */
+           /* 视野半径 / 听觉半径都按它分档 */
         float mdx = posX - warden.x, mdy = posY - warden.y;
         float md2 = mdx * mdx + mdy * mdy;
 
@@ -833,7 +846,7 @@ void UpdateWarden(float dt) {
                2026-11-03：**原来只判距离和角度，他能隔墙看见你**
                （HasLOS 一次都没调过），烟对它也完全无效。 */
             if (diff <= WARDEN_CONE_HALF && playerMoveSpeedNow > WARDEN_MOVE_EPS) {
-                extern int SegmentInSmoke(float, float, float, float);
+
                 if (HasLOS(warden.x, warden.y, posX, posY) &&
                     !SegmentInSmoke(warden.x, warden.y, posX, posY)) {
                     inCone = 1;
@@ -856,7 +869,7 @@ void UpdateWarden(float dt) {
                听觉本来就是「全向、穿墙」，所以烟雾弹对守门人一点用都没有 ——
                他能看见你、也能听见你，两种通道都不受烟影响。
                现在：你和他之间隔着烟，声音就被吞掉了。 */
-            extern int SegmentInSmoke(float, float, float, float);
+
             if (hearR > 0.0f && md2 < hearR * hearR &&
                 !SegmentInSmoke(warden.x, warden.y, posX, posY)) heard = 1;
         }
@@ -924,15 +937,13 @@ void UpdateWarden(float dt) {
             }
             /* v2.4-beta B02：低频吼叫来自守门人所在方向 ——
                这是"它在哪边"最重要的听觉线索，比看见更早。 */
-            { extern void AudioPlayWorld(int, float, float, float, float, int);
+            { 
               AudioPlayWorld(SFX_WARDEN, warden.x, warden.y, 1.0f, 26.0f, 3); }          /* ← 直接进入 5 秒追击 */
             warden.stateT = 0.0f;
             PlaySfx(SFX_HEART, 0.85f);
-            pickupMsg = heard
-                ? ((g_lang == LANG_ZH) ? "守门人锁定了你！" : "THE WARDEN LOCKED ON")
-                : ((g_lang == LANG_ZH) ? "守门人盯上你了！" : "THE WARDEN HAS YOU IN SIGHT");
-            pickupMsgTimer = 2.0f;
-            return;
+            (void)0; /* Enemy encounter narration removed. */
+            (void)0; /* No encounter-toast timer. */
+            return 0;
         }
     }
 
@@ -950,7 +961,12 @@ void UpdateWarden(float dt) {
      *   · 走过去；到达 / 卡住超过 3 秒 / 超过 8 秒 → 换一个
      * 路点用 wdStepToward（自带贴墙滑），所以不会再"站在死点不动"。
      * ================================================================== */
-    {
+    
+    return 1;
+}
+
+static int WardenSteerToTarget(float dt) {
+{
         int cx2 = (int)warden.x, cy2 = (int)warden.y;
         float wdx = warden.tx - warden.x, wdy = warden.ty - warden.y;
         int arrived = (wdx * wdx + wdy * wdy) < 0.30f;
@@ -1005,7 +1021,7 @@ void UpdateWarden(float dt) {
             }
             (void)cx2; (void)cy2;
         }
-        return;
+        return 0;
     }
 
     /* ============ 巡逻：**沿 BFS 梯度在出口 6~8 步之间来回** ============
@@ -1019,7 +1035,12 @@ void UpdateWarden(float dt) {
          出去  wdStepGradient(climb=1)   沿距离场往"离出口更远"爬
          回来  wdStepGradient(climb=0)   沿距离场往"离出口更近"降
        没有目标坐标，也就不存在"目标点进墙"这种问题。 */
-    {
+    
+    return 1;
+}
+
+static int WardenPatrol(float dt) {
+{
         int wcx = (int)warden.x, wcy = (int)warden.y;
         int st = (wcx >= 0 && wcy >= 0 && wcx < MAP_WIDTH && wcy < MAP_HEIGHT)
                  ? wdB[wcy][wcx] : -1;
@@ -1028,7 +1049,7 @@ void UpdateWarden(float dt) {
             /* 掉出距离场（极少见）→ 重建，并往出口挪一步 */
             wdBfsBuild();
             wdStepToward(&warden.x, &warden.y, exitX, exitY, WARDEN_SPEED, dt);
-            return;
+            return 0;
         }
 
         /* ============================================================
@@ -1059,7 +1080,7 @@ void UpdateWarden(float dt) {
                 float mvx2 = warden.x - ox2, mvy2 = warden.y - oy2;
                 if (mvx2 * mvx2 + mvy2 * mvy2 > 1e-6f) warden.facing = atan2f(mvy2, mvx2);
             }
-            return;
+            return 0;
         }
 
         /* ============================================================
@@ -1110,7 +1131,18 @@ void UpdateWarden(float dt) {
         float mvx = warden.x - oldX, mvy = warden.y - oldY;
         if (mvx * mvx + mvy * mvy > 1e-6f) warden.facing = atan2f(mvy, mvx);
     }
+
+    return 1;
 }
+
+void UpdateWarden(float dt) {
+    if (!WardenPreflight(dt)) return;
+    if (!WardenTickState(dt)) return;
+    if (!WardenObservePlayer(dt)) return;
+    if (!WardenSteerToTarget(dt)) return;
+    (void)WardenPatrol(dt);
+}
+
 
 /* 训练营用 —— 强制摆到指定位置当标本 */
 void WardenForcePlace(float x, float y) {

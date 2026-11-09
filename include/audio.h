@@ -17,9 +17,13 @@ enum { SFX_STEP = 0, SFX_HEART, SFX_PICKUP, SFX_POWER, SFX_GATE, SFX_CRANK,
        SFX_WARDEN,   /* v2.4.89 守门人：极低频压迫 */
        SFX_SCAVENGER,/* v2.4.89 清道夫：刺耳刮擦（拆东西）*/
        SFX_SCAV_STEP,/* v2.4.92 清道夫：走路的高速摩擦 */
+       SFX_IMPACT, SFX_HEARTBEAT, SFX_METAL_SCRAPE, SFX_DRIP, SFX_STEAM, SFX_HUM,
+       SFX_WRIGGLE, SFX_BONE, SFX_GLASS_CRACK, SFX_HINGE, SFX_BREATH,
        SFX_COUNT };
+void AudioBuildAtmosphere(short* output,int frames,int kind,int rate);
 
 void PlaySfx(int id, float vol);
+float AudioOutputLatencySeconds(void);
 
 /* ==================================================================
  * 2026-11-06（v2.4-beta B02）：**世界音效**
@@ -45,4 +49,5 @@ void AudioComputeGains(float lisX, float lisY, float lisDirX, float lisDirY,
 void InitAudio(void);
 void ShutdownAudio(void);
 
+void AudioMaintain(void);
 #endif /* CANITY_AUDIO_H */

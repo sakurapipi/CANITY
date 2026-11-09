@@ -36,17 +36,11 @@
 #define SHOP_ITEM_KINDS 9
 #define SHOP_COOLDOWN_ROWS 8
 
-#define SAFEHOUSE_PAGES 5   /* v3.0：+ 强化 */
+#define SAFEHOUSE_PAGES 4   /* v3.0：+ 强化 */
 
 typedef enum {
-    SHP_SHOP = 0,
-    SHP_BENCH,
-    SHP_TREE,    /* v2.7：局内改造树 —— v2.9 挪到 REST 前面，
-                    否则页签文字数组和 enum 顺序不一致：
-                    点「TREE」实际打开的是 REST（截图可见） */
-    SHP_REST,
-    SHP_UPGRADE   /* v3.0：金币强化 */
-} ShopPage;
+    SHP_SHOP=0, SHP_TREE=2, SHP_REST=3, SHP_UPGRADE=4
+} ShopPage; /* ID 1 was the retired equipment page; never reuse it. */
 
 extern int shopPage;                  /* 当前页 */
 extern int shopRow;
@@ -69,10 +63,24 @@ extern int attachOwned[ATTACH_COUNT]; /* 已拥有（未装）的配件数量 */
 /* 进入安全屋：按层号重掷报价，重置休息次数 */
 void ShopOpen(int level);
 void ShopRefresh(void);
+int ShopRestPrice(void);
+float ShopRestCooldown(void);
+float ShopRefreshCooldown(void);
+void ShopRestoreCooldowns(float rest,float refresh);
 void SafeLevelReset(void);   /* v2.2 */
 
 /* 面板结构 */
 int  ShopPageCount(void);
+int ShopPageAtTab(int index);
+int ShopTabOfPage(int page);
+const char* ShopProductName(int row);
+const char* ShopProductDescription(int row);
+int ShopProductSprite(int row);
+int ShopBasePriceAt(int row);
+int ShopCanBuyProduct(int row);
+int ShopServiceCanUse(int row);
+float ShopServiceGain(int row);
+const char* ShopServiceName(int row);
 const char* ShopPageTitle(void);
 int  ShopRowCount(void);
 const char* ShopRowText(int row);
@@ -88,10 +96,28 @@ int  AttachPrice(int id);
 
 void ShopLeave(void);
 
-#endif
-
 /* v3.4：每行的剩余冷却秒数（0 = 可买） */
 extern float shopCooldown[SHOP_COOLDOWN_ROWS];
 float ShopCooldownOf(int row);
 void  ShopTickCooldown(float dt);   /* 每帧递减 */
 void  ShopResetCooldowns(void);
+
+/* Refresh/session state and persisted safehouse upgrades. */
+extern int shopRefreshFloor, shopRefreshUsed, shopContractUsed;
+
+int  ShopSafeHealLv(void);
+
+int  ShopSafeChargeLv(void);
+
+int  ShopSafeStaminaLv(void);
+
+void ShopSetSafeLv(int heal, int charge, int stamina);
+
+int ShopServicePrice(int row);
+float ShopServiceCooldown(int row);
+const char* ShopServiceStatus(int row);
+int ShopCanOpen(void);
+int ShopServiceUses(int row);
+void ShopCaptureServices(int counts[3]);
+void ShopRestoreServices(const int counts[3]);
+#endif

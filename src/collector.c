@@ -23,6 +23,10 @@
 #include "state.h"
 #include "economy.h"
 #include "common.h"
+#include "monster_rules.h"
+#include "bestiary.h"
+#include "run_stats.h"
+#include "wallet.h"
 #include "loop_api.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -36,22 +40,9 @@
                                           玩家走 2.0 / 跑 2.4，所以 2.3 是
                                           「比你走路快、比你冲刺慢一点点」：
                                           必须真的跑起来才追得上。 */
-/* ===== v2.4.71 **偷钱比例不固定：带得越多，偷得越狠** =====
-   用户要求：「偷钱比例不固定，越往后面你带的钱越多，他的偷钱比例越大。」
-
-     基础        6%
-     每 20000 金  +1%
-     上限        15%
-
-   携带       比例      实际被偷（按该持有量）
-       20k     7%        1 400
-       60k     9%        5 400
-      120k    12%       14 400
-      200k    15%       30 000   ← 封顶
-   这样后期「带太多钱在身上」真的会变成风险。 */
-#define COLLECTOR_STEAL_BASE    6
-#define COLLECTOR_STEAL_PER_20K 1
-#define COLLECTOR_STEAL_MAX     15
+/* Three encounters per run: 20%, 30%, 40% of currently carried gold. */
+#define COLLECTOR_STEAL_BASE 20
+#define COLLECTOR_STEAL_MAX 40
 #define COLLECTOR_FLEE_TIME    10.0f
 #define COLLECTOR_HITS_TO_DROP 2
 #define COLLECTOR_HIT_WINDOW   6.0f
@@ -73,8 +64,19 @@ typedef struct {
 } Collector;
 
 Collector collector;
+static int runEncounters=0,stealsThisRun=0,attemptedFloor=0;
+void CollectorResetRun(void){runEncounters=stealsThisRun=attemptedFloor=0;CollectorReset();}
+void CollectorSaveRun(int out[3]){out[0]=runEncounters;out[1]=stealsThisRun;out[2]=attemptedFloor;}
+void CollectorLoadRun(const int data[3]){
+    runEncounters=data[0]<0?0:data[0]>3?3:data[0];
+    stealsThisRun=data[1]<0?0:data[1]>3?3:data[1];
+    attemptedFloor=data[2]<0?0:data[2];
+    /* In-flight entities are not serialized: consumed appearances stay consumed. */
+    CollectorReset();
+}
 
 
+/* Live state queries; only SpeedNow below is an intentional tuning constant. */
 int   CollectorActive(void)   { return collector.active; }
 float CollectorX(void)        { return collector.x; }
 float CollectorY(void)        { return collector.y; }
@@ -82,7 +84,6 @@ int   CollectorBounty(void)   { return collector.bounty; }
 
 /* v6：图鉴读这里，保证"改速度 → 图鉴自动变" */
 float CollectorSpeedNow(void) { return COLLECTOR_SPEED; }
-float CollectorFleeSpeedNow(void) { return COLLECTOR_FLEE_SPEED; }
 
 int   CollectorHasMoney(void) { return collector.bounty > 0; }
 
@@ -199,26 +200,27 @@ void CollectorSpawnIfEligible(void) {
 
         if (exitChoiceOpen) return;
         if (breakerOpen) {
-            extern float Dist2(float, float, float, float);
+
             if (Dist2(posX, posY, exitX, exitY) < 9.0f) return;   /* 3 格内 */
         }
     }
 
 
+    if(trainingMode || runEncounters>=3 || attemptedFloor==currentLevel || collector.active)return;
+    attemptedFloor=currentLevel;
     CollectorReset();
-    /* v2.4.71 平调：门槛 46000/T7 → 20000/T4 —— 用户要求「让他早点出来」。
-       20000 大约是前期两三层就能攒到的量。 */
-    if (carryGold < 20000) return;
-    if (GoldTier() < 4) return;
+    int chance=MonsterFloorChance(SPAWN_COLLECTOR,currentLevel);
+    if((int)(RunRngNext()%100u)>=chance)return;
     float x, y;
     if (!findSpotFar(&x, &y)) return;
     collector.x = x;
     collector.y = y;
     collector.active = 1;
+    runEncounters++;
     colBfsBuild();
-    { extern void BestiaryMarkSeen(int); BestiaryMarkSeen(3); }
-    pickupMsg = (g_lang == LANG_ZH) ? "有东西在闻你的钱味…" : "SOMETHING SMELLS YOUR GOLD";
-    pickupMsgTimer = 2.0f;
+    {  BestiaryMarkSeen(BST_ID_COLLECTOR); BestiaryNoteFloor(BST_ID_COLLECTOR, currentLevel); }
+    (void)0; /* Enemy encounter narration removed. */
+    (void)0; /* No encounter-toast timer. */
 }
 
 void CollectorForceSpawnAt(float x, float y) {
@@ -227,7 +229,7 @@ void CollectorForceSpawnAt(float x, float y) {
     collector.y = y;
     collector.active = 1;
     colBfsBuild();
-    { extern void BestiaryMarkSeen(int); BestiaryMarkSeen(3); }
+    {  BestiaryMarkSeen(BST_ID_COLLECTOR); BestiaryNoteFloor(BST_ID_COLLECTOR, currentLevel); }
 }
 
 void CollectorBurstBounty(void) {
@@ -239,8 +241,8 @@ void CollectorBurstBounty(void) {
         collector.fleeTimer = 3.0f;
         PlaySfx(SFX_GLASS, 0.75f);
         AddShake(0.12f, 0.09f);
-        pickupMsg = (g_lang == LANG_ZH) ? "它被砸退了" : "IT STAGGERED";
-        pickupMsgTimer = 1.3f;
+        (void)0; /* Enemy encounter narration removed. */
+        (void)0; /* No encounter-toast timer. */
         return;
     }
 
@@ -250,8 +252,8 @@ void CollectorBurstBounty(void) {
     collector.fleeTimer = COLLECTOR_FLEE_TIME;
     PlaySfx(SFX_GLASS, 1.0f);
     AddShake(0.18f, 0.14f);
-    pickupMsg = (g_lang == LANG_ZH) ? "瓶子砸中！赃款掉了出来" : "BOTTLE HIT! BOUNTY DROPPED";
-    pickupMsgTimer = 2.0f;
+    (void)0; /* Enemy encounter narration removed. */
+    (void)0; /* No encounter-toast timer. */
 }
 
 /* ===== v2.4.87 **砸几下才吐钱，跟强度档挂勾** =====
@@ -290,8 +292,8 @@ void CollectorHitByWrench(float hx, float hy) {
         snprintf(hb, sizeof(hb), (g_lang == LANG_ZH) ? "命中！再打 %d 下掉赃款"
                                                      : "HIT! %d MORE TO DROP",
                  CollectorHitsToDrop() - collector.hits);
-        pickupMsg = hb;
-        pickupMsgTimer = 1.2f;
+        (void)0; /* Enemy encounter narration removed. */
+        (void)0; /* No encounter-toast timer. */
         AddShake(0.10f, 0.08f);
     }
 
@@ -300,14 +302,14 @@ void CollectorHitByWrench(float hx, float hy) {
         collector.bounty = 0;
         collector.hits = 0;
         PlaySfx(SFX_GLASS, 0.85f);
-        { extern int bountyRecovered; bountyRecovered++; }   /* v7：CLAWBACK 成就用 */
-        pickupMsg = (g_lang == LANG_ZH) ? "赃款抢回来了！" : "BOUNTY RECOVERED";
-        pickupMsgTimer = 1.6f;
+        {  bountyRecovered++; }   /* v7：CLAWBACK 成就用 */
+        (void)0; /* Enemy encounter narration removed. */
+        (void)0; /* No encounter-toast timer. */
     }
 }
 
 void UpdateCollector(float dt) {
-    { extern int trainingMode; if (trainingMode) return; }
+    {  if (trainingMode) return; }
     if (!collector.active) return;
 
     collector.hitTimer += dt;
@@ -407,14 +409,14 @@ void UpdateCollector(float dt) {
     {
         float dx = posX - collector.x, dy = posY - collector.y;
         float d = sqrtf(dx * dx + dy * dy);
-        if (d < COLLECTOR_TOUCH) {
+        if (hiddenIn<0 && !playerInSafe && d < COLLECTOR_TOUCH) {
 
-            int pct = COLLECTOR_STEAL_BASE + (carryGold / 20000) * COLLECTOR_STEAL_PER_20K;
+            int pct = COLLECTOR_STEAL_BASE + (runEncounters>0?runEncounters-1:0)*10;
             if (pct > COLLECTOR_STEAL_MAX) pct = COLLECTOR_STEAL_MAX;
-            int steal = carryGold * pct / 100;
+            int steal = (int)((int64_t)carryGold*pct/100);
             if (steal < 1 && carryGold > 0) steal = 1;
             if (steal > 0) {
-                { extern int WalletStealRun(int); WalletStealRun(steal); }
+                {  WalletStealRun(steal); }
                 collector.bounty += steal;
                 AddHitFlash(0.55f);
                 AddShake(0.18f, 0.14f);
@@ -424,15 +426,15 @@ void UpdateCollector(float dt) {
                     snprintf(sm, sizeof(sm), (g_lang == LANG_ZH)
                              ? "它偷走了 %d 金币！" : "IT STOLE %d GOLD!",
                              steal);
-                    pickupMsg = sm;
-                    pickupMsgTimer = 2.0f;
+                    (void)0; /* Enemy encounter narration removed. */
+                    (void)0; /* No encounter-toast timer. */
                 }
             } else {
-                pickupMsg = (g_lang == LANG_ZH) ? "它摸了你一下（你没带钱）"
-                                                : "IT GRABBED YOU (NO GOLD)";
-                pickupMsgTimer = 1.4f;
+                (void)0; /* Enemy encounter narration removed. */
+                (void)0; /* No encounter-toast timer. */
             }
             /* 得手 → 转身逃 */
+            if(stealsThisRun<3)stealsThisRun++;
             collector.fleeTimer = COLLECTOR_FLEE_TIME;
             if (d > 0.001f) {
                 float bx = collector.x - (dx / d) * 1.2f;

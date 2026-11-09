@@ -153,4 +153,9 @@ void PlatLog(const char* msg);
 
 void PlatSfx(int id, float gain);
 
+#ifdef CANITY_WEB
+/* A quick press survives until one logic update, even if released between frames. */
+void PlatConsumeKeyPulses(void);
+#endif
+
 #endif /* CANITY_PLAT_H */

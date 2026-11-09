@@ -2,7 +2,7 @@
  * Canity — 威胁值 THREAT（v6）
  *
  * 局内改造树点得越多 → 属性越强 → THREAT 越高 → 怪越凶。
- * 所有效果都有硬上限，速度上限永远 < 玩家冲刺速度。
+ * 所有效果都有硬上限，速度上限统一夹至 THREAT_SPEED_HARD_CAP。
  */
 #ifndef CANITY_THREAT_H
 #define CANITY_THREAT_H
@@ -18,10 +18,10 @@
 #define THREAT_W_CAPSTONE         2.0f
 
 /* 速度上限 = BASE + T × PER_POINT，硬顶 HARD_CAP
-   ★ 硬顶 2.33 距玩家冲刺 2.40 留 0.07 —— 这条不能破 */
+   ★ 硬顶 2.20；不叠加金币速度倍率 —— 这条不能破 */
 #define THREAT_SPEED_BASE         2.05f
-#define THREAT_SPEED_PER_POINT   0.0155f
-#define THREAT_SPEED_HARD_CAP     2.33f
+#define THREAT_SPEED_PER_POINT   0.008333333f
+#define THREAT_SPEED_HARD_CAP     2.20f
 
 /* 其余四项 */
 #define THREAT_CD_PER_POINT       0.03f
@@ -38,9 +38,11 @@
 void  ThreatReset(void);
 void  ThreatAdd(float v);
 void  ThreatSet(float v);
+void  ThreatRestoreTotal(float savedTotal);
 float ThreatValue(void);
 float ThreatRatio(void);
 
+float ThreatCostForTier(int tier, int isCapstone);
 void  ThreatAddForTier(int tier, int isCapstone);
 
 float ThreatSpeedCap(void);

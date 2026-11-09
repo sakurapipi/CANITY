@@ -5,6 +5,9 @@
  */
 #include "threat_telegraph.h"
 #include "common.h"
+#include "room_theme.h"
+#include "perception.h"
+#include "room_material.h"
 #include "collapse.h"
 #include "echo_marks.h"
 #include "item_effects.h"
@@ -34,6 +37,10 @@
 #include "entity.h"
 #include "ui.h"
 #include "plat.h"
+
+static float FlareLightAt(float wx,float wy);
+static void DrawCreatureActor(int spr,float wx,float wy,float halfH,float lightK,
+                              int zTest,float facing,float stride,unsigned int tint,float tintMix,float activity);
 
 int renderW = 800, renderH = 600;    /* 内部渲染分辨率 */
 static const float fovPlaneLen[5] = {0.6494f, 0.7673f, 0.9163f, 1.0926f, 1.2972f};
@@ -278,100 +285,13 @@ void GenerateThemeTextures(int id) {
     if (id < 0 || id >= THEME_COUNT) id = 0;
     themeId = id;
 
-    switch (id) {
-    case 1:  floorBaseA = 0x0014161au; floorBaseB = 0x001c1f24u; break;  /* 监狱 */
-    case 2:  floorBaseA = 0x001a0c0cu; floorBaseB = 0x00241010u; break;  /* 地狱 */
-    case 3:  floorBaseA = 0x00181c18u; floorBaseB = 0x0020261fu; break;  /* 病房 */
-    case 4:  floorBaseA = 0x00141c22u; floorBaseB = 0x00243038u; break;  /* 冰窖 */
-    case 5:  floorBaseA = 0x00201610u; floorBaseB = 0x002c2014u; break;  /* 锈工厂 */
-    case 6:  floorBaseA = 0x00180e14u; floorBaseB = 0x00241620u; break;  /* 血肉洞窟 */
-    default: floorBaseA = 0x00151515u; floorBaseB = 0x00202020u; break;  /* 砖墙 */
+    floorBaseA=RoomMaterialSample(id,8,8,1);floorBaseB=RoomMaterialSample(id,16,16,1);
+    for(int y=0;y<TEX_HEIGHT;y++)for(int x=0;x<TEX_WIDTH;x++){
+        texture[y][x]=RoomMaterialSample(id,x&~1,y&~1,0);
+        floorTexture[y][x]=RoomMaterialSample(id,x&~1,y&~1,1);
+        ceilTexture[y][x]=RoomMaterialSample(id,x&~1,y&~1,2);
     }
 
-    for (int y = 0; y < TEX_HEIGHT; y++) {
-        for (int x = 0; x < TEX_WIDTH; x++) {
-            int px = x & ~1, py = y & ~1;      /* 2x2 复古块 */
-            int r, g, b;
-
-            /* ---------------- 墙面 ---------------- */
-            switch (id) {
-            case 1: {   /* 监狱：横铁栏 + 立柱 + 铆点 + 锈迹 */
-                r = 34 + (px * py) % 12; g = 38 + (x * y) % 12; b = 44 + (px * py) % 14;
-                if (py % 12 == 0) { r = 20; g = 24; b = 30; }
-                if (px % 24 == 0) { r = 26; g = 30; b = 36; }
-                if (py % 12 == 1) { r += 14; g += 14; b += 16; }
-                if (((px % 24) == 12) && ((py % 12) == 6)) { r = 78; g = 82; b = 88; }
-                if (rand() % 110 == 0) { r = 62; g = 44; b = 30; }
-                break; }
-            case 2: {   /* 地狱：裂纹 + 余烬 */
-                r = 52 + (px * py) % 24; g = 8 + (px * py) % 6; b = 6;
-                if (((x + y * 3) % 37) == 0) { r = 12; g = 4; b = 4; }
-                if (rand() % 70 == 0) { r = 120; g = 30; b = 8; }
-                if (rand() % 150 == 0) { r = 200; g = 96; b = 24; }
-                break; }
-            case 3: {   /* 病房：小瓷砖 + 霉斑 + 碎瓷 */
-                r = 66 + (px * py) % 10; g = 70 + (x * y) % 10; b = 64 + (px * py) % 8;
-                if (py % 16 == 0 || px % 16 == 0) { r = 38; g = 42; b = 38; }
-                if (rand() % 55 == 0) { r = 34; g = 46; b = 34; }
-                if (rand() % 210 == 0) { r = 96; g = 98; b = 92; }
-                break; }
-            case 4: {   /* 冰窖：冰缝 + 霜点 + 反光 */
-                r = 28 + (px * py) % 14; g = 40 + (x * y) % 16; b = 52 + (px * py) % 18;
-                if (px % 32 == 0) { r = 18; g = 26; b = 36; }
-                if ((x % 7) == 0 && (y % 13) == 0) { r = 96; g = 132; b = 162; }
-                if (rand() % 130 == 0) { r = 150; g = 190; b = 210; }
-                break; }
-            case 5: {   /* 锈工厂：板缝 + 铆钉 + 锈斑 */
-                r = 46 + (px * py) % 16; g = 30 + (x * y) % 12; b = 18 + (px * py) % 8;
-                if (py % 10 == 0) { r = 30; g = 20; b = 12; }
-                if ((px % 16 == 0) && (py % 10) != 0) { r += 14; g += 10; b += 8; }
-                if ((px % 16 == 8) && (py % 10 == 5)) { r = 92; g = 72; b = 50; }
-                if (rand() % 80 == 0) { r = 84; g = 48; b = 22; }
-                break; }
-            case 6: {   /* 血肉洞窟：筋络 + 亮筋 + 暗孔 */
-                r = 44 + (px * py) % 18; g = 14 + (x * y) % 10; b = 26 + (px * py) % 12;
-                if (((x * x + y * y * 2) % 53) == 0) { r = 92; g = 24; b = 42; }
-                if (rand() % 110 == 0) { r = 128; g = 42; b = 64; }
-                if (rand() % 160 == 0) { r = 16; g = 6; b = 10; }
-                break; }
-            default: {  /* 砖墙：错缝砖 + 深色砖 + 红斑 */
-                r = 40 + (px * py) % 20; g = 10 + (x * y) % 10; b = 10;
-                int off = ((py / 16) % 2) * 16;
-                if (py % 16 == 0) { r = 10; g = 10; b = 10; }
-                else if ((px + off) % 32 == 0) { r = 10; g = 10; b = 10; }
-                else if (rand() % 60 == 0) { r = 96; g = 24; b = 20; }
-                if (rand() % 140 == 0) { r = 150; g = 30; b = 20; }
-                break; }
-            }
-            r = (r >> 5) << 5; g = (g >> 5) << 5; b = (b >> 5) << 5;
-            if (r > 248) r = 248;
-            if (g > 248) g = 248;
-            if (b > 248) b = 248;
-            texture[y][x] = (unsigned int)((r << 16) | (g << 8) | b);
-
-            /* 地砖：32px 砖块 + 勾缝 + 污渍（只产生 4 种颜色，premul 表安全） */
-            {
-                int fr = (int)((floorBaseA >> 16) & 0xFF);
-                int fg = (int)((floorBaseA >> 8) & 0xFF);
-                int fb = (int)(floorBaseA & 0xFF);
-                int dark = ((px / 32 + py / 32) % 2) ? 0 : -8;
-                if ((px % 32) < 2 || (py % 32) < 2) { fr = 12; fg = 12; fb = 12; }
-                else if (rand() % 70 == 0) { fr = fr * 6 / 10; fg = fg * 6 / 10; fb = fb * 6 / 10; }
-                else { fr += dark; fg += dark; fb += dark; }
-                if (fr < 0) fr = 0;
-                if (fg < 0) fg = 0;
-                if (fb < 0) fb = 0;
-                floorTexture[y][x] = (unsigned int)((fr << 16) | (fg << 8) | fb);
-            }
-            /* 天花板：混凝土 + 每隔 32px 一道横梁 */
-            {
-                int cr = 16 + (px * py) % 8, cg = 16 + (px * py) % 8, cb = 18 + (px * py) % 8;
-                if (py % 32 < 3) { cr = 9; cg = 9; cb = 10; }
-                else if (rand() % 90 == 0) { cr = 26; cg = 24; cb = 22; }
-                ceilTexture[y][x] = (unsigned int)((cr << 16) | (cg << 8) | cb);
-            }
-        }
-    }
 
     if (!noiseReady) {
         for (int i = 0; i < 256; i++) noiseTab[i] = (unsigned char)(rand() % 40);
@@ -461,6 +381,7 @@ static float SpriteShade(float ty, float minK) {
     float k = 1.0f - ty / 16.0f;
     if (k < minK) k = minK;
     if (k > 1.0f) k = 1.0f;
+    if(!flashlightOn || battery<=0)k*=.22f;
     return k;
 }
 
@@ -538,14 +459,7 @@ static void SetThemeLight(int id) {
     }
 }
 
-static float SpriteAtten(float dist) {
-    int lightOn = (flashlightOn && battery > 0.0f);
-    float d = lightOn ? 1.0f / (1.0f + dist * (0.20f/BenchLightRangeMul()))
-                      : 1.0f / (1.0f + dist * 0.45f);
-    if (d < 0.10f) d = 0.10f;      /* 贴脸的东西别全黑 */
-    if (d > 1.00f) d = 1.00f;
-    return d;
-}
+
 
 static void DrawCrateSprite(int i) {
     if (i < 0 || i >= containerCount) return;
@@ -573,11 +487,10 @@ static void DrawMimicSprite(int i) {
     if (m->state == MIM_NONE || m->state == MIM_GONE) return;
 
     if (m->state == MIM_ANGRY) {
-        DrawBakedProp(SPR_MON_MIMIC, m->x, m->y, 0.0f, 0.52f, 1.0f);
+        DrawCreatureActor(SPR_MON_MIMIC,m->x,m->y,.52f,1,1,0,m->breathPh,0,0,1);
     } else {
         /* 破绽①：呼吸。用相位算，不依赖全局时钟 —— 每只相位不同 */
-        float bob = sinf(m->breathPh) * 0.012f;
-        DrawBakedProp(SPR_PROP_CRATE_MIMIC, m->x, m->y + bob, 0.0f, 0.42f, 1.0f);
+        DrawBakedPropArt(SPR_PROP_CRATE_MIMIC,m->x,m->y,0,.42f,1);
     }
 }
 
@@ -685,8 +598,15 @@ void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, flo
         if (dw < 1) dw = 1;
         int dx = (s.x0 + s.x1) / 2 - dw / 2;
         int dy = s.y1 - h;
-        DrawSpriteSubZ(spr, sp->bx0, sp->by0, bw, bh, dx, dy, dw, h,
-                       light * lightK, 1.0f, s.ty);
+        if(spr==SPR_PROP_SPIDER || spr==SPR_PROP_CRATE_MIMIC){
+            float scale=(float)h/bh;
+            int fullW=(int)(sp->w*scale+.5f),fullH=(int)(sp->h*scale+.5f);
+            SpritePose pose={(float)g_timeSec+(spr==SPR_PROP_SPIDER?.8f:2.1f),(float)g_timeSec*1.8f,spr==SPR_PROP_SPIDER?.3f:0,0};
+            float localLight=light*lightK+FlareLightAt(wx,wy)*.8f;
+            DrawSpriteCreature(spr,dx-(int)(sp->bx0*scale),dy-(int)(sp->by0*scale),fullW,fullH,localLight,1,1,s.ty,0,0,&pose);
+        }else{
+            DrawSpriteSubZ(spr, sp->bx0, sp->by0, bw, bh, dx, dy, dw, h,light*lightK,1,s.ty);
+        }
     } else {
         /* 包围盒无效（全透明）：退回正方形绘制 */
         int x = (s.x0 + s.x1) / 2 - h / 2;
@@ -743,74 +663,27 @@ static void MonsterSpriteSelect(int base, float wx, float wy, const Monster* m,
     *outFrame = frame;
 }
 
-static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
-                             float lightK, int zTest, float facing, float walkPhase) {
-    SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
-    if (!s.ok) return;
-    /* 同理：怪贴脸时 sprite 投影会铺满屏幕，先裁掉。 */
-    if (s.ty < 0.55f) return;
-    int w = s.x1 - s.x0;
-    int h = s.y1 - s.y0;
-    if (w < 2 || h < 2) return;
-    /* 投影框通常是 1:1；保持长宽比但让精灵按高度对齐地面 */
-    int size = (w > h) ? w : h;
-    int x = (s.x0 + s.x1) / 2 - size / 2;
-    int y = s.y1 - size;
-
-    float light = SpriteShade(s.ty, 0.12f);
-    light *= lightK;
-
-    /* 脚下阴影：画在精灵之前（否则会被自己的 z 裁掉） */
-    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
-
-    /* v2.2：只有三只主怪有 4 帧，其余单帧 */
-    int isMain = (spr == SPR_MON_HUNTER || spr == SPR_MON_LIGHT || spr == SPR_MON_LEECH
-                  || spr == SPR_MON_HUNTER2 || spr == SPR_MON_HUNTER3);
-    if (isMain) {
-        int useSpr, flip, frame;
-        /* v3.0：朝向/相位由**调用方传进来** ——
-       原来写死 &monster，追光鬼拿到的是寻声鬼的数据。 */
-        {
-            Monster tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.active = 1;
-            tmp.x = wx; tmp.y = wy;
-            tmp.facing = facing;
-            tmp.walkPhase = walkPhase;
-            MonsterSpriteSelect(spr, wx, wy, &tmp, &useSpr, &flip, &frame);
-        }
-        float dim = (a_back_light ? 0.72f : 1.0f);   /* 背向镜头时压暗 */
-        if (flip) DrawSpriteFlip(useSpr, x, y, size, size, light * dim, 1.0f, zTest, s.ty);
-        else      DrawSprite(useSpr, x, y, size, size, light * dim, 1.0f, zTest, s.ty);
-        spr = useSpr;     /* 眼睛按实际帧的颜色走 */
-    } else {
-        DrawSprite(spr, x, y, size, size, light, 1.0f, zTest, s.ty);
+static void DrawCreatureActor(int spr,float wx,float wy,float halfH,float lightK,
+                              int zTest,float facing,float stride,unsigned int tint,float tintMix,float activity){
+    SpriteBox box=ProjectSprite(wx,wy,0,halfH);
+    if(!box.ok || box.ty<.55f || !SpritesReady())return;
+    int w=box.x1-box.x0,h=box.y1-box.y0,size=w>h?w:h;if(size<2)return;
+    int use=spr,mirror=0,frame=0;
+    if(spr==SPR_MON_HUNTER || spr==SPR_MON_HUNTER2 || spr==SPR_MON_HUNTER3 || spr==SPR_MON_LIGHT || spr==SPR_MON_LEECH){
+        Monster model;memset(&model,0,sizeof(model));model.active=1;model.x=wx;model.y=wy;model.facing=facing;model.walkPhase=stride;
+        MonsterSpriteSelect(spr,wx,wy,&model,&use,&mirror,&frame);
     }
-
-    /* v2.1：眼睛自发光。烘焙图里留了黑眼窝，这里加两个加法光点 ——
-       黑暗里身体全黑，但眼睛一直亮着。 */
-    {
-        /* v3.0：眼睛发光色目前没有真正用上（烘焙图里已经带暖色眼窝），
-           保留常量并显式标记，免得每次编译都报一条 set-but-not-used。 */
-        int ec = 0x00FF4020u;
-        (void)ec;
-        int base = (spr >= SPR_MON_HUNTER  && spr < SPR_MON_HUNTER  + 4) ? SPR_MON_HUNTER  :
-                   (spr >= SPR_MON_HUNTER2 && spr < SPR_MON_HUNTER2 + 4) ? SPR_MON_HUNTER2 :
-                   (spr >= SPR_MON_HUNTER3 && spr < SPR_MON_HUNTER3 + 4) ? SPR_MON_HUNTER3 :
-                   (spr >= SPR_MON_LIGHT   && spr < SPR_MON_LIGHT   + 4) ? SPR_MON_LIGHT   :
-                   (spr >= SPR_MON_LEECH   && spr < SPR_MON_LEECH   + 4) ? SPR_MON_LEECH : spr;
-        spr = base;
-        if (spr == SPR_MON_LIGHT)  ec = 0x00C8F0FFu;
-        else if (spr == SPR_MON_SHADE)  ec = 0x007040A0u;
-        else if (spr == SPR_MON_SPIDER) ec = 0x00FFD040u;
-        else if (spr == SPR_MON_ECHO)   ec = 0x00A0FFC0u;
-        else if (spr == SPR_MON_LEECH)  ec = 0x0040FF80u;
-
-        /* v2.2：完全删除渲染端的眼睛叠加 —— 审计指出烘焙图里的眼睛
-           在 17.8%/42%/27% 三个不同高度，叠加层统一按 30% 画，
-           等于每只怪都有两套位置不对的眼睛。眼睛只由烘焙图负责。 */
-    }
+    float light=SpriteShade(box.ty,.10f)*ArtMonsterLight(wx,wy)*lightK;
+    light+=FlareLightAt(wx,wy)*.85f;
+    if(light>1.2f)light=1.2f;
+    DrawGroundShadow((box.x0+box.x1)/2,box.y1,w/3,box.ty);
+    SpritePose pose={(float)g_timeSec+spr*.27f,stride,activity,mirror};
+    DrawSpriteCreature(use,(box.x0+box.x1)/2-size/2,box.y1-size,size,size,light,1,zTest,box.ty,tint,tintMix,&pose);
 }
+static void DrawBakedMonster(int spr,float wx,float wy,float halfH,float lightK,int zTest,float facing,float walkPhase){
+    DrawCreatureActor(spr,wx,wy,halfH,lightK,zTest,facing,walkPhase,0,0,.6f);
+}
+
 
 /* ===== v2.4.6 **距离压迫感**（全部怪物共用的唯一入口）=====
    用户反馈：只有新怪有衰减，听声怪/追光怪还是老样子，整体不统一。
@@ -824,67 +697,17 @@ static void DrawBakedMonster(int spr, float wx, float wy, float halfH,
    为什么这样有压迫感：看不清才是最恐怖的。
    8 格外只剩黑影，你直到 4~5 格才确定那是什么 —— 那时候已经晚了。 */
 /* v2.4.3: 距离曲线已统一到 src/art.c 的 ArtMonsterLight() */
-static float ProximityLight(float wx, float wy) { return ArtMonsterLight(wx, wy); }
-
-static void DrawBeastSprite(Monster* m, unsigned int eyeColor, int baseSpr) {
-    if (!m->active) return;
-    if (!SpritesReady()) {
-        /* 烘焙失败时退回旧路径：至少不黑屏 */
-        SpriteBox s = ProjectSprite(m->x, m->y, 0.0f, 0.86f);
-        if (!s.ok) return;
-        for (int x = s.x0; x < s.x1; x++) {
-            if (x < 0 || x >= renderW) continue;
-            if (s.ty >= zBuffer[x]) continue;
-            for (int y = s.y0; y < s.y1; y++) {
-                if (y < 0 || y >= renderH) continue;
-                pixels[(size_t)y * renderW + x] = 0x00141418u;
-            }
-        }
-        (void)eyeColor;
-        return;
-    }
 
 
-    /* 变体由调用方指定：第一只 SPR_MON_HUNTER、第二只 HUNTER2、第三只 HUNTER3。
-       原来这里写死 HUNTER/LIGHT 二选一，所以三只长得一样。 */
-    int spr = (baseSpr > 0) ? baseSpr
-              : ((eyeColor == 0x00c8f0ffu) ? SPR_MON_LIGHT : SPR_MON_HUNTER);
-    float halfH = 0.86f;
-    float lightK = 1.0f;
-    unsigned int tint = 0;
-    float tintMix = 0.0f;
-
-    /* v2.4.6：听声怪 / 追光怪 也走同一套距离衰减 */
-    lightK *= ProximityLight(m->x, m->y);
-
-    if (bossLevel && m == Hunter0()) {
-        halfH = 1.45f;
-        tint = 0x00FF2010u;      /* Boss 泛红 */
-        tintMix = 0.35f;
-    }
-    /* 硬直时闪白 */
-    if (m->stun > 0.0f) {
-        float k = m->stun / MONSTER_STUN;
-        if (k > 1.0f) k = 1.0f;
-        tint = 0x00FFFFFFu;
-        tintMix = k * 0.75f;
-    }
-
-    if (!tintMix) {
-        DrawBakedMonster(spr, m->x, m->y, halfH, lightK, 1, m->facing, m->walkPhase);
-    } else {
-        SpriteBox s = ProjectSprite(m->x, m->y, 0.0f, halfH);
-        if (!s.ok) return;
-        int size = (s.x1 - s.x0);
-        int hh = s.y1 - s.y0;
-        if (hh > size) size = hh;
-        int x = (s.x0 + s.x1) / 2 - size / 2;
-        int y = s.y1 - size;
-        float light = SpriteShade(s.ty, 0.12f);
-        DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
-        DrawSpriteTint(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty, tint, tintMix);
-    }
+static void DrawBeastSprite(Monster* m,unsigned int eyeColor,int baseSpr){
+    if(!m->active)return;
+    int sprite=baseSpr>0?baseSpr:(eyeColor==0xC8F0FF?SPR_MON_LIGHT:SPR_MON_HUNTER);
+    float halfH=.86f,tintMix=0;unsigned int tint=0;
+    if(bossLevel && m==Hunter0()){halfH=1.45f;tint=0xFF2010;tintMix=.35f;}
+    if(m->stun>0){tint=0xFFFFFF;tintMix=fminf(.75f,m->stun/MONSTER_STUN*.75f);}
+    DrawCreatureActor(sprite,m->x,m->y,halfH,1,1,m->facing,m->walkPhase,tint,tintMix,m->stun>0?0:m->state==1?1:.35f);
 }
+
 
 static void DrawMonster2Sprite(void) {
     if (!Hunter1()->active) return;
@@ -900,67 +723,17 @@ static void DrawMonsterSprite(void) { DrawBeastSprite(Hunter0(), 0x00ff4020u, SP
 
 /* v1.8 偷电怪：体型 55%，暗色，只有被手电光锥照到才可见。
    "看不见但电量在掉" 就是它的压迫感来源，所以这里宁可画得几乎融进黑里。 */
-static void DrawLeechSprite(int idx) {
-    if (idx < 0 || idx >= LEECH_MAX) return;
-    Leech* L = &leeches[idx];
-    if (!L->active) return;
-
-    /* 可见性：
-       · 平时只有被手电照到才看得见；
-       · 但它正在抽你电的时候，会漏出蓝色电光 —— 这是唯一的"它在了"提示。 */
-    int lit = 0;
-    {
-        float adx = L->x - posX, ady = L->y - posY;
-        float d2a = adx * adx + ady * ady;
-        if (flashlightOn && battery > 0.0f && d2a <= 64.0f) {
-            float a1 = atan2f(ady, adx), a2 = atan2f(dirY, dirX);
-            float df = a1 - a2;
-            while (df > 3.14159f) df -= 6.28318f;
-            while (df < -3.14159f) df += 6.28318f;
-            if (fabsf(df) <= 0.55f && HasLOS(posX, posY, L->x, L->y)) lit = 1;
-        }
-    }
-    if (!lit && !L->draining) return;
-    float dx = L->x - posX, dy = L->y - posY;
-    float d2 = dx * dx + dy * dy;
-    if (d2 > 64.0f) return;
-    float ang = atan2f(dy, dx), face = atan2f(dirY, dirX);
-    float diff = ang - face;
-    while (diff > 3.14159f) diff -= 6.28318f;
-    while (diff < -3.14159f) diff += 6.28318f;
-    if (fabsf(diff) > 0.55f) return;
-    if (!HasLOS(posX, posY, L->x, L->y)) return;
-
-    SpriteBox s = ProjectSprite(L->x, L->y, 0.0f, 0.47f);
-    if (!s.ok) return;
-    spriteLight = SpriteAtten(s.ty);
-    int spanX = s.x1 - s.x0, spanY = s.y1 - s.y0;
-    if (spanX <= 0 || spanY <= 0) return;
-    float dyRel = 32.0f / (float)spanY;
-
-    for (int x = s.x0; x < s.x1; x++) {
-        if (s.ty >= zBuffer[x]) continue;
-        int relX = (x - s.x0) * 32 / spanX;
-        float fy = 0.0f;
-        unsigned int* col = pixels + (size_t)s.y0 * renderW + x;
-        int wrote = 0;
-        for (int y = s.y0; y < s.y1; y++, fy += dyRel, col += renderW) {
-            int relY = (int)fy;
-            int cx = 16;
-            int w = (relY < 10) ? 5 : 7;
-            if (relY > 3 && relY < 28 && relX > cx - w && relX < cx + w) {
-                float sh = (1.0f - s.ty / 16.0f) * 0.55f;
-                if (sh < 0.10f) sh = 0.10f;
-                int r = (int)(26 * sh), g = (int)(34 * sh), b = (int)(40 * sh);
-                /* 电光裂纹：偶尔亮一下，提示"它在偷电" */
-                if (((relY * 7 + relX * 3) % 23) == 0) { r = 40; g = 150; b = 220; }
-                *col = (unsigned int)((r << 16) | (g << 8) | b);
-                wrote = 1;
-            }
-        }
-        if (wrote && s.ty < zBuffer[x]) zBuffer[x] = s.ty;
-    }
+static void DrawLeechSprite(int idx){
+    if(idx<0 || idx>=LEECH_MAX)return;
+    Leech* leech=&leeches[idx];if(!leech->active)return;
+    float dx=leech->x-posX,dy=leech->y-posY,d2=dx*dx+dy*dy;if(d2>64)return;
+    float len=sqrtf(fmaxf(.001f,d2));
+    float beam=(dx*dirX+dy*dirY)/len;
+    int lit=flashlightOn && battery>0 && beam>.85f && HasLOS(posX,posY,leech->x,leech->y);
+    if(!lit && !leech->draining)return;
+    DrawCreatureActor(SPR_MON_PARASITE,leech->x,leech->y,.47f,1,1,0,(float)g_timeSec*1.8f,0,0,leech->draining?1:.5f);
 }
+
 /* 2026-11-06：追光怪两只。DrawBeastSprite 本来就是参数化的，
    所以这里只需要各自传自己的实体。 */
 static void DrawLightBeastSprite(void)  { DrawBeastSprite(&lightBeast,  0x00c8f0ffu, SPR_MON_LIGHT); }
@@ -1173,41 +946,10 @@ static void DrawFlareSprite(int idx) {
      · 主体剪影、走路帧、朝向帧、阴影、距离光衰 —— 和那两只完全一致
      · 只在颜色上区分：拾荒者暗金 / 清道夫病绿 / 守门人暗蓝
    这样质感立刻对齐，而且不用新画任何精灵。 */
-static void DrawTintedBeast(int spr, float wx, float wy, float halfH,
-                            unsigned int tint, float tintMix) {
-    if (!SpritesReady()) {
-        /* 烘焙失败时的兜底：至少画个剪影，不黑屏 */
-        SpriteBox sb = ProjectSprite(wx, wy, 0.0f, halfH);
-        if (!sb.ok) return;
-        for (int x = sb.x0; x < sb.x1; x++) {
-            if (x < 0 || x >= renderW) continue;
-            if (sb.ty >= zBuffer[x]) continue;
-            for (int y = sb.y0; y < sb.y1; y++) {
-                if (y < 0 || y >= renderH) continue;
-                pixels[(size_t)y * renderW + x] = 0x00141418u;
-            }
-        }
-        return;
-    }
-
-    SpriteBox s = ProjectSprite(wx, wy, 0.0f, halfH);
-    if (!s.ok) return;
-
-    int size = (s.x1 - s.x0);
-    int hh = s.y1 - s.y0;
-    if (hh > size) size = hh;
-    if (size < 2) return;
-
-    int x = (s.x0 + s.x1) / 2 - size / 2;
-    int y = s.y1 - size;
-
-    /* v2.4.6：统一走 ProximityLight()，和新怪完全一致 */
-    {
-        float light = SpriteShade(s.ty, 0.12f) * ProximityLight(wx, wy);
-        DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
-        DrawSpriteTint(spr, x, y, size, size, light, 1.0f, 1, s.ty, tint, tintMix);
-    }
+static void DrawTintedBeast(int spr,float wx,float wy,float halfH,unsigned int tint,float tintMix){
+    DrawCreatureActor(spr,wx,wy,halfH,1,1,atan2f(posY-wy,posX-wx),(float)g_timeSec*1.4f,tint,tintMix,.55f);
 }
+
 
 static void DrawNewMonsters(void) {
     /* ---- 拾荒者：**只换麻袋颜色**，身体保持原样 ---- */
@@ -1249,7 +991,7 @@ static void DrawNewMonsters(void) {
                  SPR_MON_SPIDER   = 冷青眼（巡逻 / 堵门 / 失明）
                  SPR_MON_LEECH_W  = 血红眼（追击）
                一个 SpriteAccent 都不调，也就没有 key 泄漏的可能。 */
-            int spr = WardenChasing() ? SPR_MON_LEECH_W : SPR_MON_SPIDER;
+            int spr = WardenChasing() ? SPR_MON_WARDEN_CHASE : SPR_MON_SPIDER;
             DrawTintedBeast(spr, WardenX(), WardenY(), 0.94f, 0, 0.0f);
         }
     }
@@ -2813,10 +2555,10 @@ static void DrawListedRoomProp(int ri) {
          * 现在**每个家具只画 1 个精灵**，改由 searchLeft 承担内容量：
          *   货架 3 次 / 木箱堆 2 次 / 控制台 2 次
          * ================================================================ */
-        int oneSpr = SPR_PROP_SHELF;
+        int oneSpr = roomProps[ri].kind>=3 && roomProps[ri].kind<=9?SPR_ROOM_BOILER+roomProps[ri].kind-3:SPR_PROP_SHELF;
         if (roomProps[ri].kind == ROOMPROP_CONSOLE)     oneSpr = SPR_PROP_CONSOLE;
         else if (roomProps[ri].kind == ROOMPROP_CRATES) oneSpr = SPR_PROP_CRATE;
-        DrawBakedPropArt(oneSpr, roomProps[ri].x, roomProps[ri].y, 0.0f, 0.62f, 1.0f);
+        DrawBakedPropArt(oneSpr, roomProps[ri].x, roomProps[ri].y, 0.0f, roomProps[ri].height, 1.0f);
 
     }
 }
@@ -3118,7 +2860,7 @@ static void RenderFloorBand(int y0, int y1) {
         if (reachF < 0.0f) reachF = 0.0f;
         reachF *= reachF;
 
-        float shadow = (ambF * 0.28f + (lightOnF ? reachF * 0.95f : 0.0f)) * smokeDim;
+        float shadow = (ambF * (lightOnF?.28f:.055f) + (lightOnF ? reachF * 0.95f : 0.0f)) * smokeDim;
         int shadowI = (int)(shadow * 256.0f);
         if (shadowI < 0) shadowI = 0;
         if (shadowI > 1023) shadowI = 1023;
@@ -3126,7 +2868,7 @@ static void RenderFloorBand(int y0, int y1) {
         /* 距离雾（天花板减半：天花板本来就不该被照亮太多） */
         float fogAmt = rowDistance * 0.075f;
         if (fogAmt > 0.8f) fogAmt = 0.8f;
-        if (!lightOnF) fogAmt *= 0.22f;
+        if (!lightOnF) fogAmt *= 0.04f;
         if (isCeil) fogAmt *= 0.5f;
         unsigned int fogR = (unsigned int)(fogAmt * (float)themeFogR);
         unsigned int fogG = (unsigned int)(fogAmt * (float)themeFogG);
@@ -3268,10 +3010,12 @@ typedef struct {
     int mapY;
     int side;
     float perpWallDist;
+    int stepX, stepY;
 } WallRay;
 
 static WallRay CastWallRay(int x) {
     float cameraX = 2.0f * x / (float)renderW - 1.0f;
+    cameraX+=perception.distortion*sinf((float)g_timeSec*2.7f+cameraX*4);
     float rayDirX = dirX + planeX * cameraX;
     float rayDirY = dirY + planeY * cameraX;
 
@@ -3296,7 +3040,7 @@ static WallRay CastWallRay(int x) {
     float perpWallDist = (side == 0) ? (sideDistX - deltaDistX) : (sideDistY - deltaDistY);
     if (perpWallDist < 0.1f) perpWallDist = 0.1f;
     zBuffer[x] = perpWallDist;
-    WallRay result = { rayDirX, rayDirY, mapX, mapY, side, perpWallDist };
+    WallRay result = { rayDirX, rayDirY, mapX, mapY, side, perpWallDist, stepX, stepY };
     return result;
 }
 
@@ -3369,7 +3113,7 @@ static void RenderWallSurface(int x, int halfH, const WallRay* ray) {
     float flash = flashTab[x];
     float torch = lightOnW ? (flash * reach * 0.62f) : 0.0f;
 
-    float lit = (amb * 0.26f + torch) * smokeDim;
+    float lit = (amb * (lightOnW?.26f:.045f) + torch) * smokeDim;
     if (side == 1) lit *= 0.62f;
 
     float cone = flash - 0.35f;
@@ -3379,7 +3123,7 @@ static void RenderWallSurface(int x, int halfH, const WallRay* ray) {
     /* 距离雾（冷色，加法叠加，零额外采样） */
     float fog = perpWallDist * 0.085f;
     if (fog > 0.85f) fog = 0.85f;
-    if (!lightOnW) fog *= 0.25f;    /* 留一点，纯粹压黑会没有纵深 */
+    if (!lightOnW) fog *= 0.04f;    /* 留一点，纯粹压黑会没有纵深 */
 
     /* 光斑也受有效距离约束：远处不许再加亮 */
     /* 光球照明：命中点离任一荧光棒越近越亮（暖色） */
@@ -3445,10 +3189,9 @@ static void RenderWallSurface(int x, int halfH, const WallRay* ray) {
          * （roomId != 0）时才上主题色，外面看就是普通墙。
          * ================================================================ */
         int nbX = mapX, nbY = mapY;
-        /* 2026-11-09：原来这里用的是射线循环里局部变量 stepX/stepY，
-           搬进 RenderWallSurface 时没跟过来。按投射约定就地重建。 */
-        int stepX = (rayDirX > 0.0f) ? 1 : -1;
-        int stepY = (rayDirY > 0.0f) ? 1 : -1;
+        /* Use the caster's exact steps; do not infer a second sign convention. */
+        int stepX = ray->stepX;
+        int stepY = ray->stepY;
         if (side == 0) nbX -= stepX; else nbY -= stepY;
         int fromInsideRoom = 0;
         if (nbX >= 0 && nbY >= 0 && nbX < MAP_WIDTH && nbY < MAP_HEIGHT)
@@ -3604,73 +3347,56 @@ static void RenderWallBand(int x0, int x1) {
    这一段只在理智 < 50 时才跑，但跑起来是全屏逐像素的。
    优化点：把「乘强度」和「除 300」从每像素挪到每帧一次（各 256 项的查表），
    顺便用递增代替乘 3 来定位噪点。 */
-static void RenderPostBand(int y0, int y1) {
-    int intensity = 0;
-    if (vignetteOn && sanity < 50.0f) {
-        /* v3.0：**红晕封顶 60%** ——
-           用户截图：6% 理智时整屏红噪点，「几乎看不见路」。
-           原来满强度 255（88%），恐怖氛围变成了致盲。 */
-        intensity = (int)((50.0f - sanity) / 50.0f * 255.0f * 0.60f);
-        if (intensity > 153) intensity = 153;
-        if (intensity < 0) intensity = 0;
-    }
-    int heal = (healFlash > 0.0f);
-    /* 低理智红边的噪点固定相位。旧版按 61Hz 改变整张噪点图，
-       会把本来应该是渐晕的效果看成全屏闪烁/抽搐；红边强度仍会
-       随理智变化，但纹理本身保持稳定。 */
-    int frameSeed = 17;
-
-    /* 每帧一次的查表：alpha = mask*intensity>>8，nz = (noise-20)*intensity/300 */
-    unsigned char alphaLut[256];
-    signed char noiseLut[256];
-    if (intensity > 0) {
-        for (int i = 0; i < 256; i++) {
-            alphaLut[i] = (unsigned char)((i * intensity) >> 8);
-            int nz = (int)noiseTab[i] - 20;
-            noiseLut[i] = (signed char)(nz * intensity / 300);
-        }
-    }
-
-    for (int y = y0; y < y1; y++) {
-        unsigned int* row = pixels + (size_t)y * renderW;
-        if (intensity > 0) {
-            const unsigned char* mask = vignetteMask + (size_t)y * renderW;
-            /* 噪点索引必须精确等于 (x*3 + y*5 + frameSeed) & 255。
-               不能用「每列 +3」代替 —— x*3 超过 255 后要回绕，
-               递增法在回绕点对不齐，噪点会整片错位。
-               所以这里保留 x*3 的乘法，但把「乘强度/除 300」挪到查表。 */
-            const int noiseBase = (y * 5 + frameSeed) & 255;
-            for (int x = 0; x < renderW; x++) {
-                int maskVal = mask[x];
-                if (maskVal == 0) continue;
-                int alpha = alphaLut[maskVal];
-                if (alpha == 0) continue;
-                unsigned int dst = row[x];
-                int r = (int)((dst >> 16) & 0xFF), g = (int)((dst >> 8) & 0xFF), b = (int)(dst & 0xFF);
-                r = r + (((255 - r) * alpha) >> 8);
-                g = g - ((g * alpha) >> 8);
-                b = b - ((b * alpha) >> 8);
-                {
-                    int nz = noiseLut[(x * 3 + noiseBase) & 255];
-                    r += nz; g += nz; b += nz;
-                    if (r < 0) r = 0; else if (r > 255) r = 255;
-                    if (g < 0) g = 0; else if (g > 255) g = 255;
-                    if (b < 0) b = 0; else if (b > 255) b = 255;
-                }
-                row[x] = (unsigned int)((r << 16) | (g << 8) | b);
+static unsigned int* horrorSource=NULL;
+static size_t horrorCapacity=0;
+static int horrorReady=0;
+static void PrepareHorrorSource(void){
+    horrorReady=0;if(perception.stress<.02f)return;
+    size_t count=(size_t)renderW*renderH;
+    if(count>horrorCapacity){unsigned int* next=(unsigned int*)realloc(horrorSource,count*sizeof(unsigned int));if(!next)return;horrorSource=next;horrorCapacity=count;}
+    memcpy(horrorSource,pixels,count*sizeof(unsigned int));horrorReady=1;
+}
+static void RenderPostBand(int y0,int y1) {
+    float stress=perception.stress,crisis=perception.contamination;
+    float beat=.5f+.5f*sinf((float)g_timeSec*6.0f);
+    int radius=1+(int)(stress*3),dark=(int)(256*perception.vignette);
+    for(int y=y0;y<y1;y++){
+        unsigned int* row=pixels+(size_t)y*renderW;
+        uint32_t noise=perception.seed^(uint32_t)(y*7919+107);
+        int wobble=(int)(sinf(y*.075f+(float)g_timeSec*1.9f)*perception.distortion*renderW);
+        int veinOffset=(int)(sinf(y*.037f)*36)+(int)(perception.seed%9)*3;
+        for(int x=0;x<renderW;x++){
+            unsigned int c=row[x];float edge=vignetteMask?vignetteMask[(size_t)y*renderW+x]/255.0f:0;
+            int r=(c>>16)&255,g=(c>>8)&255,b=c&255;
+            if(horrorReady){
+                int sx=x+wobble;if(sx<radius)sx=radius;if(sx>=renderW-radius)sx=renderW-radius-1;
+                int sy=y<radius?radius:y>=renderH-radius?renderH-radius-1:y;
+                unsigned int a=horrorSource[(size_t)sy*renderW+sx-radius],d=horrorSource[(size_t)sy*renderW+sx+radius];
+                unsigned int u=horrorSource[(size_t)(sy-radius)*renderW+sx],v=horrorSource[(size_t)(sy+radius)*renderW+sx];
+                float blur=stress*.68f;
+                r=(int)(r*(1-blur)+blur*(((a>>16)&255)+((d>>16)&255)+((u>>16)&255)+((v>>16)&255))*.25f);
+                g=(int)(g*(1-blur)+blur*(((a>>8)&255)+((d>>8)&255)+((u>>8)&255)+((v>>8)&255))*.25f);
+                b=(int)(b*(1-blur)+blur*((a&255)+(d&255)+(u&255)+(v&255))*.25f);
             }
-        }
-        if (heal) {
-            for (int x = 0; x < renderW; x++) {
-                unsigned int dst = row[x];
-                int r = (int)((dst >> 16) & 0xFF), g = (int)((dst >> 8) & 0xFF), b = (int)(dst & 0xFF);
-                row[x] = (unsigned int)(((r + (255 - r) * 3 / 10) << 16) |
-                                        ((g + (255 - g) * 3 / 10) << 8) |
-                                        (b + (255 - b) * 3 / 10));
-            }
+            noise=noise*1664525u+1013904223u;
+            int speck=(int)((((int)(noise>>24)-128)/128.0f)*perception.grain);
+            float blood=vignetteOn?(stress*edge*.52f+crisis*(.10f+beat*.12f)):0;
+            float vein=((x+veinOffset+128)%57<2 && (noise&128))?crisis*edge*.6f:0;
+            float shade=1-edge*dark/256.0f;
+            r=(int)(r*shade*(1-blood)+145*blood-45*vein)+speck;
+            g=(int)(g*shade*(1-blood*.9f)-32*vein)+speck;
+            b=(int)(b*shade*(1-blood*.85f)-28*vein)+speck;
+            if(r<0)r=0;
+            if(r>255)r=255;
+            if(g<0)g=0;
+            if(g>255)g=255;
+            if(b<0)b=0;
+            if(b>255)b=255;
+            row[x]=(unsigned)(r<<16|g<<8|b);
         }
     }
 }
+
 
 /* v2.1：落地阴影。全项目只有抛出的光球有假阴影，怪物/箱子全都没有，
    于是所有东西都像"浮在地面上"。这里在精灵脚下压一个扁椭圆。 */
@@ -3864,27 +3590,15 @@ static void DrawViewModel(void) {
 }
 
 void Render3D(void) {
+    PerceptionUpdate(RoomThemeSanityRatio(sanity/fmaxf(1,SanityMax())),g_timeSec);
     int halfH = renderH / 2;
 
     /* 只清上半屏（下半会被地板整片覆盖） */
     memset(pixels, 0, (size_t)(halfH + 1) * renderW * sizeof(unsigned int));
 
-    /* 手电筒：开着是横向聚光，关掉/没电就整体压暗；电量低于 25% 会闪 */
-    float flick = 1.0f;
-    if (flashlightOn && battery > 0.0f && battery < 25.0f) {
-        float t = (float)g_timeSec;
-        float wobble = sinf(t * 7.5f) * sinf(t * 2.1f);      /* 慢速拍频，不会跟帧率打架 */
-        flick = 0.78f + 0.22f * wobble;
-        if (flick < 0.45f) flick = 0.45f;
-    }
-    int lightOn = (flashlightOn && battery > 0.0f);
-    /* 第 3 轮：有东西靠近时手电会抖一下（威胁预告的环境征兆）。
-       只在"手电开着"时有意义，且只是一个乘系数 —— 不新增分支。 */
-    if (lightOn) {
-
-        float tf = TelegraphFlicker();
-        if (tf > 0.0f) flick *= (1.0f - tf * 0.55f);
-    }
+    /* Stable illumination: no periodic low-charge or enemy-proximity strobe. */
+    const float flick=perception.flicker;
+    int lightOn=(flashlightOn && battery>0.0f);
     for (int x = 0; x < renderW; x++) {
         float f;
         if (lightOn) {
@@ -3897,7 +3611,7 @@ void Render3D(void) {
         } else {
             /* v1.9：手电熄了就该「几乎看不见」。
                原来 0.32 太亮 —— 关灯还能看清走廊，手电就没意义了。 */
-            f = 0.13f;   /* 0.09 太黑，抬一点：贴脸能看清，远处仍黑 */
+            f = 0.025f;   /* Torch off: only close-range silhouettes remain. */
         }
         flashTab[x] = f;
         float cone = f > 0.40f ? (f - 0.40f) / 0.75f : 0.0f;
@@ -3911,14 +3625,15 @@ void Render3D(void) {
         }
         /* v2.1：天花板原来最亮只有 7/255（乘完贴图），上半屏是死黑。
            抬到 0.55 基数 + 150 上限，再乘上限乘的距离雾。 */
-        ceilTab[x] = (int)((0.55f + cone * 0.75f) * 150.0f);
+        ceilTab[x] = (int)((lightOn?.55f:.06f) * 150.0f + cone*.75f*150.0f);
     }
 
     RunPhase(1);
     RunPhase(2);
     RenderSprites();
     DrawViewModel();                 /* v2.1 第一人称手持模型 */
-    if ((vignetteOn && sanity < 50.0f) || healFlash > 0.0f) RunPhase(3);
+    PrepareHorrorSource();
+    RunPhase(3);
 
     /* ==================================================================
      * 2026-11-06：**崩塌黑屏**（在所有后处理之后、送显之前）
@@ -3940,9 +3655,13 @@ void Render3D(void) {
             } else {
                 for (size_t p = 0; p < total; p++) {
                     unsigned int c = pixels[p];
-                    unsigned int rr = ((c >> 16) & 0xFF) * (unsigned int)k >> 8;
-                    unsigned int gg = ((c >> 8) & 0xFF) * (unsigned int)k >> 8;
-                    unsigned int bb = (c & 0xFF) * (unsigned int)k >> 8;
+                    int edge=vignetteMask?vignetteMask[p]:128;
+                    float local=sb<.5f?sb*2*(.25f+.75f*edge/255.0f):(.5f+(sb-.5f)*2);
+                    if(local>1)local=1;
+                    int localK=(int)((1-local)*256);if(localK<k)localK=k;
+                    unsigned int rr = ((c >> 16) & 0xFF) * (unsigned int)localK >> 8;
+                    unsigned int gg = ((c >> 8) & 0xFF) * (unsigned int)localK >> 8;
+                    unsigned int bb = (c & 0xFF) * (unsigned int)localK >> 8;
                     pixels[p] = (c & 0xFF000000u) | (rr << 16) | (gg << 8) | bb;
                 }
             }
@@ -4289,6 +4008,12 @@ void RenderMap(void) {
             int px2 = mapStartX + mx * cellSize + cellSize / 2;
             int py2 = mapStartY + my * cellSize + cellSize / 2;
             int kind = echoMarkKind[i];
+            if(kind!=0){
+                int live=0;for(int ci=0;ci<containerCount;ci++){
+                    if(containers[ci].active && !containers[ci].searched && Dist2(containers[ci].x,containers[ci].y,echoMarkX[i],echoMarkY[i])<.1f){live=1;break;}
+                }
+                if(!live){echoMarkActive[i]=0;continue;}
+            }
 
             if (kind == 0) {
                 /* 活物：红菱形 + 亮芯 */

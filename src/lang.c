@@ -33,17 +33,19 @@ const char* Transl(const char* en) {
     }
 
     /* 动态字符串：按前缀造 */
-    static char buf[160];
-    if (!strncmp(en, "GOLD ", 7))  { snprintf(buf, sizeof(buf), "金币 %s", en + 7); return buf; }
-    if (!strncmp(en, "CORES ", 6))   { snprintf(buf, sizeof(buf), "核心 %s", en + 6); return buf; }
-    if (!strncmp(en, "BEST LEVEL ", 11)) { snprintf(buf, sizeof(buf), "最高层 %s", en + 11); return buf; }
-    if (!strncmp(en, "PENDING ", 8)) { snprintf(buf, sizeof(buf), "待上缴 %s", en + 8); return buf; }
-    if (!strncmp(en, "LEVEL ", 6))   { snprintf(buf, sizeof(buf), "第 %s 层", en + 6); return buf; }
-    if (!strncmp(en, "TIME ", 5))    { snprintf(buf, sizeof(buf), "时间 %s", en + 5); return buf; }
-    if (!strncmp(en, "FUSES ", 6))   { snprintf(buf, sizeof(buf), "保险丝 %s", en + 6); return buf; }
-    if (!strncmp(en, "SCORE ", 6))   { snprintf(buf, sizeof(buf), "得分 %s", en + 6); return buf; }
+    static char buffers[8][320];
+    static unsigned int nextBuffer;
+    char* buf=buffers[(nextBuffer++)&7u];
+    if (!strncmp(en, "GOLD ", 5))  { snprintf(buf, sizeof(buffers[0]), "金币 %s", en + 5); return buf; }
+    if (!strncmp(en, "CORES ", 6))   { snprintf(buf, sizeof(buffers[0]), "核心 %s", en + 6); return buf; }
+    if (!strncmp(en, "BEST LEVEL ", 11)) { snprintf(buf, sizeof(buffers[0]), "最高层 %s", en + 11); return buf; }
+    if (!strncmp(en, "PENDING ", 8)) { snprintf(buf, sizeof(buffers[0]), "待上缴 %s", en + 8); return buf; }
+    if (!strncmp(en, "LEVEL ", 6))   { snprintf(buf, sizeof(buffers[0]), "第 %s 层", en + 6); return buf; }
+    if (!strncmp(en, "TIME ", 5))    { snprintf(buf, sizeof(buffers[0]), "时间 %s", en + 5); return buf; }
+    if (!strncmp(en, "FUSES ", 6))   { snprintf(buf, sizeof(buffers[0]), "保险丝 %s", en + 6); return buf; }
+    if (!strncmp(en, "SCORE ", 6))   { snprintf(buf, sizeof(buffers[0]), "得分 %s", en + 6); return buf; }
     if (!strncmp(en, "RUN FAILED", 10)) return "本局失败";
-    if (!strncmp(en, "KNIFE", 5))    { snprintf(buf, sizeof(buf), "锈刃 %s", en + 5); return buf; }
+    if (!strncmp(en, "KNIFE", 5))    { snprintf(buf, sizeof(buffers[0]), "锈刃 %s", en + 5); return buf; }
     {   /* "100 GOLD" -> "100 金币" */
         int n = 0, consumed = 0;
         /* ==================================================================
@@ -63,12 +65,12 @@ const char* Transl(const char* en) {
         if (sscanf(en, "%d GOLD%n", &n, &consumed) == 1) {
             const char* rest = en + consumed;
             while (*rest == ' ') rest++;
-            if (*rest == '\0') { snprintf(buf, sizeof(buf), "%d 金币", n); return buf; }
+            if (*rest == '\0') { snprintf(buf, sizeof(buffers[0]), "%d 金币", n); return buf; }
         }
         if (sscanf(en, "%d CORES%n", &n, &consumed) == 1) {
             const char* rest = en + consumed;
             while (*rest == ' ') rest++;
-            if (*rest == '\0') { snprintf(buf, sizeof(buf), "%d 核心", n); return buf; }
+            if (*rest == '\0') { snprintf(buf, sizeof(buffers[0]), "%d 核心", n); return buf; }
         }
     }
 
@@ -78,11 +80,7 @@ const char* Transl(const char* en) {
 
 /* v8：TSV 单一词条源优先，内联 Tr 的第二个参数只当兜底。
    这样改翻译只需要动 l10n/zh.tsv，不会再出现“表里改了、调用点没改”。 */
-const char* LangTr(const char* en, const char* zh) {
-    if (g_lang != LANG_ZH) return en;
-    {
-        const char* t = Transl(en);
-        if (t && t != en) return t;
-    }
-    return zh;
+const char* LangTr(const char* en,const char* zh) {
+    return g_lang==LANG_ZH ? (zh && zh[0] ? zh : en) : en;
 }
+

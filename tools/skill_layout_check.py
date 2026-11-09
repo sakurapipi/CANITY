@@ -1,89 +1,51 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""技能树布局自检 —— 2026-11-08 重写：**直接读坐标表**。
+"""Source geometry check for the pannable triangle constellation. Not a desktop test.
 
-## 为什么重写
-
-以前这个工具按"椭圆 + 角度 + 半径"公式把 skills.c 的常数再算一遍，
-于是出现"工具说没事、实机压住"，以及"改了公式工具就崩"。
-
-现在 skills.c 里就是一张 `kNodeNX[] / kNodeNY[]` 的 40 项常量表，
-工具**只读这张表**，和界面用同一份数据。
-
-## 判据
-  ① 每个节点都在安全区内（留 40px 边距）
-  ② 任意两个方框重叠面积 < 8%（擦边 1~2% 不算问题）
+Reads the actual position arrays and viewport constants. Checks player node
+separation at minimum/default/maximum zoom and safe coordinate ranges for the
+line renderer. It does not mistake offscreen nodes in a pannable view for bugs.
 """
-import math
-import os
+from pathlib import Path
 import re
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, 'src', 'skills.c')
-
-# 与 ui.c 的 SK_NODE_K 保持一致（方框尺寸基准）
-NODE_K = 0.78
-SK_WX, SK_WY = 210.0, 120.0
-WORLD = 6.0
-
-
-def read_table(src, name):
-    m = re.search(name + r'\[\s*\w+\s*\]\s*=\s*\{(.*?)\};', src, re.S)
-    if not m:
-        return None
-    body = re.sub(r'/\*.*?\*/', '', m.group(1), flags=re.S)
-    return [float(x.strip().rstrip('f')) for x in body.split(',') if x.strip()]
-
-
+ROOT = Path(__file__).resolve().parents[1]
+def table(source, name):
+    m = re.search(name+r'\[\s*\w+\s*\]\s*=\s*\{(.*?)\};',source,re.S)
+    if not m: raise ValueError('missing '+name)
+    body=re.sub(r'/\*.*?\*/','',m[1],flags=re.S)
+    return [float(value.strip().rstrip('f')) for value in body.split(',') if value.strip()]
+def constant(source,name):
+    m=re.search(r'#define\s+'+name+r'\s+([0-9.]+)',source)
+    if not m: raise ValueError('missing '+name)
+    return float(m[1])
 def main():
-    src = open(SRC, encoding='utf-8', errors='replace').read()
-    nx = read_table(src, 'kNodeNX')
-    ny = read_table(src, 'kNodeNY')
-    if not nx or not ny or len(nx) != len(ny):
-        print('✗ 读不到 kNodeNX / kNodeNY 坐标表')
-        return 1
-
-    n = len(nx)
-    win_w, win_h = 1264, 711
-    node_w = int(SK_WX * 0.55 * NODE_K)
-    node_h = int(SK_WY * 0.62 * NODE_K)
-    half_w, half_h = win_w / 2.0 - 40, win_h / 2.0 - 40
-
-    pts = []
-    for i in range(n):
-        x = (nx[i] - 0.5) * WORLD * SK_WX * NODE_K
-        y = (ny[i] - 0.5) * WORLD * SK_WY * NODE_K
-        pts.append((i, x, y))
-
-    oob = [(i, x, y) for i, x, y in pts
-           if abs(x) + node_w / 2 > half_w or abs(y) + node_h / 2 > half_h]
-    bad = []
-    area = node_w * node_h
-    for a in range(n):
-        for b in range(a + 1, n):
-            dx = abs(pts[a][1] - pts[b][1])
-            dy = abs(pts[a][2] - pts[b][2])
-            ox, oy = node_w - dx, node_h - dy
-            if ox > 0 and oy > 0 and (ox * oy) / area >= 0.08:
-                bad.append((a, b, ox, oy))
-
-    print('  节点数 %d，方框 %.0fx%.0f px，安全区 ±%.0f x ±%.0f'
-          % (n, node_w, node_h, half_w, half_h))
-    if oob:
-        print('✗ 出界 %d 个：' % len(oob))
-        for i, x, y in oob[:8]:
-            print('    id %2d  (%.0f, %.0f)' % (i, x, y))
-    else:
-        print('✓ 全部节点在屏幕内')
-    if bad:
-        print('✗ 明显重叠 %d 对：' % len(bad))
-        for a, b, ox, oy in bad[:10]:
-            print('    id %2d × id %2d  叠 %.0fx%.0f px' % (a, b, ox, oy))
-    else:
-        print('✓ 没有明显重叠')
-    return 0 if not oob and not bad else 1
-
-
-if __name__ == '__main__':
-    sys.exit(main())
+    skills=(ROOT/'src/skills.c').read_text(encoding='utf-8')
+    ui=(ROOT/'src/ui.c').read_text(encoding='utf-8')
+    common=(ROOT/'include/common.h').read_text(encoding='utf-8')
+    nx,ny=table(skills,'kNodeNX'),table(skills,'kNodeNY')
+    count=int(constant(common,'SKILL_PLAYER_COUNT'))
+    definitions=int(constant(common,'SKILL_COUNT'))
+    if len(nx)!=definitions or len(ny)!=definitions: raise ValueError('incomplete position table')
+    wx,wy=constant(ui,'SK_WX'),constant(ui,'SK_WY')
+    nominal=constant(ui,'SK_NODE_K')
+    failure=False
+    for zoom in (constant(ui,'SK_K_MIN'),nominal,constant(ui,'SK_K_MAX')):
+        width=max(26,int(wx*.55*min(zoom,nominal)))
+        height=max(18,int(wy*.62*min(zoom,nominal)))
+        ids=[i for i in range(definitions) if i!=40]
+        points=[(nx[i]*wx*6*zoom,ny[i]*wy*6*zoom) for i in ids]
+        bad=[]
+        for a in range(count):
+            for b in range(a+1,count):
+                dx=abs(points[a][0]-points[b][0]);dy=abs(points[a][1]-points[b][1])
+                if dx<width and dy<height and (width-dx)*(height-dy)>=width*height*.08: bad.append((ids[a],ids[b]))
+        unsafe=[i for i,(x,y) in enumerate(points) if abs(x)>12000 or abs(y)>12000]
+        print('zoom %.2f: %d player nodes / %dx%d boxes / overlaps %s / unsafe %s'%(zoom,count,width,height,bad,unsafe))
+        failure |= bool(bad or unsafe)
+    return int(failure)
+if __name__=='__main__':
+    try: sys.exit(main())
+    except (OSError,ValueError) as error:
+        print('ERROR: '+str(error));sys.exit(1)

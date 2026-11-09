@@ -1,0 +1,549 @@
+{
+  "format": "canity-onset-v1",
+  "rate": 44100,
+  "start_sample": 882000,
+  "duration_ms": 40000,
+  "pcm_sha256": "5f2c0f8b26ae8fa107ce04db4571261e3881c047326001eb160e7a83295492f8",
+  "notes": [
+    {
+      "time_ms": 510,
+      "lane": 3,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 760,
+      "lane": 1,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 1000,
+      "lane": 1,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 1260,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 1500,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 1770,
+      "lane": 3,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 2230,
+      "lane": 1,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 4000,
+      "lane": 0,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 4460,
+      "lane": 3,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 5000,
+      "lane": 3,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 5250,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 5850,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 6260,
+      "lane": 1,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 7000,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 7250,
+      "lane": 0,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 7800,
+      "lane": 1,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 8260,
+      "lane": 0,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 8510,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 8770,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 9010,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 9260,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 9510,
+      "lane": 1,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 10000,
+      "lane": 3,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 10260,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 10500,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 10770,
+      "lane": 3,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 11010,
+      "lane": 0,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 11260,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 11510,
+      "lane": 1,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 12000,
+      "lane": 1,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 12260,
+      "lane": 0,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 12500,
+      "lane": 3,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 12770,
+      "lane": 3,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 13010,
+      "lane": 1,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 13260,
+      "lane": 1,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 13510,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 13800,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 14120,
+      "lane": 3,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 16000,
+      "lane": 1,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 16870,
+      "lane": 0,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 17230,
+      "lane": 3,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 17510,
+      "lane": 3,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 18000,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 18260,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 18670,
+      "lane": 1,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 19510,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 19770,
+      "lane": 0,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 20010,
+      "lane": 1,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 20260,
+      "lane": 0,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 20670,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 21000,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 21260,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 21500,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 21770,
+      "lane": 1,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 22010,
+      "lane": 3,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 22260,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 22510,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 23000,
+      "lane": 3,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 23260,
+      "lane": 0,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 23500,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 23770,
+      "lane": 1,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 24010,
+      "lane": 1,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 24260,
+      "lane": 0,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 24510,
+      "lane": 3,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 25000,
+      "lane": 3,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 25260,
+      "lane": 1,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 25670,
+      "lane": 1,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 26000,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 26260,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 26510,
+      "lane": 3,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 26800,
+      "lane": 1,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 27260,
+      "lane": 0,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 27670,
+      "lane": 3,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 28260,
+      "lane": 3,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 28510,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 29000,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 29260,
+      "lane": 1,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 29770,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 30230,
+      "lane": 0,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 30510,
+      "lane": 1,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 31000,
+      "lane": 0,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 31260,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 31670,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 32000,
+      "lane": 2,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 32510,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 32770,
+      "lane": 1,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 33010,
+      "lane": 3,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 33260,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 33510,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 34000,
+      "lane": 3,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 34260,
+      "lane": 0,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 34500,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 34770,
+      "lane": 1,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 35010,
+      "lane": 1,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 35260,
+      "lane": 0,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 35510,
+      "lane": 3,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 35800,
+      "lane": 3,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 36260,
+      "lane": 1,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 36510,
+      "lane": 1,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 36770,
+      "lane": 2,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 37010,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 37260,
+      "lane": 3,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 37510,
+      "lane": 1,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 37800,
+      "lane": 0,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 38260,
+      "lane": 3,
+      "difficulty": 3
+    },
+    {
+      "time_ms": 38670,
+      "lane": 3,
+      "difficulty": 1
+    },
+    {
+      "time_ms": 39260,
+      "lane": 2,
+      "difficulty": 2
+    },
+    {
+      "time_ms": 39510,
+      "lane": 2,
+      "difficulty": 3
+    }
+  ]
+}

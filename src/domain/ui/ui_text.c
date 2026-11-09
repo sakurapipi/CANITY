@@ -13,6 +13,7 @@
 /* CjkDecodeOne / CjkRows 在 render.h 里，不需要额外的 cjk 头。 */
 #include "ui.h"
 #include "ui_text.h"
+#include "ui_theme.h"
 
 static const unsigned char fontData[95][FONT_H] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},
@@ -120,7 +121,7 @@ int TextScale(void) {
        现在实际绘制、测量、布局统一用同一个整数缩放。 */
     int s = (renderH * 2) / 458;   /* 设计基准 458；向下取整，低画质只会更小，不会突然变大 */
     if (s < 1) s = 1;
-    if (s > 6) s = 6;
+    if (s > 4) s = 4;
     return s;
 }
 
@@ -184,6 +185,9 @@ static void DrawMissingCjk(int px, int py, int cell, unsigned int color) {
 /* 渲染坐标下逐码点绘制：ASCII 走 8x12 点阵，非 ASCII 走 12x12 中文图集。 */
 static void DrawUiTextRaw(int px, int py, const char* t, unsigned int color, int s) {
     if (!t) return;
+    int hasNumber=0;
+    for(const char* c=t;*c;c++)if(*c>='0' && *c<='9'){hasNumber=1;break;}
+    if(hasNumber && (strstr(t,"GOLD") || strstr(t,"gold") || strstr(t,"金币") || strstr(t,"黄金") || strstr(t,"COST") || strstr(t,"价格") || strstr(t,"BANK")))color=UI_GOLD;
     const char* p = t;
     while (*p) {
         unsigned int cp = CjkDecodeOne(&p);
@@ -256,3 +260,27 @@ void PutTextRaw(int x, int y, const char* t, unsigned int color) {
 int TextWidthRaw(const char* t) {
     return (int)strlen(t) * FONT_W;
 }
+
+int TextSmallLiteralWidth(const char* text) { return TextBaseWidth(text)+2; }
+void DrawTextSmallLiteralWin(int x,int y,const char* text,unsigned int color) {
+    if(!text || winW<=0 || winH<=0)return;
+    UiTrack(x,y,TextSmallLiteralWidth(text),FONT_H+2,text);
+    DrawUiTextRaw(x*renderW/winW,y*renderH/winH,text,color,1);
+}
+void UiTrimSmallText(char* text,int width) {
+    if(!text)return;
+    while(text[0] && TextSmallLiteralWidth(text)>width) {
+        size_t n=strlen(text)-1;
+        while(n>0 && ((unsigned char)text[n]&0xC0)==0x80)n--;
+        text[n]=0;
+    }
+}
+
+static int MediumScale(void){return renderW*4>=winW*3?2:1;}
+int TextMediumLiteralWidth(const char* text){return (TextBaseWidth(text)+2)*MediumScale()*winW/(renderW>0?renderW:1);}
+void DrawTextMediumLiteralWin(int x,int y,const char* text,unsigned int color){
+    if(!text || winW<=0 || winH<=0)return;
+    DrawUiTextRaw(x*renderW/winW,y*renderH/winH,text,color,MediumScale());
+}
+
+int TextMediumLiteralHeight(void){return FONT_H*MediumScale()*winH/(renderH>0?renderH:1);}

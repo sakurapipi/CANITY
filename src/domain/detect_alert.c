@@ -68,10 +68,7 @@ int DetectAlertTick(float dt) {
     if (found > 0) {
         s_age = 0.0f;
         /* 玩家反馈「不知道被谁盯上」——这里给一句能立刻照做的提示 */
-        pickupMsg = (g_lang == LANG_ZH)
-            ? "它盯上你了 —— 断视线，或者躲进柜子"
-            : "IT SAW YOU - break line of sight, or hide";
-        pickupMsgTimer = 1.8f;
+        /* Encounter narration removed; preserve detection age for mechanics. */
     } else if (s_age < 1.0e8f) {
         s_age += dt;
     }

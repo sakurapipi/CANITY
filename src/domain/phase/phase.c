@@ -9,6 +9,7 @@
  * 不要显式 include <math.h>：分区契约 S1 要求系统头只在 common.h。
  */
 #include "common.h"
+#include "tutorial.h"
 #include "loop_api.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -106,7 +107,7 @@ void PhaseOnThrowLanded(int kind, float lx, float ly) {
          * 现在落地时就用**同一套判据**挑格子；四邻找不到再扩到 8 邻、
          * 半径 2 格。真的没有可站格才拒绝（并明确提示）。
          * ============================================================== */
-        extern int PropBlocksAt(int px, int py);
+
         static const int dx8[8] = { 1, -1, 0, 0, 1, 1, -1, -1 };
         static const int dy8[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
         int step, k;
@@ -189,7 +190,7 @@ int PhaseTryTeleport(void) {
      * 真的变成墙（比如期间塌过）才拒绝。
      * ================================================================ */
     {
-        extern int PropBlocksAt(int x, int y);
+
         int cx = (int)floorf(phaseX), cy = (int)floorf(phaseY);
         if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) return 0;
         if (worldMap[cy][cx]) return 0;
@@ -208,5 +209,5 @@ int PhaseTryTeleport(void) {
     if (phaseCharges <= 0) phaseOwned = 0;   /* 用完即消失 */
 
     UnstickPlayer();
-    return 1;
+    TutorialRecordAction(TUTOR_PHASE);return 1;
 }

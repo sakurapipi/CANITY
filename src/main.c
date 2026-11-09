@@ -10,6 +10,7 @@
  * 模块划分见 common.h 顶部注释。
  */
 #include "common.h"
+#include "diagnostics.h"
 #include "skills.h"
 #include "entity.h"
 #include "loop_api.h"
@@ -24,6 +25,8 @@
 #include "save.h"
 #include "steam_zone.h"
 #include "music.h"
+#include "monster_rules.h"
+#include "calibration.h"
 #include "shop.h"
 
 /* ==================================================================
@@ -51,7 +54,6 @@ static int FileExists(const char* path) {
 /* ===== 崩溃定位器 =====
    崩溃时把「异常地址 - 模块基址」写进 canity_crash.txt。
    canity.exe 没有 strip，拿到 RVA 就能用 nm 反查到函数名。 */
-volatile int g_dbgMark = 0;   /* 崩溃现场标记：最后执行到哪一步 */
 LONG WINAPI CanityCrashHandler(EXCEPTION_POINTERS* ep) {
     /* v6 第 ㊽ 轮：**崩溃日志必须落在 exe 旁边**
        原来写的是当前工作目录 —— 从别处启动就找不到，
@@ -98,7 +100,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     /* 2026-11-05：云->本地的回写搬到存档分区了。
        顺序很重要：必须在 LoadSettings() **之前**跑完，
        否则读到的还是旧档、云端赢的那份要等下次启动才生效。 */
-    { extern void SaveBackendSyncAll(void); SaveBackendSyncAll(); }
+    {  SaveBackendSyncAll(); }
     InitAchievements();
     hasSave = LoadSettings();
 
@@ -140,9 +142,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     InitAchievements();          /* 只填静态字段，不覆盖存档里的进度 */
-    InitAudio();
     MusicInit();
     MusicLoadGameTracks();
+    InitAudio();
 
     InitPixels();
     SpritesInit();   /* v2.1：烘焙精灵（一次性，约 40~80ms） */
@@ -232,12 +234,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         if(currentState==STATE_GAMEOVER) scene=gameWon?MUSIC_VICTORY:MUSIC_DEFEAT;
         else if(currentState==STATE_SAFEHOUSE) scene=MUSIC_SAFE;
         else if(currentState==STATE_PLAYING || currentState==STATE_PAUSED || currentState==STATE_SKILL_PICK) {
-            scene=(monster.active && monster.state==2) || (lightBeast.active && lightBeast.state==2) ? MUSIC_CHASE : MUSIC_EXPLORE;
+            scene=(MonsterChaseActive() || sanity<fmaxf(1,SanityMax())*.28f) ? MUSIC_CHASE : MUSIC_EXPLORE;
         }
+        int pausedAudio=currentState==STATE_PAUSED || ((currentState==STATE_SETTINGS || currentState==STATE_HELP) && prevState==STATE_PAUSED);
+        if(calibActive || pausedAudio)scene=MusicCurrentScene();
         MusicSetScene(scene);
         MusicSetMasterVolume(musicVolumeF);
-        MusicSetPaused(currentState==STATE_PAUSED || (g_hwnd && IsIconic(g_hwnd)));
+        MusicSetPaused(pausedAudio || (g_hwnd && IsIconic(g_hwnd)));
         MusicTick((float)dt);
+        AudioMaintain();
         if (dt > 0.25) dt = 0.25;
         if (dt < 0.0) dt = 0.0;
 
@@ -340,10 +345,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (currentState == STATE_PLAYING || currentState == STATE_PAUSED) SaveGame();
     PlatShutdown();
     free(vignetteMask);
+    ShutdownAudio();
     MusicShutdown();
     SteamZoneStoreStats();
     SteamZoneShutdown();
-    ShutdownAudio();
     ShutdownWorkers();
     timeEndPeriod(1);
     return 0;

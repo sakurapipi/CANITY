@@ -14,6 +14,7 @@
 
 #define SPR_W 128
 #define SPR_H 128
+#define SPR_CREATURE_SCALE 4 /* 512px actors; props/UI keep their existing resolution. */
 #define SPR_SHADES 24      /* 亮度档数，blit 时查表，不做逐像素浮点乘 */
 
 typedef struct {
@@ -109,6 +110,8 @@ enum {
     /* 2026-11-06（用户要求）：缚丝蛛的世界模型。
        之前它只有逻辑、没有建模 —— 玩家完全看不见它。 */
     SPR_PROP_SPIDER,
+    SPR_ROOM_BOILER, SPR_ROOM_ARCHIVE, SPR_ROOM_COIL, SPR_ROOM_MEDBED, SPR_ROOM_PRISM, SPR_ROOM_ALTAR, SPR_ROOM_HEART,
+    SPR_MON_PARASITE, SPR_MON_WARDEN_CHASE,
     SPR_COUNT
 };
 
@@ -119,6 +122,11 @@ int    SpritesReady(void);
 /* 运行时绘制：双线性采样 + 亮度查表 + alpha + 可选深度测试 */
 void DrawSprite(int id, int x, int y, int w, int h,
                 float light, float alpha, int zTest, float zDist);
+
+/* Render-only deformation. Collision, world location and AI remain untouched. */
+typedef struct { float time, stride, activity; int mirror; } SpritePose;
+void DrawSpriteCreature(int id,int x,int y,int w,int h,float light,float alpha,
+                        int zTest,float zDist,unsigned int tint,float tintMix,const SpritePose* pose);
 
 /* 带色调偏移的版本（Boss 换色、受击闪白） */
 void DrawSpriteTint(int id, int x, int y, int w, int h,

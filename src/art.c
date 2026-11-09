@@ -8,6 +8,7 @@
  * 共享算法集中管理，具体表现留在实际负责的模块。
  */
 #include "common.h"
+#include "entity.h"
 #include "art.h"
 
 /* ================================================================== */
@@ -36,7 +37,7 @@ const unsigned int ART_BEAM         = 0x0060F0D0u;  /* 光柱 */
  *   2.5 格内全亮 / 11 格外只剩 5%
  */
 float ArtMonsterLight(float wx, float wy) {
-    extern float posX, posY;
+
     float dx = wx - posX, dy = wy - posY;
     float dist = sqrtf(dx * dx + dy * dy);
     if (dist <= 2.5f) return 1.0f;
@@ -52,7 +53,7 @@ float ArtMonsterLight(float wx, float wy) {
  *   3.5 格内全亮 / 13 格外剩 12%
  */
 float ArtPropLight(float wx, float wy) {
-    extern float posX, posY;
+
     float dx = wx - posX, dy = wy - posY;
     float dist = sqrtf(dx * dx + dy * dy);
     if (dist <= 3.5f) return 1.0f;

@@ -1,0 +1,55 @@
+{
+  "composer": "CANITY original procedural score",
+  "version": 1,
+  "algorithm": "tools/compose_score.py",
+  "tracks": {
+    "menu": {
+      "bpm": 72,
+      "seconds": 80.0,
+      "wav_sha256": "f2beffcce1db90835b0a64d0b9a4e2fd9a0a985d80d8a5b1330b37e7b296fabf",
+      "rms_dbfs": -17.059,
+      "peak_dbfs": -1.0,
+      "notes": 94
+    },
+    "explore": {
+      "bpm": 80,
+      "seconds": 72.0,
+      "wav_sha256": "9a1e70870a4b2078700a5403dc0e2f52a4b8f18c8b0d545237a926529e0186e3",
+      "rms_dbfs": -17.596,
+      "peak_dbfs": -1.0,
+      "notes": 88
+    },
+    "chase": {
+      "bpm": 120,
+      "seconds": 80.0,
+      "wav_sha256": "f6894a90e801708de03865769c71bd5aa676cb3896c9b0b95869b9dfd475afba",
+      "rms_dbfs": -17.0,
+      "peak_dbfs": -2.796,
+      "notes": 108
+    },
+    "safe": {
+      "bpm": 64,
+      "seconds": 75.0,
+      "wav_sha256": "db5d04c6dbbde76349b62deb7367abc1fd7293ddbdc0740b1f1ddeb60f14954b",
+      "rms_dbfs": -17.0,
+      "peak_dbfs": -3.849,
+      "notes": 86
+    },
+    "victory": {
+      "bpm": 80,
+      "seconds": 72.0,
+      "wav_sha256": "c2bd24eee82659e4d9c78a46fe9891209f704cc8bd272662d8eff655eccdef21",
+      "rms_dbfs": -17.0,
+      "peak_dbfs": -1.631,
+      "notes": 80
+    },
+    "defeat": {
+      "bpm": 60,
+      "seconds": 80.0,
+      "wav_sha256": "5f86d3b5641d67d9912d45203ebb4bde05a4111e0229a55d141557943d340e05",
+      "rms_dbfs": -17.0,
+      "peak_dbfs": -2.74,
+      "notes": 102
+    }
+  }
+}

@@ -33,6 +33,8 @@ void MusicSetPaused(int paused);
 void MusicDuck(float seconds,float gain);
 void MusicNotify(MusicEvent event);
 void MusicTick(float dt);
+void MusicSeekSeconds(float seconds);
+int MusicCanCalibrate(void);
 float MusicEffectiveGain(void);
 MusicScene MusicCurrentScene(void);
 MusicProviderId MusicCurrentProvider(void);

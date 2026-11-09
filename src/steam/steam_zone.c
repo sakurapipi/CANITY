@@ -585,12 +585,4 @@ void SteamZoneUploadSave(const char* path) {
     const char* name=strrchr(path,'\\');name=name?name+1:path;
     SteamZoneCloudUpload(name,p,bytes);free(p);
 }
-/* 2026-11-05：云->本地的回写已搬到**存档分区的后端**
-   （src/save/save_backend.c 的 SaveBackendSyncAll）。
-
-   为什么搬：这一步要**写本地存档文件**，而存档文件只允许后端写
-   （原来这里用裸 fopen，绕过了 tmp+fsync+原子改名和 .bak 链）。
-   现在 Steam 专区只做它该做的事：传输原语 + 冲突判定。
-
-   对外接口变化：调用方把 SteamZoneSyncLocalSaves() 换成 SaveBackendSyncAll()。 */
-
+/* Cloud transport owns transfer/conflict handling; local persistence uses SaveBackendSyncAll. */

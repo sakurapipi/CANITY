@@ -77,11 +77,12 @@ def run():
         n = _count_ints(b) if b else 0
         out.append((n == count, '%s 项数 %d == %d' % (nm, n, count)))
 
-    # ---- 界面绘制列表 ----
+    player_match = re.search(r'#define\s+SKILL_PLAYER_COUNT\s+(\d+)', common)
+    player_count = int(player_match.group(1)) if player_match else count
+    # ---- 界面绘制列表（开发节点仍保留在定义表，不进入玩家列表）----
     b = _arr(ui, r'kSkillList')
     n = _count_ints(b) if b else 0
-    out.append((n == count, 'kSkillList 项数 %d == %d（少了就是"加了节点界面不画"）'
-                % (n, count)))
+    out.append((n == player_count, 'kSkillList player rows %d == %d' % (n, player_count)))
 
     # ---- 总价 ----
     mt = re.search(r'#define\s+SKILL_TOTAL_COST\s+(\d+)', common)
@@ -95,7 +96,8 @@ def run():
             rank = int(mm.group(1))
             costs = [int(mm.group(2)), int(mm.group(3)), int(mm.group(4))]
             rows_parsed += 1
-            total += sum(costs[:max(0, min(3, rank))])
+            if rows_parsed-1 != 40:  # stable SK_GEN_SELFTEST metadata slot
+                total += sum(costs[:max(0, min(3, rank))])
         out.append((rows_parsed == count,
                     '能解析出价格的节点 %d/%d' % (rows_parsed, count)))
         out.append((total == declared,

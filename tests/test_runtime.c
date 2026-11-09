@@ -44,6 +44,9 @@ void TestSuite_save(void);
 void TestSuite_collapse(void);
 void TestSuite_hatch(void);
 void TestSuite_phase(void);
+void TestSuite_delivery(void);
+void TestSuite_existing_save(void);
+void TestSuite_legacy_fixtures(void);
 
 extern int carryAtRunStart,exitGoDeeper,exitChoiceOpen;
 extern int knockCountRun,throwHitCountRun,echoCellsTotalRun;
@@ -551,7 +554,7 @@ int fixture_copy(const char* from, const char* to) {
 
 void finish_floor(void) {
     currentState=STATE_PLAYING;flashTime=0.0f;exitChoiceOpen=0;exitGoDeeper=1;breakerOpen=1;
-    posX=exitX;posY=exitY;sanity=SanityMax();monster.active=lightBeast.active=0;WardenReset();
+    posX=exitX;posY=exitY;sanity=SanityMax();Hunter0()->active=lightBeast.active=0;WardenReset();
     memset(keyPressed,0,sizeof(keyPressed));Update(0.008f);
 }
 
@@ -1017,11 +1020,31 @@ static void test_cloud_decide_length(void) {
 
 
 
-int main(void) {
+int main(int argc,char** argv) {
     CHECK(getenv("CANITY_DATA_DIR")!=NULL,"tests require isolated save directory");
     srand(1234);InitAchievements();InitPixels();
+    if(argc==3 && !strcmp(argv[1],"--suite")){
+        const char* name=argv[2];
+        if(!strcmp(name,"base")){test_cloud_decide_length();test_sound_event_center();test_audio_pan_math();}
+        else if(!strcmp(name,"phase"))TestSuite_phase();
+        else if(!strcmp(name,"hatch"))TestSuite_hatch();
+        else if(!strcmp(name,"collapse"))TestSuite_collapse();
+        else if(!strcmp(name,"throwing"))TestSuite_throwing();
+        else if(!strcmp(name,"core"))TestSuite_core();
+        else if(!strcmp(name,"ui"))TestSuite_ui();
+        else if(!strcmp(name,"update"))TestSuite_update();
+        else if(!strcmp(name,"progress"))TestSuite_progress();
+        else if(!strcmp(name,"actors"))TestSuite_actors();
+        else if(!strcmp(name,"world"))TestSuite_world();
+        else if(!strcmp(name,"save"))TestSuite_save();
+        else if(!strcmp(name,"delivery"))TestSuite_delivery();
+        else if(!strcmp(name,"existing_save"))TestSuite_existing_save();
+        else if(!strcmp(name,"legacy_fixtures"))TestSuite_legacy_fixtures();
+        else {fprintf(stderr,"Unknown runtime suite: %s\n",name);return 2;}
+        printf("CANITY runtime suite %s: PASS (%d checks)\n",name,checks);return 0;
+    }
     test_cloud_decide_length();test_sound_event_center();test_audio_pan_math();
     TestSuite_phase();TestSuite_hatch();TestSuite_collapse();TestSuite_throwing();
-    TestSuite_core();TestSuite_ui();TestSuite_update();TestSuite_progress();TestSuite_actors();TestSuite_world();TestSuite_save();
+    TestSuite_core();TestSuite_ui();TestSuite_update();TestSuite_progress();TestSuite_actors();TestSuite_world();TestSuite_save();TestSuite_delivery();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

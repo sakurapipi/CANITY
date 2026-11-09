@@ -44,7 +44,7 @@ typedef enum {
     CK_COUNT
 } ContentKind;
 
-/* 每一类最多登记多少条 */
+/* Per-kind capacity: CK_COUNT independent tables, not 128 entries shared globally. */
 #define CONTENT_MAX 128
 
 /* 清空整张表（测试与新局用） */

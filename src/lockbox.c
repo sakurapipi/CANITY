@@ -6,6 +6,7 @@
  * 抄过来的逻辑一行都不用改。
  */
 #include "common.h"
+#include "wallet.h"
 #include "lockbox.h"
 #include "loop_api.h"
 #include "player_api.h"
@@ -118,9 +119,9 @@ void LockOpenFor(int idx, int type) {
        鼠标还被锁在屏幕中心做视角控制，玩家既看不到指针也移不动，
        于是「锁盘每一个按钮都点不到」。 */
     {
-        extern int isCharging;
-        extern float mouseCharge;
-        extern int firstMouseMove;
+
+
+
         isCharging = 0;          /* 开锁时不能带着投掷蓄力 */
         mouseCharge = 0.0f;
         ForceCursor(1);
@@ -171,7 +172,7 @@ void CloseLockOverlay(void) {
        E 还按着 -> 自动重复再置 keyPressed -> 藏身分支接管。
        这里上 0.4 秒封锁，等玩家松手。 */
     {
-        extern float hideBlockTimer;
+
         hideBlockTimer = 0.4f;
     }
     if (wasActive) {
@@ -200,12 +201,12 @@ static void LockUnlock(int idx) {
     locksOpened++;              /* LOCKSMITH 成就 */
     /* v3.4：解谜给金币 —— 40 + 层数×5。解谜是主动技能，比搜箱子值钱。 */
     {
-        extern int carryGold, totalGoldEarned, currentLevel;
+
         int gld = (int)(GOLD_LOCK_BASE + GOLD_LOCK_STEP * (float)currentLevel + 0.5f);
-        carryGold += gld;
+        WalletAddRun(gld);
         totalGoldEarned += gld;
-        extern const char* pickupMsg;
-        extern float pickupMsgTimer;
+
+
         pickupMsg = "LOCK +GOLD";
         pickupMsgTimer = 1.4f;
     }
@@ -389,8 +390,8 @@ static LockBox LockHandleBarBox(void) {
 
 /* ---- 过载：过红线的惩罚 ---- */
 static void OverloadBlow(void) {
-    extern float battery;
-    extern float sanity;
+
+
     lockOvFlash = 0.45f;
     lockOvVal   = 0.0f;
     battery -= 10.0f;
@@ -466,7 +467,7 @@ void LockTick(float dt) {
     }
 
     if (lockType == LOCK_TYPE_SAW) {
-        extern float gameTime;
+
         /* 节拍标记来回摆 —— 玩家要「跟着节拍的方向」拖鼠标 */
         float ph = gameTime * (2.0f * 3.14159265f * LOCK_SAW_BEAT_HZ);
         lockSawBeat = 0.5f + 0.5f * sinf(ph);

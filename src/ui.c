@@ -5,6 +5,10 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "monster_rules.h"
+#include "hush.h"
+#include "room_theme.h"
+#include "perception.h"
 #include "item_effects.h"
 #include "run_rewards.h"
 #include "state.h"
@@ -92,36 +96,7 @@ static const char* themeNames[THEME_COUNT] = {
    所以统一在绘制前剪一次，末尾用 ".." 表示省略。 */
 
 /* v2.9：技能树节点名的中文并列表（SkillDef 没中文字段，这里按英文名查） */
-static const char* SkillNameZh(const char* en) {
-    /* v6：**按新的 20 个节点重写** ——
-       原来 10 条里 6 条是已删节点的旧名（TYPE WORK / CARTOGRAPHER …），
-       20 个节点只有 4 个有中文，中文模式下技能树 16 个名字是英文。 */
-    static const char* tbl[][2] = {
-        { "LIGHT STEP",  "轻步" },
-        { "QUIET LID",   "静盖" },
-        { "GHOST STEP",  "鬼步" },
-        { "DECOY",       "诱饵" },
-        { "WEATHERMAN",  "观测者" },
-        { "SIPHON",      "虹吸" },
-        { "CRANK WALK",  "摇电行走" },
-        { "REST",        "休整" },
-        { "METABOLISM",  "代谢" },
-        { "LAST RES",    "绝境反击" },
-        { "BREATH",      "屏息" },
-        { "STILL FACE",  "静面" },
-        { "SLIP AWAY",   "滑脱" },
-        { "PLAY DEAD",   "装死" },
-        { "SALVAGE",     "打捞" },
-        { "CARTO",       "制图" },
-        { "BREAKER",     "配电子" },
-        { "FUSE SMITH",  "保险丝匠" },
-        { "SHORTCUT",    "捷径" },
-        { "SILENT RUN",  "无声疾行" },
-    };
-    for (int i = 0; i < (int)(sizeof(tbl) / sizeof(tbl[0])); i++)
-        if (strcmp(tbl[i][0], en) == 0) return tbl[i][1];
-    return en;
-}
+
 
 
 
@@ -218,19 +193,11 @@ int UIS(int v) {
 
 
 /* 分支主色：只用在标题、进度条、连线上，不参与节点状态色 */
-static const unsigned int kBranchColor[7] = {   /* v6：5 项（branch=4 = 跨支行） */
-    0x0040D8FFu,   /* A 潜行 青 */
-    0x0050E070u,   /* B 续航 绿 */
-    0x00FF6050u,   /* C 反击 红 */
-    0x00B080FFu,   /* 跨支   紫 */
-    0x00FF9050u, 0x00C080FFu, 0x00808088u /* risk, cross, origin */
-};
+static const unsigned int kBranchColor[7] = {0x79CDF2,0xB8D9FA,0xE8ADB7,0xB6BBC9,0xD0C6ED,0x98D8C8,0xF1F5FF};
 /* v2.9：分支名走翻译（原来只有英文） */
 /* v3.3：第 3 列从「伤害交付」改成「藏匿脱身」后，表头没跟着改 ——
    界面上写 DELIVERY，里面却是 HOLD BREATH / STILL FACE / SLIP AWAY /
    PLAY DEAD（见 skills.c 的「列 2：隐」）。改成 CONCEAL。 */
-static const char* kBranchName[7] = { "SILENCE", "ECONOMY", "CONCEAL", "SHAPE", "RISK", "CROSS", "ORIGIN" };
-static const char* kBranchNameZh[7] = { "沉寂", "节流", "藏匿", "塑形", "冒险", "跨支", "起点" };
 
 /* 面板内竖向预算，单位 = TH/10。
  *   TEXT 部分（文字行 + 跨支行高度）不吃压缩
@@ -274,8 +241,7 @@ static const int kSkillList[] = {
        注释却说"加节点不用改这里" —— 所以新节点一直没被画出来（界面显示 1/30）。 */
     30, 31, 32, 33,      /* 幽灵：呼吸同步 / 影步 / 静默落地 / 无形 */
     34, 35, 36,          /* 掠夺者：典当 / 赌徒 / 金币即力量 */
-    37, 38, 39           /* 反击者：挣脱 / 以牙还牙 / 反杀 */,
-    40,
+    37, 38, 39           /* 反击者：挣脱 / 以牙还牙 / 反杀 */,41,42,43,44,45,46,47,48,49,50
 };
 #define SKILL_LIST_COUNT ((int)(sizeof(kSkillList) / sizeof(kSkillList[0])))
 
@@ -290,7 +256,7 @@ static const int kSkillList[] = {
  * 各自为政。这一行让它们一旦不一致就**编译不过**。
  * ================================================================ */
 typedef char skill_list_must_cover_all_nodes[
-    (sizeof(kSkillList) / sizeof(kSkillList[0]) == SKILL_COUNT) ? 1 : -1];
+    (sizeof(kSkillList) / sizeof(kSkillList[0]) == SKILL_PLAYER_COUNT) ? 1 : -1];
 /* v6：中心节点取代原来的"跨支行" */
 #define SKILL_CROSS_ID 25
 
@@ -608,7 +574,7 @@ MenuGeo GetMenuGeo(void) {
             g.titleY=g.panel.top+UIS(14);
             g.firstY=g.titleY+TextHeightWin()+UIS(32);
             g.count=g.maxVisibleRows=BESTIARY_COUNT+1;
-            g.rowH=(g.panel.bottom-g.firstY-TextHeightWin()*3-UIS(20))/g.count;
+            g.rowH=(g.panel.bottom-g.firstY-TextHeightWin()-UIS(16))/g.count;
             g.scrollOffset=0; return g;
         }
         case STATE_HELP:      return MakeGeo(helpPage == 1 ? Tr("HELP  -  RULES", "帮助  -  规则") : Tr("HELP  -  CONTROLS", "帮助  -  按键"),
@@ -728,6 +694,7 @@ RECT RowRect(MenuGeo g, int i) {
     if (leftPad > UIS(400)) leftPad = UIS(400);
     r.left = g.panel.left + leftPad;
     r.right = g.panel.right - UIS(18);
+    if (currentState == STATE_BESTIARY) r.right = g.panel.left + (g.panel.right-g.panel.left)*32/100 - UIS(8);
     if (r.right <= r.left) r.right = r.left + 1;
 
     int rowH = g.rowH;
@@ -825,8 +792,8 @@ void DrawCalibBar(int bx, int by, int barW, int barH) {
 
 
 void DrawPageTabs(void) {
-    static const char* names[SAFEHOUSE_PAGES] = { "SHOP", "BENCH", "TREE", "REST", "UPGRADE" };
-    static const char* namesZh[SAFEHOUSE_PAGES] = { "商店", "改装", "改造树", "休息", "强化" };
+    static const char* names[SAFEHOUSE_PAGES] = { "SUPPLIES", "RUN TREE", "RECOVERY", "UPGRADES" };
+    static const char* namesZh[SAFEHOUSE_PAGES] = { "补给商店", "局内技能", "休整服务", "属性强化" };
 
     int th = TextHeightWin();
     int x0, y0, x1, y1;
@@ -834,23 +801,23 @@ void DrawPageTabs(void) {
 
     /* 左侧竖分隔线：把 sidebar 和内容区切开 */
     int sepX = x1 + UIS(10);
-    BlendRectWin(sepX, y0 - UIS(8), sepX + 1, winH - UIS(40), 0x00C8B060u, 0.45f);
+    BlendRectWin(sepX, y0 - UIS(8), sepX + 1, winH - UIS(40), UI_ACCENT, 0.45f);
 
     for (int i = 0; i < SAFEHOUSE_PAGES; i++) {
         PageTabRect(i, &x0, &y0, &x1, &y1);
-        int active = (shopPage == i);
+        int active = (shopPage == ShopPageAtTab(i));
         int hover  = (safehouseHoverTab == i);
 
         BlendRectWin(x0, y0, x1, y1,
-                     active ? 0x00C8A040 : (hover ? 0x00303838 : 0x00161C1C),
+                     active ? UI_ACCENT : (hover ? 0x00303838 : UI_BG_PANEL),
                      active ? 0.95f : 0.85f);
         FrameRectWin(x0, y0, x1, y1,
-                     active ? PAL_GOLD : (hover ? PAL_CYAN : PAL_DIM),
+                     active ? UI_ACCENT : (hover ? PAL_CYAN : PAL_DIM),
                      0.9f, active ? 2 : 1);
 
         /* 选中时左侧加一根粗竖条，扫一眼就知道在哪一页 */
         if (active) {
-            BlendRectWin(x0 - UIS(6), y0, x0 - UIS(1), y1, 0x00FFE070u, 0.95f);
+            BlendRectWin(x0 - UIS(6), y0, x0 - UIS(1), y1, UI_ACCENT, 0.95f);
         }
 
         const char* t = Tr(names[i], namesZh[i]);
@@ -869,7 +836,7 @@ void DrawPopupPanel(void) {
     const SettingItem* it = &settings[popupItem];
 
     BlendRectWin(p.panel.left, p.panel.top, p.panel.right, p.panel.bottom, 0x0004080c, 1.0f);
-    FrameRectWin(p.panel.left, p.panel.top, p.panel.right, p.panel.bottom, PAL_PANEL, 0.95f, UIS(2));
+    FrameRectWin(p.panel.left, p.panel.top, p.panel.right, p.panel.bottom, UI_EDGE, 0.95f, UIS(2));
 
     if (it->kind == SET_SLIDER) {
         RECT t = SliderTrackRect(p);
@@ -906,7 +873,7 @@ void DrawTextInRow(const char* text, RECT row, unsigned int color) {
 /* 这一步能不能买（含"花 3 核心换 keystone"） */
 static int SkillNodeBuyable(int id) {
     if (SkillCanBuy(id)) return 1;
-    return SkillSwitchable(id) ? 1 : 0;
+    return SkillSwitchable(id) && WalletCanPayBank(SKILL_SWITCH_COST);
 }
 
 
@@ -928,7 +895,7 @@ static int SkillNodeBuyable(int id) {
    而且没法缩放。改成固定世界网格后，缩放/平移只是改 VK/VX/VY。 */
 #define SK_WX      210.0f    /* 世界网格：列间距 */
 #define SK_WY      120.0f    /* 世界网格：行间距 */
-#define SK_K_MIN   0.45f
+#define SK_K_MIN   0.18f
 #define SK_K_MAX   2.60f
 
 static float skVX = 0.0f, skVY = 0.0f, skVK = 1.0f;
@@ -944,6 +911,13 @@ static int   skDragging = 0;
 static float skDragMouseX = 0.0f, skDragMouseY = 0.0f;
 static float skDragVX = 0.0f, skDragVY = 0.0f;
 
+static void SkillNodeSize(int* width, int* height) {
+    float scale = skVK < SK_NODE_K ? skVK : SK_NODE_K;
+    int w = (int)(SK_WX * .55f * scale), h = (int)(SK_WY * .62f * scale);
+    if (w < 26) w = 26;
+    if (h < 18) h = 18;
+    *width=w; *height=h;
+}
 /* ==================================================================
  * v6 **辐射布局**：四个方向各一条支线，联动节点在两支之间
  * ==================================================================
@@ -979,21 +953,35 @@ int  SkillViewZoom(void)  { return (int)(skVK * 100.0f); }
 void SkillCenterOn(int id) {
     float wx, wy;
     SkillWorldPos(id, &wx, &wy);
-    int nodeW = (int)(SK_WX * 0.55f * SK_NODE_K);
-    int nodeH = (int)(SK_WY * 0.62f * SK_NODE_K);
+    int nodeW, nodeH; SkillNodeSize(&nodeW,&nodeH);
     skVX = (float)winW * 0.50f - (wx * skVK + (float)nodeW * 0.5f);
     skVY = (float)winH * 0.42f - (wy * skVK + (float)nodeH * 0.5f);
     uiDirty = 1;
 }
 
 void SkillResetView(void) {
-    /* v6：**不再是「把树丢回世界原点」** ——
-       那是原来 HOME 的行为，按一下整棵树跑到屏幕左上角。
-       现在 HOME = 回到当前选中的技能，缩放回到 0.85。 */
-
-    skVK = 0.78f;
-    SkillCenterOn(hubSelection);
+    float minX=1e9f,minY=1e9f,maxX=-1e9f,maxY=-1e9f;
+    for (int id=0; id<SKILL_COUNT; id++) {
+        if(!SkillIsPlayerFacing(id))continue;
+        float x,y; SkillWorldPos(id,&x,&y);
+        if(x<minX)minX=x;
+        if(x>maxX)maxX=x;
+        if(y<minY)minY=y;
+        if(y>maxY)maxY=y;
+    }
+    SkillTreeLayout layout; SkillTreeCompute(&layout);
+    int th=TextHeightWin();
+    float top=layout.curY+th*2.0f, bottom=layout.panel.bottom-th*5.0f;
+    skVK=(layout.panel.right-layout.panel.left-100.0f)/(maxX-minX+120.0f);
+    float ky=(bottom-top)/(maxY-minY+100.0f);
+    if(ky<skVK)skVK=ky;
+    if(skVK<SK_K_MIN)skVK=SK_K_MIN;
+    if(skVK>SK_NODE_K)skVK=SK_NODE_K;
+    skVX=winW*.5f-(minX+maxX)*.5f*skVK;
+    skVY=(top+bottom)*.5f-(minY+maxY)*.5f*skVK;
+    uiDirty=1;
 }
+
 void SkillPanBy(float dx, float dy) { skVX += dx; skVY += dy; uiDirty = 1; }
 void SkillZoomAt(float factor, int mx, int my) {
     float k0 = skVK, k2 = k0 * factor;
@@ -1071,7 +1059,7 @@ void DrawHubZoomButtons(void) {
         BlendRectWin(x0, y0, x1, y1, 0x00101418u, 0.88f);
         FrameRectWin(x0, y0, x1, y1, 0x00607080u, 0.95f, UIS(2));
         DrawTextCenterWin((x0 + x1) / 2, (y0 + y1) / 2 - TextHeightWin() / 2,
-                          which == 0 ? "+" : "-", 0x00E8C040u);
+                          which == 0 ? "+" : "-", UI_ACCENT);
     }
 }
 
@@ -1114,7 +1102,7 @@ int SkillDragWasClick(void) {
     float dy = skVY - skDragVY;
     if (dx < 0) dx = -dx;
     if (dy < 0) dy = -dy;
-    return (dx < 4.0f && dy < 4.0f) ? 1 : 0;
+    return skDragging && dx<4.0f && dy<4.0f;
 }
 int  SkillIsDragging(void) { return skDragging; }
 
@@ -1198,12 +1186,12 @@ static void DrawExitChoice(void) {
     BlendRectWin(x - UIS(3), y - UIS(3), x + w + UIS(3), y + h + UIS(3),
                  0x00000000u, 0.55f * fade);
     BlendRectWin(x, y, x + w, y + h, 0x0012181Bu, 0.98f * fade);
-    FrameRectWin(x, y, x + w, y + h, 0x00E8C040u, 0.95f * fade, UIS(2));
+    FrameRectWin(x, y, x + w, y + h, UI_ACCENT, 0.95f * fade, UIS(2));
 
     /* 四角短标：像素面板的标志性细节 */
     {
         int arm = UIS(12), t = UIS(2);
-        unsigned int cc = 0x00FFD040u;
+        unsigned int cc = UI_ACCENT;
         BlendRectWin(x, y, x + arm, y + t, cc, 0.9f * fade);
         BlendRectWin(x, y, x + t, y + arm, cc, 0.9f * fade);
         BlendRectWin(x + w - arm, y, x + w, y + t, cc, 0.9f * fade);
@@ -1219,7 +1207,7 @@ static void DrawExitChoice(void) {
     int curY   = y + PAD;
 
     /* ---- 标题 ---- */
-    DrawTextWin(leftX, curY, Tr("THE EXIT IS OPEN", "出口已开"), 0x00FFD040u);
+    DrawTextWin(leftX, curY, Tr("THE EXIT IS OPEN", "出口已开"), UI_ACCENT);
     curY += ROW * 2;          /* 标题后空一行 */
 
     /* ---- 选项 1：撤离 ---- */
@@ -1232,7 +1220,7 @@ static void DrawExitChoice(void) {
         snprintf(lb, sizeof(lb), "%s", Tr("LEAVE NOW", "现在撤离"));
         snprintf(vb, sizeof(vb), "+%d GOLD", quit);
 
-        DrawTextWin(leftX, curY, kb, 0x00E8C040u);
+        DrawTextWin(leftX, curY, kb, UI_ACCENT);
         DrawTextWin(leftX + TextWidthWin("[1] ") + UIS(6), curY, lb, 0x00E0E0E0u);
         DrawTextWin(rightX - TextWidthWin(vb), curY, vb, 0x0060FF90u);
         curY += ROW;
@@ -1247,7 +1235,7 @@ static void DrawExitChoice(void) {
         snprintf(vb, sizeof(vb), Tr("LV %d   x%.2f", "第 %d 层   x%.2f"),
                  currentLevel + 1, ExtractDepthMul(currentLevel + 1));
 
-        DrawTextWin(leftX, curY, kb, 0x00E8C040u);
+        DrawTextWin(leftX, curY, kb, UI_ACCENT);
         DrawTextWin(leftX + TextWidthWin("[1] ") + UIS(6), curY, lb, 0x00E0E0E0u);
         DrawTextWin(rightX - TextWidthWin(vb), curY, vb, 0x00FFA040u);
         curY += ROW * 2;      /* 选项后空一行 */
@@ -1284,8 +1272,7 @@ static void DrawSkillTreeCanvas(const SkillTreeDrawContext* context) {
     int gBot = context->gBot;
     /* ---------- 图区（可缩放/平移） ---------- */
     {
-        int nodeW = (int)(SK_WX * 0.55f * SK_NODE_K);
-        int nodeH = (int)(SK_WY * 0.62f * SK_NODE_K);
+        int nodeW, nodeH; SkillNodeSize(&nodeW,&nodeH);
         if (nodeW < 24) nodeW = 24;
         if (nodeH < 18) nodeH = 18;
         /* ============================================================
@@ -1300,43 +1287,34 @@ static void DrawSkillTreeCanvas(const SkillTreeDrawContext* context) {
         if (gBot < gTop + nodeH) gBot = gTop + nodeH;
 
 
-        /* 连线先画（在节点下面）
-           v6：**改成读邻接表** —— 原来只画 d->prereq 一条线，
-           新增的联动节点（两个邻居）根本画不出来。
-           现在遍历每个节点的所有邻居，有几个画几条。 */
-        for (int k = 0; k < SKILL_LIST_COUNT; k++) {
-            int id = kSkillList[k];
-            const SkillDef* d = &skillDefs[id];
-            (void)d;
-            if (SkillEdgeCount(id) <= 0) continue;
-            float wx1, wy1, wx2, wy2;
-            SkillWorldPos(SkillEdgeNeighbor(id, 0), &wx1, &wy1);
-            SkillWorldPos(id, &wx2, &wy2);
-            int x1 = SkSX(wx1) + nodeW / 2, y1 = SkSY(wy1) + nodeH;
-            int x2_ = SkSX(wx2) + nodeW / 2, y2 = SkSY(wy2);
-            /* ============================================================
-             * v6 第 ㉖ 轮：**连线重画**
-             * ============================================================
-             * 原来：颜色 0x484848、宽度 2px、alpha 0.85，还分成两段 L 形。
-             * 实测截图：整张网看起来是散的 —— 节点之间像没关系。
-             *
-             * 现在：
-             *   · 已点亮 = PAL_GOLD（和节点同一个语言）
-             *   · 未点亮 = 明显可见的灰蓝（不再是 0x484848）
-             *   · 宽度随缩放放大（缩小时看得见）
-             *   · 直角折线保留（赛博朋克电路感），但两段接得更紧
-             * ============================================================ */
-            int lit = (skillRank[id] > 0) && (skillRank[SkillEdgeNeighbor(id, 0)] > 0);
-            unsigned int lc = lit ? PAL_GOLD : 0x00708098u;
-            int lw = (int)(3.0f * skVK);
-            if (lw < 2) lw = 2;
-            if (lw > 8) lw = 8;
-            int midY = (y1 + y2) / 2;
-            BlendRectWin(x1 - lw / 2, y1, x1 + lw / 2, midY + lw / 2, lc, 0.95f);
-            BlendRectWin(x2_ - lw / 2, midY - lw / 2, x2_ + lw / 2, y2, lc, 0.95f);
-            BlendRectWin(x1 - lw / 2, midY - lw / 2, x2_ + lw / 2, midY + lw / 2, lc, 0.95f);
-        }
 
+        /* Only actual prerequisite connections are drawn. */
+        for (int id=0; id<SKILL_COUNT; id++) {
+        if(!SkillIsPlayerFacing(id))continue;
+            RECT target=SkillNodeRect(id);
+            for (int e=0; e<SkillEdgeCount(id); e++) {
+                int pre=SkillEdgeNeighbor(id,e); RECT source=SkillNodeRect(pre);
+                int x0=(source.left+source.right)/2, y0=(source.top+source.bottom)/2;
+                int x1=(target.left+target.right)/2, y1=(target.top+target.bottom)/2;
+                int dx=x1-x0,dy=y1-y0,steps=abs(dx)>abs(dy)?abs(dx):abs(dy);
+                if(steps<1 || steps>12000) continue;
+                int lit=SkillOwned(pre);
+                int route=(id==sel || pre==sel);
+                for(int step=0;step<=steps;step+=3) {
+                    if(!lit && (step/9)%2)continue;
+                    int x=x0+(int)((float)dx*step/steps),y=y0+(int)((float)dy*step/steps);
+                    if(x>=context->innerL && x+2<context->innerR && y>=gTop && y+2<gBot)
+                        BlendRectWin(x,y,x+2,y+2,route?UI_INFO:(lit?UI_ACCENT:0x005C748Bu),.95f);
+                }
+            }
+        }
+        const int tips[3]={SK_GHOST_FORM,SK_RAIDER_POWER,SK_COUNTER_KILL};
+        for(int group=0;group<3;group++) {
+            RECT r=SkillNodeRect(tips[group]); const char* name=SkillArchetypeName(group,0);
+            int x=(r.left+r.right)/2-DrawTextSmallWidth(name)/2, y=r.top-16;
+            if(x>=context->innerL && x+DrawTextSmallWidth(name)<context->innerR && y>=gTop && y+12<gBot)
+                DrawTextSmallWin(x,y,name,UI_ACCENT);
+        }
 
         /* 节点 */
         for (int k = 0; k < SKILL_LIST_COUNT; k++) {
@@ -1358,7 +1336,7 @@ static void DrawSkillTreeCanvas(const SkillTreeDrawContext* context) {
             int x1 = x0 + nw2, y1 = y0 + nodeH;
 
             /* 图区裁剪：超出上下界的整个跳过（不裁剪像素，省开销） */
-            if (y1 < gTop || y0 > gBot) continue;
+            if (y0 < gTop || y1 > gBot || x0 < context->innerL || x1 > context->innerR) continue;
 
             /* ============================================================
              * v6 第 ㉕ 轮：**这里原来绕过调色盘自己写死了一套颜色**
@@ -1371,9 +1349,10 @@ static void DrawSkillTreeCanvas(const SkillTreeDrawContext* context) {
             unsigned int fill = owned ? 0x00384858u : 0x00222834u;
             unsigned int bd;
             if (owned)        bd = PAL_CYAN;
-            else if (canBuy)  bd = (((int)(g_timeSec * 2.0f) & 1)) ? PAL_GOLD : 0x008A7830u;
+            else if (canBuy)  bd = (((int)(g_timeSec * 2.0f) & 1)) ? UI_ACCENT : 0x008A7830u;
             else              bd = 0x008090A0u;      /* 明显可见的灰蓝，不再是 0x404040 */
 
+            if(id>=45){static const unsigned shared[3]={0x006EB9D9u,0x0094B994u,0x00B69ADBu};bd=shared[(id-45)/2];}
             BlendRectWin(x0, y0, x1, y1, fill, 0.92f);
             FrameRectWin(x0, y0, x1, y1, bd, 0.95f, isSel ? 3 : 2);
 
@@ -1382,7 +1361,7 @@ static void DrawSkillTreeCanvas(const SkillTreeDrawContext* context) {
                 char nm[40];
                 /* v6：节点里画短名，详情条才用全长名 */
                 { 
-                  sprintf(nm, "%s", SkillShortName(id)); }
+                  snprintf(nm,sizeof(nm),"%s",SkillShortName(id)); }
                 /* ============================================================
                  * 修：**节点名被截成 3 个字**
                  * ============================================================
@@ -1392,14 +1371,14 @@ static void DrawSkillTreeCanvas(const SkillTreeDrawContext* context) {
                  *
                  * 改用 1x 小字（每个字符 8px），同样宽度能放 8~10 个字符。
                  * ============================================================ */
-                unsigned int tc = owned ? 0x0090FFB0u : (canBuy ? 0x00FFE080u : 0x00787878u);
+                unsigned int tc = owned ? 0x0090FFB0u : (canBuy ? UI_ACCENT : 0x00787878u);
                 {
 
 
-                    int sw = DrawTextSmallWidth(nm);
-                    if (sw > nw2 - 4) ClampRowText(nm, nw2 - 4);
-                    sw = DrawTextSmallWidth(nm);
-                    DrawTextSmallWin((x0 + x1) / 2 - sw / 2,
+                    int sw = TextSmallLiteralWidth(nm);
+                    UiTrimSmallText(nm,nw2-4);
+                    sw = TextSmallLiteralWidth(nm);
+                    DrawTextSmallLiteralWin((x0 + x1) / 2 - sw / 2,
                                      y0 + nodeH / 2 - 6, nm, tc);
                 }
             }
@@ -1422,7 +1401,7 @@ static void DrawSkillTreeCanvas(const SkillTreeDrawContext* context) {
             /* 选中框 */
             if (isSel) {
                 FrameRectWin(x0 - 3, y0 - 3, x1 + 3, y1 + 3, 0x00000000u, 0.85f, 2);
-                FrameRectWin(x0 - 5, y0 - 5, x1 + 5, y1 + 5, 0x00FFE080u, 0.95f, 2);
+                FrameRectWin(x0 - 5, y0 - 5, x1 + 5, y1 + 5, UI_ACCENT, 0.95f, 2);
             }
         }
     }
@@ -1443,8 +1422,8 @@ static void DrawSkillTreeDetails(const SkillTreeDrawContext* context) {
         sprintf(b, "%.2fx", skVK);
         DrawTextWin(innerR - TextWidthWin(b), dy - TH, b, 0x00808080u);
 
-        sprintf(b, "%s   [%s]", Tr(d->name, SkillNameZh(d->name)),
-                Tr(kBranchName[d->branch], kBranchNameZh[d->branch]));
+        sprintf(b, "%s   [%s]", SkillDisplayName(sel),
+                SkillArchetypeName(SkillArchetype(sel), g_lang == LANG_ZH));
         ClampRowText(b, innerR - innerL);
         DrawTextWin(innerL, dy, b, 0x00E8E8E8u);
 
@@ -1460,6 +1439,7 @@ static void DrawSkillTreeDetails(const SkillTreeDrawContext* context) {
          * ================================================================ */
         int costNow = SkillCost(sel);
         if(costNow>=0)costNow+=d->coreCost*GOLD_PER_CORE;
+        if(SkillSwitchable(sel))costNow=SKILL_SWITCH_COST;
 
         {   /* 第二行：描述左，价格右 */
             static char cb[32];
@@ -1467,24 +1447,34 @@ static void DrawSkillTreeDetails(const SkillTreeDrawContext* context) {
             if (costNow >= 0) {
                 sprintf(cb, "%s %d", Tr("COST", "价格"), costNow);
                 cw = TextWidthWin(cb) + UIS(16);
-                DrawTextWin(innerR - TextWidthWin(cb), dy + TH, cb, PAL_GOLD);
+                DrawTextWin(innerR - TextWidthWin(cb), dy + TH, cb, UI_GOLD);
             }
-            sprintf(b, "%s", d->desc);
+            snprintf(b,sizeof(b),"%s",SkillDisplayDescription(sel));
             ClampRowText(b, innerR - innerL - cw);
             DrawTextWin(innerL, dy + TH, b, 0x008A8A8Au);
         }
 
         {
             const char* st; unsigned int sc;
-            if (skillRank[sel] >= d->maxRank) { st = Tr("ALREADY MAXED", "已满级"); sc = 0x0060FF90u; }
-            else if (!(d->prereq < 0 || skillRank[d->prereq] > 0)) { st = Tr("REQUIRES THE NODE ABOVE IT", "需要先点亮上面的节点"); sc = 0x00FF8080u; }
+            if (SkillSwitchable(sel)) { st=WalletCanPayBank(SKILL_SWITCH_COST)?Tr("ENTER TO EQUIP CROWN", "回车切换流派王冠"):Tr("BANK GOLD REQUIRED TO SWITCH", "切换王冠需要银行金币"); sc=0x00E0BD72u; }
+            else if (skillRank[sel] >= d->maxRank) { st = Tr("ALREADY MAXED", "已满级"); sc = 0x0060FF90u; }
+            else if (!(d->prereq < 0 || skillRank[d->prereq] > 0)) { static char required[160];snprintf(required,sizeof(required),Tr("FIRST UNLOCK: %s","先解锁：%s"),SkillDisplayName(d->prereq));st=required; sc = 0x00FF8080u; }
+            else if (!SkillKeystoneUnlocked(sel)) { st = Tr("INVEST 5 POINTS IN THIS ARCHETYPE", "本流派需先投入五点"); sc = 0x00FF8080u; }
             else if (!WalletCanPayBank(costNow)) { st = Tr("NOT ENOUGH GOLD", "金币不够"); sc = 0x00FF8080u; }
-            else { st = Tr("ENTER TO BUY", "回车购买"); sc = 0x0060FF90u; }
-            DrawTextWin(innerL, dy + TH * 2, st, sc);
+            else if (!SkillCanBuy(sel)) { st = Tr("REQUIRES ALL CONNECTED NODES", "需要点亮全部连线前置"); sc = 0x00FF8080u; }
+            else { st = Tr("ENTER / SPACE / CLICK TO BUY", "回车、空格或左键购买"); sc = 0x0060FF90u; }
+            char status[160];snprintf(status,sizeof(status),"%s",st);
+            ClampRowText(status,innerR-innerL-UIS(150));
+            DrawTextWin(innerL,dy+TH*2,status,sc);
+            RECT button;HubPurchaseRect(&button);
+            int enabled=SkillCanBuy(sel) || (SkillSwitchable(sel)&&WalletCanPayBank(SKILL_SWITCH_COST));
+            UiRow(button.left,button.top,button.right,button.bottom,enabled?UI_ROW_SEL:UI_ROW_DISABLED,1.0f);
+            DrawTextCenterWin((button.left+button.right)/2,(button.top+button.bottom-TH)/2,
+                              SkillSwitchable(sel)?Tr("EQUIP","装备"):Tr("BUY","购买"),enabled?UI_ACCENT:UI_INK_DIM);
         }
     }
     /* 2026-11-08：标题放到最上层 —— chrome 永远在内容之上 */
-    DrawTitleWin("SKILL TREE", L.titleY, 0x00D23C3Cu);
+    DrawTitleWin(Tr("THREE PATHS", "三途技能网"), L.titleY, UI_ACCENT);
 
     DrawTextCenterWin((L.panel.left + L.panel.right) / 2, L.panel.bottom - TH,
                       /* ================================================
@@ -1495,12 +1485,12 @@ static void DrawSkillTreeDetails(const SkillTreeDrawContext* context) {
                        * 这里按可用宽度自动降级到短版本（信息没删，只是缩写）。
                        * ================================================ */
                       (TextWidthWin(Tr("R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY",
-                                       "滚轮缩放   拖拽平移   HOME 复位   回车购买"))
+                                       "TAB切流派  P看前置  滚轮缩放  回车购买"))
                        > (L.panel.right - L.panel.left) - UIS(16))
                       ? Tr("R RESET - WHEEL ZOOM - ENTER BUY",
-                           "R 复位 - 滚轮缩放 - 回车购买")
+                           "TAB切流派  P前置  回车购买")
                       : Tr("R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY",
-                           "滚轮缩放   拖拽平移   HOME 复位   回车购买"),
+                           "TAB切流派  P看前置  滚轮缩放  回车购买"),
                       0x00707070u);
 
     /* 2026-11-06：左侧 + / - 缩放按钮 */
@@ -1515,7 +1505,7 @@ static void DrawSkillTreeDetails(const SkillTreeDrawContext* context) {
         BlendRectWin(bx0, by0, bx1, by1, 0x00101418u, 0.90f);
         FrameRectWin(bx0, by0, bx1, by1, 0x00607080u, 0.95f, UIS(2));
         DrawTextCenterWin((bx0 + bx1) / 2, (by0 + by1) / 2 - TextHeightWin() / 2,
-                          Tr("BACK", "返回"), 0x00E8C040u);
+                          Tr("BACK", "返回"), UI_ACCENT);
     }
 }
 
@@ -1570,8 +1560,7 @@ void DrawSkillTree(void) {
         static int skCentred = 0;
         if (!skCentred) {
             skCentred = 1;
-            skVK = 0.78f;
-            SkillCenterOn(hubSelection);
+            SkillResetView();
         }
     }
 
@@ -1596,7 +1585,7 @@ void DrawSkillTree(void) {
         sprintf(b, "%d / %d NODES", owned, SKILL_LIST_COUNT);
         DrawTextWin(innerL, L.curY, b, 0x0060D0FFu);
         {  sprintf(b, "GOLD %d", bankGold); }
-        DrawTextWin(innerR - TextWidthWin(b), L.curY, b, 0x00FFC040u);
+        DrawTextWin(innerR - TextWidthWin(b), L.curY, b, UI_GOLD);
     }
 
     const SkillTreeDrawContext context = { L, TH, sel, innerL, innerR, gTop, gBot };
@@ -1618,10 +1607,9 @@ void SkillFocusNode(int id) {
        之外就把它拉回中心，轴间独立，不会来回抖。 */
     float wx, wy;
     SkillWorldPos(id, &wx, &wy);
-    int nodeW = (int)(SK_WX * 0.55f * SK_NODE_K);
-    int nodeH = (int)(SK_WY * 0.62f * SK_NODE_K);
-    float cx = wx * skVK + (float)nodeW * 0.5f;
-    float cy = wy * skVK + (float)nodeH * 0.5f;
+    int nodeW, nodeH; SkillNodeSize(&nodeW,&nodeH);
+    float cx = wx * skVK + skVX + (float)nodeW * 0.5f;
+    float cy = wy * skVK + skVY + (float)nodeH * 0.5f;
     float tx = (float)winW * 0.50f;
     float ty = (float)winH * 0.42f;
     int moved = 0;
@@ -1631,29 +1619,29 @@ void SkillFocusNode(int id) {
 }
 
 RECT SkillNodeRect(int id) {
-    RECT r={0,0,0,0}; if(id<0 || id>=SKILL_COUNT) return r;
-    float wx,wy;SkillWorldPos(id,&wx,&wy);
-    r.left=SkSX(wx);r.top=SkSY(wy);
-    r.right=r.left+(int)(SK_WX*0.55f*skVK);r.bottom=r.top+(int)(SK_WY*0.62f*skVK);return r;
+    RECT r={0,0,0,0}; if(!SkillIsPlayerFacing(id)) return r;
+    int w,h; SkillNodeSize(&w,&h);
+    float x,y; SkillWorldPos(id,&x,&y);
+    r.left=SkSX(x); r.top=SkSY(y); r.right=r.left+w; r.bottom=r.top+h;
+    return r;
 }
+
 int SkillNodeHitTest(int mx, int my) {
-    /* v6：**逆变换命中** —— 屏幕坐标先反解回世界坐标，再判矩形。 */
-    int TH = TextHeightWin();
-    int nodeW = (int)(SK_WX * 0.55f * SK_NODE_K);
-    int nodeH = (int)(SK_WY * 0.62f * SK_NODE_K);
-    if (nodeW < 24) nodeW = 24;
-    if (nodeH < 18) nodeH = 18;
-    (void)TH;
-    for (int k = 0; k < SKILL_LIST_COUNT; k++) {
-        int id = kSkillList[k];
-        float wx, wy;
-        SkillWorldPos(id, &wx, &wy);
-        int x0 = SkSX(wx), y0 = SkSY(wy);
-        if (mx >= x0 && mx <= x0 + nodeW && my >= y0 && my <= y0 + nodeH)
-            return id;
+    SkillTreeLayout layout; SkillTreeCompute(&layout);
+    int th=TextHeightWin(), w,h; SkillNodeSize(&w,&h);
+    int top=layout.curY+th+th/2, bottom=layout.panel.bottom-th*4-h-th/2;
+    if(bottom<top+h)bottom=top+h;
+    int left=layout.panel.left+layout.padX, right=layout.panel.right-layout.padX;
+    if(mx<left || mx>right || my<top || my>bottom) return -1;
+    for(int id=0;id<SKILL_COUNT;id++) {
+        if(!SkillIsPlayerFacing(id))continue;
+        RECT r=SkillNodeRect(id);
+        if(r.top<top || r.bottom>bottom || r.left<left || r.right>right) continue;
+        if(mx>=r.left && mx<=r.right && my>=r.top && my<=r.bottom) return id;
     }
     return -1;
 }
+
 
 /* ============================================================
  * 主菜单绘制（v2.2）
@@ -1684,14 +1672,14 @@ static void DrawRebindOverlay(void) {
     int bottom = top + panelH;
 
     BlendRectWin(left, top, right, bottom, 0x0004080c, 1.0f);
-    FrameRectWin(left, top, right, bottom, PAL_PANEL, 0.95f, UIS(2));
+    FrameRectWin(left, top, right, bottom, UI_EDGE, 0.95f, UIS(2));
     DrawTitleWin("REBIND", top + pad, 0x00E65A5Au);
     DrawTextCenterWin(winW / 2, top + pad + titlePx + UIS(24), actionNames[rebindingAct], 0x00A0FFA0u);
     if (rebindConflict >= 0 && rebindConflict < ACT_COUNT) {
         /* 冲突确认：告诉玩家会顶掉哪个动作的绑定，再按一次才生效 */
         char cbuf[96];
         sprintf(cbuf, "%s USES THIS KEY", actionNames[rebindConflict]);
-        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin() * 2, cbuf, 0x00FFC040u);
+        DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin() * 2, cbuf, UI_ACCENT);
         DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin(), Tr("PRESS AGAIN TO REPLACE", "再按一次替换"), 0x008C8C8Cu);
     } else {
         DrawTextCenterWin(winW / 2, bottom - pad - TextHeightWin() * 2, Tr("PRESS ANY KEY", "按任意键"), 0x008C8C8Cu);
@@ -1905,7 +1893,7 @@ static void DrawHudRunHeader(int effDetail) {
         if (gx0 + TextWidthWin(gbuf) > winW - UIS(12)) {
             snprintf(gbuf, sizeof(gbuf), "G%d", carryGold);
         }
-        DrawTextWin(gx0, UIS(18), gbuf, 0x00FFC040u);
+        DrawTextWin(gx0, UIS(18), gbuf, UI_GOLD);
 
         /* ===== v6：金币右边再挂一个 THREAT =====
            威胁值是这套设计的核心反馈 —— 玩家必须随时看到
@@ -2057,7 +2045,7 @@ static void DrawHudRunHeader(int effDetail) {
 
             if (DailyDone()) {
                 sprintf(buf, "DAILY  COMPLETE");
-                DrawTextWin(UIS(12), hy, buf, PAL_GOLD);
+                DrawTextWin(UIS(12), hy, buf, UI_ACCENT);
             } else {
                 int cur = DailyCurrent(), goal = DailyGoalParam();
                 int avail = winW - UIS(24);
@@ -2100,7 +2088,7 @@ static void DrawHudVitalsAndStatus(int effDetail) {
     if (effDetail >= 1) {
         if (breakerOpen) sprintf(buf, "POWER ON");
         else sprintf(buf, "FUSES %d/%d", fusesHeld, fusesNeeded);
-        DrawTextWin(UIS(20), hudY2, buf, breakerOpen ? 0x0030FF60u : 0x00E8C040u);
+        DrawTextWin(UIS(20), hudY2, buf, breakerOpen ? 0x0030FF60u : UI_ACCENT);
     }
 
     /* ===== v3.4 左上角新增两行（用户要求）=====
@@ -2156,7 +2144,7 @@ static void DrawHudVitalsAndStatus(int effDetail) {
                 sprintf(sb2, Tr("DROP %d%%  =  %d GOLD   LEFT/RIGHT   RELEASE K",
                                 "丢钱 %d%%  =  %d 金币   ←/→ 调整   松开 K 丢出"),
                         moneyDropPct, damt);
-                DrawTextWin(UIS(20), hudY3 + hudTH * 2 + UIS(10), sb2, 0x00FFD040u);
+                DrawTextWin(UIS(20), hudY3 + hudTH * 2 + UIS(10), sb2, UI_ACCENT);
             }
         }
         /* ==================================================================
@@ -2168,22 +2156,19 @@ static void DrawHudVitalsAndStatus(int effDetail) {
          * ================================================================ */
         if (effDetail >= 2) {
             int tier = GoldTier();
-            sprintf(buf, Tr("CARRY  %d   TIER %d", "带入  %d   强度档 %d"), carryGold, tier);
+            sprintf(buf, Tr("CARRY %d / GOLD TIER %d", "携带 %d / 金币档 %d"), carryGold, tier);
             /* 档位越高颜色越烫：0~4 灰 / 5~9 黄 / 10~15 红 */
             unsigned int tc = (tier >= 10) ? 0x00FF6050u
-                            : (tier >= 5  ? 0x00FFC040u : 0x00A0A0A0u);
+                            : (tier >= 5  ? UI_ACCENT : 0x00A0A0A0u);
             DrawTextWin(UIS(20), hudY3, buf, tc);
         }
 
         if (effDetail >= 2) {
-            int boost = 0;
-            if (bankHistMax > 0)
-                boost = (int)((float)carryGold * 100.0f / (float)bankHistMax + 0.5f);
-            if (boost > 100) boost = 100;
-            sprintf(buf, Tr("BOOST  +%d%%", "强度  +%d%%"), boost);
-            DrawTextWin(UIS(20), hudY3 + hudTH + UIS(4), buf,
-                        boost >= 100 ? 0x0060FF90u
-                                     : (boost >= 50 ? 0x00FFD040u : 0x00909090u));
+            float pressure=EconomyPressureRatio();
+            int next=GoldNextThreshold();
+            if(next>=0) snprintf(buf,sizeof(buf),Tr("PRESSURE %d%% / NEXT %dG","综合压力 %d%% / 下档 %d金"),(int)(pressure*100.0f+.5f),next);
+            else snprintf(buf,sizeof(buf),Tr("PRESSURE %d%% / GOLD MAX","综合压力 %d%% / 金币满档"),(int)(pressure*100.0f+.5f));
+            DrawTextWin(UIS(20),hudY3+hudTH+UIS(4),buf,pressure>=.8f?PAL_MAGENTA:PAL_CYAN);
         }   /* end hudDetail >= 2 */
     }
 
@@ -2511,7 +2496,7 @@ static void DrawHudSafeHints(void) {
         unsigned int hcol = 0x00E8E060u;
         static char cool[96];
         if (calibActive) {
-            hint = Tr("SPACE: LOCK CALIBRATION", "空格：锁定校准");
+            hint = Tr("QWER: HIT NOTES", "QWER：跟随节律");
             hcol = 0x00FFFFFFu;
         } else if (calibCooldown > 0.0f) {
             sprintf(cool, "%s %.0fs", Tr("CALIB COOLING", "校准冷却"), calibCooldown);
@@ -2540,7 +2525,7 @@ static void DrawHudSafeHints(void) {
             int sw = TextWidthWin(shopHint);
             BlendRectWin(sx - UIS(6), sy - UIS(3), sx + sw + UIS(6),
                          sy + TextHeightWin() + UIS(3), 0x000A0E14, 0.90f);
-            DrawTextWin(sx, sy, shopHint, 0x00C8B060u);
+            DrawTextWin(sx, sy, shopHint, UI_ACCENT);
         }
 
         if (hint) {
@@ -2609,7 +2594,7 @@ static void DrawHudCoverAndThreat(void) {
                                "按空格开始小游戏"), 0x0060FF90u);
             }
             DrawTextWin(UIS(20), hy + lh,
-                        Tr("T  -  OPEN SHOP", "T  -  打开商店"), 0x00E8C040u);
+                        Tr("T  -  OPEN SHOP", "T  -  打开商店"), UI_ACCENT);
         } else if (hideSpotNear >= 0 && currentState == STATE_PLAYING) {
             /* ===== v2.4.21 **坏掉的藏身点要报修复金额** =====
                用户反馈：柜子坏了之后只提示 "NOT ENOUGH GOLD"，
@@ -2629,7 +2614,7 @@ static void DrawHudCoverAndThreat(void) {
 
                 char rb[96];
                 if (hideRepairCount >= HIDESPOT_REPAIR_MAX) {
-                    sprintf(rb, Tr("BROKEN  -  TOO DAMAGED TO REPAIR",
+                    snprintf(rb,sizeof(rb),"%s",Tr("BROKEN  -  TOO DAMAGED TO REPAIR",
                                    "柜子坏了  -  破得太狠，修不了"));
                     DrawTextWin(UIS(20), winH - UIS(214), rb, 0x00806060u);
                 } else if ((float)carryGold >= cost) {
@@ -2655,20 +2640,9 @@ static void DrawHudCoverAndThreat(void) {
         }
 
         /* ② 敌人状态（三态雷达）—— 怪不可杀后这是唯一的威胁指标 */
-        if (Hunter0()->active && currentState == STATE_PLAYING) {
-            const char* st = NULL;
-            unsigned int sc = 0x0080FF80u;
-            if (Hunter0()->state == 1)      { st = Tr("HUNTING", "追捕中"); sc = 0x00FF3020u; }
-            else if (Hunter0()->state == 2) { st = Tr("SEARCHING", "搜寻中"); sc = 0x00E0A020u; }
-            else                          { st = Tr("WANDERING", "游荡"); sc = 0x0080C080u; }
-            int tw3 = TextWidthWin(st);
-            /* v6 **让开右下角的小地图** ——
-               原来在 winH-UIS(210)（约 65% 处），正好被钉到右下角的地图盖住。
-               地图占右下约 40% 高度，字幕上移到 55% 以上。 */
-            /* 2026-11-06：用户要求"警告状态往上移几格"。
-               小地图虽然已经缩小，但状态行和小地图之间仍偏挤，
-               再上移 24 像素留出呼吸空间。 */
-            DrawTextWin(winW - UIS(24) - tw3, winH - UIS(394), st, sc);
+        
+            /* Encounter narration removed: threat is communicated by sound and the world. */
+
 
     /* ==================================================================
      * 2026-11-08（第 1 轮）：**扳手命中标记**
@@ -2689,7 +2663,7 @@ static void DrawHudCoverAndThreat(void) {
         if (a > 1.0f) a = 1.0f;
         if (a < 0.0f) a = 0.0f;
         /* 命中 = 亮橙黄；挥空 = 灰蓝（明显不同，不糊弄得过去） */
-        unsigned int mc = isHit ? 0x00FFE080u : 0x00708090u;
+        unsigned int mc = isHit ? UI_ACCENT : 0x00708090u;
         /* This small HUD marker writes directly to the current UI pixel buffer. */
         {
             int pts[8][2];
@@ -2747,7 +2721,7 @@ static void DrawHudCoverAndThreat(void) {
     }
 
     DrawHudThemeRoom();   /* 第 3 轮：主题房间字幕抽成函数 */
-        }
+        
     }
 
 }
@@ -2994,7 +2968,8 @@ static void DrawHudInteractionHints(const HudBarLayout* layout) {
     if (hoverKind != 0) {
         char pbuf[192];   /* 2026-11-06：舱门门槛文案最长（含数字）要 96 字节，64 会溢出 */
         /* v2.7：提示要用当前绑定，改过键之后写死 E 就是骗人 */
-        if (hoverKind == 1)
+        if (hoverKind == 5)snprintf(pbuf,sizeof(pbuf),"%s",Tr("HOLD E: MASTER SWITCH / REROLL FLOOR","按住E：总控闸／重掷整层"));
+        else if (hoverKind == 1)
             sprintf(pbuf, "HOLD %s  SEARCH", VkName(g_bindings[ACT_INTERACT]));
         else if (hoverKind == 4) {
             /* AD-46：舱门提示**独占一行**，不和时间/搜索提示抢坐标 */
@@ -3011,8 +2986,8 @@ static void DrawHudInteractionHints(const HudBarLayout* layout) {
             int left = 0;
             if (hoverIndex >= 0 && hoverIndex < MAX_ROOM_PROPS)
                 left = roomProps[hoverIndex].searchLeft;
-            sprintf(pbuf, "PRESS %s  SEARCH  (%d LEFT)",
-                    VkName(g_bindings[ACT_INTERACT]), left);
+            const char* action=(hoverIndex>=0 && hoverIndex<roomPropCount && roomProps[hoverIndex].kind>=ROOMPROP_THEME_FIRST)?Tr("INSPECT DEVICE","检修装置"):Tr("SEARCH","搜查");
+            snprintf(pbuf,sizeof(pbuf),Tr("HOLD %s  %s  (%d LEFT)","按住%s  %s（剩%d次）"),VkName(g_bindings[ACT_INTERACT]),action,left);
         }
         else if (fusesHeld >= fusesNeeded)
             sprintf(pbuf, "HOLD %s  POWER ON", VkName(g_bindings[ACT_INTERACT]));
@@ -3123,7 +3098,7 @@ static void DrawHudChargeHints(const HudBarLayout* layout) {
             else          sprintf(ub, "%s USED", nm);
             int uw = TextWidthWin(ub);
             DrawTextWin(winW - UIS(24) - uw, y1 - UIS(3), ub,
-                        ultUsed ? 0x00606060u : 0x00FFD040u);
+                        ultUsed ? 0x00606060u : UI_ACCENT);
         }
     }
 }
@@ -3150,8 +3125,8 @@ static void DrawHudCalibrationHints(const HudBarLayout* layout) {
         char cd[48];
         unsigned int cdc;
         if (calibActive) {
-            sprintf(cd, Tr("CALIBRATING", "校准中"));
-            cdc = 0x00FFD040u;
+            snprintf(cd,sizeof(cd),"%s",Tr("CALIBRATING", "校准中"));
+            cdc = UI_ACCENT;
         } else if (calibCooldown > 0.0f) {
             sprintf(cd, Tr("CALIB %ds", "校准冷却 %d 秒"),
                     (int)(calibCooldown + 0.5f));
@@ -3163,10 +3138,10 @@ static void DrawHudCalibrationHints(const HudBarLayout* layout) {
                校准只在安全屋或藏身点里能开（见 game.c 的 inSafe || hiddenIn >= 0）。 */
 
             if (playerInSafe || hiddenIn >= 0) {
-                sprintf(cd, Tr("CALIB READY", "校准就绪"));
+                snprintf(cd,sizeof(cd),"%s",Tr("CALIB READY", "校准就绪"));
                 cdc = 0x0060FF90u;
             } else {
-                sprintf(cd, Tr("CALIB - HIDE TO USE", "校准 - 需躲进藏身点"));
+                snprintf(cd,sizeof(cd),"%s",Tr("CALIB - HIDE TO USE", "校准 - 需躲进藏身点"));
                 cdc = 0x00505050u;   /* 压暗，不抢视线 */
             }
         }
@@ -3185,7 +3160,7 @@ static void DrawHudCalibrationHints(const HudBarLayout* layout) {
 
 
             if (trainingMode && !tutorialGuideOn) {
-                const char* gtxt = Tr("[B] GUIDE", "[B] 引导");
+                const char* gtxt = Tr("[B] GUIDED FLOOR", "[B] 进入引导层");
                 DrawTextWin(px2, py2, gtxt, 0x004A9480u);
                 px2 += TextWidthWin(gtxt) + UIS(18);
             }
@@ -3214,7 +3189,7 @@ static void DrawHudCalibrationHints(const HudBarLayout* layout) {
             lineY = y2 - UIS(2) - lineH;
             if (lineY < y1 + barH) lineY = y1 + barH;
         }
-        unsigned int ccol = (cc >= 1.0f) ? 0x0060FF90u : 0x00FFD040u;
+        unsigned int ccol = (cc >= 1.0f) ? 0x0060FF90u : UI_ACCENT;
         BlendRectWin(barX, lineY, barX + barW, lineY + lineH, 0x00202020u, 0.80f);
         BlendRectWin(barX, lineY, barX + (int)(barW * cc), lineY + lineH, ccol, 1.0f);
     }
@@ -3251,44 +3226,29 @@ void DrawHUD(void) {
 /* v3.1：新手教程的顶部提示条。步骤文案和推进逻辑都在 game.c，
    这里只负责画，避免两边各维护一套步骤。 */
 static void DrawTutorialPanel(void) {
-    if (!trainingMode) return;
-
-    /* v3.3：**引导关着的时候整个面板不画** ——
-       用户反馈「按 B 激活引导」那行放屏幕中间太遮挡，
-       所以这行已经挪到左下角 CALIB 那一行的右边了（见 DrawHUD）。
-       这里只负责「别画面板」。 */
-    {
-
-        if (!tutorialGuideOn) return;
+    if(!trainingMode || !guideMode || currentState!=STATE_PLAYING || calibActive || lockActive)return;
+    int w=winW*43/100;if(w>UIS(400))w=UIS(400);
+    int x=winW-w-UIS(12),top=UIS(16),pad=UIS(9),line=UIS(27),y=top+pad;
+    BlendRectWin(x,top,x+w,top+UIS(170),UI_BG_PANEL,.96f);FrameRectWin(x,top,x+w,top+UIS(170),UI_EDGE_HOT,1,1);
+    char text[256];snprintf(text,sizeof(text),Tr("COURSE %d/%d","课程 %d/%d"),TutorialStepNumber(),TutorialStepTotal());
+    DrawTextSmallLiteralWin(x+pad,y,text,UI_ACCENT);y+=UIS(20);
+    snprintf(text,sizeof(text),"%s",TutorialObjective());
+    while(text[0] && TextMediumLiteralWidth(text)>w-pad*2){size_t n=strlen(text)-1;while(n && ((unsigned char)text[n]&0xC0)==0x80)n--;text[n]=0;}
+    DrawTextMediumLiteralWin(x+pad,y,text,UI_INK_TITLE);y+=line;
+    const char* hint=TutorialHint();
+    for(int row=0;*hint && row<3;row++){
+        int bytes=0,fit=0;
+        while(hint[bytes] && bytes<230){unsigned char c=(unsigned char)hint[bytes];int n=c<128?1:c<224?2:c<240?3:4;
+            if(bytes+n>=250)break;
+            memcpy(text+bytes,hint+bytes,(size_t)n);bytes+=n;text[bytes]=0;
+            if(TextMediumLiteralWidth(text)>w-pad*2)break;
+            fit=bytes;
+        }
+        if(!fit)break;
+        memcpy(text,hint,(size_t)fit);text[fit]=0;DrawTextMediumLiteralWin(x+pad,y,text,UI_INK);hint+=fit;y+=line;
     }
-
-    int th = TextHeightWin();
-    int w = UIS(620);
-    if (w > winW - UIS(24)) w = winW - UIS(24);
-    int h = th * 3 + UIS(30);
-    int x = (winW - w) / 2;
-    int y = UIS(120);
-    if (y + h > winH * 2 / 3) y = UIS(56);
-
-    BlendRectWin(x, y, x + w, y + h, 0x00081018u, 0.90f);
-    FrameRectWin(x, y, x + w, y + h, 0x00C8A040u, 0.92f, UIS(2));
-
-    char line[160];
-
-    if (tutorialDone) {
-        DrawTextCenterWin(winW / 2, y + UIS(10), Tr("TUTORIAL COMPLETE", "教程完成"), 0x00FFE070u);
-    } else {
-        sprintf(line, "TUTORIAL  %d / %d", TutorialStepNumber(), TutorialStepTotal());
-        DrawTextCenterWin(winW / 2, y + UIS(10), line, 0x00FFE070u);
-    }
-
-    snprintf(line, sizeof(line), "%s", TutorialObjective());
-    ClampRowText(line, w - UIS(24));
-    DrawTextCenterWin(winW / 2, y + UIS(10) + th, line, 0x00FFFFFFu);
-
-    snprintf(line, sizeof(line), "%s", TutorialHint());
-    ClampRowText(line, w - UIS(24));
-    DrawTextCenterWin(winW / 2, y + UIS(10) + th * 2, line, 0x00A8B4B8u);
+    float tx,ty;TutorialTarget(&tx,&ty);
+    if(Dist2(tx,ty,posX,posY)>.1f){snprintf(text,sizeof(text),Tr("TARGET (%d,%d)","目标（%d,%d）"),(int)tx,(int)ty);DrawTextSmallLiteralWin(x+pad,top+UIS(150),text,UI_INFO);}
 }
 
 /* ------------------------------------------------------------------ */
@@ -3349,7 +3309,7 @@ void DrawPickupToast(void) {
 
 
 
-    if (!pickupMsg || pickupMsgTimer <= 0.0f) return;
+    if (!pickupMsg || pickupMsgTimer <= 0.0f || MonsterChaseActive()) return;
 
     /* ===== v2.4.52 **只在游玩中显示** =====
        用户截图：暂停菜单上浮着一行 "AT THE EXIT: LEAVE, OR GO DEEPER."
@@ -3434,16 +3394,11 @@ static void RenderFrameScene(void) {
 
     if (showScene) {
         /* v2.1：相机抖动（偏移玩家位置再还原，所有投影自动跟着抖） */
-        float _sx = posX, _sy = posY;
-        posX += g_shakeOffX;
-        posY += g_shakeOffY;
+        /* Feedback must not push the render camera through walls. */
         Render3D();
-        posX = _sx;
-        posY = _sy;
         if (currentState == STATE_PLAYING && isMapOpen) RenderMap();
         /* 跳脸虫：屏幕空间 overlay，盖在场景之上、HUD 之下 */
-            if (flashTime > 0.0f)
-            memset(pixels, 0xFF, (size_t)renderW * renderH * sizeof(unsigned int));
+        /* Floor transitions no longer overwrite the frame with white. */
 
         /* v2.1：受伤红闪（越靠边缘越红）+ 枪口闪光 */
         if (hitFlash > 0.0f) {
@@ -3496,10 +3451,39 @@ static void RenderFrameScene(void) {
     }
 }
 
+int SkillPickAt(int x,int y){
+    if(currentState!=STATE_SKILL_PICK)return -1;
+    MenuGeo g=GetMenuGeo();
+    for(int i=0;i<INRUN_CHOICES;i++){
+        RECT r=RowRect(g,i);
+        if(skillPickOptions[i]>=0 && x>=r.left && x<r.right && y>=r.top && y<r.bottom)return i;
+    }return -1;
+}
+void RunReplacementButtonRect(int index,RECT* r){
+    int gap=UIS(12),w=winW*34/100,h=UIS(42),x=winW*15/100;
+    if(index)x+=w+gap;
+    *r=(RECT){x,winH*58/100,x+w,winH*58/100+h};
+}
+static void DrawRunReplacement(void){
+    if(!LoopRunReplacementPending())return;
+    BlendRectWin(0,0,winW,winH,0x030609,.94f);
+    int x=winW*12/100,y=winH*34/100,right=winW*88/100;
+    UiPanel9(x,y,right,winH*72/100,1);
+    DrawTextMediumLiteralWin(x+UIS(18),y+UIS(16),Tr("A RUN IS ALREADY IN PROGRESS","当前有正在游玩的进度"),UI_ACCENT);
+    DrawTextSmallLiteralWin(x+UIS(18),y+UIS(57),Tr("Replace it with a new run? Cancel keeps your progress.","是否用新对局覆盖？取消将保留原有进度。"),UI_INK);
+    for(int i=0;i<2;i++){
+        RECT r;RunReplacementButtonRect(i,&r);UiRow(r.left,r.top,r.right,r.bottom,LoopRunReplacementChoice()==i?UI_ROW_SEL:UI_ROW_NORMAL,1);
+        const char* label=i?Tr("REPLACE [Y]","覆盖进度 [Y]"):Tr("KEEP PROGRESS [ESC]","保留进度 [ESC]");
+        DrawTextMediumLiteralWin(r.left+UIS(10),r.top+UIS(10),label,i?UI_DANGER:UI_OK);
+    }
+}
+
 static void RenderFrameMenus(void) {
     /* 文字也在这一层，先合成再一次性呈现；弹窗必须在列表文字之后画 */
     if (currentState != STATE_PLAYING) {
         int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
+        if(currentState!=STATE_PAUSED && !(currentState==STATE_SETTINGS && prevState==STATE_PAUSED))
+            BlendRectWin(0,0,winW,winH,UI_BG_PANEL,1.0f);
         UiDrawMenuPages();   /* Menu composition has one shared entry point. */
         if (popupOpen) {
             DrawPopupPanel();
@@ -3515,7 +3499,7 @@ static void RenderFrameMenus(void) {
            小窗地图则照常画 HUD（它只是右下角一个叠加层）。 */
     } else {
         DrawHUD();
-        DrawTutorialPanel();
+        /* The course board is composited after cover occlusion. */
     }
 }
 
@@ -3617,8 +3601,8 @@ static void RenderFrameOcclusion(void) {
 
                 /* ---- 操作（一段话横排，省高度）---- */
                 if (calibActive) {
-                    sprintf(l1, "%s", Tr("SPACE LOCK", "空格 锁定"));
-                    c1 = 0x00FFD040u;
+                    sprintf(l1, "%s", Tr("QWER", "QWER 校准"));
+                    c1 = UI_ACCENT;
                 } else if (calibCooldown > 0.0f) {
                     sprintf(l1, Tr("SPACE %ds", "空格 %d秒"),
                             (int)(calibCooldown + 0.5f));
@@ -3687,36 +3671,40 @@ static void RenderFrameOcclusion(void) {
 }
 
 static void RenderFrameCalibration(void) {
-    /* ===== v3.0：**校准条画在所有图层之上** =====
-       用户反复反馈「躲在柜子里看不到判定轴」。
-       之前试过「校准时跳过遮罩」，但只要还有别的覆盖层（低理智红晕、
-       锁定框、letterbox）就会再次被埋。
-       现在把整块校准 UI 挪到帧末、遮罩之后，**它一定是最后画的**。 */
-    DrawExitChoice();   /* v6：出口二选一，画在最上层 */
-
-    if (currentState == STATE_PLAYING && calibActive) {
-        int bw2 = winW - UIS(320);
-        if (bw2 < UIS(180)) bw2 = winW - UIS(120);
-        int bx2 = (winW - bw2) / 2;
-        int bh2 = UIS(20);
-        int by2 = winH / 2 - bh2 / 2;      /* 屏幕正中，视野最好认 */
-
-        /* 三层实心底：外框 + 内底 + 边框，保证在任何背景上都看得清 */
-        BlendRectWin(bx2 - UIS(14), by2 - UIS(14),
-                     bx2 + bw2 + UIS(14), by2 + bh2 + UIS(14),
-                     0x00000000u, 0.88f);
-        BlendRectWin(bx2 - UIS(10), by2 - UIS(10),
-                     bx2 + bw2 + UIS(10), by2 + bh2 + UIS(10),
-                     0x00101418u, 1.0f);
-        FrameRectWin(bx2 - UIS(10), by2 - UIS(10),
-                     bx2 + bw2 + UIS(10), by2 + bh2 + UIS(10),
-                     0x00FFD040u, 1.0f, 2);
-        DrawCalibBar(bx2, by2, bw2, bh2);
-        DrawTextCenterWin(winW / 2, by2 - UIS(34),
-                          Tr("SPACE TO LOCK", "空格锁定"), 0x00FFD040u);
+    DrawExitChoice();
+    if(currentState==STATE_PLAYING){
+        HushDraw();
+        if(roomTheme.active && roomTheme.inside && !MonsterChaseActive()){
+            char instruction[240];snprintf(instruction,sizeof(instruction),"%s",RoomThemeInstruction());UiTrimSmallText(instruction,winW-UIS(70));
+            DrawTextSmallWin(UIS(35),UIS(72),instruction,UI_INK_DIM);
+        }
     }
-
+    if((currentState!=STATE_PLAYING && currentState!=STATE_SAFEHOUSE) || !calibActive)return;
+    int w=UIS(360),h=winH*70/100,x=(winW-w)/2,y=winH*14/100,target=y+h-UIS(45);
+    BlendRectWin(x,y,x+w,y+h,0x00081220u,.96f);
+    FrameRectWin(x,y,x+w,y+h,UI_ACCENT,.9f,2);
+    int laneW=w/4;
+    for(int lane=0;lane<4;lane++) {
+        int lx=x+lane*laneW;
+        BlendRectWin(lx+2,y+UIS(30),lx+laneW-2,target+UIS(10),lane%2?0x00162939u:0x000D1C2Au,1);
+        char key[2]={"QWER"[lane],0};
+        DrawTextCenterWin(lx+laneW/2,target+UIS(12),key,UI_INK);
     }
+    BlendRectWin(x+2,target,x+w-2,target+2,UI_ACCENT,1);
+    for(int i=0;i<CalibNoteCount();i++) {
+        float offset=CalibNoteOffset(i);
+        if(offset<-.18f || offset>2.0f)continue;
+        int ny=target-(int)(offset*(target-y-UIS(30))/2.0f);
+        int nx=x+CalibNoteLane(i)*laneW+4;
+        BlendRectWin(nx,ny-UIS(4),nx+laneW-8,ny+UIS(4),UI_ACCENT,1);
+    }
+    char text[80];snprintf(text,sizeof(text),Tr("COMBO %d  ERRORS %d/6","连击%d  失误%d/6"),CalibCombo(),CalibErrors());
+    DrawTextSmallWin(x+UIS(8),y+UIS(9),text,UI_INK);
+    snprintf(text,sizeof(text),Tr("RESTORED +%d SAN / +%.1f CELL","已恢复 +%d理智 / +%.1f电量"),CalibPendingReward(),(double)CalibBatteryRestored());
+    UiTrimSmallText(text,w-UIS(12));DrawTextSmallLiteralWin(x+UIS(6),y+h-UIS(16),text,UI_OK);
+    DrawTextSmallWin(x,y+h+UIS(8),Tr("SPACE TWICE: EXIT","连按两次空格退出"),UI_ACCENT);
+}
+
 
 static void PresentComposedFrame(void) {
     /* ==================================================================
@@ -3767,11 +3755,16 @@ static void PresentComposedFrame(void) {
 }
 
 void RenderFrame(void) {
+    static int previousState=-1;
+    if(previousState!=(int)currentState){if(pixels)memset(pixels,0,(size_t)renderW*renderH*sizeof(*pixels));previousState=(int)currentState;uiDirty=1;}
     UiLayoutBegin();
     RenderFrameScene();
     RenderFrameMenus();
+    UiDecayFrame();
     RenderFrameOcclusion();
+    DrawTutorialPanel();
     RenderFrameCalibration();
+    DrawRunReplacement();
     PresentComposedFrame();
 }
 
@@ -3786,44 +3779,31 @@ void RenderFrame(void) {
 
 void UiInit(void) { /* FIXED_RESULT: UI has no initialization-owned state; resources are initialized by their owners. */ }
 
-void UiPanel9(int x0, int y0, int x1, int y1, int hot) {
-    if (!SpritesReady()) return;
-    int id = hot ? SPR_UI_PANEL_HOT : SPR_UI_PANEL;
-    int S = 128;
-    int c = UI_INSET;
-    int w = x1 - x0, h = y1 - y0;
-    if (w < c * 2 + 2 || h < c * 2 + 2) return;
-    DrawSpriteSub(id, 0, 0, c, c, x0, y0, c, c, 1.0f, 1.0f);
-    DrawSpriteSub(id, S - c, 0, c, c, x0 + w - c, y0, c, c, 1.0f, 1.0f);
-    DrawSpriteSub(id, 0, S - c, c, c, x0, y0 + h - c, c, c, 1.0f, 1.0f);
-    DrawSpriteSub(id, S - c, S - c, c, c, x0 + w - c, y0 + h - c, c, c, 1.0f, 1.0f);
-    DrawSpriteSub(id, c, 0, S - 2 * c, c, x0 + c, y0, w - 2 * c, c, 1.0f, 1.0f);
-    DrawSpriteSub(id, c, S - c, S - 2 * c, c, x0 + c, y0 + h - c, w - 2 * c, c, 1.0f, 1.0f);
-    DrawSpriteSub(id, 0, c, c, S - 2 * c, x0, y0 + c, c, h - 2 * c, 1.0f, 1.0f);
-    DrawSpriteSub(id, S - c, c, c, S - 2 * c, x0 + w - c, y0 + c, c, h - 2 * c, 1.0f, 1.0f);
-    DrawSpriteSub(id, c, c, S - 2 * c, S - 2 * c,
-                  x0 + c, y0 + c, w - 2 * c, h - 2 * c, 1.0f, 1.0f);
+void UiPanel9(int x0,int y0,int x1,int y1,int hot) {
+    if(x1<=x0 || y1<=y0)return;
+    BlendRectWin(x0,y0,x1,y1,UI_BG_PANEL,1.0f);
+    FrameRectWin(x0,y0,x1,y1,hot?UI_EDGE_HOT:UI_EDGE,.98f,UIS(1));
+    BlendRectWin(x0+1,y0+1,x1-1,y0+UIS(3),UI_BG_SEL,.95f);
+    UiCorrodeRect(x0,y0,x1,y1);
 }
 
-void UiCursor(int x, int y, int size, float alpha) {
-    if (!SpritesReady()) return;
-    if (size < 6) size = 6;
-    if (size > 48) size = 48;
-    DrawSprite(SPR_UI_CURSOR, x, y, size, size, 1.0f, alpha, 0, 0.0f);
+
+void UiCursor(int x,int y,int size,float alpha) {
+    if(size<6)size=6;
+    if(size>48)size=48;
+    for(int line=0;line<size;line++) {
+        int distance=abs(line-size/2);
+        int span=size/2-distance;
+        BlendRectWin(x,y+line,x+span+1,y+line+1,UI_ACCENT,alpha);
+    }
 }
 
-void UiRowSel(int x0, int y0, int x1, int y1, float alpha) {
-    int h = y1 - y0;
-    if (h < 4) return;
-    if (SpritesReady())
-        DrawSpriteSub(SPR_UI_ROW, 0, 0, 128, 128, x0, y0, x1 - x0, h, 1.0f, alpha);
-    int barW = h / 8;
-    if (barW < 2) barW = 2;
-    BlendRectWin(x0, y0 + h / 6, x0 + barW, y1 - h / 6, UI_ACCENT, alpha * 0.95f);
-    int cs = h * 2 / 3;
-    if (cs < 8) cs = 8;
-    UiCursor(x0 + barW + 2, y0 + (h - cs) / 2, cs, alpha);
+
+void UiRowSel(int x0,int y0,int x1,int y1,float alpha) {
+    BlendRectWin(x0,y0,x1,y1,UI_BG_SEL,alpha);
+    BlendRectWin(x0,y0,x0+UIS(3),y1,UI_ACCENT,alpha);
 }
+
 
 /* v2.2：分组细线 —— 中间亮两头渐隐，用于把列表分成逻辑段 */
 
@@ -3842,6 +3822,7 @@ void UiPanel(int x0, int y0, int x1, int y1, int kind) {
     }
     BlendRectWin(x0, y0, x1, y1, fill, 0.97f);
     FrameRectWin(x0, y0, x1, y1, edge, 0.95f, 1);
+    UiCorrodeRect(x0,y0,x1,y1);
 }
 
 void UiRow(int x0, int y0, int x1, int y1, int state, float alpha) {
@@ -3864,6 +3845,7 @@ void UiRow(int x0, int y0, int x1, int y1, int state, float alpha) {
         BlendRectWin(x0, y0, x1, y1, UI_BG_ROW, 0.45f * alpha);
         break;
     }
+    UiCorrodeRect(x0,y0,x1,y1);
 }
 
 void UiBar(int x, int y, int w, int h, float frac, int kind, unsigned int col) {
@@ -3918,8 +3900,13 @@ void UiCornerMarks(int x0, int y0, int x1, int y1) {
     BlendRectWin(x1 - arm / 2 - th, y1 - arm, x1 - arm / 2, y1 - arm / 2, UI_ACCENT, 0.35f);
 }
 
-void UiTitle(int cx, int y, const char* s) {
-    DrawTextCenterWin(cx, y, s, UI_INK_TITLE);
+void UiTitle(int cx,int y,const char* text) {
+    DrawTextCenterWin(cx,y,text,UI_INK_TITLE);
+    if(currentState==STATE_MAIN_MENU || perception.contamination>.05f){
+        int width=TextWidthWin(text),bottom=y+TextHeightWin();
+        float amount=currentState==STATE_MAIN_MENU?.35f:perception.contamination*.45f;
+        for(int i=0;i<width;i+=17){unsigned h=(unsigned)(i*251+19);int length=2+(h%9);BlendRectWin(cx-width/2+i,bottom-2,cx-width/2+i+2,bottom+length,0x00802B48u,amount);}
+    }
 }
 
 void UiLabel(int x, int y, unsigned int col, const char* s) {
@@ -3928,4 +3915,16 @@ void UiLabel(int x, int y, unsigned int col, const char* s) {
 
 void UiHint(int cx, int y, const char* s) {
     DrawTextCenterWin(cx, y, s, UI_INK_DIM);
+}
+
+void HubPurchaseRect(RECT* rect) {
+    SkillTreeLayout layout;
+    SkillTreeCompute(&layout);
+    int th=TextHeightWin(),right=layout.panel.right-layout.padX;
+    *rect=(RECT){right-UIS(138),layout.panel.bottom-th*2-UIS(3),right,layout.panel.bottom-th+UIS(3)};
+}
+int HubPurchaseAt(int x,int y) {
+    RECT r;
+    HubPurchaseRect(&r);
+    return x>=r.left && x<=r.right && y>=r.top && y<=r.bottom;
 }

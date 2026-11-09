@@ -6,6 +6,7 @@
  * 一个功能 = 一个文件 + 只走公开接口。
  */
 #include "common.h"
+#include "wallet.h"
 #include "loop_api.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -124,7 +125,7 @@ void MoneyTick(float dt) {
                             moneyBags[slot].amount = amt;
                             moneyBags[slot].life = 45.0f;
                             moneyBags[slot].active = 1;
-                            { extern int WalletSpendRun(int); WalletSpendRun(amt); }
+                            {  WalletSpendRun(amt); }
                             if (carryGold < 0) carryGold = 0;
                             /* 吸引强度 = 金额 / 1000 × 5，封顶 100
                                丢 2000 → 10；丢 20000 → 100（比玩偶的 75 还高） */
@@ -153,7 +154,7 @@ void MoneyTick(float dt) {
         float bdx = posX - moneyBags[mi].x, bdy = posY - moneyBags[mi].y;
         if (bdx * bdx + bdy * bdy < 2.25f && keyPressed['E']) {
             keyPressed['E'] = 0;
-            carryGold += moneyBags[mi].amount;
+            WalletAddRun(moneyBags[mi].amount);
             SuspicionClearNear(moneyBags[mi].x, moneyBags[mi].y, 1.0f);
             moneyBags[mi].active = 0;
             PlaySfx(SFX_POWER, 0.7f);

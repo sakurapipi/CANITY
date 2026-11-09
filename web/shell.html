@@ -136,6 +136,30 @@
     border: 1px solid #3a4656; color: #9fb0c4; text-decoration: none;
     pointer-events: auto;
   }
+
+  :root{--canity-accent:#7bcdf2}
+  html,body{height:100dvh}
+  #btns button,#btns2 button,#rhythmTouch button{border-color:var(--canity-accent);color:#f4f0e8;background:rgba(12,14,19,.72);border-radius:12px}
+  #stick i{background:var(--canity-accent);border-color:#e6ecf2;opacity:.65}
+  #rhythmTouch{display:none;position:fixed;bottom:calc(8px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);gap:8px;z-index:8;pointer-events:auto}
+  #rhythmTouch button{width:clamp(52px,12vw,82px);height:clamp(48px,13vh,72px);font-size:22px;touch-action:none}
+  body.calibrating #rhythmTouch{display:flex}
+  body.calibrating #movezone,body.calibrating #look,body.calibrating #stick,body.calibrating #btns,body.calibrating #btns2{display:none!important}
+  body.touchmenu #touch{display:none!important}
+  @media(pointer:coarse){#entry{display:none}#btns{grid-template-columns:repeat(3,min(13vw,58px));gap:6px}#btns2{grid-template-columns:repeat(3,min(13vw,58px));gap:6px}#btns button,#btns2 button{width:min(13vw,58px);height:min(13vw,58px);font-size:12px}}
+
+  /* Touch hit layers are explicit: navigation zones cannot cover action buttons. */
+  #touch { pointer-events: none; }
+  #movezone, #look { z-index: 0; }
+  #stick { z-index: 1; }
+  #btns, #btns2 { z-index: 4; }
+  #rhythmTouch { z-index: 20; }
+  @media (pointer: coarse), (max-height: 520px) {
+    #btns2 { grid-template-columns: repeat(4, clamp(40px, 8vw, 52px)); gap: 7px; }
+    #btns2 button { width: clamp(40px, 8vw, 52px); height: clamp(40px, 12vh, 52px); font-size: 12px; }
+    #btns { grid-template-columns: repeat(2, clamp(44px, 10vw, 60px)); gap: 8px; }
+    #btns button { width: clamp(44px, 10vw, 60px); height: clamp(44px, 15vh, 60px); }
+  }
 </style>
 </head>
 <body>
@@ -165,9 +189,11 @@
     <button data-act="FLASHLIGHT">手电</button>
     <button data-act="CRANK">摇电</button>
     <button data-act="PAUSE">菜单</button>
+    <button data-vk="84">补给</button><button data-vk="81">相位</button><button data-vk="71">静息</button><button data-act="SPRINT">冲刺</button>
   </div>
 </div>
 
+<div id="rhythmTouch"><button data-vk="81">Q</button><button data-vk="87">W</button><button data-vk="69">E</button><button data-vk="82">R</button><button data-vk="27">退出</button></div>
 <div id="rotate">
   <div class="icon">⟳</div>
   <div>请把手机横过来玩</div>
@@ -381,6 +407,7 @@
       if (!Module._keys) return;
       if (on) {
         Module._held[vk] = 1;
+        if(!Module._keys[vk] && Module._keyPulses)Module._keyPulses[vk]=1;
         Module._keys[vk] = 1;
       } else {
         Module._held[vk] = 0;
@@ -656,5 +683,23 @@
   })();
 </script>
 {{{ SCRIPT }}}
+<script>
+(function(){
+  var coarse=window.matchMedia('(pointer:coarse)').matches || navigator.maxTouchPoints>0 || location.search.indexOf('touch=1')>=0;
+  if(!coarse)return;
+  document.querySelectorAll('[data-vk]').forEach(function(button){
+    var code=Number(button.dataset.vk);
+    function send(down){if(Module._key)Module._key(code,down);else if(Module._keys)Module._keys[code]=down?1:0;}
+    button.addEventListener('pointerdown',function(e){e.preventDefault();button.setPointerCapture(e.pointerId);send(1);});
+    ['pointerup','pointercancel','lostpointercapture'].forEach(function(type){button.addEventListener(type,function(e){e.preventDefault();send(0);});});
+  });
+  setInterval(function(){
+    if(!Module._CanityUiFlags)return;
+    var flags=Module._CanityUiFlags();document.body.classList.toggle('calibrating',!!(flags&2));document.body.classList.toggle('touchmenu',!(flags&1) && !(flags&2));
+    if(Module._CanityUiAccent)document.documentElement.style.setProperty('--canity-accent','#'+(Module._CanityUiAccent()>>>0).toString(16).padStart(6,'0'));
+    var shop=document.querySelector('[data-vk="84"]');if(shop){shop.disabled=!(flags&4);shop.style.opacity=flags&4?'1':'.3';}
+  },200);
+})();
+</script>
 </body>
 </html>

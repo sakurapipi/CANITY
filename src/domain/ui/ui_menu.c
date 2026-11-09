@@ -4,6 +4,8 @@
  * 契约：include/ui_menu.h
  */
 #include "common.h"
+#include "entity.h"
+#include "run_stats.h"
 #include "render.h"
 #include "loop_api.h"
 #include "player_api.h"
@@ -20,21 +22,31 @@
 #include "skills.h"
 #include "bench.h"
 #include "shop.h"
+#include "upgrade_run.h"
 #include "bestiary.h"
+#include "sprites.h"
+#include "economy.h"
+#include "threat.h"
 #include "save.h"
 #include "daily.h"
 #include "campaign.h"
 #include "state.h"
+#include "calibration.h"
 
 extern int safehouseHoverRow;   /* 定义在 game.c */
 #include "wallet.h"
+#include "help_book.h"
 
 /* 菜单内部互相引用，原文件里靠"先定义后使用"的巧合；这里显式前置声明 */
+static int mainMenuMore=0;
 static int MainMenuRowCount(void);
 static const char* MenuLabel(int i);
+static const char* MainMenuVisibleLabel(int index);
 static void DrawMenuText(void);
+static void DrawBestiaryPage(MenuGeo g);
 static void DrawBenchTree(MenuGeo g);
 static void DrawBankPage(void);
+static void DrawSafehousePage(void);
 static void DrawTextInRowLeft(const char* text, RECT row, unsigned int color);
 static void DrawCalibStrip(MenuGeo g);
 
@@ -46,70 +58,23 @@ static const char* kBranchNameZh[7] = { "沉寂", "节流", "藏匿",
                                         "塑形", "冒险", "跨支", "起点" };
 
 void MainMenuCompute(MainMenuLayout* L) {
-    int TH = TextHeightWin();
-    if (TH < 8) TH = 8;
-    memset(L, 0, sizeof(*L));
-
-    int n = MainMenuRowCount();
-    if (n < 1) n = 1;
-    L->count = n;
-    L->padX = TH;
-
-    int panelW = TH * 18;
-    if (panelW > winW - TH) panelW = winW - TH;
-    if (panelW < TH * 12) panelW = TH * 12;
-
-    int titleH  = (TH * 24) / 10;  /* CANITY + 副标题，留够上方呼吸位 */
-    int gapTop  = (TH * 8) / 10;
-    int gapRows = (TH * 11) / 10;  /* 副标题和第一行之间别贴在一起 */
-    int gapFoot = (TH * 6) / 10;
-    int footH   = (TH * 3) / 2;    /* 页脚：一条细线 + 一行字 */
-
-    int rowH = (TH * 135) / 100;
-    int bottomPad = (TH * 6) / 10;      /* 页脚和面板下边框之间的呼吸位 */
-    int panelH = titleH + gapTop + gapRows + n * rowH + gapFoot + footH + bottomPad;
-    int maxH = winH - TH;
-
-    if (panelH > maxH) {
-        /* 行数多（10 行）时压行高，文字本身不缩 */
-        int fixed = titleH + gapTop + gapRows + gapFoot + footH + bottomPad;
-        int avail = maxH - fixed;
-        rowH = (n > 0) ? avail / n : rowH;
-        if (rowH < (TH * 11) / 10) rowH = (TH * 11) / 10;
-        panelH = fixed + n * rowH;
-        if (panelH > maxH) panelH = maxH;
-    }
-    L->rowH = rowH;
-
-    int left = (winW - panelW) / 2;
-    L->panel.left   = left;
-    L->panel.right  = left + panelW;
-    L->panel.top    = (winH - panelH) / 2;
-    L->panel.bottom = L->panel.top + panelH;
-
-    L->titleY = L->panel.top + gapTop;
-    L->subY   = L->titleY + TH + TH / 3;
-    L->firstY = L->titleY + titleH;
-
-    L->footRuleY = L->panel.bottom - bottomPad - footH;
-    L->footY     = L->footRuleY + (footH - TH) / 2;
+    memset(L,0,sizeof(*L));int th=TextHeightWin();if(th<8)th=8;
+    L->count=MainMenuRowCount();L->padX=UIS(30);
+    L->panel.left=UIS(30);L->panel.right=winW*3/5;
+    L->panel.top=UIS(25);L->panel.bottom=winH-UIS(25);
+    L->titleY=UIS(55);L->subY=L->titleY+th+UIS(16);
+    L->firstY=winH/4;L->rowH=(winH*3/5)/L->count;
+    if(L->rowH<th+UIS(5))L->rowH=th+UIS(5);
+    L->footRuleY=winH-UIS(78);L->footY=winH-UIS(56);
 }
+
 
 static int MainMenuRowCount(void) {
     return MainMenuCount();
 }
 
-int MainMenuCount(void) {
-    /* v6 **行数必须等于标签表长度** ——
-       加「Bank」一行后表变了但这里没跟上，导致最后一行 Quit
-       永远画不出来、也选不到，菜单里没有任何退出游戏的途径。
-       表长度：有档 12 / 无档 11（无无尽）；各 +1（有无尽）。 */
-    int endlessUnlocked = EndlessUnlocked();
-    if (endlessUnlocked) {
-        return hasSave ? 13 : 12;
-    }
-    return hasSave ? 12 : 11;
-}
+int MainMenuCount(void) {return mainMenuMore?(EndlessUnlocked()?7:6):(hasSave?8:7);}
+
 
 static int MenuItemIndex(void) {
     if (currentState == STATE_SETTINGS) return settingsSelection;
@@ -125,26 +90,7 @@ static int MenuItemIndex(void) {
 static const char* MenuLabel(int i) {
     static char buf[128];
     switch (currentState) {
-        case STATE_MAIN_MENU: {
-            static const char* withSave[] = {"Continue", "New Run", "Hub", "Bank", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
-            /* v2.0 中文菜单 */
-            static const char* withSaveZh[] = {"继续", "新游戏", "大厅", "银行", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
-            static const char* noSaveZh[]   = {"新游戏", "大厅", "银行", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
-            static const char* withEndlessZh[]   = {"继续", "新游戏", "无尽", "大厅", "银行", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
-            static const char* noSaveEndlessZh[] = {"新游戏", "无尽", "大厅", "银行", "成就", "图鉴", "帮助", "设置", "战役", "每日挑战", "新手教程", "退出"};
-            static const char* noSave[] = {"New Run", "Hub", "Bank", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
-            static const char* withEndless[] = {"Continue", "New Run", "Endless", "Hub", "Bank", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
-            static const char* noSaveEndless[] = {"New Run", "Endless", "Hub", "Bank", "Achievements", "Bestiary", "Help", "Settings", "Campaign", "Daily Run", "Tutorial", "Quit"};
-            /* Endless 解锁条件：通关过第 10 层 */
-            int endlessUnlocked = EndlessUnlocked();
-            int zh = (g_lang == LANG_ZH);
-            if (endlessUnlocked) {
-                if (zh) return hasSave ? withEndlessZh[i] : noSaveEndlessZh[i];
-                return hasSave ? withEndless[i] : noSaveEndless[i];
-            }
-            if (zh) return hasSave ? withSaveZh[i] : noSaveZh[i];
-            return hasSave ? withSave[i] : noSave[i];
-        }
+        case STATE_MAIN_MENU: return MainMenuVisibleLabel(i);
         case STATE_PAUSED: {
             static const char* s[] = {"Resume", "Settings", "Main Menu"};
             static const char* szh[] = {"继续游戏", "设置", "主菜单"};
@@ -300,7 +246,7 @@ static const char* MenuLabel(int i) {
                用户要的「带进去越多，拿出来的越多」就靠这一行。
                行序：0..5 六项永久升级 / 6 携带档位 / 7 Back */
             if (i == UPGRADE_COUNT) {
-                extern int bankCarryPct, bankGold;
+
                 static const int pct[4] = { 25, 50, 75, 100 };
                 int p = bankCarryPct;
                 if (p < 0) p = 0;
@@ -325,7 +271,7 @@ static const char* MenuLabel(int i) {
             /* v6：**按分类筛选 + 用表里的真实奖励**
                原来这里写着 "+1C/250S" —— 那是已删除的「核心 / 金币」，
                玩家看到的是两个不存在的货币。现在从 kAchDefs 读。 */
-            extern const AchDef kAchDefs[ACH_COUNT];
+
             if (i >= AchVisibleCount()) return "Back";
             int id = AchIdAtRow(i);
             if (id < 0) return "Back";
@@ -402,6 +348,10 @@ void PageTabRect(int idx, int* x0, int* y0, int* x1, int* y1) {
 }
 
 void DrawMenuPanels(void) {
+    if(currentState==STATE_SAFEHOUSE) {
+        BlendRectWin(0,0,winW,winH,UI_BG_PANEL,1.0f);
+        if(shopPage!=SHP_TREE) { DrawSafehousePage(); return; }
+    }
     MenuGeo g = GetMenuGeo();
     /* v2.7：改造树是**整屏**页面，不走下面的通用面板 ——
        否则旧面板和标题会画在树底下（截图里能看到 SAFE HOUSE - SHOP 残留）。 */
@@ -414,7 +364,7 @@ void DrawMenuPanels(void) {
         UiPanel9(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, 0);
     } else {
         BlendRectWin(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, 0x000a1016, 0.94f);
-        FrameRectWin(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, PAL_PANEL, 0.85f, UIS(2));
+        FrameRectWin(g.panel.left, g.panel.top, g.panel.right, g.panel.bottom, UI_EDGE, 0.85f, UIS(2));
     }
 
     /* ==================================================================
@@ -429,7 +379,7 @@ void DrawMenuPanels(void) {
         BlendRectWin(bx0, by0, bx1, by1, 0x00101418u, 0.90f);
         FrameRectWin(bx0, by0, bx1, by1, 0x00607080u, 0.95f, UIS(2));
         DrawTextCenterWin((bx0 + bx1) / 2, (by0 + by1) / 2 - TextHeightWin() / 2,
-                          Tr("BACK", "返回"), 0x00E8C040u);
+                          Tr("BACK", "返回"), UI_ACCENT);
     }
 
     /* v2.8：安全屋的**所有**页都要显示页签（不只改造树那一页） */
@@ -439,14 +389,14 @@ void DrawMenuPanels(void) {
            5 个页签变宽后右端会压到余额（截图里 GOLD 被 UPGRADE 盖住）。 */
         {
             static char sb2[64];
-            { extern int carryGold; sprintf(sb2, "GOLD %d", carryGold); }   /* v6 第 40 轮：同 1567 行，双倍 */
+            {  sprintf(sb2, "GOLD %d", carryGold); }   /* v6 第 40 轮：同 1567 行，双倍 */
             int bx0, by0, bx1, by1;
             PageTabRect(0, &bx0, &by0, &bx1, &by1);
             /* v6 **余额必须锚在面板右边缘，不是窗口右边缘** ——
                用 winW 算的话，窗口比面板宽时 GOLD 会跑到面板外面，
                看起来就是「字幕漂移到屏幕最右边」。 */
             DrawTextWin(g.panel.right - UIS(20) - TextWidthWin(sb2),
-                        g.panel.top + UIS(12), sb2, 0x00E8C040u);
+                        g.panel.top + UIS(12), sb2, UI_ACCENT);
         }
     }
 
@@ -467,8 +417,8 @@ void DrawMenuPanels(void) {
     {
         static int    s_hintDone  = 0;      /* 已经放过一次了 */
         static double s_hintStart = -1.0;   /* 第一次进主菜单的时刻 */
-        extern double g_timeSec;
-        extern int isFullscreen;
+
+
 
         if (!s_hintDone && !isFullscreen &&
             currentState == STATE_MAIN_MENU) {
@@ -482,7 +432,7 @@ void DrawMenuPanels(void) {
                 /* 面板上方、右对齐面板右边 —— 不遮标题、菜单行、BEST LEVEL */
                 int hy = g.panel.top - UIS(26);
                 if (hy < UIS(4)) hy = g.panel.top + UIS(4);
-                DrawTextWin(g.panel.right - hw, hy, hint, 0x00E8C040u);
+                DrawTextWin(g.panel.right - hw, hy, hint, UI_ACCENT);
             } else if (age >= 3.0) {
                 s_hintDone = 1;             /* 放过一次，之后再也不放 */
             }
@@ -507,7 +457,7 @@ void DrawMenuPanels(void) {
                 /* 安全屋：线只铺「内容列」，不越过左边那一列页签 */
                 int tx0, ty0, tx1, ty1;
                 PageTabRect(0, &tx0, &ty0, &tx1, &ty1);
-                extern void UiSectionRuleSpan(int, int, int);
+
                 UiSectionRuleSpan(tx1 + UIS(24), R2 - inner, ty);
             } else {
                 UiSectionRule(cx2, ty, (R2 - L2) - inner * 2);
@@ -525,7 +475,8 @@ void DrawMenuPanels(void) {
             currentState != STATE_BANK) {
             int fy = B2 - UIS(26);
             /* v2.9：**线要画在最后一行文字下面**。
-               原来 y - TH/2，主菜单第 10 行「Quit」正好被这条线横切
+               原来 
+y - TH/2，主菜单第 10 行「Quit」正好被这条线横切
                （用户截图：Quit 上有条小横线）。
                现在先算出最后一行的底边，线放它下面 4px。 */
             int lastRowBottom = g.firstY + (g.count - 1) * g.rowH + TextHeightWin();
@@ -578,6 +529,7 @@ void DrawMenuPanels(void) {
     /* v6：Hub 合并成一页后不再需要页码 */
     /* 弹窗开着时不再高亮背后的列表行 */
     int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
+    if (currentState == STATE_BESTIARY) { DrawBestiaryPage(g); return; }
     int sel = MenuItemIndex();
     /* v2 技能树不是行列表：选中框由 DrawSkillTree 自己画在节点上 */
     int rowHighlight = !(currentState == STATE_HUB ||
@@ -606,162 +558,30 @@ void DrawMenuPanels(void) {
 }
 
 static void DrawMainMenu(const MainMenuLayout* M) {
-    int TH = TextHeightWin();
-    int n = M->count;
-    int sel = menuSelection;
-    if (sel < 0 || sel >= n) sel = 0;
-    int cx = (M->panel.left + M->panel.right) / 2;
-
-    /* 标题：故意用双空格拉开字距 —— 点阵字没有字距控制，这是唯一的办法 */
-    UiTitle(cx, M->titleY, "C  A  N  I  T  Y");
-    UiHint(cx, M->subY, "RAYCASTER HORROR");
-
-    int split = n - 4;                 /* 系统组（Help/Settings/Training/Quit）之前分组 */
-    for (int i = 0; i < n; i++) {
-        int top = M->firstY + i * M->rowH;
-        int y = top + (M->rowH - TH) / 2;
-        int left = M->panel.left + M->padX;
-        int right = M->panel.right - M->padX;
-
-        if (split > 0 && i == split) {
-            /* 画在行与行之间的空隙正中：上一行文字底 → 本行文字顶 的中点就是 top。
-               （用 top - rowH/6 会直接切到上一行文字的底边，第一版就是这样） */
-            int lth = TH / 12; if (lth < 2) lth = 2;
-            int ly = top - lth / 2;
-            BlendRectWin(left, ly, right, ly + lth, 0x00605A66u, 0.95f);
-        }
-
-        int isSel = (i == sel);
-        if (isSel) {
-            /* v2.2：底纹 + 左竖线（光标另画在文字那一行，避免行高不一致时错位） */
-            int rt = top + M->rowH / 10;
-            int rb = top + M->rowH - M->rowH / 10;
-            BlendRectWin(left - TH / 2, rt, right + TH / 2, rb, UI_ACCENT, 0.10f);
-            BlendRectWin(left - TH / 2, rt, left - TH / 2 + TH / 8, rb, UI_ACCENT, 0.95f);
-            /* v2.2：主菜单不再叠三角光标 —— 行高与文字基线对不齐时会错行，
-               左竖线 + 琥珀文字已经足够表达选中。 */
-        }
-
-        char num[12];   /* v2.2：sprintf %d 最多 11 字节 */
-        sprintf(num, "%d", i + 1);
-        DrawTextWin(left, y, num, isSel ? 0x00FFE080u : 0x00969AA6u);
-
-        DrawTextWin(left + TH * 2, y, MenuLabel(i),
-                    isSel ? UI_ACCENT : UI_INK);
-
-        if (isSel) {
-            const char* arrow = ">";
-            DrawTextWin(right - TextWidthWin(arrow), y, arrow, 0x0060E070u);
-        }
+    if(menuSelection<0 || menuSelection>=M->count)menuSelection=0;
+    int th=TextHeightWin(),left=M->panel.left+M->padX;
+    BlendRectWin(0,0,winW,winH,0x00040C17u,1);
+    /* Perspective doorway fills the screen; selection remains on one coherent axis. */
+    int cx=winW*4/5,cy=winH/2;
+    for(int depth=0;depth<8;depth++) {
+        int w=winW/(3+depth),h=winH/(2+depth);
+        FrameRectWin(cx-w/2,cy-h/2,cx+w/2,cy+h/2,UI_EDGE,.65f-depth*.06f,2);
     }
-
-    /* 页脚：细线 + 一行数据，全部**在面板里面**（原来露在面板外，很难看） */
-    {
-        int ft = TH / 10; if (ft < 2) ft = 2;
-        /* 左右各内缩半行：面板四角那四条装饰短条会压到页脚首尾字符 */
-        int fx0 = M->panel.left + M->padX + TH / 2;
-        int fx1 = M->panel.right - M->padX - TH / 2;
-        BlendRectWin(fx0, M->footRuleY, fx1, M->footRuleY + ft, 0x00502A32u, 0.95f);
+    UiTitle((M->panel.left+M->panel.right)/2,M->titleY,"C  A  N  I  T  Y");
+    DrawTextSmallWin(left,M->subY,Tr("LISTEN. HIDE. RETURN.","倾听。藏匿。归来。"),UI_INK_DIM);
+    for(int i=0;i<M->count;i++) {
+        int y=M->firstY+i*M->rowH;
+        if(i==menuSelection)UiRowSel(left-UIS(12),y,M->panel.right,y+M->rowH-UIS(4),.7f);
+        DrawTextWin(left+UIS(10),y+(M->rowH-th)/2,MenuLabel(i),i==menuSelection?UI_ACCENT:UI_INK);
     }
-
-    /* 页脚：左边货币、右边最佳层数；
-       版本号挪到屏幕右下角（面板内塞三项，800x600 下必然撞车） */
-    char lstr[48], rstr[48];
-    /* v3.4：**左边不再显示 GOLD** —— 用户要求「主界面最底部那个蓝色的
-       GOLD 0 删掉，最底相当于只留一个最佳 level」。
-       金币归属挪到了新的 BANK 页和游戏内 HUD，主菜单底部只留 BEST LEVEL。 */
-    lstr[0] = '\0';
-    sprintf(rstr, "BEST LEVEL %d", bestLevel);
-    int lx = M->panel.left + M->padX + TH / 2;
-    int rx = M->panel.right - M->padX - TH / 2;
-
-    /* v3.3：**页脚两项会撞车** ——
-       用户截图：金币涨到 7000 之后 "GOLD 7000" 变宽，
-       和右对齐的 "BEST LEVEL 0" 直接叠在一起。
-       原来完全没做宽度检查。现在按可用宽度逐级缩短右侧文案：
-         ① BEST LEVEL 12  （完整）
-         ② BEST 12        （去掉 LEVEL）
-         ③ Lv12           （极窄窗口）
-       仍然放不下就左右各让一半，保证至少一个字的间隙。 */
-    {
-        int avail = rx - lx;
-        int gapMin = TH;                     /* 最小间隙 = 一个字高 */
-        int wl = (lstr[0] ? TextWidthWin(lstr) : 0);
-        int wr = TextWidthWin(rstr);
-        if (wl + wr + gapMin > avail) {
-            sprintf(rstr, "BEST %d", bestLevel);
-            wr = TextWidthWin(rstr);
-        }
-        if (wl + wr + gapMin > avail) {
-            sprintf(rstr, "Lv%d", bestLevel);
-            wr = TextWidthWin(rstr);
-        }
-        /* 极端情况：左侧也收一点，保证不重叠 */
-        if (wl + wr + gapMin > avail && wl > avail / 2) {
-            sprintf(lstr, "%d", carryGold);
-            wl = TextWidthWin(lstr);
-        }
-        DrawTextWin(lx, M->footY, lstr, 0x0060D0FFu);
-        DrawTextWin(rx - wr, M->footY, rstr, 0x00808088u);
-    }
-
-    DrawTextWin(winW - TextWidthWin(CANITY_VERSION_STR) - UIS(8),
-                winH - TextHeightWin() - UIS(4), CANITY_VERSION_STR, 0x007C8088u);
+    BlendRectWin(left,M->footRuleY,winW-UIS(60),M->footRuleY+2,UI_EDGE,1);
+    DrawTextSmallWin(left,M->footY,Tr("ENTER / SPACE / CLICK","回车 / 空格 / 单击"),UI_INK_DIM);
+    DrawTextSmallWin(winW-TextSmallLiteralWidth(CANITY_VERSION_STR)-UIS(60),M->footY,CANITY_VERSION_STR,UI_INK_DIM);
 }
 
-static void DrawMenuText(void) {
-    /* ==================================================================
-     * v7 第 ㊿ 轮：**商店必须在 GetMenuGeo() 之前分派**
-     * ==================================================================
-     * 上一版我把分派放在 GetMenuGeo() 之��—— 结果永远是
-     * GetMenuGeo() → MakeGeo(SAFEHOUSE) 先崩，我那个独立面板
-     * 一次都没跑到。
-     *
-     * 现在把它提到最前面：安全屋这一页完全不碰通用几何。
-     * ================================================================ */
-    /* v7 第 ㊿ 轮：安全屋回到通用菜单渲染 —— 它会画页签、
-       改造树、局内强化、休息页。之前那条路径的崩溃已随
-       ShopPriceAt() 的递归修复而消失。 */
-    MenuGeo g = GetMenuGeo();
-    int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
 
-    /* 成就页面：使用专用现代化渲染 */
-    if (currentState == STATE_ACHIEVEMENTS) {
-        UiDrawAchievementsPage(g);
-        return;
-    }
-
-    /* v6：**Hub 有 3 页** —— 0 升级列表 / 1 技能树 / 2 银行。
-       原来这里写死 hubPage == 1，导致银行页根本进不来，
-       掉到下面的通用列表渲染，看起来就是「点 Bank 显示 Hub」。
-       现在改成 >= 1，再把 1 和 2 分开。 */
-    /* v6：**BANK 是独立状态**，不再和 Hub 共用页号 */
-    if (currentState == STATE_BANK) {
-        DrawBankPage();
-        return;
-    }
-    if (currentState == STATE_HUB) {
-        /* v7 第 54 轮：**技能树临时降级**
-           git checkout -- src/skills.c 把 264 行未提交改动冲掉之后，
-           切到 Hub 会直接崩溃（无崩溃日志 = 栈耗尽或死循环）。
-           我重写的 SkillNodeX/Y 几何和原版不一致，连线也画不出来。
-           在重写整个技能树之前，先保证**界面能进、不崩**，
-           并且把列表版购买入口留着（Hub 走通用列表渲染）。 */
-        int kHubFallbackTree = 0;   /* v7 第 58 轮：6 个空节点补回后技能树正常，永久启用 */   /* v7 第 57 轮：几何修了两次仍然崩，尊重事实——回到列表 */   /* v7 第 57 轮：几何修好后重新启用技能树 */   /* v7 第 54 轮：1=列表降级 0=技能树（树崩溃中） */
-        if (!kHubFallbackTree) { DrawSkillTree(); return; }
-        /* 降级：走通用列表渲染（下面会画 MenuLabel 行） */
-    }
-
-
-    /* v2.2 主菜单：自己的布局（标题 / 行 / 页脚） */
-    if (currentState == STATE_MAIN_MENU) {
-        MainMenuLayout M;
-        MainMenuCompute(&M);
-        DrawMainMenu(&M);
-        return;
-    }
-
-    unsigned int titleColor = (currentState == STATE_MAIN_MENU) ? 0x00BE1414u : 0x00D23C3Cu;
+static void DrawGenericMenuTitle(MenuGeo g) {
+    unsigned int titleColor = (currentState == STATE_MAIN_MENU) ? UI_ACCENT : UI_ACCENT;
     /* 通关结局的标题用绿色 —— 和「理智耗尽」的暗红区分开 */
     if (currentState == STATE_GAMEOVER && gameWon) titleColor = 0x0060E070u;
     if (currentState == STATE_MAIN_MENU) {
@@ -801,95 +621,133 @@ static void DrawMenuText(void) {
     /* v2.9：标题为空就不画 —— 安全屋靠顶部页签表明位置，
        那行大红「SAFE HOUSE - SHOP」会把改造树整个盖住（用户要求去掉）。 */
     if (g.title && g.title[0]) DrawTitleWin(g.title, g.titleY, titleColor);
+}
 
-    int sel = MenuItemIndex();
-    int idx[SETTING_COUNT];
-    int pageItemCount = 0;
-    if (currentState == STATE_SETTINGS && settingsPage != SETPAGE_ROOT && settingsPage != SETPAGE_BINDDIR) {
-        pageItemCount = PageItems(idx);
-    }
 
-    /* 确保选中的项在可见范围内 */
-    if (sel >= 0 && sel < g.count) {
-        if (sel < g.scrollOffset) {
-            g.scrollOffset = sel;
-        } else if (sel >= g.scrollOffset + g.maxVisibleRows) {
-            g.scrollOffset = sel - g.maxVisibleRows + 1;
+/* Wrap UTF-8 at complete codepoints. Every section has an explicit lower bound. */
+static int DossierText(const char* text,int x,int y,int width,int bottom,unsigned int color){
+    if(!text || width<=0)return y;
+    int height=TextMediumLiteralHeight(),step=height+UIS(4);
+    while(*text && y+height<=bottom){
+        char line[256];int used=0,fit=0;
+        if(*text=='\n'){text++;y+=step;continue;}
+        while(text[used] && text[used]!='\n' && used<240){
+            unsigned char c=(unsigned char)text[used];int n=c<128?1:c<224?2:c<240?3:4;
+            if(used+n>=250)break;
+            int valid=1;for(int i=1;i<n;i++)if(!text[used+i] || ((unsigned char)text[used+i]&0xC0)!=0x80)valid=0;
+            if(!valid)n=1;
+            memcpy(line+used,text+used,(size_t)n);used+=n;line[used]=0;
+            if(TextMediumLiteralWidth(line)>width)break;
+            fit=used;
         }
+        if(!fit)break;
+        line[fit]=0;DrawTextMediumLiteralWin(x,y,line,color);text+=fit;y+=step;
+        if(*text=='\n')text++;
     }
+    return y;
+}
 
-    /* 将调整后的滚动偏移保存回全局数组，持久化到下次调用 */
-    if (currentState >= 0 && currentState < 8) {
-        menuScrollOffsets[currentState] = g.scrollOffset;
+/* Use exactly the existing baked world sprite, cropped without stretching.
+ * No game camera, light, sprite-accent or monster state is modified. */
+static void DrawDossierPortrait(int spriteId, RECT box, int identified) {
+    if (!SpritesReady() || !pixels || renderW <= 0 || renderH <= 0 || winW <= 0 || winH <= 0) return;
+    Sprite* sprite = SpriteGet(spriteId);
+    if (!sprite || !sprite->px) return;
+    int sx = sprite->bx0, sy = sprite->by0;
+    int sw = sprite->bx1-sx, sh = sprite->by1-sy;
+    if (sx < 0 || sy < 0 || sw <= 0 || sh <= 0 || sprite->bx1 > sprite->w || sprite->by1 > sprite->h) {
+        sx = sy = 0; sw = sprite->w; sh = sprite->h;
     }
+    int left = box.left*renderW/winW, top = box.top*renderH/winH;
+    int bw = (box.right-box.left)*renderW/winW, bh = (box.bottom-box.top)*renderH/winH;
+    if (bw <= 0 || bh <= 0 || sw <= 0 || sh <= 0) return;
+    float k = (float)bw/sw; if ((float)bh/sh < k) k = (float)bh/sh;
+    int w = (int)(sw*k), h = (int)(sh*k);
+    if (w <= 0 || h <= 0) return;
+    left += (bw-w)/2; top += (bh-h)/2;
+    for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+        unsigned int pixel = sprite->px[(sy+y*sh/h)*sprite->w + sx+x*sw/w];
+        float alpha = (float)(pixel >> 24)/255.0f;
+        if (alpha <= 0.0f) continue;
+        PutPixelBlend(left+x,top+y,identified ? (pixel&0xFFFFFFu) : 0x001C2935u,alpha);
+    }
+}
 
-    /* v1.8：图鉴底部两行 —— 威胁 + 对策（未解锁则提示去遇到它） */
-    if (currentState == STATE_BESTIARY && sel >= 0 && sel < BESTIARY_COUNT) {
-        char l1[192], l2[192];
-        MenuGeo bg = GetMenuGeo();
-        int avail = (bg.panel.right - bg.panel.left) - UIS(56);
-        /* ===== v6 **三阶揭示** =====
-           见过 1 次 → 名字 + 危险度
-           逃 3 次   → + 行为 + 实时数值
-           逃 5 次   → + 对策 + 你的战绩
-
-           数值来自 bestiary[sel].getSpeed() 等函数指针，
-           读的是真实常量 —— 改怪物参数，这里自动变。 */
-        if (!BestiaryIsSeen(sel)) {
-            /* v6 第 ㉘ 轮：**这一行画到面板外面去了**
-               其它分支都锚在 bg.panel.bottom，只有这条用 winH ——
-               实测截图：「UNKNOWN...」压在面板下边框之外的黑色背景上。 */
-            sprintf(l1, "UNKNOWN. ENCOUNTER IT IN A RUN TO UNLOCK.");
-            ClampRowText(l1, avail);
-            /* ==================================================================
-             * v7 第 64 轮：**这一行删掉**
-             * ==================================================================
-             * 实测截图：面板只有 6 行高度，第 6 个条目恰好画在这个位置，
-             * 于是变成「UNKNOWN. ENCOUNTE??? [LOCKED]UN TO UNLOCK.」。
-             * 上面试过 -52 / -88 两个位置，都会和列表或被裁掉。
-             *
-             * 而 `??? [LOCKED]` 这五个字本身就把话说清楚了 ——
-             * 一条放不下的说明不如不放。
-             * ================================================================ */
-            (void)l1;
-        } else {
-            int stage = BestiaryStage(sel);
-            int danger = BestiaryDanger(sel);
-
-            /* 第一行：危险度 + 实时数值（逃 3 次后才显示数值） */
-            if (stage >= BST_BEHAVED) {
-                float sp = bestiary[sel].getSpeed ? bestiary[sel].getSpeed() : 0.0f;
-                float hr = bestiary[sel].getHear  ? bestiary[sel].getHear()  : 0.0f;
-                float ch = bestiary[sel].getChase ? bestiary[sel].getChase() : 0.0f;
-                sprintf(l1, "DANGER %d/5   SPEED %.2f   HEAR %.1f   CHASE %.1fs",
-                        danger, (double)sp, (double)hr, (double)ch);
-            } else {
-                sprintf(l1, "DANGER %d/5   (%s TO REVEAL MORE)",
-                        danger, "3 FLOORS / 2 ESCAPES");
-            }
-
-            /* 第二行：行为（逃 3 次）或对策（逃 5 次） */
-            if (stage >= BST_COUNTER) {
-                sprintf(l2, "COUNTER: %s",
-                        (g_lang == LANG_ZH) ? bestiary[sel].counterZh : bestiary[sel].counterEn);
-            } else if (stage >= BST_BEHAVED) {
-                sprintf(l2, "%s",
-                        (g_lang == LANG_ZH) ? bestiary[sel].behaviorZh : bestiary[sel].behaviorEn);
-            } else {
-                sprintf(l2, "%s", "???");
-            }
-            ClampRowText(l1, avail);
-            ClampRowText(l2, avail);
-            /* v3.3 **锚到面板底边，不是窗口底边** ——
-               试玩实测：「面板下边框在 y≈670，THREAT/COUNTER 两行却画在
-               y≈719 / 751，第二行贴到窗口最底边被切」。
-               原来用的是 winH，而面板比窗口矮。 */
-            int footY = bg.panel.bottom - UIS(52);
-            DrawTextCenterWin(winW / 2, footY, l1, 0x00E0A050u);
-            DrawTextCenterWin(winW / 2, footY + UIS(24), l2, 0x0060C0FFu);
+static void DrawBestiaryPage(MenuGeo g) {
+    int th = TextHeightWin(), pad = UIS(16);
+    int split = g.panel.left + (g.panel.right-g.panel.left)*32/100;
+    int x = split+pad, right = g.panel.right-pad;
+    BlendRectWin(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,0x00090F17u,.99f);
+    FrameRectWin(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,0x00485668u,.95f,1);
+    DrawTextWin(g.panel.left+pad,g.titleY,Tr("FIELD ARCHIVE","怪物档案"),UI_ACCENT);
+    char text[160];
+    snprintf(text,sizeof(text),Tr("ACTIVE %d / %d","现行 %d / %d"),BestiaryCountSeen(bestiarySeen),BestiaryActiveCount());
+    DrawTextWin(right-TextWidthWin(text),g.titleY,text,0x008CCBD3u);
+    BlendRectWin(split,g.firstY-UIS(8),split+1,g.panel.bottom-pad,0x00404C60u,.9f);
+    for (int id = 0; id <= BESTIARY_COUNT; id++) {
+        RECT row = RowRect(g,id);
+        int selected = bestiarySel == id;
+        if (selected) BlendRectWin(row.left,row.top,row.right,row.bottom,0x002B394Bu,.95f);
+        if (id == BESTIARY_COUNT) snprintf(text,sizeof(text),"< %s",Tr("BACK","返回"));
+        else if (!BestiaryIsActive(id)) snprintf(text,sizeof(text),"%02d  %s",id+1,Tr("ARCHIVED","旧版记录"));
+        else snprintf(text,sizeof(text),"%02d  %s",id+1,BestiaryIsSeen(id) ? Tr(bestiary[id].nameEn,bestiary[id].nameZh) : "???");
+        ClampRowText(text,row.right-row.left-UIS(12));
+        DrawTextWin(row.left+UIS(6),row.top+(row.bottom-row.top-th)/2,text,selected?0x00FFE1A0u:0x0093A4B7u);
+    }
+    int id = bestiarySel;
+    if (id < 0 || id >= BESTIARY_COUNT) {
+        DossierText(Tr("Return to the main menu. Your archive is kept.","返回主菜单。已发现的档案会保留。"),x,g.firstY,right-x,g.panel.bottom-pad,0x0093A4B7u);
+        return;
+    }
+    const BestiaryEntry* entry = &bestiary[id];
+    int seen = BestiaryIsSeen(id), stage = BestiaryStage(id), active = BestiaryIsActive(id);
+    int y = DossierText(seen ? ((id==BST_ID_HUNTER)?Tr("SOUND HUNTERS / THREE FORMS","听声鬼 / 三种形态"):Tr(entry->nameEn,entry->nameZh)) : Tr("UNIDENTIFIED","未知生物"),x,g.firstY,right-x,g.panel.bottom-pad,0x00F0E1C8u);
+    snprintf(text,sizeof(text),"%s / %s",active ? Tr("ACTIVE","现行") : Tr("ARCHIVED","旧版"),seen?Tr(entry->tagEn,entry->tagZh):"???");
+    y = DossierText(text,x,y,right-x,g.panel.bottom-pad,0x007DA7BEu);
+    int bottom = g.panel.bottom-th-pad;
+    int imageSize = (right-x)*46/100;
+    if (imageSize > (bottom-y)*42/100) imageSize = (bottom-y)*42/100;
+    if (imageSize < 12) return;
+    RECT image = {x,y+UIS(6),x+imageSize,y+UIS(6)+imageSize};
+    BlendRectWin(image.left,image.top,image.right,image.bottom,0x00131C29u,1.0f);
+    FrameRectWin(image.left,image.top,image.right,image.bottom,0x00374B60u,.9f,1);
+    RECT inset = {image.left+UIS(5),image.top+UIS(5),image.right-UIS(5),image.bottom-UIS(5)};
+    if(id==BST_ID_HUNTER) {
+        static const int variants[3]={SPR_MON_HUNTER,SPR_MON_HUNTER2,SPR_MON_HUNTER3};
+        int width=(inset.right-inset.left)/3;
+        for(int variant=0;variant<3;variant++) {
+            RECT portrait={inset.left+variant*width,inset.top,inset.left+(variant+1)*width,inset.bottom};
+            DrawDossierPortrait(variants[variant],portrait,seen);
         }
+    } else DrawDossierPortrait(entry->spriteId,inset,seen);
+    int sx = image.right+UIS(10), sy = image.top, sw = right-sx;
+    snprintf(text,sizeof(text),Tr("KNOWLEDGE %d / 3","认知 %d / 3"),stage);
+    sy = DossierText(text,sx,sy,sw,image.bottom,UI_ACCENT);
+    if (seen) {
+        snprintf(text,sizeof(text),Tr("RISK %d / 5","危险 %d / 5"),BestiaryDanger(id));
+        sy = DossierText(text,sx,sy,sw,image.bottom,0x00DB997Du);
+        snprintf(text,sizeof(text),Tr("ESCAPES %d","逃脱 %d"),bestiaryEscapes[id]);
+        sy = DossierText(text,sx,sy,sw,image.bottom,0x0095B5BCu);
+        snprintf(text,sizeof(text),Tr("CAUGHT %d","被抓 %d"),bestiaryCaught[id]);
+        sy = DossierText(text,sx,sy,sw,image.bottom,0x0095B5BCu);
     }
+    y = image.bottom+UIS(10);
+    if (!active) {
+        DossierText(Tr("Legacy record. This creature no longer spawns and is excluded from completion.","历史记录：当前版本不生成，不计入现行全图鉴。"),x,y,right-x,bottom,0x0093A4B7u);
+    } else if (!seen) {
+        DossierText(Tr("Encounter this creature in a run to identify its portrait and behavior.","在局内遭遇后，解锁肖像与身份。研究逐层积累，逃脱能加速揭示。"),x,y,right-x,bottom,0x0093A4B7u);
+    } else {
+        int half = y + (bottom-y)/2;
+        y = DossierText(Tr("BEHAVIOR","行为"),x,y,right-x,half,UI_ACCENT);
+        DossierText(stage>=BST_BEHAVED?Tr(entry->behaviorEn,entry->behaviorZh):Tr("Study across 3 floors or escape twice.","累计遭遇三层，或逃脱两次后揭示。"),x,y,right-x,half,0x00B6C7D1u);
+        y = DossierText(Tr("COUNTERMEASURE","对策"),x,half+UIS(4),right-x,bottom,0x008CCBD3u);
+        DossierText(stage>=BST_COUNTER?Tr(entry->counterEn,entry->counterZh):Tr("Study across 5 floors or escape three times.","累计遭遇五层，或逃脱三次后揭示。"),x,y,right-x,bottom,0x00B6C7D1u);
+    }
+    DrawTextSmallWin(x,bottom,Tr("ARROWS / MOUSE   ESC BACK","ARROWS / MOUSE   ESC BACK"),0x006E8497u);
+}
 
+
+static void DrawGenericMenuRows(MenuGeo g, int sel, int popupOpen, const int* idx, int pageItemCount) {
     /* THE HUB 升级页：价格列宽度按**本页最宽的价格**算一次，
        等级点列锚在它左边。这样每行都对齐，也不会出现
        "120 GOLD" 压到等级点上的情况。 */
@@ -938,7 +796,7 @@ static void DrawMenuText(void) {
             char line[112];
             int mins = (int)(runTime / 60.0f);
             int secs = (int)runTime - mins * 60;
-            if (i == 1) { extern int lastRunCaught; snprintf(line,sizeof(line),"LEVEL %d  TIME %d:%02d  CAUGHT %d",currentLevel,mins,secs,lastRunCaught); }
+            if (i == 1) {  snprintf(line,sizeof(line),"LEVEL %d  TIME %d:%02d  CAUGHT %d",currentLevel,mins,secs,lastRunCaught); }
             else if (gameWon)
                 sprintf(line, "SCORE %d  D%d C%d K%d T%d",
                         lastScore.score, lastScore.s_depth, lastScore.s_coll,
@@ -950,8 +808,8 @@ static void DrawMenuText(void) {
                    走出这一局学不到任何东西，只会觉得"我明明很小心"。
 
                    现在多给三行：被抓几次 / 金币损失 / 理智在哪层见底。 */
-                extern int CatchCountThisRun(void);
-                extern int lastRunGold,lastRunKept,lastRunCaught;
+
+
                 int caught = lastRunCaught;
                 if (i == 1) continue;   /* 第 1 行已被上面 LEVEL/TIME 占掉 */
                 sprintf(line, "CAUGHT %d  SCORE %d", caught, lastScore.score);
@@ -1020,7 +878,7 @@ static void DrawMenuText(void) {
             unsigned int priceCol;
             if (cost < 0) {
                 sprintf(price, "MAX");
-                priceCol = 0x00E8C040u;
+                priceCol = UI_ACCENT;
             } else {
                 sprintf(price, "%d GOLD", cost);
                 priceCol = (carryGold >= cost) ? 0x0060D0FFu : 0x00C86868u;
@@ -1059,10 +917,13 @@ static void DrawMenuText(void) {
     }
 
     if(currentState==STATE_SAFEHOUSE && shopPage==SHP_SHOP) {
-        extern int shopRefreshUsed;
+
         char hint[80];snprintf(hint,sizeof(hint),"R  REFRESH %d/1",shopRefreshUsed?0:1);
         DrawTextInRowLeft(hint,RowRect(g,SHOP_OFFERS+1),PAL_CYAN);
     }
+}
+
+static void DrawMenuScrollIndicator(MenuGeo g) {
     /* 绘制滚动指示器 */
     if (g.count > g.maxVisibleRows) {
         int barH = g.panel.bottom - g.firstY;
@@ -1081,6 +942,88 @@ static void DrawMenuText(void) {
             DrawTextCenterWin(g.panel.left + (g.panel.right - g.panel.left) / 2, g.panel.bottom + UIS(4), "v", 0x008CFF8C);
         }
     }
+}
+
+static void DrawMenuText(void) {
+    if(currentState==STATE_SAFEHOUSE)return;
+    /* ==================================================================
+     * v7 第 ㊿ 轮：**商店必须在 GetMenuGeo() 之前分派**
+     * ==================================================================
+     * 上一版我把分派放在 GetMenuGeo() 之��—— 结果永远是
+     * GetMenuGeo() → MakeGeo(SAFEHOUSE) 先崩，我那个独立面板
+     * 一次都没跑到。
+     *
+     * 现在把它提到最前面：安全屋这一页完全不碰通用几何。
+     * ================================================================ */
+    /* v7 第 ㊿ 轮：安全屋回到通用菜单渲染 —— 它会画页签、
+       改造树、局内强化、休息页。之前那条路径的崩溃已随
+       ShopPriceAt() 的递归修复而消失。 */
+    MenuGeo g = GetMenuGeo();
+    int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
+    if (currentState == STATE_BESTIARY) { DrawBestiaryPage(g); return; }
+
+    /* 成就页面：使用专用现代化渲染 */
+    if (currentState == STATE_ACHIEVEMENTS) {
+        UiDrawAchievementsPage(g);
+        return;
+    }
+
+    /* v6：**Hub 有 3 页** —— 0 升级列表 / 1 技能树 / 2 银行。
+       原来这里写死 hubPage == 1，导致银行页根本进不来，
+       掉到下面的通用列表渲染，看起来就是「点 Bank 显示 Hub」。
+       现在改成 >= 1，再把 1 和 2 分开。 */
+    /* v6：**BANK 是独立状态**，不再和 Hub 共用页号 */
+    if (currentState == STATE_BANK) {
+        DrawBankPage();
+        return;
+    }
+    if (currentState == STATE_HUB) {
+        /* v7 第 54 轮：**技能树临时降级**
+           git checkout -- src/skills.c 把 264 行未提交改动冲掉之后，
+           切到 Hub 会直接崩溃（无崩溃日志 = 栈耗尽或死循环）。
+           我重写的 SkillNodeX/Y 几何和原版不一致，连线也画不出来。
+           在重写整个技能树之前，先保证**界面能进、不崩**，
+           并且把列表版购买入口留着（Hub 走通用列表渲染）。 */
+        int kHubFallbackTree = 0;   /* v7 第 58 轮：6 个空节点补回后技能树正常，永久启用 */   /* v7 第 57 轮：几何修了两次仍然崩，尊重事实——回到列表 */   /* v7 第 57 轮：几何修好后重新启用技能树 */   /* v7 第 54 轮：1=列表降级 0=技能树（树崩溃中） */
+        if (!kHubFallbackTree) { DrawSkillTree(); return; }
+        /* 降级：走通用列表渲染（下面会画 MenuLabel 行） */
+    }
+
+
+    /* v2.2 主菜单：自己的布局（标题 / 行 / 页脚） */
+    if (currentState == STATE_MAIN_MENU) {
+        MainMenuLayout M;
+        MainMenuCompute(&M);
+        DrawMainMenu(&M);
+        return;
+    }
+
+    if(currentState==STATE_HELP){HelpBookDraw();return;}
+    DrawGenericMenuTitle(g);
+    int sel = MenuItemIndex();
+    int idx[SETTING_COUNT];
+    int pageItemCount = 0;
+    if (currentState == STATE_SETTINGS && settingsPage != SETPAGE_ROOT && settingsPage != SETPAGE_BINDDIR) {
+        pageItemCount = PageItems(idx);
+    }
+
+    /* 确保选中的项在可见范围内 */
+    if (sel >= 0 && sel < g.count) {
+        if (sel < g.scrollOffset) {
+            g.scrollOffset = sel;
+        } else if (sel >= g.scrollOffset + g.maxVisibleRows) {
+            g.scrollOffset = sel - g.maxVisibleRows + 1;
+        }
+    }
+
+    /* 将调整后的滚动偏移保存回全局数组，持久化到下次调用 */
+    if (currentState >= 0 && currentState < 8) {
+        menuScrollOffsets[currentState] = g.scrollOffset;
+    }
+
+    /* Bestiary uses its dedicated dossier layout above. */
+    DrawGenericMenuRows(g, sel, popupOpen, idx, pageItemCount);
+    DrawMenuScrollIndicator(g);
 }
 
 static void DrawTextInRowLeft(const char* text, RECT row, unsigned int color) {
@@ -1109,7 +1052,7 @@ static void DrawCalibStrip(MenuGeo g) {
        （因为小游戏本身是从安全屋也能开的，得让玩家知道进度）。 */
     if (!calibActive) return;
     {
-        sprintf(line, "%s", Tr("CALIBRATION - PRESS SPACE TO LOCK",
+        sprintf(line, "%s", Tr("QWER NOTES / ESC CANCEL",
                                "校准中 - 按空格锁定"));
     }
     BlendRectWin(bx - UIS(8), by - TextHeightWin() - UIS(8),
@@ -1122,297 +1065,362 @@ static void DrawCalibStrip(MenuGeo g) {
         const char* msg = "";
         unsigned int col = 0x00808080u;
         if (calibResult == 1) { msg = Tr("PERFECT", "完美"); col = 0x00FFE060u; }
-        else if (calibResult == 2) { msg = Tr("CALIBRATED", "成功"); col = 0x0080E080u; }
+        else if (calibResult == 2) { msg = Tr("CANCELLED", "已取消"); col = 0x0080E080u; }
         else { msg = Tr("MISSED", "失手"); col = 0x00FF6040u; }
         DrawTextWin(bx + barW - TextWidthWin(msg), by - TextHeightWin() - UIS(4), msg, col);
     }
 }
 
+/* Bounded segment rasterization: diagonal graph edges never touch the chrome. */
+static void BenchGraphLink(int x0, int y0, int x1, int y1, unsigned int color, int solid) {
+    int dx = x1-x0, dy = y1-y0;
+    int steps = abs(dx) > abs(dy) ? abs(dx) : abs(dy);
+    if (steps < 1 || steps > 12000) return;
+    for (int i = 0; i <= steps; i += 3) {
+        if (!solid && (i/9)%2) continue;
+        int x = x0+(int)((float)dx*i/steps), y = y0+(int)((float)dy*i/steps);
+        if (x >= winW*.30f && x+2 < winW-UIS(20) && y >= UIS(70) && y+2 < winH-UIS(178))
+            BlendRectWin(x,y,x+2,y+2,color,.9f);
+    }
+}
 static void DrawBenchTree(MenuGeo g) {
     (void)g;
-    int th = TextHeightWin();
-
-    /* v2.9：第一次进树页自动居中 —— 原来 treeVX/VY 默认 0，
-       第一列框 -35..115，左半截在屏外（截图可见）。 */
-    {
-        static int treeCentred = 0;
-        if (!treeCentred) {
-            treeCentred = 1;
-            BenchResetView();
-        }
-        if (currentState != STATE_SAFEHOUSE) treeCentred = 0;
+    int th = TextHeightWin(), m = UIS(16);
+    static int lastWidth = 0, lastHeight = 0;
+    if (lastWidth != winW || lastHeight != winH) {
+        BenchResetView(); lastWidth = winW; lastHeight = winH;
     }
-    int M = UIS(16);
-
-    /* ---- 背景 ---- */
-    BlendRectWin(M, M, winW - M, winH - M, 0x000A0E14, 0.97f);
-    FrameRectWin(M, M, winW - M, winH - M, 0x00C8B060u, 0.9f, 1);
-
-    /* ---- 顶部：页签 + 余额 ---- */
+    BlendRectWin(m,m,winW-m,winH-m,UI_BG_PANEL,.99f);
+    FrameRectWin(m,m,winW-m,winH-m,UI_EDGE,.95f,1);
     DrawPageTabs();
-    {
-        static char sb[64];
-        /* v6 第 ㊵ 轮：**这里原来显示双倍金币**
-         * 第 ① 轮货币统一时，`carryGold + shards` 被机械替换成
-         * `carryGold + carryGold` —— 界面显示的是真实值的两倍。
-         * 玩家看到 GOLD 2000，实际只有 1000，进商店什么都买不起。 */
-        { extern int carryGold; sprintf(sb, "GOLD %d", carryGold); }
-        DrawTextWin(winW - M - UIS(16) - TextWidthWin(sb), UIS(14), sb, 0x00E8C040u);
-        /* 缩放指示 */
-        sprintf(sb, "%.1fx", treeVK);
-        DrawTextWin(winW - M - UIS(16) - TextWidthWin(sb), UIS(14) + th + UIS(6), sb, 0x009AA8A8u);
-    }
-
-    /* ---- 节点（世界坐标 -> 屏幕） ---- */
-    /* v2.9：框宽**从世界间距推**，不再从文字高推 ——
-       从文字高推的话，窗口一大 TH 变大，框也跟着变宽，
-       最后宽到和列间距一样，相邻节点就贴在一起（截图里 MAGAZI|HIDE）。
-       现在：框宽 = 列间距 - 固定缝隙，永远留得住缝。 */
-    int boxW = (int)((BENCH_NODE_WX - 46.0f) * treeVK);
-    int boxH = (int)((BENCH_NODE_WY - 52.0f) * treeVK);
-    if (boxW < 26) boxW = 26;
-    if (boxH < 16) boxH = 16;
-    /* 但高度至少要放得下一行字 */
-    if (boxH < th) boxH = th;
-
+    int bx0,by0,bx1,by1; ShopBackButtonRect(&bx0,&by0,&bx1,&by1);
+    BlendRectWin(bx0,by0,bx1,by1,0x00243646u,.98f);
+    DrawTextCenterWin((bx0+bx1)/2,(by0+by1-th)/2,Tr("BACK","返回"),UI_ACCENT);
+    char line[160];
+    snprintf(line,sizeof(line),Tr("RUN GOLD %d","局内金币 %d"),WalletRun());
+    DrawTextWin(winW-m-UIS(12)-TextWidthWin(line),m,line,UI_ACCENT);
+    int w,h; BenchNodeBoxSize(&w,&h);
     for (int id = 0; id < BENCH_COUNT; id++) {
-        float wx = BenchNodeWorldX(id);
-        float wy = BenchNodeWorldY(id);
-        /* v2.9：screen = world * k + v（和思维导图一致） */
-        int cx = (int)(wx * treeVK + treeVX);
-        int cy = (int)(wy * treeVK + treeVY);
-        int bx = cx - boxW / 2, by = cy - boxH / 2;
-
-        /* 屏幕外的直接跳过（节点多了也不掉帧） */
-        if (bx < winW*30/100 || by < UIS(70) || bx+boxW>winW-UIS(20) || by+boxH>winH-UIS(135)) continue;
-
-        int owned = BenchHas(id);
-        int prereq = BenchPrereqOk(id);
-        int affordable = (carryGold >= benchNodes[id].cost);
-        int sel = (id == shopNodeSel);
-
-        /* 同列竖连线（画在节点下面） */
-        if (benchNodes[id].row>0) {
-            int pid = id>=16 ? (id-16)*4+2 : id-1;
-            int pcx = (int)(BenchNodeWorldX(pid) * treeVK + treeVX);
-            int pcy = (int)(BenchNodeWorldY(pid) * treeVK + treeVY);
-            int upOwned = BenchHas(pid);
-            int y0 = pcy + boxH / 2, y1 = cy - boxH / 2;
-            int steps = (y1 - y0) / 6;
-            for (int s = 0; s <= steps; s++) {
-                int yy = y0 + s * 6;
-                if (!upOwned && (s % 2)) continue;      /* 未解锁 = 虚线 */
-                BlendRectWin(pcx - 1, yy, pcx + 2, yy + 4,
-                             upOwned ? 0x00C8A040u : 0x00404040u, upOwned ? 0.95f : 0.7f);
-            }
-        }
-
-        unsigned int fill, frame, textc;
-        if (owned)           { fill = 0x00C8A040u; frame = 0x00FFE070u; textc = 0x00100C08u; }
-        else if (!prereq)    { fill = 0x00161412u; frame = 0x00383028u; textc = 0x00504840u; }
-        else if (affordable) { fill = 0x00202828u; frame = 0x00A0C0C0u; textc = 0x00E8F0F0u; }
-        else                 { fill = 0x00201818u; frame = 0x00704040u; textc = 0x00C08080u; }
-
-        BlendRectWin(bx, by, bx + boxW, by + boxH, fill, owned ? 0.95f : 0.88f);
-        FrameRectWin(bx, by, bx + boxW, by + boxH,
-                     sel ? 0x00FFFFFFu : frame, 0.95f, sel ? 3 : 1);
-
-        if (treeVK > 0.35f) {
-            /* v2.9：**名字独占框内一行，价格画在框下方**。
-               之前挤同一行，800x600 下框内只有 138px，
-               "MAGAZINE"(160px) 截断后价格还叠上去 → 糊成一坨。 */
-            char nb[48];
-            /* v2.9：框内也用中文名（原来只有底部详情是中文，同屏一中一英） */
-            sprintf(nb, "%s%s", benchNodes[id].star ? "* " : "",
-                    Tr(benchNodes[id].name, benchNodes[id].nameZh));
-            ClampRowText(nb, boxW - UIS(10));
-            /* 有价格时名字靠上，没价格时居中 */
-            { int nameY = (boxH >= th * 2 + UIS(6)) ? (by + UIS(3))
-                                                   : (by + (boxH - th) / 2);
-              DrawTextWin(bx + UIS(5), nameY, nb, textc); }
-
-            /* ============================================================
-             * 修：**价格画在框下面，会压到下一行的节点名**
-             * ------------------------------------------------------------
-             * ui_layout 实测（800x600，SHP_TREE 页）：
-             *   "350"(426,195..498,231)  x  "轻装"(426,225..498,261)
-             * 价格是「本框底部 + 2px」，而下一行的框紧挨着 ——
-             * 行距一小，价格的最后一个像素就落进下一行名字里。
-             *
-             * 现在改成**放进框里、贴底一行**，并留一个最小高度检查：
-             * 框太矮（放不下两行字）就干脆不显示价格，只看底部详情条。
-             * ============================================================ */
-            if (treeVK > 0.55f && boxH >= th * 2 + UIS(6)) {
-                char pb[24];
-                sprintf(pb, "%d", benchNodes[id].cost);
-                DrawTextWin(bx + UIS(5), by + boxH - th - UIS(3), pb,
-                            owned ? 0x00807850u : (affordable ? 0x00A0E0A0u : 0x00C06060u));
-            }
+        int pre = BenchPrereqId(id);
+        int px = pre >= 0 ? (int)(BenchNodeWorldX(pre)*treeVK+treeVX) : (int)treeVX;
+        int py = pre >= 0 ? (int)(BenchNodeWorldY(pre)*treeVK+treeVY) : (int)treeVY;
+        int x = (int)(BenchNodeWorldX(id)*treeVK+treeVX), y = (int)(BenchNodeWorldY(id)*treeVK+treeVY);
+        int lit = pre < 0 || BenchHas(pre);
+        BenchGraphLink(px,py,x,y,id==shopNodeSel || pre==shopNodeSel?UI_INFO:(lit?UI_ACCENT:UI_EDGE_DIM),lit);
+    }
+    const unsigned int colors[4] = {0x79CDD5u,UI_ACCENT,UI_DANGER,0xC1B4E4u};
+    for (int id = 0; id < BENCH_COUNT; id++) {
+        int cx = (int)(BenchNodeWorldX(id)*treeVK+treeVX), cy = (int)(BenchNodeWorldY(id)*treeVK+treeVY);
+        int x = cx-w/2, y = cy-h/2;
+        if (x < winW*.30f || x+w > winW-UIS(20) || y < UIS(70) || y+h > winH-UIS(178)) continue;
+        int group = BenchArchetype(id); if (group < 0) group = 3;
+        int owned = BenchHas(id), available = BenchCanBuy(id);
+        BlendRectWin(x,y,x+w,y+h,owned?0x0031474Au:0x00182432u,.97f);
+        FrameRectWin(x,y,x+w,y+h,id==shopNodeSel?UI_ACCENT:colors[group],available||owned?1.0f:.45f,id==shopNodeSel?2:1);
+        char name[40];
+        snprintf(name,sizeof(name),"%s",BenchShortName(id));
+        UiTrimSmallText(name,w-6);
+        if(w>=TextSmallLiteralWidth(name)+4 && h>=12)
+            DrawTextSmallLiteralWin(cx-TextSmallLiteralWidth(name)/2,cy-5,name,owned?0x00BCF0C9u:0x00BCC8D5u);
+        else BlendRectWin(cx-2,cy-2,cx+2,cy+2,owned?UI_OK:colors[group],1);
+        if (treeVK > .5f && h >= th+18) {
+            snprintf(line,sizeof(line),"%d",benchNodes[id].cost);
+            DrawTextSmallWin(x+4,y+h-12,line,0x00D1B373u);
         }
     }
-
-    /* ---- 底部详情 ---- */
-    {
-        /* v2.9：原来 dy=winH-96，三行累加后第三行 570 撞提示行 574。
-           现在从下往上倒推：留出提示行 + 三行正文。 */
-        int lineH = th + UIS(4);
-        /* v6：底部还有一条 R x2 RESET / WHEEL ZOOM 操作提示，
-           详情行不能画到它上面去（用户截图：SHORT BY 和 WHEEL 重叠） */
-        int detailMaxY = winH - UIS(16) - th - UIS(6) - th - UIS(6);
-        int dy = winH - UIS(10) - th - 3 * lineH;
-        int id = shopNodeSel;
-        if (id < 0 || id >= BENCH_COUNT) id = 0;
-        static char l2[128];
-
-        if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, Tr(benchNodes[id].name, benchNodes[id].nameZh), 0x00FFFFFFu);
-        sprintf(l2, "%d %s", benchNodes[id].cost, Tr("GOLD", "金币"));
-        DrawTextWin(UIS(240), dy, l2, carryGold >= benchNodes[id].cost ? 0x00A0E0A0u : 0x00E06060u);
-        /* v7 第 51 轮：**把 THREAT 代价写出来**
-           改造树的代价是 THREAT，但整棵树从没显示过它 ——
-           玩家买了节点、怪变凶了，却不知道是谁干的。
-           现在价格旁边直接写 +N THREAT。 */
-        {
-            static char tb[48];
-            extern int BenchThreatCostOf(int);
-            int tc = BenchThreatCostOf(id);
-            if (tc > 0) {
-                sprintf(tb, "+%d THREAT", tc);
-                DrawTextWin(UIS(400), dy, tb, 0x00FF8050u);
-            }
-        }
-
-        dy += lineH;
-        {
-            static char db[128];
-            sprintf(db, "%s", Tr(benchNodes[id].desc, benchNodes[id].descZh));
-            ClampRowText(db, winW - UIS(56));
-            if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, db, 0x00C8D0D0u);
-        }
-
-        dy += lineH;
-        if (BenchHas(id)) {
-            if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, Tr("OWNED", "已拥有"), 0x00C8A040u);
-        } else if (!BenchPrereqOk(id)) {
-            if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, Tr("REQUIRES THE NODE ABOVE IT", "需要先买同一列的上一层"), 0x00E0A040u);
-        } else if (carryGold < benchNodes[id].cost) {
-            sprintf(l2, "%s %d", Tr("SHORT BY", "还差"), benchNodes[id].cost - carryGold);
-            if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, l2, 0x00E06060u);
-        } else {
-            if (dy <= detailMaxY) DrawTextWin(UIS(28), dy, Tr("ENTER TO BUY", "回车购买"), 0x0060FF90u);
-        }
-
-        {
-            const char* kh = Tr("R x2 RESET / WHEEL ZOOM  DRAG PAN  HOME  ESC",
-                                "滚轮缩放  拖拽平移  HOME  ESC");
-            DrawTextWin(winW - UIS(24) - TextWidthWin(kh), winH - UIS(16) - th - UIS(6), kh, 0x009AA8A8u);
-        }
+    const int ends[3] = {7,3,11};
+    for (int group=0; group<3; group++) {
+        int cx=(int)(BenchNodeWorldX(ends[group])*treeVK+treeVX);
+        int cy=(int)(BenchNodeWorldY(ends[group])*treeVK+treeVY)-h/2-16;
+        const char* name=SkillArchetypeName(group,0);
+        if (cx > winW*.34f && cx < winW*.93f && cy > UIS(70) && cy < winH-UIS(178))
+            DrawTextSmallWin(cx-DrawTextSmallWidth(name)/2,cy,name,colors[group]);
     }
+    int id=shopNodeSel;if(id<0 || id>=BENCH_COUNT)id=0;
+    int x=(int)(winW*.30f)+UIS(12),y=winH-UIS(166),right=winW-m-UIS(12),bottom=winH-m;
+    int width=right-x-UIS(140);BlendRectWin(x,y,right,bottom,UI_BG_PANEL,1);
+    char text[192];snprintf(text,sizeof(text),"%s",Tr(benchNodes[id].name,benchNodes[id].nameZh));
+    while(text[0] && TextMediumLiteralWidth(text)>width){size_t n=strlen(text)-1;while(n && ((unsigned char)text[n]&0xC0)==0x80)n--;text[n]=0;}
+    DrawTextMediumLiteralWin(x,y+UIS(5),text,UI_ACCENT);y+=TextMediumLiteralHeight()+UIS(10);
+    snprintf(text,sizeof(text),Tr("COST %d / THREAT +%.1f","价格 %d金币 / 威胁 +%.1f"),benchNodes[id].cost,(double)BenchThreatCostOf(id));UiTrimSmallText(text,width);DrawTextSmallLiteralWin(x,y,text,UI_GOLD);y+=UIS(23);
+    y=DossierText(Tr(benchNodes[id].desc,benchNodes[id].descZh),x,y,width,bottom-UIS(27),UI_INK);
+    int parent=BenchPrereqId(id);
+    snprintf(text,sizeof(text),Tr("FIRST: %s / %s","前置：%s / %s"),parent>=0?Tr(benchNodes[parent].name,benchNodes[parent].nameZh):Tr("START","起点"),BenchHas(id)?Tr("OWNED","已拥有"):BenchCanBuy(id)?Tr("CAN BUY","可购买"):Tr("CHECK FUNDS / PREREQUISITE","检查金币或前置"));
+    UiTrimSmallText(text,width);DrawTextSmallLiteralWin(x,bottom-UIS(21),text,UI_INFO);
+    int x0,y0,x1,y1;BenchBuyButtonRect(&x0,&y0,&x1,&y1);
+    UiRow(x0,y0,x1,y1,BenchCanBuy(id)?UI_ROW_SEL:UI_ROW_DISABLED,1);
+    DrawTextSmallLiteralWin(x0+UIS(15),y0+UIS(12),Tr("BUY","购买"),UI_ACCENT);
 }
 
+
+void SafehouseCardRect(int row,RECT* rect) {
+    *rect=(RECT){0,0,0,0};if(row<0 || shopPage==SHP_TREE || row>=ShopRowCount())return;
+    MenuGeo g=GetMenuGeo();int tx0,ty0,tx1,ty1;PageTabRect(0,&tx0,&ty0,&tx1,&ty1);
+    int left=tx1+UIS(20),right=g.panel.right-UIS(18),gap=UIS(10);
+    int top=g.panel.top+TextHeightWin()*2+UIS(22),bottom=g.panel.bottom-UIS(64);
+    int count=shopPage==SHP_UPGRADE?RUN_UPG_COUNT:shopPage==SHP_REST?5:SHOP_OFFERS;
+    if(row==count){
+        if(shopPage==SHP_SHOP)right-=UIS(240);
+        *rect=(RECT){left,g.panel.bottom-UIS(43),right,g.panel.bottom-UIS(7)};return;
+    }
+    if(shopPage==SHP_REST){
+        int width=(right-left)*52/100,height=(bottom-top-gap*4)/5;
+        *rect=(RECT){left,top+row*(height+gap),left+width,top+row*(height+gap)+height};return;
+    }
+    int columns=shopPage==SHP_SHOP?(winW>=1000?4:2):(winW>=1000?3:2);
+    int rows=(count+columns-1)/columns,width=(right-left-gap*(columns-1))/columns,height=(bottom-top-gap*(rows-1))/rows;
+    int col=row%columns,line=row/columns;
+    *rect=(RECT){left+col*(width+gap),top+line*(height+gap),left+col*(width+gap)+width,top+line*(height+gap)+height};
+}
+int SafehouseCardAt(int x,int y) {
+    for(int row=0;row<ShopRowCount();row++) {
+        RECT r;
+        SafehouseCardRect(row,&r);
+        if(r.right>r.left && x>=r.left && x<=r.right && y>=r.top && y<=r.bottom)return row;
+    }
+    return -1;
+}
+static void DrawSupplyIcon(int row,RECT rect) {
+    int sprite=ShopProductSprite(row);
+    if(sprite>=0) { DrawDossierPortrait(sprite,rect,1);
+         return;
+         }
+    int x=(rect.left+rect.right)/2,y=(rect.top+rect.bottom)/2;
+    int size=(rect.bottom-rect.top)/3;
+    if(size<4)return;
+    if(shopOffer[row]==6) {
+        FrameRectWin(x-size,y-size/2,x+size,y+size/2,UI_ACCENT,1.0f,UIS(2));
+        BlendRectWin(x+size,y-size/5,x+size+UIS(3),y+size/5,UI_ACCENT,1.0f);
+        BlendRectWin(x-size+UIS(3),y-size/2+UIS(3),x+size/2,y+size/2-UIS(3),UI_BG_SEL,1.0f);
+    } else {
+        BlendRectWin(x-size/3,y-size,x+size/3,y+size,UI_ACCENT,1.0f);
+        BlendRectWin(x-size,y-size/3,x+size,y+size/3,UI_ACCENT,1.0f);
+    }
+}
+static void DrawSupplyCard(int row,RECT r) {
+    int th=TextHeightWin(),pad=UIS(10),y=r.top+pad;
+    int width=r.right-r.left-pad*2;
+    if(ShopIsDiscounted(row)) {
+        char badge[48];
+        snprintf(badge,sizeof(badge),Tr("SAVE %d%%","限时优惠 -%d%%"),(int)(shopDiscountPct*100.0f+.5f));
+        BlendRectWin(r.left,r.top,r.right,r.top+th+UIS(6),UI_BG_SEL,1.0f);
+        DossierText(badge,r.left+pad,r.top+UIS(3),width,r.top+th+UIS(6),UI_ACCENT);
+        y=r.top+th+pad;
+    }
+    y=DossierText(ShopProductName(row),r.left+pad,y,width,r.bottom-pad,UI_INK_TITLE);
+    int available=r.bottom-y-th*3-pad;
+    int side=available>UIS(28)?available:UIS(24);
+    if(side>width)side=width;
+    RECT icon={(r.left+r.right-side)/2,y,(r.left+r.right+side)/2,y+side};
+    DrawSupplyIcon(row,icon);
+    y=icon.bottom+UIS(4);
+    char price[64];
+    snprintf(price,sizeof(price),Tr("%d RUN GOLD","%d 局内金币"),ShopPriceAt(row));
+    y=DossierText(price,r.left+pad,y,width,r.bottom-th-pad,UI_GOLD);
+    if(ShopIsDiscounted(row) && y+12<r.bottom-th-pad) {
+        char base[48];
+        snprintf(base,sizeof(base),Tr("WAS %d","原价 %d"),ShopBasePriceAt(row));
+        DrawTextSmallLiteralWin(r.left+pad,y,base,UI_INK_DIM);
+        BlendRectWin(r.left+pad,y+5,r.left+pad+TextSmallLiteralWidth(base),y+6,UI_INK_DIM,1.0f);
+    }
+    char state[72];
+    float cooldown=ShopCooldownOf(row);
+    if(cooldown>.05f)snprintf(state,sizeof(state),Tr("RESTOCK %ds","补货中 %d秒"),(int)ceilf(cooldown));
+    else snprintf(state,sizeof(state),"%s",ShopCanBuyProduct(row)?Tr("BUY","购买"):Tr("FULL OR INSUFFICIENT GOLD","已满或金币不足"));
+    UiTrimSmallText(state,width);
+    DrawTextSmallLiteralWin(r.left+pad,r.bottom-pad-12,state,ShopCanBuyProduct(row)?UI_OK:UI_INK_DIM);
+}
+static void DrawRecoveryCard(int row,RECT r) {
+    int x=r.left+UIS(8),w=r.right-r.left-UIS(16),y=r.top+UIS(6);char text[160];
+    snprintf(text,sizeof(text),"%s",ShopServiceName(row));UiTrimSmallText(text,w);
+    DrawTextSmallLiteralWin(x,y,text,UI_INK_TITLE);
+    if(row<3)snprintf(text,sizeof(text),Tr("%d GOLD | USES %d | NO LIMIT","%d金币 | 已用%d次 | 无次数上限"),ShopServicePrice(row),ShopServiceUses(row));
+    else if(row==4)snprintf(text,sizeof(text),Tr("FREE | CD %ds","免费 | 冷却%d秒"),(int)ceilf(calibCooldown));
+    else snprintf(text,sizeof(text),"%s",Tr("FREE | SKILL LIMIT","免费 | 技能限制"));
+    UiTrimSmallText(text,w);DrawTextSmallLiteralWin(x,y+UIS(19),text,UI_GOLD);
+    if(r.bottom-y>=UIS(55)){snprintf(text,sizeof(text),"%s",ShopServiceStatus(row));UiTrimSmallText(text,w);DrawTextSmallLiteralWin(x,y+UIS(38),text,ShopServiceCanUse(row)?UI_OK:UI_INK_DIM);}
+}
+static void DrawRecoveryDetail(void) {
+    RECT first;SafehouseCardRect(0,&first);MenuGeo g=GetMenuGeo();
+    int x=first.right+UIS(20),right=g.panel.right-UIS(28),bottom=g.panel.bottom-UIS(65),y=first.top;
+    int row=shopRow<5?shopRow:0,w=right-x;char text[160];
+    UiPanel(x-UIS(8),y,right+UIS(8),bottom,UI_PANEL_NORMAL);y+=UIS(12);
+    y=DossierText(ShopServiceName(row),x,y,w,bottom,UI_INK_TITLE)+UIS(18);
+    if(row<3){float values[3]={sanity,battery,stamina};float maximum=row==0?SanityMax():row==1?(float)BatteryMax():StaminaMax();
+        snprintf(text,sizeof(text),Tr("CURRENT %.0f / %.0f","当前 %.0f / %.0f"),(double)values[row],(double)maximum);
+        y=DossierText(text,x,y,w,bottom,UI_INK)+UIS(10);
+        UiBar(x,y,w,UIS(8),values[row]/fmaxf(1,maximum),UI_BAR_NORMAL,UI_ACCENT);y+=UIS(20);
+        snprintf(text,sizeof(text),Tr("RESTORE +%.0f / PRICE %d GOLD","本次恢复 +%.0f / 当前价格 %d金币"),(double)ShopServiceGain(row),ShopServicePrice(row));
+        y=DossierText(text,x,y,w,bottom,UI_GOLD)+UIS(12);
+        y=DossierText(row==0?Tr("Unlimited recovery. Every use doubles this service price for the rest of the run.","无次数限制。每次使用后，本项服务本局价格翻倍。"):Tr("No cooldown or use limit; prices double per use and persist between floors.","无冷却、无次数限制；每次价格翻倍，跨层保留涨价。"),x,y,w,bottom,UI_INK_DIM)+UIS(14);
+    }else y=DossierText(row==3?Tr("Skip this non-boss floor. Requires the permanent SHORTCUT skill; once per run.","需要永久捷径技能，跳过当前非首领层，每局限一次。"):Tr("Each QWER hit immediately restores sanity; combos increase healing. Five misses fail. Finish for gold. Sanity/battery drain pauses during play.","每次QWER命中即时回理智，连击提高恢复，断连重置加成。失误5次失败，完成另奖金币；游玩期间不耗理智和电量。"),x,y,w,bottom,UI_INK)+UIS(15);
+    DossierText(ShopServiceStatus(row),x,y,w,bottom-UIS(10),ShopServiceCanUse(row)?UI_OK:UI_INFO);
+}
+static void DrawUpgradeCard(int row,RECT r) {
+    int pad=UIS(10),width=r.right-r.left-pad*2,y=r.top+pad;
+    y=DossierText(Tr(RunUpgName(row),RunUpgNameZh(row)),r.left+pad,y,width,r.bottom-pad,UI_INK_TITLE);
+    int level=RunUpgLevel(row),pip=UIS(10);
+    for(int i=0;i<RUN_UPG_MAX;i++) {
+        int x=r.left+pad+i*(pip+UIS(5));
+        if(i<level)BlendRectWin(x,y,x+pip,y+pip,UI_ACCENT,1.0f);
+        else FrameRectWin(x,y,x+pip,y+pip,UI_EDGE,.95f,1);
+    }
+    y+=pip+UIS(8);
+    static const char* en[RUN_UPG_COUNT]={"+2 capacity / rank","-10% grab loss / rank","-15% sprint cost / rank","-15% light drain / rank","-1s cooldown / rank (base min 5s)","-2 points map drain / rank"};
+    static const char* zh[RUN_UPG_COUNT]={"每级携带上限 +2","每级抓捕理智损失 -10%","每级冲刺耗体 -15%","每级手电耗电 -15%","每级基础冷却 -1秒，最低5秒","每级地图耗电 -2个百分点"};
+    char effect[128];
+    snprintf(effect,sizeof(effect),"%s",Tr(en[row],zh[row]));
+    UiTrimSmallText(effect,width);
+    if(y+12<r.bottom-pad-12)DrawTextSmallLiteralWin(r.left+pad,y,effect,UI_INK_DIM);
+    char price[64];
+    int cost=RunUpgCost(row);
+    if(cost<0)snprintf(price,sizeof(price),"%s",Tr("MAX LEVEL","已满级"));
+    else snprintf(price,sizeof(price),Tr("LV %d/%d / %d GOLD","等级 %d/%d / %d 金币"),level,RUN_UPG_MAX,cost);
+    UiTrimSmallText(price,width);
+    DrawTextSmallLiteralWin(r.left+pad,r.bottom-pad-12,price,cost>=0&&WalletCanPayRun(cost)?UI_GOLD:UI_INK_DIM);
+}
+static void DrawSafehousePage(void) {
+    MenuGeo g=GetMenuGeo();
+    int th=TextHeightWin();
+    UiPanel9(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,0);
+    DrawPageTabs();
+    int x0,y0,x1,y1;
+    ShopBackButtonRect(&x0,&y0,&x1,&y1);
+    UiRow(x0,y0,x1,y1,UI_ROW_NORMAL,1.0f);
+    DrawTextCenterWin((x0+x1)/2,(y0+y1-th)/2,Tr("BACK","返回"),UI_ACCENT);
+    char balance[96];
+    snprintf(balance,sizeof(balance),Tr("RUN GOLD %d","局内金币 %d"),WalletRun());
+    DrawTextWin(g.panel.right-UIS(18)-TextWidthWin(balance),g.panel.top+UIS(10),balance,UI_ACCENT);
+    if(shopPage==SHP_SHOP){RECT r;char refresh[96];ShopRefreshButtonRect(&r);
+        UiRow(r.left,r.top,r.right,r.bottom,UI_ROW_NORMAL,1);
+        if(ShopRefreshCooldown()>0)snprintf(refresh,sizeof(refresh),Tr("RESTOCK IN %ds  [F5]","刷新剩余 %d秒 [F5]"),(int)ceilf(ShopRefreshCooldown()));
+        else snprintf(refresh,sizeof(refresh),"%s",Tr("REFRESH STOCK [F5]","刷新补给 [F5]"));
+        UiTrimSmallText(refresh,r.right-r.left-UIS(12));
+        DrawTextSmallLiteralWin(r.left+UIS(6),r.top+UIS(10),refresh,ShopRefreshCooldown()>0?UI_INK_DIM:UI_ACCENT);
+    }
+    int count=shopPage==SHP_UPGRADE?RUN_UPG_COUNT:(shopPage==SHP_REST?5:4);
+    for(int row=0;row<ShopRowCount();row++) {
+        RECT r;
+        SafehouseCardRect(row,&r);
+        if(r.right<=r.left || r.bottom<=r.top)continue;
+        UiRow(r.left,r.top,r.right,r.bottom,shopRow==row?UI_ROW_SEL:UI_ROW_NORMAL,1.0f);
+        FrameRectWin(r.left,r.top,r.right,r.bottom,shopRow==row?UI_EDGE_HOT:UI_EDGE,.95f,shopRow==row?2:1);
+        if(row>=count) {
+            const char* label=Tr("LEAVE SAFE HOUSE","离开安全屋");
+            char footer[160];
+            snprintf(footer,sizeof(footer),"%s",label);
+            ClampRowText(footer,r.right-r.left-UIS(12));
+            DrawTextCenterWin((r.left+r.right)/2,(r.top+r.bottom-th)/2,footer,UI_INFO);
+        } else if(shopPage==SHP_SHOP)DrawSupplyCard(row,r);
+        else if(shopPage==SHP_REST)DrawRecoveryCard(row,r);
+        else DrawUpgradeCard(row,r);
+    }
+    if(shopPage==SHP_REST)DrawRecoveryDetail();
+}
+void BankBackRect(RECT* rect) { *rect=(RECT){UIS(24),UIS(20),UIS(130),UIS(58)};
+     }
+void BankSliderRect(int slider,RECT* rect) {
+    int top=winH*34/100+slider*(winH*24/100);
+    *rect=(RECT){UIS(35),top,winW*55/100,top+UIS(18)};
+}
+int BankSliderAt(int x,int y) {
+    for(int slider=0;slider<2;slider++) { RECT r;
+        BankSliderRect(slider,&r);
+    if(x>=r.left-UIS(10)&&x<=r.right+UIS(10)&&y>=r.top-UIS(16)&&y<=r.bottom+UIS(16))return slider;
+         }
+    return -1;
+}
+void BankAdjustSlider(int slider,int delta) {
+    int* value=slider==0?&bankCarryPct:&bankRiskPlan;
+    int limit=slider==0?BANK_CARRY_STEPS-1:3;
+    *value+=delta;
+    if(*value<0)*value=0;
+    if(*value>limit)*value=limit;
+    uiDirty=1;
+}
+void BankSetSliderFromPointer(int slider,int x) {
+    RECT r;
+    BankSliderRect(slider,&r);
+    if(r.right<=r.left)return;
+    float ratio=(float)(x-r.left)/(r.right-r.left);
+    if(ratio<0.0f)ratio=0.0f;
+    if(ratio>1.0f)ratio=1.0f;
+    int limit=slider==0?BANK_CARRY_STEPS-1:3;
+    if(slider==0)bankCarryPct=(int)(ratio*limit+.5f);
+    else bankRiskPlan=(int)(ratio*limit+.5f);
+    uiDirty=1;
+}
 static void DrawBankPage(void) {
-    SkillTreeLayout L;
-    SkillTreeCompute(&L);
-
-    int TH = TextHeightWin();
-    extern int bankGold, bankHistMax, bankCarryPct, carryGold;
-    extern int carryGold;
-
-    DrawTitleWin("BANK", L.titleY, 0x00FFC040u);
-
-    int y = L.curY + TH;
-    int x = L.panel.left + L.padX * 3;
-    char line[128];
-
-    sprintf(line, Tr("BALANCE          %d GOLD", "存款          %d 金币"), bankGold);
-    DrawTextWin(x, y, line, 0x00FFC040u);
-    y += TH * 2;
-
-    sprintf(line, Tr("HIGHEST EVER     %d GOLD", "历史最高      %d 金币"), bankHistMax);
-    DrawTextWin(x, y, line, 0x00909090u);
-    y += TH * 2;
-
-    {
-        int p = bankCarryPct;
-        if (p < 0) p = 0;
-        if (p >= BANK_CARRY_STEPS) p = BANK_CARRY_STEPS - 1;
-        int pc = p * BANK_STEP_PCT;
-        int amt = (int)((float)bankGold * (float)pc / 100.0f + 0.5f);
-        sprintf(line, Tr("CARRY IN   %3d%%   (%d / %d GOLD)",
-                         "携带   %3d%%   (%d / %d 金币)"),
-                pc, amt, bankGold);
-        DrawTextWin(x, y, line, 0x0060FF90u);
-        y += TH + UIS(6);
-
-        /* ===== v6 **可视化滑动条** —— 用户要「左右滑动选带多少」 =====
-           21 格，亮的部分 = 已选比例，最右边一个小方块是把手。 */
-        {
-            int barW = L.panel.right - L.panel.left - L.padX * 6;
-            if (barW > UIS(720)) barW = UIS(720);
-            int barH = UIS(18);
-            int bx = x;
-            int by = y;
-            /* 底槽 */
-            BlendRectWin(bx, by, bx + barW, by + barH, 0x00202020u, 0.95f);
-            FrameRectWin(bx, by, bx + barW, by + barH, 0x00505050u, 0.9f, 1);
-            /* 已选填充 */
-            if (p > 0) {
-                int fw = barW * p / (BANK_CARRY_STEPS - 1);
-                BlendRectWin(bx + 1, by + 1, bx + fw, by + barH - 1,
-                             0x0030C060u, 0.90f);
-            }
-            /* 每 5 档一根刻度（0/25/50/75/100%） */
-            for (int k = 0; k < BANK_CARRY_STEPS; k += 5) {
-                int gx = bx + barW * k / (BANK_CARRY_STEPS - 1);
-                BlendRectWin(gx, by + barH, gx + 1, by + barH + UIS(4),
-                             0x00606060u, 0.9f);
-            }
-            /* 把手 */
-            {
-                int hx = bx + barW * p / (BANK_CARRY_STEPS - 1);
-                int hw = UIS(6);
-                BlendRectWin(hx - hw / 2, by - UIS(3),
-                             hx + hw / 2, by + barH + UIS(3),
-                             0x00FFE070u, 0.98f);
-            }
-            /* 刻度文字 */
-            DrawTextWin(bx, by + barH + UIS(6), "0%", 0x00707070u);
-            {
-                const char* r100 = "100%";
-                DrawTextWin(bx + barW - TextWidthWin(r100), by + barH + UIS(6),
-                            r100, 0x00707070u);
-            }
-            y = by + barH + UIS(6) + TH + UIS(6);
-        }
+    BlendRectWin(0,0,winW,winH,UI_BG_PANEL,1);
+    RECT back;BankBackRect(&back);UiRow(back.left,back.top,back.right,back.bottom,UI_ROW_NORMAL,1);
+    DrawTextSmallLiteralWin(back.left+UIS(15),back.top+UIS(12),Tr("BACK","返回"),UI_ACCENT);
+    UiTitle(winW/2,winH*14/100,Tr("EXPEDITION CONTROL","行动风险中枢"));
+    char text[200];int pad=UIS(35);
+    snprintf(text,sizeof(text),Tr("BANK: %d GOLD","银行存款：%d 金币"),WalletBank());
+    DrawTextSmallLiteralWin(pad,winH*23/100,text,UI_ACCENT);
+    for(int slider=0;slider<2;slider++) {
+        RECT r;BankSliderRect(slider,&r);
+        if(slider==0)snprintf(text,sizeof(text),Tr("CARRY %d%% / %d GOLD","带入 %d%% / %d 金币"),bankCarryPct*BANK_STEP_PCT,BankCarryAmount());
+        else snprintf(text,sizeof(text),Tr("CONTRACT: %s","风险契约：%s"),BankRiskName(bankRiskPlan));
+        UiTrimSmallText(text,r.right-r.left);DrawTextSmallLiteralWin(r.left,r.top-UIS(30),text,UI_INK_TITLE);
+        int limit=slider?3:BANK_CARRY_STEPS-1,value=slider?bankRiskPlan:bankCarryPct;
+        int handle=r.left+(r.right-r.left)*value/limit;
+        BlendRectWin(r.left,r.top,r.right,r.bottom,UI_BG_ROW,1);
+        BlendRectWin(r.left,r.top,handle,r.bottom,UI_BG_SEL,1);
+        FrameRectWin(r.left,r.top,r.right,r.bottom,slider==BankSelectedControl()?UI_EDGE_HOT:UI_EDGE,1,1);
+        BlendRectWin(handle-UIS(4),r.top-UIS(4),handle+UIS(4),r.bottom+UIS(4),UI_ACCENT,1);
+        DossierText(slider?Tr("Higher risk raises awareness and extraction rewards.","提高风险会增加感知压力，也提高撤离收益。"):Tr("This amount leaves the bank only when a normal run starts.","只在普通对局开始时取出，不会因拖动立即扣款。"),r.left,r.bottom+UIS(20),r.right-r.left,winH*82/100,UI_INK_DIM);
     }
-
-    {
-        /* v6：强度加成 = 携带额 / 历史最高（携带额现在按 5% 档位算） */
-        int bp = bankCarryPct;
-        if (bp < 0) bp = 0;
-        if (bp >= BANK_CARRY_STEPS) bp = BANK_CARRY_STEPS - 1;
-        int carryAmt = (int)((float)bankGold * (float)(bp * BANK_STEP_PCT) / 100.0f + 0.5f);
-        int boost = (bankHistMax > 0)
-                  ? (int)((float)carryAmt * 100.0f / (float)bankHistMax + 0.5f)
-                  : 0;
-        if (boost > 100) boost = 100;
-        sprintf(line, Tr("NEXT RUN BOOST   +%d%%", "下局强度加成  +%d%%"), boost);
-        DrawTextWin(x, y, line, 0x00FFD040u);
-        y += TH * 2;
-    }
-
-    y += TH;
-    DrawTextWin(x, y, Tr("ENTER  CYCLE CARRY RATIO",
-                         "回车   切换携带比例"), 0x00707070u);
-    y += TH;
-    DrawTextWin(x, y, Tr("CARRY RATIO ONLY TAKES EFFECT NEXT RUN",
-                         "携带比例只在下一局生效"), 0x00606060u);
-
-    DrawTextCenterWin((L.panel.left + L.panel.right) / 2, L.hintY,
-                      Tr("ENTER SWITCH   ESC BACK", "回车切换   ESC 返回"), 0x00707070u);
+    int x=winW*62/100,right=winW-pad,y=winH*26/100,bottom=winH*81/100;
+    UiPanel(x-UIS(14),y-UIS(12),right+UIS(10),bottom,UI_PANEL_NORMAL);
+    y=DossierText(Tr("NEXT RUN","下局预测"),x,y,right-x,bottom,UI_INK_TITLE)+UIS(12);
+    snprintf(text,sizeof(text),Tr("GOLD PRESSURE %d / 15","金币压力 %d / 15"),BankPreviewTier());
+    y=DossierText(text,x,y,right-x,bottom,UI_ACCENT)+UIS(12);
+    snprintf(text,sizeof(text),Tr("AWARENESS x%.2f","感知倍率 x%.2f"),(double)BankPreviewHearing());
+    y=DossierText(text,x,y,right-x,bottom,UI_INK)+UIS(12);
+    snprintf(text,sizeof(text),Tr("EXIT REWARD x%.2f","撤离收益 x%.2f"),(double)BankRiskExitMul(bankRiskPlan));
+    y=DossierText(text,x,y,right-x,bottom,UI_INK)+UIS(12);
+    snprintf(text,sizeof(text),Tr("DEFEAT REFUND %d%%","失败本金返还 %d%%"),(int)(BANK_DEATH_REFUND*100+.5f));
+    DossierText(text,x,y,right-x,bottom,UI_INK_DIM);
+    DossierText(Tr("Drag sliders / Up-Down select / Left-Right adjust / Enter save / Esc back","拖动滑条；上下选择，左右调整；回车保存，ESC返回"),pad,winH*87/100,winW-pad*2,winH-UIS(10),UI_INK_DIM);
 }
+
 
 /* 对外唯一入口：顺序与 RenderFrame 里原来那两行一致（面板 → 文字）。 */
 void UiDrawMenuPages(void) {
     DrawMenuPanels();
     DrawMenuText();
+}
+
+static const char* MainMenuVisibleLabel(int index) {
+    static const char* primaryEn[]={"Continue","New Run","Skill Web","Threat Bank","Bestiary","Archives / Modes","Training Camp","Quit"};
+    static const char* primaryZh[]={"继续游戏","开始新局","局外技能网","威胁银行","怪物图鉴","档案与模式","自由训练营","退出游戏"};
+    static const char* moreEn[]={"Achievements","Help / Skill Index","Settings","Campaign","Daily Run","Endless","Back"};
+    static const char* moreZh[]={"成就档案","帮助与技能索引","设置","战役","每日挑战","无尽模式","返回"};
+    if(!mainMenuMore){index+=hasSave?0:1;return Tr(primaryEn[index],primaryZh[index]);}
+    if(!EndlessUnlocked() && index==5)index=6;
+    return Tr(moreEn[index],moreZh[index]);
+}
+int MainMenuLegacySelection(void) {
+    int index=menuSelection,base=hasSave?1:0,eo=EndlessUnlocked()?1:0;
+    if(index<0 || index>=MainMenuCount()){menuSelection=0;index=0;}
+    if(!mainMenuMore){
+        index+=hasSave?0:1;
+        if(index==5){mainMenuMore=1;menuSelection=0;uiDirty=1;return -1;}
+        if(index==0)return 0;
+        if(index==1)return base;
+        if(index==2)return base+1+eo;
+        if(index==3)return base+2+eo;
+        if(index==4)return base+4+eo;
+        if(index==6)return base+9+eo;
+        return base+10+eo;
+    }
+    if(index==(EndlessUnlocked()?6:5)){mainMenuMore=0;menuSelection=0;uiDirty=1;return -1;}
+    static const int offsets[5]={3,5,6,7,8};
+    return index<5?base+offsets[index]+eo:base+1;
+}
+
+void ShopRefreshButtonRect(RECT* rect) {
+    MenuGeo g=GetMenuGeo();
+    *rect=(RECT){g.panel.right-UIS(245),g.panel.bottom-UIS(43),g.panel.right-UIS(20),g.panel.bottom-UIS(7)};
 }

@@ -14,6 +14,7 @@ static int         s_result    = 0;   /* 0 无 / 1 挣脱 / 2 超时 */
 static float       s_pressReduce = 0.0f;  /* >0 = 限时模式：每次按键削减多少秒 */
 static float       s_minTime     = 0.0f;  /* 限时模式的时间下限 */
 
+/* Live control state, maintained by begin/press/tick/release; not fallback stubs. */
 int ControlActive(void) { return s_type != CTRL_NONE; }
 ControlType ControlCurrent(void) { return s_type; }
 int   ControlMashLeft(void) { return s_mashLeft; }

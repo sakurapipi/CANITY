@@ -86,4 +86,6 @@ const char* DailyModTextZh(void);
 const char* DailyRestrictTextEn(void);
 const char* DailyRestrictTextZh(void);
 
+int DailyVisualThemeNow(void);
+const char* DailyScenarioName(int chinese);
 #endif /* CANITY_DAILY_H */

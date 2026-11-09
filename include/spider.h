@@ -47,7 +47,7 @@ enum {
 #define SPIDER_APPEAR_STEP    5      /* 每深一层 +5% */
 #define SPIDER_APPEAR_CAP     60     /* 上限 */
 #define SPIDER_AIM_TIME       0.8f   /* 前摇（用户要求 0.7~1.0） */
-#define SPIDER_RANGE          4.5f   /* 射程（格） */
+#define SPIDER_RANGE          7.0f   /* 射程（格）；保留视线、前摇和躲避窗口 */
 #define SPIDER_COOLDOWN_TIME  8.0f
 #define SPIDER_MOVE_SPEED     0.85f  /* 远慢于玩家 2.0 */
 /* ==================================================================

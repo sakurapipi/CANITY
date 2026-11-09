@@ -4,9 +4,11 @@
  * 32 个成就，一张表。加成就 = 加一行。
  */
 #include "common.h"
+#include "present_api.h"
 #include "save.h"
 #include "steam_zone.h"
 #include "achievements.h"
+#include "bestiary.h"
 #include "content_db.h"
 #include "wallet.h"
 #include "audio.h"
@@ -142,9 +144,9 @@ void AchUnlock(int idx) {
     MusicNotify(MUSIC_EVENT_ACHIEVEMENT);
 
     {
-        extern const char* pickupMsg;
-        extern float pickupMsgTimer;
-        extern int uiDirty;
+
+
+
         static char abuf[72];
         snprintf(abuf, sizeof(abuf), "+%d GOLD  %s",
                  kAchDefs[idx].reward, kAchDefs[idx].nameEn);
@@ -164,10 +166,16 @@ void AchUnlock(int idx) {
     }
 }
 
+void AchRecordFlag(AchFlag flag) {
+    if (flag <= 0 || flag >= ACH_FLAG_COUNT) return;
+    for (int i=0; i<ACH_COUNT; i++)
+        if (kAchDefs[i].kind == AK_FLAG && kAchDefs[i].target == (int)flag) AchUnlock(i);
+}
 void AchAddProgress(int idx, int amount) {
     if (idx < 0 || idx >= ACH_COUNT) return;
     if (g_achievements[idx].unlocked) return;
-    g_achievements[idx].progress += amount;
+    if (amount <= 0) return;
+    g_achievements[idx].progress = amount > INT_MAX - g_achievements[idx].progress ? INT_MAX : g_achievements[idx].progress + amount;
     if (g_achievements[idx].progress >= g_achievements[idx].target) {
         AchUnlock(idx);
     }
@@ -187,11 +195,7 @@ static void checkValue(int idx, int value, int target) {
 }
 
 /* 位掩码里数 1 的个数 */
-static int popcount6(int m) {
-    int c = 0;
-    for (int i = 0; i < 8; i++) if ((m >> i) & 1) c++;
-    return c;
-}
+
 
 void AchCheck(const AchSnap* s) {
     if (!s) return;
@@ -205,7 +209,7 @@ void AchCheck(const AchSnap* s) {
             /* v6 第 40 轮：**target 直接当下标**
                原来分了两段（1~7 和 8~14 各减 8），结果两组撞在同一个槽。
                现在 flags[16]，target 1..14 一一对应。 */
-            if (d->target >= 0 && d->target < 16 && s->flags[d->target]) AchUnlock(i);
+            if (d->target >= 0 && d->target < ACH_FLAG_COUNT && s->flags[d->target]) AchUnlock(i);
             break;
         case AK_LEVEL:      checkValue(i, s->level,            d->target); break;
         case AK_TOTALGOLD:  checkValue(i, s->totalGoldEarned,  d->target); break;
@@ -215,7 +219,14 @@ void AchCheck(const AchSnap* s) {
         case AK_HIDE:       checkValue(i, s->hideCount,        d->target); break;
         case AK_KNOCK:      checkValue(i, s->knockCount,       d->target); break;
         case AK_THROWHIT:   checkValue(i, s->throwHitCount,    d->target); break;
-        case AK_BESTIARY:   checkValue(i, popcount6(s->bestiarySeenMask), d->target); break;
+        case AK_BESTIARYMASTER: {
+            int complete = 0;
+            for (int id = 0; id < BESTIARY_COUNT; id++)
+                if (BestiaryIsActive(id) && BestiaryStage(id) >= BST_COUNTER) complete++;
+            g_achievements[i].progress = complete;
+            checkValue(i, complete, BestiaryActiveCount()); break;
+        }
+        case AK_BESTIARY:   checkValue(i, BestiaryCountSeen(s->bestiarySeenMask), d->target>=6?BestiaryActiveCount():d->target); break;
         case AK_SKILLNODES: checkValue(i, s->skillNodesLit,    d->target); break;
         case AK_THREAT:     checkValue(i, s->maxThreatThisRun, d->target); break;
         case AK_ECHOCELLS:  checkValue(i, s->echoCellsTotal,   d->target); break;

@@ -1,7 +1,7 @@
 /* CANITY — 声音事件中心实现（v2.4-beta B01）
  *
  * 只依赖 suspicion.h（可疑点表）和 common.h。
- * 刻意**不**碰 entity.c 的内部状态（vanished / hiddenIn / monster），
+ * 刻意**不**碰 entity.c 的内部状态（hiddenIn / monster），
  * 那些留在 MakeNoise 里 —— 它们是"谁听得见"的规则，不是"事件长什么样"。
  */
 #include "common.h"
@@ -95,6 +95,7 @@ void SoundEventResetStats(void) {
     s_lastTtl = 0.0f;
     s_seenCount = 0;
 }
+/* Runtime emission/deduplication telemetry; counters change as events are handled. */
 int   SoundEventTotalEmitted(void) { return s_totalEmitted; }
 int   SoundEventTotalDeduped(void) { return s_totalDeduped; }
 int   SoundEventLastKind(void)     { return s_lastKind; }

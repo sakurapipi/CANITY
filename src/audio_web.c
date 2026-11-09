@@ -14,6 +14,8 @@
 #include "common.h"
 #include "state.h"
 #include "audio.h"
+#include "music.h"
+#include "present_api.h"
 
 /* =====================================================================
  * JS 侧合成器
@@ -49,7 +51,7 @@ EM_JS(void, js_audio_init, (void), {
 });
 
 EM_JS(void, js_play, (int id, float vol, float pan), {
-    if (!Module._actx) return;
+    if (!Module._actx || !(vol>0)) return;
     var ctx = Module._actx;
     if (ctx.state === 'suspended') ctx.resume();
 
@@ -136,6 +138,16 @@ EM_JS(void, js_play, (int id, float vol, float pan), {
         return s;
     }
 
+    if(id>=16 && id<=26){
+        var kind=id-16;
+        if(kind===0 || kind===1){osc('sine',kind===0?48:72,30,.7,.5);}
+        else if(kind===3){osc('sine',2200,900,.3,.3);}
+        else if(kind===5){osc('sine',50,50,.8,.3);osc('sine',100,100,.8,.12);}
+        else if(kind===8){osc('sine',2131,2000,.4,.2);noiseBurst(.3,4000,1600,.25);}
+        else if(kind===9){osc('sawtooth',410,500,.6,.18);}
+        else noiseBurst(.7,kind===2?4000:kind===7?2200:kind===10?300:700,120,.35);
+        out.gain.setValueAtTime(peak,t0);setTimeout(function(){out.disconnect();},1600);return;
+    }
     switch (id) {
     // ---- 0 SFX_STEP 脚步：鞋底摩擦（中频）+ 低频身音，两层都要 ----
     case 0:
@@ -155,7 +167,7 @@ EM_JS(void, js_play, (int id, float vol, float pan), {
     // ---- 2 SFX_PICKUP 拾取：上行两声方波 ----
     case 2:
         osc('square', 780, 780, 0.055, 0.28);
-        setTimeout(function () {}, 0);
+        setTimeout(function () { }, 0);
         osc('square', 1180, 1180, 0.075, 0.26);
         break;
 
@@ -254,16 +266,15 @@ EM_JS(void, js_set_volume, (float v), {
  * 公开接口
  * =================================================================== */
 void InitAudio(void) { js_audio_init(); }
-void ShutdownAudio(void) { }
+void ShutdownAudio(void) { /* PLATFORM_NOOP: WebAudio lifetime/panning is managed by the browser and individual sound emission. */ }
 
-void PlaySfx(int id, float vol) { js_play(id, vol, 0.0f); }
+void PlaySfx(int id, float vol) { if(id==SFX_SCREAM || id==SFX_WARDEN || id==SFX_GLASS)MusicDuck(.8f,.3f);js_play(id, vol*volumeF, 0.0f); }
 
 /* 世界音效：先按听者朝向算声像与距离衰减，再交给合成器。
    这样"背后的脚步"和"正前方的脚步"听起来不一样。 */
 void AudioPlayWorld(int id, float x, float y, float vol, float maxDist, int priority) {
-    (void)priority;
-    extern void AudioComputeGains(float, float, float, float,
-                                  float, float, float, float*, float*);
+    if(priority>=2 && Dist2(x,y,posX,posY)<36)MusicDuck(.9f,.35f);
+
 
     float l = 0.0f, r = 0.0f;
     float gain, pan;
@@ -284,10 +295,10 @@ void AudioPlayWorld(int id, float x, float y, float vol, float maxDist, int prio
         if (pan < -1.0f) pan = -1.0f;
         if (pan > 1.0f) pan = 1.0f;
     }
-    js_play(id, vol * gain, pan);
+    js_play(id, vol * gain * volumeF, pan);
 }
 
-void AudioUpdateListener(float px, float py, float dx, float dy) {
+void AudioUpdateListener(float px, float py, float dx, float dy) { /* PLATFORM_NOOP: WebAudio lifetime/panning is managed by the browser and individual sound emission. */
     (void)px; (void)py; (void)dx; (void)dy;
 }
 
@@ -313,3 +324,8 @@ void AudioComputeGains(float lisX, float lisY, float lisDirX, float lisDirY,
     if (outL) *outL = att * (0.5f - 0.5f * pan);
     if (outR) *outR = att * (0.5f + 0.5f * pan);
 }
+
+EM_JS(float,js_audio_latency,(void),{var ctx=Module._actx;return ctx?Math.max(.005,(ctx.baseLatency||.01)+(ctx.outputLatency||0)):0;});
+float AudioOutputLatencySeconds(void){return js_audio_latency();}
+
+void AudioMaintain(void) {js_audio_init();}

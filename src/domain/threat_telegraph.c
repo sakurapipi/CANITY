@@ -98,7 +98,7 @@ int TelegraphTick(float dt) {
      * 所以转身背对它，预告会恢复 —— 这正是"背后有东西"的恐怖来源。
      * ================================================================ */
     {
-        extern int HasLOS(float, float, float, float);
+
         float vx = tx - posX, vy = ty - posY;
         float vd = sqrtf(vx * vx + vy * vy);
         int inFront = 0;

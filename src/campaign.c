@@ -5,78 +5,20 @@
  */
 #include "common.h"
 #include "campaign.h"
+#include "entity.h"
+#include "world_api.h"
+#include "loop_api.h"
+#include "cell_meta.h"
+#include "map_rooms.h"
+#include "hatch.h"
+#include "room_theme.h"
 
 const CampaignDef kCampaign[] = {
-    /* ---- 1 黑暗工厂：手电永远关不掉 ---- */
-    {
-        "DARK FACTORY", "黑暗工厂",
-        "Your flashlight cannot be turned off.",
-        "手电永远关不掉。",
-        1,          /* flashlightLocked */
-        1.00f,      /* noiseAlertMul */
-        0,          /* wardenOnPower */
-        1.00f,      /* exitDistMul */
-        1.00f,      /* tierMul */
-        0,          /* noGiveUp */
-        1, 4,       /* layers, fuses */
-        1.00f, 0.55f, 1.00f, 1.00f
-    },
-    /* ---- 2 无声区：任何噪音都会召来第二只猎手 ---- */
-    {
-        "SILENT ZONE", "无声区",
-        "Every noise you make is heard everywhere. Sprint at your own risk.",
-        "任何噪音都会传遍全层。冲刺等于自杀。",
-        0,
-        3.00f,      /* 噪音半径 ×3 */
-        0,
-        1.00f,
-        1.00f,
-        0,
-        2, 3,
-        1.00f, 1.00f, 1.00f, 1.00f
-    },
-    /* ---- 3 守门人之城：通电即刷守门人，出口更远 ---- */
-    {
-        "WARDEN'S CITY", "守门人之城",
-        "The Warden wakes the moment you power the breaker. The exit is far.",
-        "配电箱一通电，守门人立刻出现。出口比平时远一倍。",
-        0,
-        1.00f,
-        1,          /* wardenOnPower */
-        2.00f,      /* exitDistMul */
-        1.00f,
-        0,
-        1, 6,
-        1.05f, 1.00f, 1.00f, 1.30f
-    },
-    /* ---- 4 贪婪深渊：强度档 ×2 ---- */
-    {
-        "GREED ABYSS", "贪婪深渊",
-        "Every coin you carry counts double against you. Gold is doubled too.",
-        "你带的每一枚金币都以双倍计入强度。金币收益也翻倍。",
-        0,
-        1.00f,
-        0,
-        1.00f,
-        2.00f,      /* tierMul */
-        0,
-        3, 3,
-        1.00f, 1.00f, 1.00f, 2.00f
-    },
-    /* ---- 5 最后一道门：追逐永不放弃 ---- */
-    {
-        "THE LAST DOOR", "最后一道门",
-        "Nothing gives up. Everything you avoided is waiting here.",
-        "没有东西会放弃。你躲过的一切都在这里等你。",
-        0,
-        1.15f,
-        1,
-        1.30f,
-        1.50f,
-        1,          /* noGiveUp */
-        1, 8,
-        1.10f, 1.25f, 1.20f, 1.50f
-    },
+    {"BLACKBOX RELAY","黑匣回路","Restore three relay fuses through a paired loop; light is a resource, not a permanent lock.","穿过双环回路收集三根保险丝，规划照明与返回路径。",0,1,0,1,1,0,1,3,1,.85f,1,1},
+    {"ECHO ARCHIVE","回声档案","Two archive floors with long sound corridors. Search alcoves, then cross the central spine.","两层档案回廊；声音传播更远，利用侧室搜查和主轴突围。",0,1.65f,0,1,1,0,2,3,1,1,1,1.15f},
+    {"COLD QUARANTINE","冷凝隔离","Ladder routes offer two approaches. Power wakes the Warden; the exit is a separate flank.","梯形隔离通道可绕行；接电唤醒守门人，出口在另一侧。",0,1,1,1.5f,1,0,1,4,1,1.05f,1.15f,1.2f},
+    {"DEBT VAULTS","债务金库","Three vault floors: locked caches pay more, but carried gold increases awareness faster.","三层金库分区；解锁密箱获得收益，携带金币以1.6倍计入感知压力。",0,1.15f,0,1,1.6f,0,3,4,1,1.1f,1,1.35f},
+    {"ZERO SIGNAL","归零列车","Parallel escape lanes cross sealed compartments. Power triggers a final pursuit; preserve resources.","平行撤离线穿过封闭车厢；接电触发最后追捕，保留资源突围。",0,1.35f,1,1.3f,1.3f,0,1,5,1.06f,1.2f,1.15f,1.5f}
 };
 
 typedef char kCampaign_count_check[(sizeof(kCampaign)/sizeof(kCampaign[0]) == CAMPAIGN_STAGE_COUNT) ? 1 : -1];
@@ -196,6 +138,42 @@ int CampaignStartFloor(int stage) {
     return floor;
 }
 int CampaignReward(int stage) {
-    static const int rewards[] = {3000, 4000, 6000, 8000, 15000};
+    static const int rewards[] = {300, 500, 700, 900, 1400};
     return stage >= 0 && stage < CAMPAIGN_STAGE_COUNT ? rewards[stage] : 0;
+}
+
+static void CampaignCarve(int x0,int y0,int x1,int y1){
+    if(x0>x1){int t=x0;x0=x1;x1=t;}
+    if(y0>y1){int t=y0;y0=y1;y1=t;}
+    for(int y=y0;y<=y1;y++)for(int x=x0;x<=x1;x++)if(x>0 && y>0 && x<MAP_WIDTH-1 && y<MAP_HEIGHT-1)worldMap[y][x]=0;
+}
+int CampaignThemeNow(void){static const int themes[5]={5,1,4,2,6};return campaignMode && campaignStage>=0 && campaignStage<5?themes[campaignStage]:0;}
+void CampaignBuildFloor(void){
+    if(!campaignMode)return;
+    CellMetaReset();RoomPropReset();HatchReset();roomSeedUsed=0;
+    for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)worldMap[y][x]=1;
+    CampaignCarve(1,1,3,3);CampaignCarve(3,3,3,18);
+    CampaignCarve(2,17,33,19);CampaignCarve(17,3,19,32);
+    if(campaignStage==0){
+        CampaignCarve(5,7,30,9);CampaignCarve(5,26,30,28);CampaignCarve(5,7,7,28);CampaignCarve(28,7,30,28);
+    }else if(campaignStage==1){
+        for(int y=5;y<=29;y+=6){CampaignCarve(3,y,31,y+1);CampaignCarve(y%12==5?3:29,y, y%12==5?5:31,y+5);}
+    }else if(campaignStage==2){
+        CampaignCarve(7,4,9,31);CampaignCarve(26,4,28,31);for(int y=6;y<=30;y+=6)CampaignCarve(7,y,28,y+1);
+    }else if(campaignStage==3){
+        for(int y=4;y<=27;y+=8)for(int x=4;x<=27;x+=8){CampaignCarve(x,y,x+4,y+4);CampaignCarve(x+2,y+2,18,y+2);CampaignCarve(x+2,y+2,x+2,18);}
+        for(int y=6;y<=30;y+=8)CampaignCarve(6,y,30,y);
+    }else{
+        CampaignCarve(4,6,31,7);CampaignCarve(4,28,31,29);CampaignCarve(4,6,5,29);CampaignCarve(30,6,31,29);
+        for(int x=8;x<=26;x+=6){CampaignCarve(x,7,x+1,28);CampaignCarve(x-2,11,x+3,14);CampaignCarve(x-2,23,x+3,26);}
+    }
+    /* These maintenance bays connect to the common spine in every chapter. */
+    CampaignCarve(9,14,14,20);CampaignCarve(22,17,27,23);
+    CellMetaFillRoom(9,14,6,7,1,CampaignThemeNow(),ACOUSTIC_METAL,0);
+    CellMetaFillRoom(22,17,6,7,1,CampaignThemeNow(),ACOUSTIC_HARD,0);
+    static const int fixtures[5][2]={{3,5},{4,4},{7,5},{8,5},{9,9}};
+    int stage=campaignStage>=0 && campaignStage<CAMPAIGN_STAGE_COUNT?campaignStage:0;
+    RoomPropAdd(10.5f,14.5f,fixtures[stage][0]);RoomPropAdd(26.5f,22.5f,fixtures[stage][1]);
+    HatchAdd(13.5f,14.5f,HatchKindForTheme(CampaignThemeNow()),CampaignThemeNow());RoomThemeBind();RoomSetCount(1);
+    posX=3.5f;posY=18.5f;exitX=32.5f;exitY=18.5f;dirX=1;dirY=0;planeX=0;planeY=.66f;
 }

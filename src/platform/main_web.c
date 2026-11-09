@@ -10,6 +10,11 @@
  * 两个入口都只调用游戏层公开的东西，不自己实现任何玩法。
  */
 #include "common.h"
+#include "entity.h"
+#include "music.h"
+#include "monster_rules.h"
+#include "calibration.h"
+#include "sprites.h"
 #include "plat.h"
 #include "loop_api.h"
 #include "player_api.h"
@@ -17,6 +22,7 @@
 #include "present_api.h"
 #include "render.h"
 #include "ui.h"
+#include "ui_theme.h"
 #include "save.h"
 #include "audio.h"
 
@@ -26,6 +32,12 @@
  * 对应 WinMain 的初始化顺序，去掉建窗/消息循环部分。
  * ------------------------------------------------------------------- */
 #define WEB_LOGIC_STEP (1.0 / 120.0)
+
+/* Same-translation-unit probe state; only the probe functions are exported. */
+double g_probeDt = 0.0;     /* 上一帧的 dt（秒） */
+int g_probeKeysDown = 0;
+int g_probeUpdates = 0;     /* Update() 被调用的累计次数 */
+void CanityProbeSampleKeys(void);
 
 static int g_selftest = 0;
 static double s_accum = 0.0;
@@ -38,7 +50,7 @@ static void WebFrame(void) {
     s_prev = now;
     if (dt > 0.25) dt = 0.25;
     if (dt < 0.0) dt = 0.0;
-    { extern double g_probeDt; g_probeDt = dt; }
+    {  g_probeDt = dt; }
 
     /* ==================================================================
      * 2026-11-06（用户实测：**UI 错位**）
@@ -72,29 +84,29 @@ static void WebFrame(void) {
         if (cw != lastW || ch != lastH) {
             lastW = cw;
             lastH = ch;
-            extern void InitPixels(void);
+
             InitPixels();          /* 按新宽高比重算 renderW/renderH */
-            extern void SyncWindowSize(void);
+
             SyncWindowSize();
         } else {
-            extern void SyncWindowSize(void);
+
             SyncWindowSize();
         }
     }
 
     /* 时间基准：桌面端在 WinMain 里维护 g_timeSec，网页端也得给。 */
     {
-        extern double g_timeSec;
+
         g_timeSec = now;
     }
 
-    extern void CanityProbeSampleKeys(void);
+
     CanityProbeSampleKeys();
 
-    extern void PollInput(void);
-    extern void UpdatePitch(void);
-    extern void ClearKeyEdges(void);
-    extern void Update(float dt);
+
+
+
+
 
     /* ==================================================================
      * 2026-11-06（用户实测：**局内鼠标左右滑没反应**）
@@ -116,7 +128,7 @@ static void WebFrame(void) {
         }
     }
     {
-        extern void CanityMouseLook(int dx, int dy);
+
         int mdx = 0, mdy = 0;
         PlatMouseDelta(&mdx, &mdy);
         /* 局内就转，不要求 Pointer Lock 已生效（见上面那段注释） */
@@ -136,13 +148,14 @@ static void WebFrame(void) {
      * ================================================================ */
     /* 鼠标：菜单悬停 + 点击（渲染空间坐标，已由平台层反算） */
     {
-        extern void CanityMouseMove(int mx, int my);
-        extern void CanityMouseClick(int mx, int my);
+
+
         int mx = 0, my = 0;
+        if(!PlatKeyDown(VK_LBUTTON))CanityMouseRelease();
         if (PlatTakeMouseClick(&mx, &my)) CanityMouseClick(mx, my);
         else if (PlatTakeMouseMove(&mx, &my)) CanityMouseMove(mx, my);
         {
-            extern void CanityMouseWheel(int delta, int mx, int my);
+
             int d = 0, wx = 0, wy = 0;
             if (PlatTakeWheel(&d, &wx, &wy)) CanityMouseWheel(d, wx, wy);
         }
@@ -163,7 +176,8 @@ static void WebFrame(void) {
         PollInput();
         UpdatePitch();
         Update((float)WEB_LOGIC_STEP);
-        { extern int g_probeUpdates; g_probeUpdates++; }
+        PlatConsumeKeyPulses();
+        {  g_probeUpdates++; }
         s_accum -= WEB_LOGIC_STEP;
         steps++;
     }
@@ -175,10 +189,17 @@ static void WebFrame(void) {
        这一行保证"画出来的那一帧"UI 空间和渲染空间一定相等 ——
        用户报的"退出对局后 UI 又错乱"就是从这类路径漏进来的。 */
     {
-        extern void SyncWindowSize(void);
+
         SyncWindowSize();
     }
 
+    MusicScene scene=MUSIC_MENU;
+    if(currentState==STATE_GAMEOVER)scene=gameWon?MUSIC_VICTORY:MUSIC_DEFEAT;
+    else if(currentState==STATE_SAFEHOUSE)scene=MUSIC_SAFE;
+    else if(currentState==STATE_PLAYING || currentState==STATE_PAUSED)scene=(MonsterChaseActive() || sanity<fmaxf(1,SanityMax())*.28f)?MUSIC_CHASE:MUSIC_EXPLORE;
+    int pausedAudio=currentState==STATE_PAUSED || ((currentState==STATE_SETTINGS || currentState==STATE_HELP) && prevState==STATE_PAUSED);
+    if(calibActive || pausedAudio)scene=MusicCurrentScene();
+    MusicSetScene(scene);MusicSetMasterVolume(musicVolumeF);MusicSetPaused(pausedAudio);MusicTick((float)dt);
     RenderFrame();
 
     {
@@ -188,9 +209,6 @@ static void WebFrame(void) {
 }
 
 /* 只给探针用：统计当前按下的虚拟键数量 */
-int g_probeKeysDown = 0;
-int g_probeUpdates = 0;     /* Update() 被调用的累计次数 */
-double g_probeDt = 0.0;     /* 上一帧的 dt（秒） */
 void CanityProbeSampleKeys(void) {
     int n = 0;
     for (int vk = 1; vk < 256; vk++) if (PlatKeyDown(vk)) n++;
@@ -259,8 +277,8 @@ EM_JS(int, js_panner_supported, (void), {
 });
 
 EMSCRIPTEN_KEEPALIVE float CanityProbeWorldSound(float dx, float dy) {
-    extern void AudioPlayWorld(int, float, float, float, float, int);
-    extern float posX, posY;
+
+
     AudioPlayWorld(SFX_STEP, posX + dx, posY + dy, 1.0f, 20.0f, 3);
     return js_last_pan();
 }
@@ -275,7 +293,7 @@ EMSCRIPTEN_KEEPALIVE int CanityActionVk(const char* name) {
         const char* b = name;
         while (*a && *a == *b) { a++; b++; }
         if (*a == 0 && *b == 0) {
-            extern int g_bindings[ACT_COUNT];
+
             int vk = g_bindings[kActionNames[i].act];
             return (vk > 0 && vk < 256) ? vk : -1;
         }
@@ -288,8 +306,8 @@ EMSCRIPTEN_KEEPALIVE void CanityActionMenu(void) { CanityMenuAction(); }
 EMSCRIPTEN_KEEPALIVE void CanityActionFlashlight(void) { CanityToggleFlashlight(); }
 
 EMSCRIPTEN_KEEPALIVE int CanityProbeFlashlight(void) {
-    extern int flashlightOn;
-    extern float battery;
+
+
     return (flashlightOn ? 1 : 0) * 1000 + (int)battery;
 }
 
@@ -298,21 +316,21 @@ EMSCRIPTEN_KEEPALIVE int CanityProbeState(void) {
 }
 
 EMSCRIPTEN_KEEPALIVE int CanityProbeMenu(void) {
-    extern int menuSelection;
+
     return menuSelection;
 }
 
 /* 游戏内部真正在用的按键数组（不是 JS 那份原始状态） */
 EMSCRIPTEN_KEEPALIVE int CanityProbeGameKey(int vk) {
-    extern int keys[];
-    extern int keyPressed[];
+
+
     if (vk < 0 || vk > 255) return -1;
     return (keys[vk] ? 1 : 0) | (keyPressed[vk] ? 2 : 0);
 }
 
 /* UI 布局的关键量：winW/winH 必须等于 renderW/renderH */
 EMSCRIPTEN_KEEPALIVE int CanityProbeLayout(int which) {
-    extern int winW, winH, renderW, renderH;
+
     switch (which) {
     case 0: return winW;
     case 1: return winH;
@@ -324,25 +342,25 @@ EMSCRIPTEN_KEEPALIVE int CanityProbeLayout(int which) {
 
 /* 朝向探针：验证鼠标视角是否真的改了方向 */
 EMSCRIPTEN_KEEPALIVE int CanityProbeDir(int which) {
-    extern float dirX, dirY;
+
     if (which == 0) return (int)(dirX * 1000.0f);
     if (which == 1) return (int)(dirY * 1000.0f);
     return 0;
 }
 
 EMSCRIPTEN_KEEPALIVE int CanityProbeUpdates(void) {
-    extern int g_probeUpdates;
+
     return g_probeUpdates;
 }
 
 EMSCRIPTEN_KEEPALIVE double CanityProbeDt(void) {
-    extern double g_probeDt;
+
     return g_probeDt;
 }
 
 EMSCRIPTEN_KEEPALIVE int CanityProbeKeys(void) {
     /* 当前有多少个键被按下（含绑定键与菜单键） */
-    extern int g_probeKeysDown;
+
     return g_probeKeysDown;
 }
 
@@ -351,15 +369,15 @@ int main(void) {
 
     srand((unsigned int)time(NULL));
 
-    extern void InitAchievements(void);
-    extern void MusicInit(void);
-    extern void MusicLoadGameTracks(void);
-    extern void InitPixels(void);
-    extern void SpritesInit(void);
-    extern void GenerateThemeTextures(int theme);
-    extern void InitWorkers(void);
-    extern int  LoadSettings(void);
-    extern int  hasSave;
+
+
+
+
+
+
+
+
+
 
     InitAchievements();
     hasSave = LoadSettings();
@@ -448,3 +466,6 @@ int main(void) {
     emscripten_set_main_loop(WebFrame, 0, 1);
     return 0;
 }
+
+EMSCRIPTEN_KEEPALIVE int CanityUiFlags(void){return (currentState==STATE_PLAYING?1:0)|(calibActive?2:0)|(hiddenIn>=0?4:0);}
+EMSCRIPTEN_KEEPALIVE int CanityUiAccent(void){return (int)UiThemeColor(0);}

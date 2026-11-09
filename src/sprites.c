@@ -23,7 +23,12 @@
 #define CANVAS_W (SPR_W * SUP)
 #define CANVAS_H (SPR_H * SUP)
 
-static unsigned int g_canvas[CANVAS_W * CANVAS_H];
+/* Logical authoring canvas stays 256px: models do not change scale/anchor.
+ * Only actor baking replays vectors at 4x density, then downsamples 2x. */
+static int g_canvasScale=1;
+#define RASTER_W (CANVAS_W*g_canvasScale)
+#define RASTER_H (CANVAS_H*g_canvasScale)
+static unsigned int g_canvas[CANVAS_W*CANVAS_H*SPR_CREATURE_SCALE*SPR_CREATURE_SCALE];
 
 static Sprite g_sprites[SPR_COUNT];
 static int g_ready = 0;
@@ -32,11 +37,11 @@ static void cvClear(void) {
     memset(g_canvas, 0, sizeof(g_canvas));
 }
 
-static inline void cvPx(int x, int y, unsigned int col, float a) {
-    if (x < 0 || x >= CANVAS_W || y < 0 || y >= CANVAS_H) return;
+static inline void cvPxRaw(int x, int y, unsigned int col, float a) {
+    if (x < 0 || x >= RASTER_W || y < 0 || y >= RASTER_H) return;
     if (a <= 0.0f) return;
     if (a > 1.0f) a = 1.0f;
-    unsigned int* p = &g_canvas[(size_t)y * CANVAS_W + x];
+    unsigned int* p = &g_canvas[(size_t)y * RASTER_W + x];
     unsigned int src = col & 0x00FFFFFFu;
     if (a >= 0.999f) { *p = 0xFF000000u | src; return; }
     unsigned int old = *p;
@@ -60,8 +65,18 @@ static inline void cvPx(int x, int y, unsigned int col, float a) {
     *p = ((unsigned int)(na * 255.0f) << 24) | (rr << 16) | (gg << 8) | bb;
 }
 
+static inline void cvPx(int x,int y,unsigned int col,float a){
+    for(int j=0;j<g_canvasScale;j++)for(int i=0;i<g_canvasScale;i++)
+        cvPxRaw(x*g_canvasScale+i,y*g_canvasScale+j,col,a);
+}
+
 /* 扫描线填充多边形（画布坐标） */
 static void cvPoly(const float* pts, int n, unsigned int col, float a) {
+    float scaled[32];
+    if(n<3 || n>16)return;
+    for(int i=0;i<n*2;i++)scaled[i]=pts[i]*g_canvasScale;
+    pts=scaled;
+
     if (n < 3) return;
     float minY = 1e9f, maxY = -1e9f;
     for (int i = 0; i < n; i++) {
@@ -71,7 +86,7 @@ static void cvPoly(const float* pts, int n, unsigned int col, float a) {
     }
     int y0 = (int)floorf(minY), y1 = (int)ceilf(maxY);
     if (y0 < 0) y0 = 0;
-    if (y1 > CANVAS_H - 1) y1 = CANVAS_H - 1;
+    if (y1 > RASTER_H - 1) y1 = RASTER_H - 1;
     for (int y = y0; y <= y1; y++) {
         float fy = (float)y + 0.5f;
         float xs[16];
@@ -93,12 +108,13 @@ static void cvPoly(const float* pts, int n, unsigned int col, float a) {
         }
         for (int i = 0; i + 1 < nx; i += 2) {
             int xa = (int)ceilf(xs[i] - 0.5f), xb = (int)floorf(xs[i + 1] - 0.5f);
-            for (int x = xa; x <= xb; x++) cvPx(x, y, col, a);
+            for (int x = xa; x <= xb; x++) cvPxRaw(x, y, col, a);
         }
     }
 }
 
 static void cvEllipse(float cx, float cy, float rx, float ry, unsigned int col, float a) {
+    cx*=g_canvasScale;cy*=g_canvasScale;rx*=g_canvasScale;ry*=g_canvasScale;
     if (rx < 0.5f) rx = 0.5f;
     if (ry < 0.5f) ry = 0.5f;
     int x0 = (int)(cx - rx) - 1, x1 = (int)(cx + rx) + 1;
@@ -107,7 +123,7 @@ static void cvEllipse(float cx, float cy, float rx, float ry, unsigned int col, 
         for (int x = x0; x <= x1; x++) {
             float dx = ((float)x + 0.5f - cx) / rx;
             float dy = ((float)y + 0.5f - cy) / ry;
-            if (dx * dx + dy * dy <= 1.0f) cvPx(x, y, col, a);
+            if (dx * dx + dy * dy <= 1.0f) cvPxRaw(x, y, col, a);
         }
     }
 }
@@ -131,6 +147,11 @@ static void cvLine(float x0, float y0, float x1, float y1, float wid,
 
 /* 竖向渐变多边形（体积感的主要来源） */
 static void cvPolyGrad(const float* pts, int n, unsigned int top, unsigned int bot, float a) {
+    float scaled[32];
+    if(n<3 || n>16)return;
+    for(int i=0;i<n*2;i++)scaled[i]=pts[i]*g_canvasScale;
+    pts=scaled;
+
     if (n < 3) return;
     float minY = 1e9f, maxY = -1e9f;
     for (int i = 0; i < n; i++) {
@@ -138,10 +159,10 @@ static void cvPolyGrad(const float* pts, int n, unsigned int top, unsigned int b
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
     }
-    if (maxY - minY < 0.5f) { cvPoly(pts, n, top, a); return; }
+    if (maxY - minY < 0.5f) return;
     int y0 = (int)floorf(minY), y1 = (int)ceilf(maxY);
     if (y0 < 0) y0 = 0;
-    if (y1 > CANVAS_H - 1) y1 = CANVAS_H - 1;
+    if (y1 > RASTER_H - 1) y1 = RASTER_H - 1;
     int tr = (top >> 16) & 0xFF, tg = (top >> 8) & 0xFF, tb = top & 0xFF;
     int br = (bot >> 16) & 0xFF, bg = (bot >> 8) & 0xFF, bb = bot & 0xFF;
     for (int y = y0; y <= y1; y++) {
@@ -169,7 +190,7 @@ static void cvPolyGrad(const float* pts, int n, unsigned int top, unsigned int b
         }
         for (int i = 0; i + 1 < nx; i += 2) {
             int xa = (int)ceilf(xs[i] - 0.5f), xb = (int)floorf(xs[i + 1] - 0.5f);
-            for (int x = xa; x <= xb; x++) cvPx(x, y, col, a);
+            for (int x = xa; x <= xb; x++) cvPxRaw(x, y, col, a);
         }
     }
 }
@@ -192,18 +213,19 @@ static void cvSpeckle(int cx, int cy, int radius, int count, unsigned int col, f
 
 /* 加法辉光（符印、枪口余温） */
 static void cvGlow(float cx, float cy, float r, unsigned int col, float a) {
+    cx*=g_canvasScale;cy*=g_canvasScale;r*=g_canvasScale;
     int x0 = (int)(cx - r) - 1, x1 = (int)(cx + r) + 1;
     int y0 = (int)(cy - r) - 1, y1 = (int)(cy + r) + 1;
     for (int y = y0; y <= y1; y++) {
-        if (y < 0 || y >= CANVAS_H) continue;
+        if (y < 0 || y >= RASTER_H) continue;
         for (int x = x0; x <= x1; x++) {
-            if (x < 0 || x >= CANVAS_W) continue;
+            if (x < 0 || x >= RASTER_W) continue;
             float dx = ((float)x + 0.5f - cx) / r;
             float dy = ((float)y + 0.5f - cy) / r;
             float d2 = dx * dx + dy * dy;
             if (d2 > 1.0f) continue;
             float k = (1.0f - d2);
-            unsigned int* p = &g_canvas[(size_t)y * CANVAS_W + x];
+            unsigned int* p = &g_canvas[(size_t)y * RASTER_W + x];
             unsigned int old = *p;
             int oa = (old >> 24);
             int orr = (old >> 16) & 0xFF, og = (old >> 8) & 0xFF, ob = old & 0xFF;
@@ -225,15 +247,20 @@ static void cvGlow(float cx, float cy, float r, unsigned int col, float a) {
 /* 降采样 + 亮度 LUT                                                    */
 /* ------------------------------------------------------------------ */
 static void cvFinish(Sprite* s) {
-    s->w = SPR_W;
-    s->h = SPR_H;
-    s->bx0 = SPR_W; s->by0 = SPR_H; s->bx1 = -1; s->by1 = -1;
-    for (int y = 0; y < SPR_H; y++) {
-        for (int x = 0; x < SPR_W; x++) {
+    int outputScale=g_canvasScale;
+    int ow=SPR_W*outputScale,oh=SPR_H*outputScale;
+    unsigned int* resized=(unsigned int*)realloc(s->px,(size_t)ow*oh*sizeof(unsigned int));
+    if(resized)s->px=resized;
+    else {outputScale=1;ow=SPR_W;oh=SPR_H;}
+    int sample=SUP*g_canvasScale/outputScale;
+    s->w=ow;s->h=oh;
+    s->bx0 = ow; s->by0 = oh; s->bx1 = -1; s->by1 = -1;
+    for (int y = 0; y < oh; y++) {
+        for (int x = 0; x < ow; x++) {
             int r = 0, g = 0, b = 0, a = 0;
-            for (int dy = 0; dy < SUP; dy++) {
-                for (int dx = 0; dx < SUP; dx++) {
-                    unsigned int p = g_canvas[(size_t)(y * SUP + dy) * CANVAS_W + (x * SUP + dx)];
+            for (int dy = 0; dy < sample; dy++) {
+                for (int dx = 0; dx < sample; dx++) {
+                    unsigned int p = g_canvas[(size_t)(y * sample + dy) * RASTER_W + (x * sample + dx)];
                     int pa = p >> 24;
                     r += ((p >> 16) & 0xFF) * pa / 255;
                     g += ((p >> 8) & 0xFF) * pa / 255;
@@ -241,7 +268,7 @@ static void cvFinish(Sprite* s) {
                     a += pa;
                 }
             }
-            int n = SUP * SUP;
+            int n = sample * sample;
             /* v3.0：**alpha 归一化**（建模审查 #6）。
                原来颜色是先乘 alpha 再除以 n，没有除回 alpha 总和 ——
                半透明边缘的颜色被 alpha 拉黑，每张精灵因此有一圈黑晕，
@@ -264,7 +291,7 @@ static void cvFinish(Sprite* s) {
             if (rr > 255) rr = 255;
             if (gg > 255) gg = 255;
             if (bb > 255) bb = 255;
-            s->px[(size_t)y * SPR_W + x] = ((unsigned int)outA << 24) |
+            s->px[(size_t)y * ow + x] = ((unsigned int)outA << 24) |
                                            (unsigned int)rr << 16 |
                                            (unsigned int)gg << 8 |
                                            (unsigned int)bb;
@@ -1089,7 +1116,7 @@ static void BakeMonsterMimic(const MonsterBakeContext* bake) {
 
 /* Variant: kind == 0 || kind == 1 || kind == 2 || kind == 7 || kind == 8 || kind == 9 || kind == 11 || kind == 12 */
 typedef struct {
-    const MonsterBakeContext* mon;   /* 不能叫 monster：那是 common.h 的宏 */
+    const MonsterBakeContext* mon;   /* Geometry source; ordinary member names are now safe as well. */
     float shoulderW;
     float shoulderY;
     float waistY;
@@ -1639,6 +1666,60 @@ static void BakeHumanoidLeechFace(const HumanoidBakeContext* shape) {
     }
 }
 
+/* Fine anatomical/material landmarks are vector strokes, not enlarged noise. */
+static void BakeHumanoidFineDetail(const HumanoidBakeContext* shape){
+    const MonsterBakeContext* b=shape->mon;
+    float x=b->cx,sy=shape->shoulderY,wy=shape->waistY,hy=shape->hy;
+    float width=shape->shoulderW;
+    if(b->kind==7){
+        /* Frayed coat seam, broken zipper and stitched sack shoulder harness. */
+        cvLine(x+5,sy+9,x+9,wy+23,.8f,0x898477,.65f);
+        for(int i=0;i<18;i++){
+            float y=sy+12+i*(wy-sy+12)/18;
+            cvLine(x+3,y,x+8,y+1,.6f,0xB1A698,.5f);
+        }
+        cvLine(x-width*.75f,sy+3,x+width*.42f,wy-3,3,0x191C1D,.9f);
+        cvLine(x-width*.75f+1,sy+3,x+width*.42f+1,wy-3,.7f,0x887A64,.7f);
+        for(int i=0;i<6;i++)cvLine(x-width*.45f+i*5,wy+10,x-width*.39f+i*5,wy+14,.7f,0xCEC3A1,.5f);
+    }else if(b->kind==9){
+        /* Layered oxidised plate, exposed dark fasteners, cracked mask edges. */
+        for(int i=0;i<5;i++){
+            float y=sy+9+i*9;
+            cvLine(x-width*.72f,y,x+width*.70f,y+4,1.2f,0x12181C,.85f);
+            cvLine(x-width*.68f,y-1,x+width*.65f,y+3,.55f,0x7B8585,.6f);
+            cvEllipse(x-width*.65f,y+2,1.1f,1.1f,0xB2A88C,.85f);
+        }
+        cvLine(x+shape->hrx*.6f,hy-8,x+shape->hrx*.25f,hy+1,.75f,0x060809,.9f);
+        cvLine(x+shape->hrx*.25f,hy+1,x+shape->hrx*.55f,hy+10,.6f,0x080909,.9f);
+    }else if(b->kind==1){
+        /* Lens fracture and translucent throat filaments: no extra eye pair. */
+        for(int i=0;i<4;i++){
+            float xx=x+(i-1.5f)*3;
+            cvLine(xx,hy+shape->hry*.7f,xx+1,sy+8,.65f,0x9BC4D0,.7f);
+        }
+        cvLine(x-shape->hrx*.8f,hy-6,x-shape->hrx*.3f,hy+1,.65f,0xCDE9E9,.6f);
+        cvLine(x-shape->hrx*.3f,hy+1,x-shape->hrx*.5f,hy+8,.55f,0x18252D,.9f);
+    }else{
+        /* Asymmetric rib planes read as volume; long neck gets separate tendons. */
+        unsigned int tendon=b->kind==8?0x737365:0x7A7771;
+        for(int i=0;i<7;i++){
+            float y=sy+10+i*(wy-sy-5)/8;
+            float span=width*(.65f-i*.045f);
+            cvLine(x-2,y,x-span,y-3,1.0f,0x080D10,.8f);
+            cvLine(x+2,y+2,x+span*.88f,y-1,.85f,0x080D10,.8f);
+            cvLine(x-3,y-1,x-span+1,y-4,.6f,tendon,.5f);
+        }
+        cvLine(x-1,sy+5,x+2,wy+7,.7f,0x9A8E7A,.55f);
+        if(b->kind==12 || b->kind==8){
+            for(int i=0;i<3;i++)cvLine(x-3+i*2,hy+shape->hry*.75f,x-5+i*4,sy+3,.65f,0x8C8A7C,.7f);
+        }
+        /* Dry split skin and a small stitch line on one cheek, away from the eyes. */
+        float cheek=x-shape->hrx*.62f;
+        cvLine(cheek,hy+3,cheek+2,hy+shape->hry*.65f,.65f,0x140D10,.9f);
+        for(int i=0;i<4;i++)cvLine(cheek-1,hy+5+i*2,cheek+3,hy+6+i*2,.5f,0xA79D86,.6f);
+    }
+}
+
 static void BakeMonsterHumanoid(const MonsterBakeContext* bake) {
     int kind = bake->kind;
     int side = bake->side;
@@ -1688,6 +1769,7 @@ static void BakeMonsterHumanoid(const MonsterBakeContext* bake) {
     else if (kind == 12) BakeHumanoidLongNeckFace(&shape);
     else if (kind == 1) BakeHumanoidLightHunterFace(&shape);
     else if (kind == 2) BakeHumanoidLeechFace(&shape);
+    BakeHumanoidFineDetail(&shape);
 }
 
 /* Variant: kind == 5 */
@@ -1816,7 +1898,59 @@ static void BakeMonsterResonator(const MonsterBakeContext* bake) {
     }
 }
 
+/* The power leech is an actual segmented parasite, not the old 32px rectangle. */
+static void BakeMonsterParasite(const MonsterBakeContext* b){
+    float x=b->c;
+    for(int i=10;i>=0;i--){
+        float y=111+i*11.5f,rx=9+(10-i)*1.05f,xx=x+(i%3-1)*1.2f;
+        cvEllipse(xx+2,y+2,rx,10,0x080F12,1);
+        cvEllipse(xx,y,rx,9,0x364D4F,1);
+        cvLine(xx-rx*.65f,y-3,xx+rx*.6f,y-4,.7f,0x90A19B,.7f);
+        cvLine(xx-rx*.3f,y+7,xx+rx*.4f,y+7,.7f,0x081114,.9f);
+        for(int side=-1;side<=1;side+=2){
+            cvLine(xx+side*(rx-1),y,xx+side*(rx+5),y+5,1,0x627C77,.9f);
+            cvLine(xx+side*(rx+5),y+5,xx+side*(rx+2),y+8,.7f,0x151D21,1);
+        }
+    }
+    cvEllipse(x,98,20,24,0x111C22,1);cvEllipse(x-1,97,15,19,0x58605A,1);
+    cvEllipse(x,102,10,14,0x030506,1);cvEllipse(x,104,5,8,0x34202C,1);
+    for(int i=0;i<8;i++){
+        float a=i*6.2831853f/8;
+        cvLine(x+cosf(a)*9,102+sinf(a)*12,x+cosf(a)*5,102+sinf(a)*7,1.2f,0xD0CAB3,1);
+    }
+    cvEllipse(x-8,86,2,1.4f,0x80B6AF,.9f);
+    cvEllipse(x+7,85,1.4f,1,0xBDD9CC,.9f);
+    cvLine(x-10,79,x-17,64,1,0x648780,.8f);cvLine(x+10,80,x+15,65,1,0x4E706B,.9f);
+}
+
+static unsigned int CreatureHash(unsigned int x){x^=x>>16;x*=0x7FEB352Du;x^=x>>15;x*=0x846CA68Bu;return x^(x>>16);}
+static void BakeCreatureSurface(int kind){
+    /* Stable per-surface texture: no runtime randomness or shimmering grain. */
+    for(int y=1;y<RASTER_H-1;y++)for(int x=1;x<RASTER_W-1;x++){
+        unsigned int* p=&g_canvas[(size_t)y*RASTER_W+x];unsigned int col=*p;
+        if((col>>24)<220)continue;
+        int r=(col>>16)&255,g=(col>>8)&255,b=col&255;
+        /* Keep eyes, thin highlights and exact palette-swap keys intact. */
+        if((r>145 && b>145 && g<115) || r+g+b>510)continue;
+        unsigned int hash=CreatureHash((unsigned)x*1973u+(unsigned)y*9277u+(unsigned)(kind+1)*26699u);
+        int grain=(int)(hash&15)-7;
+        int line=(x+(y/21)*3)%(kind==13?29:43);
+        float gain=1.0f+grain*.009f;
+        if(kind==7 || kind==8)gain+=((x%7==0)?-.06f:0)+((y%11==0)?.035f:0);
+        else if(kind==9)gain+=(line<2?-.13f:line==2?.13f:0);
+        else if(kind==13)gain+=(line<2?-.18f:line==2?.08f:0);
+        else {gain+=(line==0?-.10f:0);if((hash&1023)<5)gain-=.20f;}
+        if(kind==14 && (y%46)<3)gain-=.15f;
+        r=(int)(r*gain);g=(int)(g*gain);b=(int)(b*gain);
+        if(r>255)r=255;
+        if(g>255)g=255;
+        if(b>255)b=255;
+        *p=(col&0xFF000000u)|((unsigned)r<<16)|((unsigned)g<<8)|(unsigned)b;
+    }
+}
+
 static void BakeMonster(int id, int kind, int pose) {
+    g_canvasScale=SPR_CREATURE_SCALE;
     cvClear();
     float c = CANVAS_W * 0.5f;
 
@@ -1881,7 +2015,9 @@ static void BakeMonster(int id, int kind, int pose) {
        同心环 = 「正在向外广播声音」，尖角 = 恐怖该有的锐利感。
        玩家一眼就知道「那是个声源标记」，不会当成怪。 */
     MonsterBakeContext bake = { kind, pose, c, side, walk, baseY, edge, body, hi, H, footY, headY, cx };
-    if (kind == 10) {
+    if(kind==14){
+        BakeMonsterParasite(&bake);
+    }else if (kind == 10) {
         BakeMonsterEcho(&bake);
     } else if (kind == 13) {
         BakeMonsterMimic(&bake);
@@ -1901,8 +2037,8 @@ static void BakeMonster(int id, int kind, int pose) {
 
     /* 左缘轮廓光：让剪影在暗场里"立"起来 */
     {
-        int w = CANVAS_W;
-        for (int y = 0; y < CANVAS_H; y++) {
+        int w = RASTER_W;
+        for (int y = 0; y < RASTER_H; y++) {
             for (int x = 1; x < w; x++) {
                 unsigned int a = g_canvas[(size_t)y * w + x];
                 unsigned int b = g_canvas[(size_t)y * w + x - 1];
@@ -1919,7 +2055,9 @@ static void BakeMonster(int id, int kind, int pose) {
         }
     }
 
+    BakeCreatureSurface(kind);
     cvFinish(&g_sprites[id]);
+    g_canvasScale=1;
 }
 
 /* ===== v2.4.6 烘焙用的「斜角」原语（按 art_direction.h 铁律七/十）=====
@@ -2215,77 +2353,43 @@ static void BakePropBeaconGround(const PropBakeContext* bake) {
 }
 
 /* Variant: kind == 16 */
-static void BakePropSpider(const PropBakeContext* bake) {
-    float c = bake->c; (void)c;
-    float baseY = bake->baseY; (void)baseY;
-    (void)bake;
-    {
-    /* 缚丝蛛（2026-11-06） */
-        /* ==================================================================
-         * 用户原话：「蜘蛛怪的建模什么的全部都没有」。
-         *
-         * 造型按实际威胁读：贴地的宽身体 + 八条撑开的腿 + 一对红眼。
-         * 审美法则照旧：5 段明暗 / 左上边缘光 / 右下压暗 / 接地阴影。
-         * 腿用折线而不是直线 —— 直线的蜘蛛读起来像太阳。
-         * ================================================================== */
-        float bodyY = baseY - 20.0f;      /* 身体中心偏低：它是贴地的 */
-        float cxx = c;
-
-        /* 接地阴影 */
-        cvEllipse(cxx, baseY - 2.0f, 30.0f, 6.0f, 0x00000000u, 0.45f);
-
-        /* 八条腿：每条两段折线，向外再向下 */
-        {
-            static const float legDX[4] = { 0.35f, 0.72f, 1.00f, 0.92f };
-            static const float legDY[4] = { 0.95f, 0.82f, 0.46f, 0.02f };
-            for (int side = 0; side < 2; side++) {
-                float sx = side ? 1.0f : -1.0f;
-                for (int k = 0; k < 4; k++) {
-                    float kneeX = cxx + sx * (12.0f + 26.0f * legDX[k]);
-                    float kneeY = bodyY + 6.0f - 18.0f * legDY[k];
-                    float footX = cxx + sx * (18.0f + 40.0f * legDX[k]);
-                    float footY = baseY - 3.0f;
-                    cvLine(cxx + sx * 8.0f, bodyY + 4.0f, kneeX, kneeY, 3.0f, 0x00322C38u, 1.0f);
-                    cvLine(kneeX, kneeY, footX, footY, 2.5f, 0x00241F2Au, 1.0f);
-                }
-            }
+static void BakePropSpider(const PropBakeContext* bake){
+    float x=bake->c,y=bake->baseY-39;
+    cvEllipse(x,bake->baseY-2,61,7,0x010204,.4f);
+    for(int side=-1;side<=1;side+=2)for(int i=0;i<4;i++){
+        float hipY=y-8+i*6,kx=x+side*(30+i*7),ky=y-32+i*9;
+        float fx=x+side*(57+i*4),fy=y+22+i*3;
+        cvLine(x+side*13,hipY,kx,ky,4.6f,0x11161C,1);
+        cvLine(kx,ky,fx,fy,3.5f,0x2C3541,1);
+        cvLine(kx-side,ky,fx-side,fy,1.0f,0x8A8B85,.8f);
+        cvLine(fx,fy,fx-side*4,fy+7,1.6f,0x171A22,1);
+        cvEllipse(kx,ky,3,3.6f,0x67625B,.9f);
+        for(int hair=0;hair<4;hair++){
+            float t=(hair+1)*.16f,hx=kx+(fx-kx)*t,hy=ky+(fy-ky)*t;
+            cvLine(hx,hy,hx+side*3,hy-3,.5f,0xA8A08C,.7f);
         }
-
-        /* 腹部：横向椭圆，5 段明暗 */
-        {
-            float b[8] = { cxx - 26, bodyY - 12, cxx + 26, bodyY - 12,
-                           cxx + 22, bodyY + 14, cxx - 22, bodyY + 14 };
-            cvPolyGrad(b, 4, 0x00504A5Eu, 0x001C1822u, 1.0f);
-            for (int k = 1; k <= 4; k++) {
-                float y = bodyY - 12 + 26.0f * (float)k / 5.0f;
-                cvLine(cxx - 22, y, cxx + 22, y, 1.0f, 0x00000000u, 0.18f);
-                cvLine(cxx - 22, y + 1, cxx + 22, y + 1, 1.0f, 0x007A748Cu, 0.10f);
-            }
-            cvLine(cxx - 26, bodyY - 12, cxx + 26, bodyY - 12, 2.0f, 0x00908AA4u, 0.75f);
-            cvLine(cxx - 22, bodyY + 14, cxx + 22, bodyY + 14, 2.0f, 0x00000000u, 0.55f);
-        }
-
-        /* 头胸：小一圈，压在上面 */
-        {
-            float hd[8] = { cxx - 14, bodyY - 26, cxx + 14, bodyY - 26,
-                            cxx + 11, bodyY - 8,  cxx - 11, bodyY - 8 };
-            cvPolyGrad(hd, 4, 0x00625C72u, 0x00241F2Au, 1.0f);
-            cvLine(cxx - 14, bodyY - 26, cxx + 14, bodyY - 26, 1.5f, 0x00A8A2BCu, 0.8f);
-        }
-
-        /* 红眼一对 —— 唯一的自发光，暗场里先看到它 */
-        cvEllipse(cxx - 6, bodyY - 19, 3.4f, 3.0f, 0x00FF3020u, 0.95f);
-        cvEllipse(cxx + 6, bodyY - 19, 3.4f, 3.0f, 0x00FF3020u, 0.95f);
-        cvEllipse(cxx - 6, bodyY - 19, 1.6f, 1.4f, 0x00FFC0B0u, 0.9f);
-        cvEllipse(cxx + 6, bodyY - 19, 1.6f, 1.4f, 0x00FFC0B0u, 0.9f);
-
-        /* 腹部花纹：三道浅色横纹，让它不只是个黑团 */
-        cvLine(cxx - 16, bodyY - 2, cxx + 16, bodyY - 2, 2.0f, 0x00807090u, 0.35f);
-        cvLine(cxx - 14, bodyY + 4, cxx + 14, bodyY + 4, 2.0f, 0x00807090u, 0.30f);
-
-    
     }
+    cvEllipse(x,y-3,27,23,0x161B25,1);cvEllipse(x-3,y-8,22,19,0x4E5060,1);
+    for(int i=0;i<5;i++){
+        float yy=y-21+i*7;
+        cvLine(x-17,yy,x+17,yy+2,1.2f,0x171B23,.8f);
+        cvLine(x-16,yy-1,x+15,yy+1,.65f,0x969085,.5f);
+    }
+    cvEllipse(x,y+15,17,14,0x252A35,1);cvEllipse(x-2,y+10,14,10,0x676373,1);
+    for(int side=-1;side<=1;side+=2){
+        for(int i=0;i<4;i++){
+            float xx=x+side*(4+i*3),yy=y+9+(i%2)*3;
+            cvEllipse(xx,yy,1.6f-i*.15f,1.5f,0x9C271C,1);
+            cvEllipse(xx-.35f,yy-.3f,.55f,.45f,0xF0CCAC,1);
+        }
+        cvLine(x+side*7,y+24,x+side*13,y+34,3.6f,0x17141B,1);
+        cvLine(x+side*13,y+34,x+side*4,y+30,1.5f,0xCAC2A4,.9f);
+        cvLine(x+side*14,y+20,x+side*23,y+28,1.2f,0x727276,.8f);
+    }
+    cvLine(x-1,y+31,x-5,y+43,.4f,0xA0B0AE,.5f);
+    cvLine(x+1,y+31,x+6,y+44,.4f,0xA0B0AE,.5f);
 }
+
 
 /* Variant: kind == 15 */
 static void BakePropBeaconHand(const PropBakeContext* bake) {
@@ -2667,6 +2771,7 @@ static void BakePropSceneFixture(const PropBakeContext* bake) {
 }
 
 static void BakeProp(int id, int kind) {
+    g_canvasScale=(kind==16 || kind==7)?SPR_CREATURE_SCALE:1;
     cvClear();
     float c = CANVAS_W * 0.5f;
     float baseY = 244.0f;
@@ -2695,7 +2800,10 @@ static void BakeProp(int id, int kind) {
         BakePropSceneFixture(&bake);
     }
 
+    if(kind==16)BakeCreatureSurface(14);
+    if(kind==7)BakeCreatureSurface(13);
     cvFinish(&g_sprites[id]);
+    g_canvasScale=1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2768,6 +2876,48 @@ static void BakeUiRow(void) {
 /* ------------------------------------------------------------------ */
 /* 入口                                                                */
 /* ------------------------------------------------------------------ */
+static void BakeRoomFixture(int id,int kind){
+    cvClear();float cx=CANVAS_W*.5f,base=244;
+    unsigned int accent[7]={0xC08036,0x8AA1AC,0x52C5DA,0xD5E2CF,0x88BBED,0xC83720,0x9B2C32};
+    unsigned int a=accent[kind];
+    cvEllipse(cx,base-2,64,10,0x050607,.65f);
+    if(kind==0){
+        float shell[]={cx-44,base-18,cx-44,base-156,cx-27,base-176,cx+36,base-164,cx+48,base-20};
+        cvPolyGrad(shell,6,0x625244,0x282626,1);cvEllipse(cx-2,base-94,29,29,0x11181B,1);
+        cvEllipse(cx-2,base-94,22,22,a,.8f);cvLine(cx-2,base-116,cx+14,base-97,4,0xE8DEAA,1);
+        cvLine(cx-43,base-145,cx-68,base-145,14,0x555353,1);cvLine(cx-68,base-145,cx-68,base-37,13,0x3E4746,1);
+    }else if(kind==1){
+        for(int row=0;row<4;row++){float y=base-24-row*39;float face[]={cx-53,y,cx-53,y-28,cx+48,y-28,cx+58,y};cvPolyGrad(face,4,0x47555A,0x18262A,1);cvLine(cx-15,y-15,cx+14,y-15,3,a,1);}
+        cvLine(cx-60,base-180,cx-60,base,7,0x1B252B,1);cvLine(cx+61,base-180,cx+61,base,7,0x697476,1);
+    }else if(kind==2){
+        float baseplate[]={cx-56,base-12,cx-44,base-43,cx+39,base-43,cx+61,base-12};cvPolyGrad(baseplate,4,0x51646C,0x18222B,1);
+        cvLine(cx,base-40,cx,base-175,14,0x6D828A,1);
+        for(int i=0;i<6;i++)cvEllipse(cx,base-57-i*21,28-i*2,7,0x8C5535,1);
+        cvGlow(cx,base-185,20,a,.5f);cvEllipse(cx,base-178,15,15,a,.9f);
+    }else if(kind==3){
+        float bed[]={cx-73,base-35,cx-50,base-83,cx+55,base-83,cx+79,base-35};cvPolyGrad(bed,4,0xB1BAAE,0x4D615D,1);
+        cvLine(cx-62,base-37,cx-62,base,6,0x6A7778,1);cvLine(cx+65,base-36,cx+65,base,6,0x5B6C6E,1);
+        cvEllipse(cx-26,base-71,25,9,0xDDD9BA,1);cvLine(cx+22,base-77,cx+38,base-45,14,0x67302B,.85f);
+        cvLine(cx-61,base-72,cx-72,base-155,4,0x9DAEB5,1);cvEllipse(cx-72,base-126,8,17,0x8E3525,.8f);
+    }else if(kind==4){
+        float crystal[]={cx,base-190,cx-42,base-85,cx,base-38,cx+45,base-86};cvPolyGrad(crystal,4,0xBCDDF1,0x1E495E,.93f);
+        cvLine(cx,base-187,cx,base-40,2,0xF1FAFF,.9f);cvGlow(cx,base-109,30,a,.2f);
+        float stand[]={cx-55,base-12,cx-38,base-42,cx+39,base-42,cx+55,base-12};cvPolyGrad(stand,4,0x687680,0x222932,1);
+    }else if(kind==5){
+        float plinth[]={cx-64,base-11,cx-47,base-68,cx+44,base-68,cx+64,base-11};cvPolyGrad(plinth,4,0x5F5045,0x241A19,1);
+        float tooth[]={cx-37,base-70,cx-49,base-149,cx-16,base-118,cx,base-190,cx+18,base-116,cx+47,base-148,cx+35,base-70};cvPolyGrad(tooth,7,0xA49072,0x44242A,1);
+        cvEllipse(cx,base-92,21,8,0xA51E16,1);cvGlow(cx,base-91,21,0xE83317,.3f);
+    }else{
+        cvLine(cx-43,base-22,cx-42,base-178,9,0x535E5A,1);cvLine(cx+46,base-23,cx+46,base-179,9,0x2B3B36,1);
+        cvLine(cx-43,base-176,cx+46,base-176,9,0x596B62,1);
+        cvEllipse(cx-10,base-103,28,47,0x8D2630,1);cvEllipse(cx+15,base-112,26,40,0xB93B3D,1);
+        cvLine(cx-23,base-147,cx-25,base-187,12,0x6A1B25,1);cvLine(cx+14,base-145,cx+28,base-183,9,0x732B30,1);
+        for(int i=0;i<4;i++)cvLine(cx-36+i*22,base-65,cx-60+i*36,base-15,5,0x7D3333,.8f);
+    }
+    for(int i=0;i<9;i++)cvLine(cx-42+i*11,base-20,cx-46+i*11,base-29-i%4*9,1,0x9B5836,.5f);
+    cvFinish(&g_sprites[id]);
+}
+
 void SpritesInit(void) {
     if (g_ready) return;
     for (int i = 0; i < SPR_COUNT; i++) {
@@ -2798,13 +2948,14 @@ void SpritesInit(void) {
     BakeMonster(SPR_MON_JUMPER, 3, 0);
     BakeMonster(SPR_MON_SHADE, 8, 0);   /* v2.4.1: 槽位复用 -> 清道夫 */
     BakeMonster(SPR_MON_SPIDER, 9, 0);   /* v2.4.1: 槽位复用 -> 守门人（三眼） */
-    BakeMonster(SPR_MON_LEECH_W, 9, 2);   /* v2.4.81: 守门人 **追击变体**（红眼直接烘，不用 key） */
+    BakeMonster(SPR_MON_WARDEN_CHASE, 9, 2);   /* v2.4.81: 守门人 **追击变体**（红眼直接烘，不用 key） */
     BakeMonster(SPR_MON_ECHO, 10, 0);
+    BakeMonster(SPR_MON_PARASITE, 14, 0);
     BakeMonster(SPR_MON_MIMIC, 13, 0);   /* 2026-11-05 宝箱怪现形态 */
     /* v2.4.84 调试导出 */
     if (getenv("CANITY_DUMP")) {
         SpriteDumpPPM(SPR_MON_SPIDER,  "dump_warden_patrol.ppm");
-        SpriteDumpPPM(SPR_MON_LEECH_W, "dump_warden_chase.ppm");
+        SpriteDumpPPM(SPR_MON_WARDEN_CHASE, "dump_warden_chase.ppm");
         exit(0);   /* 导完直接退出，方便脚本调用 */
     }   /* v2.4.2: 槽位复用 -> 回声标记 */
     BakeHatch(SPR_HATCH_0, 0);
@@ -2828,6 +2979,7 @@ void SpritesInit(void) {
     BakeProp(SPR_PROP_PHASE, 14);          /* 2026-11-06 相位信标：地面 */
     BakeProp(SPR_PHASE_HAND, 15);          /* 2026-11-06 相位信标：手持 */
     BakeProp(SPR_PROP_SPIDER, 16);         /* 2026-11-06 缚丝蛛 */
+    for(int i=0;i<7;i++)BakeRoomFixture(SPR_ROOM_BOILER+i,i);
     BakeUiPanel(SPR_UI_PANEL, 0);
     BakeUiPanel(SPR_UI_PANEL_HOT, 1);
     BakeUiCursor();
@@ -2910,10 +3062,10 @@ void SpriteAccentClear(void) {
     g_accentOn = 0;
 }
 
-void DrawSpriteTint(int id, int x, int y, int w, int h,
+static void DrawSpriteSurface(int id, int x, int y, int w, int h,
                     float light, float alpha, int zTest, float zDist,
-                    unsigned int tint, float tintMix) {
-    if (!g_ready || w <= 0 || h <= 0) return;
+                    unsigned int tint, float tintMix,const SpritePose* pose,int mirror) {
+    if (!g_ready || id<0 || id>=SPR_COUNT || w <= 0 || h <= 0) return;
     if (alpha <= 0.003f) return;
     Sprite* s = &g_sprites[id];
 
@@ -2923,24 +3075,57 @@ void DrawSpriteTint(int id, int x, int y, int w, int h,
     unsigned int lum = s->shade[li];
     int lr = (lum >> 16) & 0xFF;      /* 0..255 的亮度系数 */
 
-    for (int dy = 0; dy < h; dy++) {
+    float clock=pose?pose->time:0,stride=pose?pose->stride:0,energy=pose?pose->activity:0;
+    if(!isfinite(clock))clock=0;
+    if(!isfinite(stride))stride=0;
+    if(!isfinite(energy))energy=0;
+    if(energy<0)energy=0;
+    if(energy>1)energy=1;
+    float breath=pose?sinf(clock*1.65f):0;
+    int rigid=id==SPR_MON_SPIDER || id==SPR_MON_WARDEN_CHASE;
+    int insect=id==SPR_PROP_SPIDER;
+    int beginY=y<0?-y:0,endY=h;
+    if(endY>renderH-y)endY=renderH-y;
+    int beginX=x<0?-x:0,endX=w;
+    if(endX>renderW-x)endX=renderW-x;
+    for (int dy = beginY; dy < endY; dy++) {
         int py = y + dy;
         if (py < 0 || py >= renderH) continue;
-        float v = ((float)dy + 0.5f) / (float)h * (float)s->h - 0.5f;
+        float nv=((float)dy+.5f)/(float)h;
+        float bend=0,spread=1,vshift=0;
+        if(pose){
+            float chest=1-fabsf(nv-(insect?.82f:.43f))*(insect?8:3.6f);if(chest<0)chest=0;
+            float head=nv<.29f?(1-nv/.29f):0;
+            float feet=nv>.65f?(nv-.65f)/.35f:0;
+            float rigidK=rigid?.28f:1;
+            spread+=breath*.014f*chest*rigidK;
+            bend=(sinf(clock*.78f)*.007f+sinf(clock*2.9f)*.0015f)*head*rigidK;
+            bend+=sinf(stride*3.0f)*.008f*feet*energy;
+            vshift=breath*.003f*sinf(nv*3.14159265f)*rigidK;
+            if(insect)bend+=sinf(clock*5.5f+nv*14)*.008f*feet;
+            if(id==SPR_MON_PARASITE){bend+=sinf(clock*3.0f+nv*16)*.009f;spread+=sinf(clock*3.0f-nv*19)*.015f;}
+            if(id==SPR_MON_MIMIC && nv<.62f)spread+=sinf(clock*1.8f)*.012f;
+            if(id==SPR_MON_ECHO)bend+=sinf(clock*2.4f+nv*11)*.008f;
+        }
+        float v=(nv+vshift)*(float)s->h-.5f;
         int ty0 = (int)floorf(v);
         float fy = v - (float)ty0;
         int ty1 = ty0 + 1;
+        if(ty1<s->by0 || ty0>s->by1)continue;
         if (ty0 < 0) ty0 = 0;
         if (ty1 < 0) ty1 = 0;
         if (ty0 > s->h - 1) ty0 = s->h - 1;
         if (ty1 > s->h - 1) ty1 = s->h - 1;
         const unsigned int* row0 = s->px + (size_t)ty0 * s->w;
         const unsigned int* row1 = s->px + (size_t)ty1 * s->w;
-        for (int dx = 0; dx < w; dx++) {
+        for (int dx = beginX; dx < endX; dx++) {
             int px = x + dx;
             if (px < 0 || px >= renderW) continue;
             if (zTest && zDist >= zBuffer[px]) continue;
-            float u = ((float)dx + 0.5f) / (float)w * (float)s->w - 0.5f;
+            float nu=(((float)dx+.5f)/(float)w-.5f-bend)/spread+.5f;
+            if(nu<0 || nu>1)continue;
+            if(mirror)nu=1-nu;
+            float u=nu*(float)s->w-.5f;
             int tx0 = (int)floorf(u);
             float fx = u - (float)tx0;
             int tx1 = tx0 + 1;
@@ -2955,14 +3140,13 @@ void DrawSpriteTint(int id, int x, int y, int w, int h,
             float a = ((p00 >> 24) * w00 + (p10 >> 24) * w10 +
                        (p01 >> 24) * w01 + (p11 >> 24) * w11) / 255.0f;
             if (a < 0.004f) continue;
-            int r = (int)(((p00 >> 16) & 0xFF) * w00 + ((p10 >> 16) & 0xFF) * w10 +
-                          ((p01 >> 16) & 0xFF) * w01 + ((p11 >> 16) & 0xFF) * w11);
-            int g = (int)(((p00 >> 8) & 0xFF) * w00 + ((p10 >> 8) & 0xFF) * w10 +
-                          ((p01 >> 8) & 0xFF) * w01 + ((p11 >> 8) & 0xFF) * w11);
-            int b = (int)((p00 & 0xFF) * w00 + (p10 & 0xFF) * w10 +
-                          (p01 & 0xFF) * w01 + (p11 & 0xFF) * w11);
-            /* v2.4.66：**局部换色** —— 只有接近洋红 key 的像素被替换，
-               其余像素完全保持原样（身体、阴影、高光都不受影响）。 */
+            float a00=(float)(p00>>24)*w00,a10=(float)(p10>>24)*w10;
+            float a01=(float)(p01>>24)*w01,a11=(float)(p11>>24)*w11;
+            float weight=a00+a10+a01+a11;if(weight<.5f)continue;
+            float inv=1.0f/weight;
+            int r=(int)((((p00>>16)&255)*a00+((p10>>16)&255)*a10+((p01>>16)&255)*a01+((p11>>16)&255)*a11)*inv);
+            int g=(int)((((p00>>8)&255)*a00+((p10>>8)&255)*a10+((p01>>8)&255)*a01+((p11>>8)&255)*a11)*inv);
+            int b=(int)(((p00&255)*a00+(p10&255)*a10+(p01&255)*a01+(p11&255)*a11)*inv);
             if (g_accentOn && r > 150 && b > 150 && g < 110) {
                 r = (int)((g_accentCol >> 16) & 0xFF);
                 g = (int)((g_accentCol >> 8) & 0xFF);
@@ -2986,6 +3170,13 @@ void DrawSpriteTint(int id, int x, int y, int w, int h,
         }
     }
 }
+void DrawSpriteTint(int id,int x,int y,int w,int h,float light,float alpha,int zTest,float zDist,unsigned int tint,float tintMix){
+    DrawSpriteSurface(id,x,y,w,h,light,alpha,zTest,zDist,tint,tintMix,NULL,0);
+}
+void DrawSpriteCreature(int id,int x,int y,int w,int h,float light,float alpha,int zTest,float zDist,unsigned int tint,float tintMix,const SpritePose* pose){
+    DrawSpriteSurface(id,x,y,w,h,light,alpha,zTest,zDist,tint,tintMix,pose,pose?pose->mirror:0);
+}
+
 
 void DrawSprite(int id, int x, int y, int w, int h,
                 float light, float alpha, int zTest, float zDist) {
@@ -3134,33 +3325,7 @@ void DrawSpriteSubZ(int id, int sx, int sy, int sw, int sh,
 }
 
 /* 水平镜像 blit */
-void DrawSpriteFlip(int id, int x, int y, int w, int h,
-                    float light, float alpha, int zTest, float zDist) {
-    if (!g_ready || w <= 0 || h <= 0 || alpha <= 0.003f) return;
-    Sprite* s = &g_sprites[id];
-    int li = (int)(light * (float)(SPR_SHADES - 1) + 0.5f);
-    if (li < 0) li = 0;
-    if (li >= SPR_SHADES) li = SPR_SHADES - 1;
-    int lr = (s->shade[li] >> 16) & 0xFF;
-    for (int dy = 0; dy < h; dy++) {
-        int py = y + dy;
-        if (py < 0 || py >= renderH) continue;
-        int sy = (dy * s->h) / h;
-        if (sy >= s->h) sy = s->h - 1;
-        const unsigned int* row = s->px + (size_t)sy * s->w;
-        for (int dx = 0; dx < w; dx++) {
-            int px = x + dx;
-            if (px < 0 || px >= renderW) continue;
-            if (zTest && zDist >= zBuffer[px]) continue;
-            int sx = s->w - 1 - (dx * s->w) / w;
-            if (sx < 0) sx = 0;
-            unsigned int p = row[sx];
-            float a = (float)(p >> 24) / 255.0f;
-            if (a < 0.004f) continue;
-            int r = (int)(((p >> 16) & 0xFF) * lr) >> 8;
-            int g = (int)(((p >> 8) & 0xFF) * lr) >> 8;
-            int b = (int)((p & 0xFF) * lr) >> 8;
-            PutPixelBlend(px, py, (unsigned int)((r << 16) | (g << 8) | b), a * alpha);
-        }
-    }
+void DrawSpriteFlip(int id,int x,int y,int w,int h,float light,float alpha,int zTest,float zDist){
+    DrawSpriteSurface(id,x,y,w,h,light,alpha,zTest,zDist,0,0,NULL,1);
 }
+

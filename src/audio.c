@@ -10,6 +10,8 @@
 #include "world_api.h"
 #include "present_api.h"
 #include "music_proc.h"
+#include "music_pcm.h"
+#include "music.h"
 
 
 /* ------------------------------------------------------------------ */
@@ -20,6 +22,7 @@
 #define AUDIO_BUFS 3
 #define AUDIO_SAMPLES 1024
 #define MAX_VOICES 8
+static short atmosphere[11][AUDIO_RATE];
 
 /* 音乐总线输出的是 [-1,1] 浮点，留约 2dB 余量和音效叠加。
    采样率必须和 music_proc.c 一致，否则音高会整体跑调。 */
@@ -79,6 +82,9 @@ static HANDLE g_audioThread = NULL;
 static volatile LONG g_audioQuit = 0;
 static CRITICAL_SECTION g_audioLock;
 static int g_audioOn = 0;
+static int g_audioLockReady=0;
+static DWORD audioRetryAt=0;
+static int audioRetryBlocked=0;
 
 static void AudioCallback(HWAVEOUT h, UINT msg, DWORD_PTR inst, DWORD_PTR p1, DWORD_PTR p2) {
     (void)h; (void)inst; (void)p1; (void)p2;
@@ -212,8 +218,13 @@ static void MixInto(short* out) {
         musicL[i] = musicR[i] = 0.0f;
     }
     MusicProcMix(musicL, musicR, AUDIO_SAMPLES);
+    MusicPcmMix(musicL, musicR, AUDIO_SAMPLES);
+    MusicBusProcess(musicL,musicR,AUDIO_SAMPLES);
 
-    EnterCriticalSection(&g_audioLock);
+    /* Never wait for a producer in the render callback. Keep the music bus
+       running and retry voices next block if the producer briefly owns it. */
+    int voicesLocked=TryEnterCriticalSection(&g_audioLock);
+    if(voicesLocked) {
     for (int v = 0; v < MAX_VOICES; v++) {
         Voice* vo = &g_voices[v];
         if (!vo->active) continue;
@@ -238,6 +249,7 @@ static void MixInto(short* out) {
         vo->gainR = tgtR;
     }
     LeaveCriticalSection(&g_audioLock);
+    }
 
     for (i = 0; i < AUDIO_SAMPLES; i++) {
         int l = mixL[i] + (int)(musicL[i] * MUSIC_MIX_SCALE);
@@ -320,6 +332,7 @@ static void AudioStartVoice(const short* data, int len, float vol,
 
 /* 音效 id → 采样数据 */
 static int SfxLookup(int id, const short** data, int* len) {
+    if(id>=SFX_IMPACT && id<=SFX_BREATH){*data=atmosphere[id-SFX_IMPACT];*len=AUDIO_RATE;return 1;}
     switch (id) {
         case SFX_STEP:      *data = g_sndStep;      *len = (int)(sizeof(g_sndStep) / sizeof(short)); return 1;
         case SFX_HEART:     *data = g_sndHeart;     *len = (int)(sizeof(g_sndHeart) / sizeof(short)); return 1;
@@ -347,39 +360,21 @@ void AudioPlayWorld(int id, float x, float y, float vol, float maxDist, int prio
     const short* data = NULL;
     int len = 0;
     if (!SfxLookup(id, &data, &len)) return;
+    if(priority>=2 && Dist2(x,y,s_lisX,s_lisY)<36)MusicDuck(.9f,.35f);
     AudioStartVoice(data, len, vol * volumeF, 1, x, y, maxDist, priority);
 }
 
-void PlaySfx(int id, float vol) {
-    vol *= volumeF;
-    if (!g_audioOn || vol <= 0.001f) return;
-    const short* data = NULL;
-    int len = 0;
-    switch (id) {
-        case SFX_STEP:   data = g_sndStep;  len = (int)(sizeof(g_sndStep) / sizeof(short)); break;
-        case SFX_HEART:  data = g_sndHeart; len = (int)(sizeof(g_sndHeart) / sizeof(short)); break;
-        case SFX_PICKUP: data = g_sndPickup;len = (int)(sizeof(g_sndPickup) / sizeof(short)); break;
-        case SFX_POWER:  data = g_sndPower; len = (int)(sizeof(g_sndPower) / sizeof(short)); break;
-        case SFX_GATE:   data = g_sndGate;  len = (int)(sizeof(g_sndGate) / sizeof(short)); break;
-        case SFX_CRANK:  data = g_sndCrank; len = (int)(sizeof(g_sndCrank) / sizeof(short)); break;
-        case SFX_SCREAM: data = g_sndScream;len = (int)(sizeof(g_sndScream) / sizeof(short)); break;
-        case SFX_GLASS:  data = g_sndGlass; len = (int)(sizeof(g_sndGlass) / sizeof(short)); break;
-        case SFX_SEARCH: data = g_sndSearch;len = (int)(sizeof(g_sndSearch) / sizeof(short)); break;
-        case SFX_THROW:  data = g_sndThrow; len = (int)(sizeof(g_sndThrow) / sizeof(short)); break;
-        case SFX_GLUE:   data = g_sndGlue;  len = (int)(sizeof(g_sndGlue) / sizeof(short));  break;
-        case SFX_ECHO:   data = g_sndEcho;  len = (int)(sizeof(g_sndEcho) / sizeof(short));  break;
-        case SFX_DECOY:  data = g_sndDecoy; len = (int)(sizeof(g_sndDecoy) / sizeof(short)); break;
-        case SFX_WARDEN: data = g_sndWarden; len = (int)(sizeof(g_sndWarden) / sizeof(short)); break;
-        case SFX_SCAVENGER: data = g_sndScavenger; len = (int)(sizeof(g_sndScavenger) / sizeof(short)); break;
-        case SFX_SCAV_STEP: data = g_sndScavStep; len = (int)(sizeof(g_sndScavStep) / sizeof(short)); break;
-        default: return;
-    }
-    AudioStartVoice(data, len, vol, 0, 0.0f, 0.0f, 0.0f, -1);
+void PlaySfx(int id,float volume) {
+    if(id==SFX_SCREAM || id==SFX_WARDEN || id==SFX_GLASS || id==SFX_IMPACT)MusicDuck(.8f,.3f);
+    const short* data=NULL;int length=0;
+    if(!SfxLookup(id,&data,&length))return;
+    AudioStartVoice(data,length,volume*volumeF,0,0,0,1,id==SFX_STEP?0:2);
 }
 
+
 /* 合成：噪声、正弦、扫频，全部给 16bit 单声道 */
-static void GenSounds(void) {
-    unsigned int seed = 12345u;
+static void GenPlayerSounds(unsigned int* seedState) {
+    unsigned int seed = *seedState;
     /* 脚步：低通噪声 + 快速衰减 */
     float lp = 0.0f;
     for (int i = 0; i < (int)(sizeof(g_sndStep) / sizeof(short)); i++) {
@@ -477,9 +472,14 @@ static void GenSounds(void) {
             g_sndGlass[i] = (short)(v * 0.55f * 32000.0f);
         }
     }
+    *seedState = seed;
+}
+
+static void GenItemSounds(unsigned int* seedState) {
+    unsigned int seed = *seedState;
     /* 过关：噪声下扫的气流声 */
     int gl = (int)(sizeof(g_sndGate) / sizeof(short));
-    lp = 0.0f;
+    float lp = 0.0f;
     for (int i = 0; i < gl; i++) {
         seed = seed * 1664525u + 1013904223u;
         float n = ((float)((seed >> 16) & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
@@ -597,6 +597,10 @@ static void GenSounds(void) {
         }
     }
 
+    *seedState = seed;
+}
+
+static void GenThreatSounds(void) {
     /* ==================================================================
      * v2.4.89 **守门人：极低频的压迫感**
      * ------------------------------------------------------------------
@@ -706,7 +710,9 @@ static void GenSounds(void) {
             g_sndScavenger[i] = (short)(v * 32000.0f);
         }
     }
+}
 
+static void GenScavengerStepSound(void) {
     /* ==================================================================
      * v2.4.92 **清道夫脚步：高速摩擦**
      * ------------------------------------------------------------------
@@ -772,35 +778,45 @@ static void GenSounds(void) {
     }
 }
 
+static void GenSounds(void) {
+    unsigned int seed = 12345u;
+    GenPlayerSounds(&seed);
+    GenItemSounds(&seed);
+    GenThreatSounds();
+    GenScavengerStepSound();
+    for(int kind=0;kind<11;kind++)AudioBuildAtmosphere(atmosphere[kind],AUDIO_RATE,kind,AUDIO_RATE);
+}
+
 void InitAudio(void) {
+    if(g_audioOn || g_wave || audioRetryBlocked)return;
+    InterlockedExchange(&g_audioQuit,0);
     GenSounds();
-    InitializeCriticalSection(&g_audioLock);
-    g_audioEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!g_audioEvent) return;
-
-    WAVEFORMATEX fmt;
-    memset(&fmt, 0, sizeof(fmt));
-    fmt.wFormatTag = WAVE_FORMAT_PCM;
-    fmt.nChannels = 2;
-    fmt.nSamplesPerSec = AUDIO_RATE;
-    fmt.wBitsPerSample = 16;
-    fmt.nBlockAlign = 4;
-    fmt.nAvgBytesPerSec = AUDIO_RATE * 4;
-
-    if (waveOutOpen(&g_wave, WAVE_MAPPER, &fmt, (DWORD_PTR)AudioCallback, 0, CALLBACK_FUNCTION) != MMSYSERR_NOERROR) {
-        g_wave = NULL;
-        return;
+    if(!g_audioLockReady){InitializeCriticalSection(&g_audioLock);g_audioLockReady=1;}
+    if(!g_audioEvent)g_audioEvent=CreateEvent(NULL,FALSE,FALSE,NULL);
+    if(!g_audioEvent)return;
+    WAVEFORMATEX fmt;memset(&fmt,0,sizeof(fmt));
+    fmt.wFormatTag=WAVE_FORMAT_PCM;fmt.nChannels=2;fmt.nSamplesPerSec=AUDIO_RATE;
+    fmt.wBitsPerSample=16;fmt.nBlockAlign=4;fmt.nAvgBytesPerSec=AUDIO_RATE*4;
+    MMRESULT result=waveOutOpen(&g_wave,WAVE_MAPPER,&fmt,(DWORD_PTR)AudioCallback,0,CALLBACK_FUNCTION);
+    if(result!=MMSYSERR_NOERROR) {
+        g_wave=NULL;
+        for(UINT device=0;device<waveOutGetNumDevs();device++) {
+            result=waveOutOpen(&g_wave,device,&fmt,(DWORD_PTR)AudioCallback,0,CALLBACK_FUNCTION);
+            if(result==MMSYSERR_NOERROR)break;
+            g_wave=NULL;
+        }
     }
-    for (int i = 0; i < AUDIO_BUFS; i++) {
-        memset(&g_hdr[i], 0, sizeof(WAVEHDR));
-        g_hdr[i].lpData = (LPSTR)g_pcm[i];
-        g_hdr[i].dwBufferLength = AUDIO_SAMPLES * 2 * sizeof(short);
-        waveOutPrepareHeader(g_wave, &g_hdr[i], sizeof(WAVEHDR));
+    if(!g_wave)return;
+    for(int i=0;i<AUDIO_BUFS;i++) {
+        memset(&g_hdr[i],0,sizeof(g_hdr[i]));g_hdr[i].lpData=(LPSTR)g_pcm[i];
+        g_hdr[i].dwBufferLength=sizeof(g_pcm[i]);
+        if(waveOutPrepareHeader(g_wave,&g_hdr[i],sizeof(WAVEHDR))!=MMSYSERR_NOERROR){ShutdownAudio();return;}
         MixInto(g_pcm[i]);
-        waveOutWrite(g_wave, &g_hdr[i], sizeof(WAVEHDR));
+        if(waveOutWrite(g_wave,&g_hdr[i],sizeof(WAVEHDR))!=MMSYSERR_NOERROR){ShutdownAudio();return;}
     }
-    g_audioThread = CreateThread(NULL, 0, AudioThreadMain, NULL, 0, NULL);
-    g_audioOn = 1;
+    g_audioThread=CreateThread(NULL,0,AudioThreadMain,NULL,0,NULL);
+    if(!g_audioThread){ShutdownAudio();return;}
+    g_audioOn=1;
 }
 
 void ShutdownAudio(void) {
@@ -817,6 +833,7 @@ void ShutdownAudio(void) {
         CloseHandle(g_audioThread);
         g_audioThread = NULL;
     }
+    if(!threadExited)audioRetryBlocked=1;
     if (g_wave) {
         waveOutReset(g_wave);
         for (int i = 0; i < AUDIO_BUFS; i++) waveOutUnprepareHeader(g_wave, &g_hdr[i], sizeof(WAVEHDR));
@@ -825,6 +842,13 @@ void ShutdownAudio(void) {
     }
     if (threadExited) {
         if (g_audioEvent) { CloseHandle(g_audioEvent); g_audioEvent = NULL; }
-        DeleteCriticalSection(&g_audioLock);
+        if(g_audioLockReady){DeleteCriticalSection(&g_audioLock);g_audioLockReady=0;}
     }
+}
+
+float AudioOutputLatencySeconds(void){return g_audioOn?(float)(AUDIO_BUFS*AUDIO_SAMPLES)/(float)AUDIO_RATE:0;}
+
+void AudioMaintain(void) {
+    DWORD now=GetTickCount();
+    if(!g_audioOn && !audioRetryBlocked && (DWORD)(now-audioRetryAt)>=3000){audioRetryAt=now;InitAudio();}
 }

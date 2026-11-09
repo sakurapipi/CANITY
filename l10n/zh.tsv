@@ -32,7 +32,7 @@ Achievements	成就	table
 B  STAMINA	B  续航	table
 BACK TO MENU	返回主菜单	table
 BALANCE          %d GOLD	存款          %d 金币	tr
-BANK	银行	table
+BANK	行动风险中枢	table
 BATTERY	电量	table
 BATTERY  %d%%  +%.0f/s	电量  %d%%  +%.0f/秒	tr
 BATTERY  100%%  FULL	电量  100%%  满	tr
@@ -95,7 +95,7 @@ COST	价格	tr
 CRAMPED	狭窄	table
 CRANK	摇电	tr
 CRANK ADDICT	摇电成瘾	table
-CRANK WALK	摇走	table
+CRANK WALK	移动摇电	table
 CRANKING	摇电中	table
 CROSS	跨支	table
 Campaign	战役	table
@@ -406,8 +406,8 @@ SHORTCUT (used)	跳层（已用）	tr
 SILENCE	沉寂	table
 SILENT FLOOR	静默一层	table
 SILENT SHADOW	无声之影	table
-SIPHON	涓流	table
-SKILL TREE	技能树	table
+SIPHON	备用电池	table
+SKILL TREE	局外技能树	table
 SKILLS RESET - GOLD REFUNDED	技能已重置，金币已退还	tr
 SLOT	选槽	tr
 SLOWED	减速	table
@@ -556,14 +556,14 @@ Crank while walking (move -40%, noise x2)	边走边摇电（移速 -40%，噪音
 Safe house rest restores +30 sanity	安全屋休息回复 +30 理智	table
 BREATH	屏息	table
 Hunters reach the locker but never open it	追捕者会到达藏身点但永不打开	table
-STILL FACE	静默面容	table
+STILL FACE	静面	table
 Standing still makes you invisible to sound	静止站立让你对声音隐形	table
-SLIP AWAY	溜之大吉	table
+SLIP AWAY	脱离追踪	table
 Vanish after 2s out of sight (was 3s)	脱离视野 2 秒后消失（原 3 秒）	table
 PLAY DEAD	装死	table
 Once per run: escape a grab	每局一次：逃脱抓捕	table
 CARTO	制图	table
-BREAKER	配电手	table
+BREAKER	快速解锁	table
 Locked crates open 40% faster	锁箱开启速度 +40%	table
 SILENT RUN	静默奔跑	table
 Sprint makes no noise (stamina -30%)	冲刺无声（续航 -30%）	table
@@ -704,3 +704,16 @@ PROGRESS	进程	table
 SKILL	技巧	table
 COLLECT	收藏	table
 SECRET	隐藏	table
+GHOST	幽灵	blue-ui
+RAIDER	掠夺者	blue-ui
+COUNTER	反击者	blue-ui
+THREE PATHS	三途技能网	blue-ui
+RUN TREE	局内技能	blue-ui
+RECOVERY	休整服务	blue-ui
+UPGRADES	属性强化	blue-ui
+SUPPLIES	补给商店	blue-ui
+CURRENT	当前	blue-ui
+COMPOSURE WINDOW	镇定窗口	blue-ui
+CLEAN BREAK	利落脱身	blue-ui
+READ THE OPENING	看准破绽	blue-ui
+FALSE OPENING	佯攻诱敌	blue-ui

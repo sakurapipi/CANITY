@@ -4,7 +4,7 @@
     python tools/hotkey_check.py
 
 原理（近似静态分析，不是运行时）：
-  1. 扫 src/game.c 的 WindowProc 里所有 `wParam == 'X'` / `wParam == VK_*` 判定
+  1. 扫 game.c 和 loop_desktop_input.c 的输入分支里所有 `wParam == 'X'` / `wParam == VK_*` 判定
   2. 用最近的 `currentState == STATE_xxx` 判断它属于哪个界面
   3. 对每个界面列出「消费了哪些键」
   4. 报告两类问题：
@@ -29,8 +29,11 @@ SCAN = [
     os.path.join(ROOT, "src", "game.c"),
     os.path.join(ROOT, "src", "loop_desktop_input.c"),
 ]
-src = "\n".join(io.open(p, encoding="utf-8", errors="replace").read()
-                 for p in SCAN if os.path.isfile(p))
+missing = [p for p in SCAN if not os.path.isfile(p)]
+if missing:
+    print("ERROR: missing required input source: " + ", ".join(missing), file=sys.stderr)
+    sys.exit(2)
+src = "\n".join(io.open(p, encoding="utf-8").read() for p in SCAN)
 lines = src.split("\n")
 
 # ---- 抓所有按键判定 + 它所在的状态 ----

@@ -1,25 +1,9 @@
-/*
- * Canity — **威胁值 THREAT**（v6 新模块）
- *
- * 这个系统回答一个问题：
- *   玩家在局内改造树点得越多，就越强 —— 那平衡怎么维持？
- *
- * 答案：**属性越强，怪越凶**。把玩家的成长直接换算成怪物强度。
- *
- * 为什么这样设计（调研结论）
- * ────────────────────────
- *   · 「Permanent options, temporary power」——
- *     局内给强度是对的，但强度必须**有代价**，否则只是无脑点满
- *   · 威胁值让玩家**自己决定什么时候加难度**，
- *     比固定难度曲线耐玩得多
- *   · 所有效果都必须有上限 —— 否则点满就必死，玩家不敢点
- *
- * 硬约束（不能破）
- * ────────────────
- *   **速度上限永远 ≤ 2.33，玩家冲刺是 2.40。**
- *   冲刺必须是永远可信的保命手段。
+/* Build pressure owns its value, quote and bounded monster modifiers.
+ * Purchase weights, HUD ratio, save restoration and runtime reads share this module.
+ * Gold affects sensing through economy.c and never multiplies movement speed.
  */
 #include "common.h"
+#include "skills.h"
 #include "threat.h"
 
 /* ---- 累积 ---- */
@@ -31,28 +15,36 @@ void ThreatReset(void) {
 }
 
 void ThreatAdd(float v) {
-    if (v <= 0.0f) return;
+    if (!isfinite(v) || v <= 0.0f) return;
     s_threat += v;
     if (s_threat > THREAT_MAX) s_threat = THREAT_MAX;
 }
 
 void ThreatSet(float v) {
-    if (v < 0.0f) v = 0.0f;
+    if (!isfinite(v) || v < 0.0f) v = 0.0f;
     if (v > THREAT_MAX) v = THREAT_MAX;
     s_threat = v;
 }
 
-float ThreatValue(void) { extern int skillRank[]; float t=s_threat+skillRank[26]; return t>18.0f ? 18.0f : t; }
+void ThreatRestoreTotal(float savedTotal) {
+    float skill = (float)SkillClampRank(SK_GREEDHAND, skillRank[SK_GREEDHAND]);
+    ThreatSet(savedTotal - skill);
+}
+float ThreatValue(void) {
+    float value = s_threat + (float)SkillClampRank(SK_GREEDHAND, skillRank[SK_GREEDHAND]);
+    return value > THREAT_MAX ? THREAT_MAX : value;
+}
+
 
 /* 0..1 的比例，UI 画进度用 */
-float ThreatRatio(void) { return s_threat / THREAT_MAX; }
+float ThreatRatio(void) { return ThreatValue() / THREAT_MAX; }
 
 /* ==================================================================
  * 速度上限 —— **随点技能变化**（这是本项目最关键的一条数值约束）
  * ==================================================================
- *   2.05 + T × 0.0155，硬顶 2.33
+ *   2.05 + T × THREAT_SPEED_PER_POINT，硬顶 2.20
  *   T=0   → 2.05（和原来一样）
- *   T=18  → 2.33（距冲刺 2.40 只剩 0.07）
+ *   T=18  → 2.20（使用统一硬顶）
  */
 float ThreatSpeedCap(void) {
     float cap = THREAT_SPEED_BASE + ThreatValue() * THREAT_SPEED_PER_POINT;
@@ -92,12 +84,16 @@ float ThreatHearMul(void) {
 
 /* ---- 买节点时按层级加威胁 ---- */
 
-void ThreatAddForTier(int tier, int isCapstone) {
-    if (isCapstone) { ThreatAdd(THREAT_W_CAPSTONE); return; }
+float ThreatCostForTier(int tier, int isCapstone) {
+    if (isCapstone) return THREAT_W_CAPSTONE;
     switch (tier) {
-    case 1:  ThreatAdd(THREAT_W_L1); break;
-    case 2:  ThreatAdd(THREAT_W_L2); break;
-    case 3:  ThreatAdd(THREAT_W_L3); break;
-    default: ThreatAdd(THREAT_W_L1); break;
+    case 1: return THREAT_W_L1;
+    case 2: return THREAT_W_L2;
+    case 3: return THREAT_W_L3;
+    default: return 0.0f;
     }
 }
+void ThreatAddForTier(int tier, int isCapstone) {
+    ThreatAdd(ThreatCostForTier(tier, isCapstone));
+}
+

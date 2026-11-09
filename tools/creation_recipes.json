@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "recipes": {
+    "monster": {
+      "required": [
+        "id",
+        "name_zh",
+        "name_en",
+        "role",
+        "spawn_rule",
+        "perception",
+        "states",
+        "counterplay",
+        "reward",
+        "appearance",
+        "surface_resolution",
+        "material_layers",
+        "micro_motion",
+        "visibility_rules"
+      ],
+      "entry_files": [
+        "src/content/content_monsters.c",
+        "src/monster_rules.c",
+        "src/entity.c",
+        "src/bestiary.c",
+        "src/sprites.c",
+        "include/entity.h",
+        "include/monster_rules.h"
+      ],
+      "contracts": [
+        "spawn -> perceive -> chase -> contact -> retreat",
+        "stable bestiary ID; unique state owner",
+        "new run / floor reset / save and restore / desktop-web",
+        "512px actor bake uses unchanged logical authoring coordinates",
+        "render-only motion preserves collision and AI; mirrored views use filtered sampling",
+        "never reuse an unrelated live actor frame ID for a new variant"
+      ],
+      "workflow": [
+        "specify",
+        "read bounded context",
+        "implement producer and consumer",
+        "update registration, bilingual text and lifecycle",
+        "compile and package only when requested",
+        "user acceptance and user push"
+      ]
+    },
+    "throwable": {
+      "required": [
+        "id",
+        "name_zh",
+        "name_en",
+        "cost",
+        "trajectory",
+        "trigger",
+        "termination",
+        "effect",
+        "counterplay",
+        "appearance"
+      ],
+      "entry_files": [
+        "src/content/content_shots.c",
+        "src/throwing.c",
+        "src/item_effects.c",
+        "include/throwing.h",
+        "src/sprites.c"
+      ],
+      "contracts": [
+        "single termination/settlement owner",
+        "inventory, shop, key binding and touch action",
+        "stable item IDs and save migration"
+      ],
+      "workflow": [
+        "specify",
+        "read bounded context",
+        "implement producer and consumer",
+        "update registration, bilingual text and lifecycle",
+        "compile and package only when requested",
+        "user acceptance and user push"
+      ]
+    },
+    "achievement": {
+      "required": [
+        "id",
+        "name_zh",
+        "name_en",
+        "description",
+        "event_source",
+        "predicate",
+        "reward",
+        "migration"
+      ],
+      "entry_files": [
+        "include/achievement_defs.inc",
+        "src/achievements.c",
+        "include/achievements.h",
+        "src/run_stats.c",
+        "src/save.c"
+      ],
+      "contracts": [
+        "explicit real event -> predicate -> unlock -> reward once",
+        "legacy bit positions never reordered",
+        "UI description reads the same goal"
+      ],
+      "workflow": [
+        "specify",
+        "read bounded context",
+        "implement producer and consumer",
+        "update registration, bilingual text and lifecycle",
+        "compile and package only when requested",
+        "user acceptance and user push"
+      ]
+    },
+    "meta_skill": {
+      "required": [
+        "id",
+        "name_zh",
+        "name_en",
+        "branch",
+        "prerequisite",
+        "cost",
+        "effect",
+        "effect_owner",
+        "migration"
+      ],
+      "entry_files": [
+        "src/skills.c",
+        "include/skills.h",
+        "src/save.c",
+        "src/domain/ui/ui_pages.c",
+        "src/domain/content/content_db.c"
+      ],
+      "contracts": [
+        "mechanics-first permanent skill; no test-only purchasable IDs",
+        "single-parent readable prerequisite graph",
+        "keyboard / mouse / touch share purchase geometry"
+      ],
+      "workflow": [
+        "specify",
+        "read bounded context",
+        "implement producer and consumer",
+        "update registration, bilingual text and lifecycle",
+        "compile and package only when requested",
+        "user acceptance and user push"
+      ]
+    },
+    "run_skill": {
+      "required": [
+        "id",
+        "name_zh",
+        "name_en",
+        "branch",
+        "prerequisite",
+        "cost",
+        "effect",
+        "effect_owner",
+        "threat_cost"
+      ],
+      "entry_files": [
+        "src/bench.c",
+        "include/bench.h",
+        "src/upgrade_run.c",
+        "src/loop_rewards.c",
+        "src/domain/ui/ui_menu.c",
+        "src/save.c"
+      ],
+      "contracts": [
+        "run gold only; attributes and small mechanics",
+        "immutable saved bit positions",
+        "effect, tooltip, prerequisites and geometry change together"
+      ],
+      "workflow": [
+        "specify",
+        "read bounded context",
+        "implement producer and consumer",
+        "update registration, bilingual text and lifecycle",
+        "compile and package only when requested",
+        "user acceptance and user push"
+      ]
+    },
+    "ui": {
+      "required": [
+        "id",
+        "name_zh",
+        "name_en",
+        "page",
+        "regions",
+        "inputs",
+        "state_entry",
+        "state_exit",
+        "palette",
+        "platforms"
+      ],
+      "entry_files": [
+        "src/domain/ui/ui_menu.c",
+        "src/domain/ui/ui_pages.c",
+        "src/ui.c",
+        "src/loop_desktop_input.c",
+        "src/ui_palette.c",
+        "web/shell.html"
+      ],
+      "contracts": [
+        "one geometry contract for drawing and hit tests",
+        "sidebar / graph / detail / modal must not overlap",
+        "text uses measured glyph dimensions; no residual modal input"
+      ],
+      "workflow": [
+        "specify",
+        "read bounded context",
+        "implement producer and consumer",
+        "update registration, bilingual text and lifecycle",
+        "compile and package only when requested",
+        "user acceptance and user push"
+      ]
+    }
+  },
+  "invariants": {
+    "map": [
+      36,
+      36
+    ],
+    "container_slots": 12,
+    "world_sprites": 64,
+    "stable_ids": true,
+    "tests_owner": "user",
+    "push_owner": "user"
+  }
+}

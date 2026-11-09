@@ -17,7 +17,9 @@
 #include <string.h>
 
 /* 旧版本 main.c 里的调试标记（被部分模块引用） */
+#ifndef CANITY_SHARED_DIAGNOSTICS
 volatile int g_dbgMark = 0;
+#endif
 
 /* 各版本都存在的全局（都在 game.c 或 save.c 里） */
 extern int   runInProgress;      /* 200: 当前是否有一局未结束 */

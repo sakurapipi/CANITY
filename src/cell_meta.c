@@ -5,6 +5,7 @@
  * 还能被 test 直接造数据验证。
  */
 #include "common.h"
+#include "room_theme.h"
 #include "cell_meta.h"
 #include "room_template.h"
 
@@ -66,12 +67,12 @@ unsigned char CellTintFor(int cx, int cy) {
    直接叠在墙面的光照项上 —— 所以它读起来像"这个房间的光不一样"，
    而不是"贴图被染色了"。幅度取 20~34：再高会把原纹理的细节洗掉。 */
 static const unsigned char kRoomTintRGB[THEME_COUNT][3] = {
-    { 20, 18, 20 },   /* 0 砖墙     中性偏灰 */
+    { 12, 26, 36 },   /* 0 砖墙     中性偏灰 */
     { 16, 22, 30 },   /* 1 监狱     冷蓝金属 */
-    { 34, 14, 12 },   /* 2 地狱     暗红 */
-    { 18, 28, 22 },   /* 3 病房     病态绿 */
+    { 10, 28, 30 },   /* 2 地狱     暗红 */
+    { 16, 30, 34 },   /* 3 病房     病态绿 */
     { 12, 24, 34 },   /* 4 冰窖     青蓝 */
-    { 34, 24, 12 },   /* 5 锈工厂   橙锈 */
+    { 22, 20, 40 },   /* 5 锈工厂   橙锈 */
     { 32, 12, 24 }    /* 6 血肉洞窟 紫红 */
 };
 
@@ -82,18 +83,8 @@ static const unsigned char kRoomTintRGB[THEME_COUNT][3] = {
  *
  * 名字和 kRoomTintRGB 的注释一一对应 —— 以后加主题时两边一起改。
  * ================================================================ */
-const char* ThemeName(int themeId, int zh) {
-    switch (themeId) {
-    case 0: return zh ? "砖墙"     : "BRICKWORKS";
-    case 1: return zh ? "监狱"     : "THE CELLS";
-    case 2: return zh ? "地狱"     : "INFERNO";
-    case 3: return zh ? "病房"     : "WARD";
-    case 4: return zh ? "冰窖"     : "ICE VAULT";
-    case 5: return zh ? "锈工厂"   : "RUSTWORKS";
-    case 6: return zh ? "血肉洞窟" : "FLESH CAVE";
-    default: return zh ? "" : "";
-    }
-}
+const char* ThemeName(int themeId,int zh) {return RoomThemeName(themeId,zh);}
+
 
 /* 逐像素路径上不能走函数调用（地板循环每帧几十万次），
    所以把主题色拆成三个内联查询，让 render 直接取。 */

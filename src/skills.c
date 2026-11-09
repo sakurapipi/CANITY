@@ -8,6 +8,12 @@
  *   9×600 + 3×2000 + 3×1400 = 15600 金币，9 核心 —— 约 34 局主线
  */
 #include "common.h"
+#include "lang.h"
+#include "achievements.h"
+#include "bench.h"
+#include "entity.h"
+#include "run_stats.h"
+#include "state.h"
 #include "loop_api.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -26,33 +32,33 @@
  *     这样技能树里画出来的竖线才有真实含义（不是你随便点，是真的有路）。 */
 const SkillDef skillDefs[] = {
     /* ---- 列 0：静（噪声的时与地） ---- */
-    {"LIGHT STEP",   "Walking noise reduced 35% per rank",                          0, 3, {1300,2600,3900},       0, -1, 0},   /* v3.0 退役：纯属性，感知不到 */
+    {"LIGHT STEP",   "Walk noise -20% and move speed +3% per rank",                          0, 3, {1300,2600,3900},       0, 25, 0},   /* v3.0 退役：纯属性，感知不到 */
     {"QUIET LID",    "Searching makes NO noise at max rank", 0, 3, {1300,2600,3900}, 0, 0, 0},
-    {"GHOST STEP",   "Silent footsteps while light is off", 0, 3, {1300,2600,3900}, 0, SK_SEARCHNOISE, 0},
-    {"DECOY",        "G: throw a stone (8s cd), noise 14", 0, 1, {4500,0,0},  1, SK_GHOSTSTEP, 0},
+    {"GHOST STEP",   "Silent footsteps while light is off", 0, 3, {1300,2600,3900}, 0, 1, 0},
+    {"HUSH PULSE",   "G: suppress footsteps 85% for 4s; 8 battery, 24s cooldown", 0, 1, {4500,0,0},  1, 2, 0},
     /* ---- 列 1：筹（风险与经济） ---- */
-    {"SIPHON",       "Crates yield +25% gold per rank",                          1, 3, {1300,2600,3900},       0, -1, 0},   /* v3.0 退役 */
+    {"SIPHON",       "Battery cap +25/rank; below 25%: regen 2-4/s, sanity drain +20%",                          1, 3, {1300,2600,3900},       0, 25, 0},   /* v3.0 退役 */
     {"CRANK WALK",   "Crank while walking (move -40%, noise x2)", 1, 3, {1300,2600,3900}, 0, 4, 0},
-    {"REST",         "Safe house rest restores +30 sanity",                          1, 3, {1300,2600,3900},       0, SK_CRANK, 0},   /* v3.0 退役 */
-    {"METABOLISM",   "Sanity loss burns battery (1:3)",    1, 1, {4500,0,0}, 0, SK_CRANK, 0},
+    {"REST",         "Safe-room recovery +25% base rate per rank",                          1, 3, {1300,2600,3900},       0, 5, 0},   /* v3.0 退役 */
+    {"METABOLISM",   "Sanity loss burns battery (1:3)",    1, 1, {4500,0,0}, 0, 6, 0},
     /* ---- 列 2：隐（藏匿与脱身） ----
        v3.0：整列重做。原来 4 个节点全是伤害（HEAVY HAND / STAGGER /
        TYPE WORK / RELOAD RHYTHM），无战斗后完全无效。
        换成逃生玩法的核心：怎么躲、怎么脱身。 */
-    {"BREATH",       "Hunters reach the locker but never open it", 2, 3, {1300,2600,3900}, 0, -1, 0},
-    {"STILL FACE",   "Standing still makes you invisible to sound",                          2, 3, {1300,2600,3900},       0, SK_BREATH, 0},   /* v3.0 退役：和 HOLD BREATH 重叠 */
-    {"SLIP AWAY",    "Vanish after 2s out of sight (was 3s)", 2, 3, {1300,2600,3900}, 0, SK_BREATH, 0},
-    {"PLAY DEAD",    "Once per run: escape a grab",        2, 1, {4500,0,0},  1, SK_SLIP, 0},
+    {"BREATH",       "While hidden, detection risk is reduced by 45%", 2, 3, {1300,2600,3900}, 0, 25, 0},
+    {"STILL FACE",   "Hunters give up twice as quickly at your hiding place",                          2, 3, {1300,2600,3900},       0, 8, 0},   /* v3.0 退役：和 HOLD BREATH 重叠 */
+    {"SLIP AWAY",    "Vanish after 2s out of sight (was 3s)", 2, 3, {1300,2600,3900}, 0, 9, 0},
+    {"PLAY DEAD",    "Once per run: escape a grab",        2, 1, {4500,0,0},  1, 10, 0},
     /* ---- 列 3：途（整局形状） ---- */
-    {"CARTO", "Reveal safe house + breaker at start", 3, 2, {2000,3900,0}, 0, -1, 0},
-    {"BREAKER", "Locked crates open 40% faster",                        3, 3, {1300,2600,3900},       0, SK_CARTO, 0},   /* v3.0 退役 */
-    {"FUSE SMITH",   "Fuse need -1 (min 2)",               3, 3, {1300,2600,3900}, 0, SK_CARTO, 0},
-    {"SHORTCUT",     "Skip one non-boss level per run",    3, 1, {4500,0,0}, 0, SK_FUSE_LESS, 0},
+    {"CARTO", "Reveal safe house + breaker at start", 3, 2, {2000,3900,0}, 0, 0, 0},
+    {"BREAKER", "Locked crates open 40% faster",                        3, 3, {1300,2600,3900},       0, 12, 0},   /* v3.0 退役 */
+    {"FUSE SMITH",   "Fuse need -1 (min 2)",               3, 3, {1300,2600,3900}, 0, 13, 0},
+    {"SHORTCUT",     "Skip one non-boss level per run",    3, 1, {4500,0,0}, 0, 14, 0},
     /* ---- 第 5 行：跨支 keystone（全局只持有一个） ---- */
-    {"SILENT RUN",   "Sprint makes no noise (stamina -30%)", 0, 1, {3900,0,0},  2, 3, 1},
-    {"GREED",   "Gold x1.5, gold threat tier +2", 1, 1, {3900,0,0},       0, 7, 1},   /* v3.0 退役 */
-    {"SECOND WIND",  "Sprint 3s after empty stamina, healing -50%", 2, 1, {3900,0,0},       0, 11, 1},   /* v3.0 退役：PLAY DEAD 覆盖 */
-    {"LIGHTLESS",      "No flashlight; quieter movement (-25%)", 3, 1, {3900,0,0},       0, 15, 1},   /* v3.0 退役 */
+    {"SILENT RUN",   "Sprint makes no noise (stamina -30%)", 0, 1, {3900,0,0},  2, 33, 1},
+    {"GREED",   "Gold x1.5, gold threat tier +2", 1, 1, {3900,0,0},       0, 36, 1},   /* v3.0 退役 */
+    {"SECOND WIND",  "Sprint 3s after empty stamina, healing -50%", 2, 1, {3900,0,0},       0, 39, 1},   /* v3.0 退役：PLAY DEAD 覆盖 */
+    {"LIGHTLESS",      "Start with light off; movement noise -25%", 3, 1, {3900,0,0},       0, 31, 1},   /* v3.0 退役 */
 
     /* ==================================================================
      * v7 第 58 轮：**补回被 git checkout 冲掉的 6 个节点**
@@ -65,41 +71,52 @@ const SkillDef skillDefs[] = {
      *
      * 这 6 个函数我是按枚举名和分支表重建的，数值取和同层节点一致。
      * ================================================================ */
-    {"SILENT DEAL",   "Crates are silent; crate gold +50%",        5, 1, {2500,0,0},    0, SK_BATTERY,    0},
-    {"GOLDEN ESCAPE", "Escape bonus +50%",                        5, 1, {2500,0,0},    0, SK_BATTERY,    0},
-    {"APPRENTICE",    "Cranking noise -50%, walking penalty halved",    5, 1, {2500,0,0},    0, SK_BREATH,    0},
-    {"SHORTCUT JR",   "Fuse need -1 (minimum 2)",5, 1, {2500,0,0},    0, SK_CARTO,     0},
-    {"NIGHT WALKER",  "Light on drains 25% slower",               5, 1, {2500,0,0},    0, SK_GHOSTSTEP, 0},
+    {"SILENT DEAL",   "Crates are silent; crate gold +50%",        5, 1, {2500,0,0},    0, 26,    0},
+    {"GOLDEN ESCAPE", "Escape bonus +50%",                        5, 1, {2500,0,0},    0, 20,    0},
+    {"APPRENTICE",    "Cranking noise -50%, walking penalty halved",    5, 1, {2500,0,0},    0, 9,    0},
+    {"SHORTCUT JR",   "Fuse need -1 (minimum 2)",5, 1, {2500,0,0},    0, 22,     0},
+    {"NIGHT WALKER",  "Light on drains 25% slower",               5, 1, {2500,0,0},    0, 2, 0},
     {"ORIGIN",        "The center. Light this to unlock the net.",5, 1, {0,0,0},       0, -1,           0},
-    {"GREEDY HAND", "Gold +20% per rank, THREAT +1 per rank", 4, 3, {1300,2000,2250},0,-1,0},
-    {"GOLD SCENT", "Noise -10% per rank while carrying gold", 4, 3, {1300,2000,2250},0,SK_GREEDHAND,0},
-    {"GAMBLER", "10% per rank chance for double crate gold", 4, 3, {1300,2000,2250},0,SK_GOLDSCENT,0},
-    {"DESPERATE", "Below 30 sanity: move +4% per rank", 4, 3, {1300,2000,2250},0,SK_GAMBLER,0},
+    {"GREEDY HAND", "Gold +20% per rank, THREAT +1 per rank", 4, 3, {1300,2000,2250},0, 5,0},
+    {"GOLD SCENT", "Noise -10% per rank while carrying gold", 4, 3, {1300,2000,2250},0, 26,0},
+    {"GAMBLER", "10% per rank chance for double crate gold", 4, 3, {1300,2000,2250},0, 27,0},
+    {"DESPERATE", "Below 30 sanity: move +4% per rank", 4, 3, {1300,2000,2250},0, 28,0},
     /* ---- 2026-11-08（第 7 轮）：幽灵流派 GHOST ---- */
     {"BREATH SYNC", "Standing still halves sanity drain (max 20s)", 0, 2,
-     {2600,3900,0}, 0, -1, 0},
+     {2600,3900,0}, 0, 3, 0},
     {"SHADOW STEP", "Sprinting inside smoke makes no sound", 0, 1,
-     {3200,0,0}, 0, -1, 0},
+     {3200,0,0}, 0, 30, 0},
     {"SILENT LAND", "After standing 3s, your next 3s of steps are silent", 0, 1,
-     {3900,0,0}, 0, 4, 0},
+     {3900,0,0}, 0, 31, 0},
     {"FORMLESS", "Stand still 3s to vanish from sight (move speed -25%)", 0, 1,
-     {4500,0,0}, 0, 5, 1},
+     {4500,0,0}, 0, 32, 1},
     /* ---- 2026-11-08（第 8 轮）：掠夺者流派 RAIDER ---- */
-    {"PAWN", "Below 30%% sanity: auto-spend 200x floor gold for +20 sanity", 1, 1,
-     {2600,0,0}, 0, SK_BATTERY, 0},
-    {"GAMBLER II", "Crate gold is 50%% doubled, 50%% nothing", 1, 1,
-     {3200,0,0}, 0, SK_RAIDER_PAWN, 0},
-    {"GOLD POWER", "Each gold tier gives +1.5%% move speed (cap +20%%)", 1, 1,
-     {4500,0,0}, 0, SK_RAIDER_GAMBLE, 1},
+    {"PAWN", "Below 30% sanity: auto-spend 200x floor gold for +20 sanity", 1, 1,
+     {2600,0,0}, 0, 29, 0},
+    {"GAMBLER II", "Crate gold is 50% doubled, 50% nothing", 1, 1,
+     {3200,0,0}, 0, 34, 0},
+    {"GOLD POWER", "Each gold tier gives +1.5% move speed (cap +20%)", 1, 1,
+     {4500,0,0}, 0, 35, 1},
     /* ---- 2026-11-08（第 9 轮）：反击者流派 COUNTER ---- */
     {"BREAK FREE", "Struggle window is 1.5x wider when grabbed", 2, 1,
-     {2600,0,0}, 0, SK_GHOST_FORM, 0},
+     {2600,0,0}, 0, 11, 0},
     {"RETALIATE", "After taking a hit: +30% move speed for 3s", 2, 1,
-     {3200,0,0}, 0, SK_COUNTER_FREE, 0},
-    {"COUNTERKILL", "Once per run: kill the scavenger as it grabs you", 2, 1,
-     {4500,0,0}, 0, SK_COUNTER_BACK, 1},
+     {3200,0,0}, 0, 37, 0},
+    {"COUNTERKILL", "Once per run: repel the scavenger when it grabs you", 2, 1,
+     {4500,0,0}, 0, 38, 1},
 
     {"SELFTEST", "自检节点", 4, 1, {1000,0,0}, 0, -1, 0},
+    {"COMPOSURE WINDOW", "After a hit, retaliation briefly suspends passive sanity drain", 2,1,{2600,0,0},0, 37,0},
+    {"CLEAN BREAK", "A successful wrench knockback grants a one-second speed burst", 2,1,{2600,0,0},0, 38,0},
+    {"READ THE OPENING", "Wrench cooldown recovers 50% faster near a stunned hunter", 2,1,{3200,0,0},0, 42,0},
+    {"FALSE OPENING", "A shattered decoy distracts its hunter for four extra seconds", 2,1,{3900,0,0},0, 43,0},
+
+    {"LINGERING HUSH","Hush Pulse lasts six seconds instead of four",3,1,{1800,0,0},0, 3,0},
+    {"BACKUP SPARK","Once per floor, an empty battery gains twelve charge",3,1,{1600,0,0},0, 4,0},
+    {"EXIT MEMORY","Powering the breaker reveals the exit sector",3,1,{1900,0,0},0, 15,0},
+    {"HIDDEN RECOVERY","Once per floor, hide still for three seconds to recover twenty stamina",3,1,{1800,0,0},0, 8,0},
+    {"ECHO MAPPING","Hush Pulse reveals nearby map cells within three tiles",3,1,{2100,0,0},0, 45,0},
+    {"SILENT CRANK","Cranking below 25% battery makes no sound",3,1,{2000,0,0},0, 7,0},
 };
 
 typedef char skillDefs_count_check[(sizeof(skillDefs)/sizeof(skillDefs[0]) == SKILL_COUNT) ? 1 : -1];
@@ -127,10 +144,14 @@ typedef char SKILL_DEF_COUNT_CHECK[(
    原来 16..19 一律当成「第 5 行列 0..3」，导致方向键导航跳错节点。 */
 static const unsigned char kNodeCol[SKILL_COUNT] = {
     0,0,0,0,  1,1,1,1,  2,2,2,2,  3,3,3,3,  4, 0,1,2,  4,4,4,4,4,  4, 4,4,4,4,
- 5, 5, 5, 5, 5, 5, 5, 5, 5, 5 };
+ 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+    6,6,6,6,
+};
 static const unsigned char kNodeRow[SKILL_COUNT] = {
     0,1,2,3,  0,1,2,3,  0,1,2,3,  0,1,2,3,  0, 4,4,4,  1,2,3,4,0,  4, 0,1,2,3,
- 0, 1, 2, 3, 0, 1, 3, 0, 1, 2 };
+ 0, 1, 2, 3, 0, 1, 3, 0, 1, 2,
+    0,1,2,3,
+};
 
 int SkillNodeCol(int id) {
     if (id < 0 || id >= SKILL_COUNT) return -1;
@@ -164,35 +185,60 @@ int activeKeystone = -1;
 /* ------------------------------------------------------------------ */
 /* 查询                                                               */
 /* ------------------------------------------------------------------ */
+typedef char player_skill_range_check[(SK_GEN_SELFTEST == 40 && SKILL_PLAYER_COUNT == SKILL_COUNT-1) ? 1 : -1];
+
+int SkillIsPlayerFacing(int id) { return id>=0 && id<SKILL_COUNT && id!=SK_GEN_SELFTEST; }
+
+
+int SkillClampRank(int id, int rank) {
+    if (!SkillIsPlayerFacing(id) || rank < 0) return 0;
+    return rank > skillDefs[id].maxRank ? skillDefs[id].maxRank : rank;
+}
+
 int SkillCost(int id) {
-    if (id < 0 || id >= SKILL_COUNT) return -1;
+    if (!SkillIsPlayerFacing(id)) return -1;
     const SkillDef* d = &skillDefs[id];
-    int r = skillRank[id];
+    int r = SkillClampRank(id, skillRank[id]);
     if (r >= d->maxRank) return -1;
     int c = d->cost[r];
     return c > 0 ? c : -1;
 }
 
+int SkillArchetype(int id) {
+    if (!SkillIsPlayerFacing(id) || id == SK_ORIGIN) return -1;
+    if (id <= 3 || id == 16 || id == 19 || (id >= 30 && id <= 33)) return 0;
+    if ((id >= 4 && id <= 7) || id == 17 || (id >= 26 && id <= 29) || (id >= 34 && id <= 36)) return 1;
+    if ((id >= 8 && id <= 11) || id == 18 || (id >= 37 && id <= 39) || (id>=SK_COUNTER_COMPOSE && id<=SK_COUNTER_FEINT)) return 2;
+    return -1;
+}
+const char* SkillArchetypeName(int branch, int chinese) {
+    static const char* en[] = {"GHOST", "RAIDER", "COUNTER", "SHARED"};
+    static const char* zh[] = {"幽灵", "掠夺者", "反击者", "通用"};
+    if (branch < 0 || branch > 2) branch = 3;
+    return chinese ? zh[branch] : en[branch];
+}
 int SkillBranchPoints(int branch) {
     int n = 0;
     for (int i = 0; i < SKILL_COUNT; i++) {
+        if (!SkillIsPlayerFacing(i)) continue;
         const SkillDef* d = &skillDefs[i];
-        if (d->branch != branch) continue;
+        if (SkillArchetype(i) != branch) continue;
         if (d->isKeystone) continue;      /* keystone 本身不计入 "投入点数" */
-        n += skillRank[i];
+        n += SkillClampRank(i,skillRank[i]);
     }
     return n;
 }
 
 int SkillKeystoneUnlocked(int id) {
-    if (id < 0 || id >= SKILL_COUNT) return 0;
+    if (!SkillIsPlayerFacing(id)) return 0;
     const SkillDef* d = &skillDefs[id];
     if (!d->isKeystone) return 1;
-    return SkillBranchPoints(d->branch) >= SKILL_POINTS_FOR_KEYSTONE;
+    int branch = SkillArchetype(id);
+    return branch < 0 || SkillBranchPoints(branch) >= SKILL_POINTS_FOR_KEYSTONE;
 }
 
 int SkillOwned(int id) {
-    if (id < 0 || id >= SKILL_COUNT) return 0;
+    if (!SkillIsPlayerFacing(id)) return 0;
     return skillRank[id] > 0;
 }
 
@@ -202,7 +248,7 @@ const char* SkillName(int id) {
 }
 
 int SkillCanBuy(int id) {
-    if (id < 0 || id >= SKILL_COUNT) return 0;
+    if (!SkillIsPlayerFacing(id)) return 0;
     const SkillDef* d = &skillDefs[id];
     int cost = SkillCost(id);
     if (cost < 0) return 0;                                  /* 已满 */
@@ -213,9 +259,8 @@ int SkillCanBuy(int id) {
     /* v6 **局外购买扣银行** —— 技能树只能从主菜单进，那时 bankGold 恒为 0
        （BankSettle 末尾清零、只有开局才填），所以原来 20 个节点全都
        NOT ENOUGH GOLD，整条局外成长线是装饰。用 bankGold 当钱包。 */
-    { extern int bankGold; if (bankGold < total) return 0; }
-    if(id>=20 && id<=24) for(int e=0;e<SkillEdgeCount(id);++e)
-        if(!SkillOwned(SkillEdgeNeighbor(id,e))) return 0;
+    {  if (bankGold < total) return 0; }
+    /* One visible incoming edge is the sole prerequisite. */
     if (d->prereq >= 0 && skillRank[d->prereq] <= 0) return 0; /* 前置未点 */
     if (d->isKeystone) {
         if (!SkillKeystoneUnlocked(id)) return 0;            /* 分支点数不足 */
@@ -229,8 +274,8 @@ int SkillBuy(int id) {
     const SkillDef* d = &skillDefs[id];
     int cost = SkillCost(id);
     /* v6：一次性扣总价（从银行扣，见 SkillCanBuy） */
-    { extern int bankGold;
-      { extern int WalletSpendBank(int);
+    { 
+      { 
         if (!WalletSpendBank(cost + (d->coreCost > 0 ? d->coreCost * GOLD_PER_CORE : 0))) return 0; }   /* v7：走钱包，不许直扣 */
       if (bankGold < 0) bankGold = 0; }
     skillRank[id]++;
@@ -255,14 +300,17 @@ int SkillGhostBreathRank(void) { return skillRank[SK_GHOST_BREATH]; }
 /* 第 8 轮：掠夺者三件 */
 int SkillRaiderPawnOwned(void)   { return skillRank[SK_RAIDER_PAWN] > 0; }
 int SkillRaiderGambleOwned(void) { return skillRank[SK_RAIDER_GAMBLE] > 0; }
-int SkillRaiderPowerOwned(void)  { return skillRank[SK_RAIDER_POWER] > 0; }
+int SkillRaiderPowerOwned(void) { return HasKeystone(SK_RAIDER_POWER); }
+
 /* 第 9 轮：反击者三件 */
 int SkillCounterFreeOwned(void) { return skillRank[SK_COUNTER_FREE] > 0; }
 int SkillCounterBackOwned(void) { return skillRank[SK_COUNTER_BACK] > 0; }
-int SkillCounterKillOwned(void) { return skillRank[SK_COUNTER_KILL] > 0; }
+int SkillCounterKillOwned(void) { return HasKeystone(SK_COUNTER_KILL); }
+
 int SkillGhostStepOwned(void)   { return skillRank[SK_GHOST_STEP] > 0; }
 int SkillGhostLandOwned(void)   { return skillRank[SK_GHOST_LAND] > 0; }
-int SkillGhostFormOwned(void)   { return skillRank[SK_GHOST_FORM] > 0; }
+int SkillGhostFormOwned(void) { return HasKeystone(SK_GHOST_FORM); }
+
 
 int SkillSwitchKeystone(int id) {
     if (!SkillSwitchable(id)) return 0;
@@ -276,8 +324,8 @@ int SkillSwitchKeystone(int id) {
      * 资金检查与扣款都走 wallet（项目规定：花钱只走那一个入口）。
      * ================================================================ */
     {
-        extern int WalletCanPayBank(int);
-        extern int WalletSpendBank(int);
+
+
         if (!WalletCanPayBank(SKILL_SWITCH_COST)) return 0;
         if (!WalletSpendBank(SKILL_SWITCH_COST)) return 0;
     }
@@ -306,7 +354,7 @@ int HasKeystone(int id) { return SkillOwned(id) && (!skillDefs[id].isKeystone ||
    从「数值」变成「质变」—— 满级之后你可以贴着怪走。 */
 float SkillNoiseMul(void) {
     int r = skillRank[SK_QUIET];
-    extern int carryGold;
+
     float m=1.0f-0.20f*(float)r;
     if(HasKeystone(SK_SALVAGE))m*=0.75f;
     if(carryGold>0) m*=1.0f-0.10f*skillRank[SK_GOLDSCENT];
@@ -346,7 +394,7 @@ float SkillSpeedAdd(void) {
     /* 2026-11-06（用户要求"技能树做点数值微调，机制不要改"）：
        QUITE STEP +2%/级 -> +3%/级；深层还 +4%（濒死加成保持不变）。
        地图变大之后移动距离变长，+2% 几乎感觉不到。 */
-    extern float sanity;
+
     return 0.03f*(float)skillRank[SK_QUIET]+(sanity<30.0f ? 0.04f*skillRank[SK_DESPERATE] : 0.0f);
 }
 float SkillQuietMul(void) {
@@ -395,6 +443,7 @@ float SkillCalmMul(void) {                  /* REST       -10%/级 */
 /* 「全满级」成就：keystone 不参与（全局只能持有一个） */
 int SkillsAllMaxed(void) {
     for (int i = 0; i < SKILL_COUNT; i++) {
+        if (!SkillIsPlayerFacing(i)) continue;
         if (skillDefs[i].isKeystone) continue;
         if (skillRank[i] < skillDefs[i].maxRank) return 0;
     }
@@ -623,7 +672,7 @@ int SkillShortcutAvailable(void) {
 }
 
 /* LAST RESORT：理智归零时免死一次 */
-int SkillLastResortOneshot(void) {
+int SkillLastResortOneshot(void) { /* STUB: Legacy sanity one-shot recovery hook is not implemented; do not claim this effect is active. */
     return 0;
 }
 
@@ -644,6 +693,7 @@ int SkillsSelfTest(void) {
     /* 1) 总成本必须等于 SKILL_TOTAL_COST（4 列 20 节点，方案冻结值） */
     int total = 0; int coreTotal = 0;
     for (int i = 0; i < SKILL_COUNT; i++) {
+        if (!SkillIsPlayerFacing(i)) continue;
         coreTotal += skillDefs[i].coreCost;
         for (int r = 0; r < skillDefs[i].maxRank; r++) total += skillDefs[i].cost[r];
     }
@@ -652,6 +702,7 @@ int SkillsSelfTest(void) {
 
     /* 2) 前置 id 必须合法且成环检测（简单：不能自己依赖自己） */
     for (int i = 0; i < SKILL_COUNT; i++) {
+        if (!SkillIsPlayerFacing(i)) continue;
         int p = skillDefs[i].prereq;
         if (p >= SKILL_COUNT || p == i) fail |= 4;
     }
@@ -660,6 +711,7 @@ int SkillsSelfTest(void) {
        原来断言「数量 = 8」，而数据表把「上一节点 id」误写进这一列（值 1..14），
        累加出 81，一旦接线必然失败 —— 这也是它一直没被接线的原因之一。 */
     for (int i = 0; i < SKILL_COUNT; i++) {
+        if (!SkillIsPlayerFacing(i)) continue;
         if (skillDefs[i].isKeystone != 0 && skillDefs[i].isKeystone != 1) fail |= 8;
     }
 
@@ -700,11 +752,9 @@ float SlipAwaySeconds(void) {
     return SkillOwned(SK_SLIP) ? 2.0f : 3.0f;
 }
 
-/* 假死：技能树或改造树，任一拥有即可 */
+/* 假死：由局外技能树提供。 */
 int PlayDeadAvailable(void) {
-    extern int BenchPlayDead(void);   /* 2026-11-06（R4）：声明与 bench.h 对齐（返回 int） */
     if (SkillOwned(SK_PLAYDEAD)) return 1;
-    if (BenchPlayDead()) return 1;
     return 0;
 }
 
@@ -787,25 +837,26 @@ float ThickHideMul(void) {
  *   水平间距 ≈120px，垂直 ≈76px；方框 90×58 → 留 30 / 18px 空隙。
  * 工具直接读这张表，不可能再各算一遍。
  * ================================================================ */
+/* Triangular constellation: north GHOST, southwest RAIDER, southeast COUNTER. */
 static const float kNodeNX[SKILL_COUNT] = {
-    /* 第 0 行 */ 0.0726f, 0.1947f, 0.3168f, 0.4390f, 0.5611f, 0.6832f, 0.8053f, 0.9274f,
-    /* 第 1 行 */ 0.0726f, 0.1947f, 0.3168f, 0.4390f, 0.5611f, 0.6832f, 0.8053f, 0.9274f,
-    /* 第 2 行 */ 0.0726f, 0.1947f, 0.3168f, 0.4390f, 0.5611f, 0.6832f, 0.8053f, 0.9274f,
-    /* 第 3 行 */ 0.0726f, 0.1947f, 0.3168f, 0.4390f, 0.5611f, 0.6832f, 0.8053f, 0.9274f,
-    /* 第 4 行 */ 0.0726f, 0.1947f, 0.3168f, 0.4390f, 0.5611f, 0.6832f, 0.8053f, 0.9274f,
-
-    0.07260f,
+    0.50000f, 0.50000f, 0.50000f, 0.50000f, 0.36144f, 0.22287f, 0.04473f, -0.07305f,
+    0.63856f, 0.77713f, 0.91569f, 1.05426f, 0.31000f, 0.31000f, 0.31000f, 0.31000f,
+    0.50000f, -0.88564f, 1.60851f, 0.69000f, 0.09617f, -0.02161f, 0.95527f, 1.07305f,
+    0.69000f, 0.50000f, 0.08431f, -0.05426f, -0.19282f, -0.33138f, 0.50000f, 0.50000f,
+    0.50000f, 0.50000f, -0.46995f, -0.60851f, -0.74708f, 1.19282f, 1.33138f, 1.46995f,
+    0.50000f, 1.18096f, 1.50952f, 1.62730f, 1.74508f, 0.69000f, 0.37330f, 0.31000f,
+    0.62670f, 0.69000f, -0.19083f
 };
 
+/* Triangular constellation: north GHOST, southwest RAIDER, southeast COUNTER. */
 static const float kNodeNY[SKILL_COUNT] = {
-/* 2026-11-09（A-1）：6 行网格，总高度不变，行距 0.10824 —— 为生成器留出第 41~48 个槽位。 */
-    0.22940f, 0.22940f, 0.22940f, 0.22940f, 0.22940f, 0.22940f, 0.22940f, 0.22940f,
-    0.33764f, 0.33764f, 0.33764f, 0.33764f, 0.33764f, 0.33764f, 0.33764f, 0.33764f,
-    0.44588f, 0.44588f, 0.44588f, 0.44588f, 0.44588f, 0.44588f, 0.44588f, 0.44588f,
-    0.55412f, 0.55412f, 0.55412f, 0.55412f, 0.55412f, 0.55412f, 0.55412f, 0.55412f,
-    0.66236f, 0.66236f, 0.66236f, 0.66236f, 0.66236f, 0.66236f, 0.66236f, 0.66236f,
-
-    0.77060f,
+    0.34000f, 0.18000f, 0.02000f, -0.14000f, 0.58000f, 0.66000f, 0.54346f, 0.61146f,
+    0.58000f, 0.66000f, 0.74000f, 0.82000f, 0.24400f, 0.10800f, -0.02800f, -0.16400f,
+    -0.94000f, 1.30000f, 1.14000f, -0.55600f, 0.95254f, 1.02054f, 0.54346f, 0.61146f,
+    -0.07600f, 0.50000f, 0.74000f, 0.82000f, 0.90000f, 0.98000f, -0.30000f, -0.46000f,
+    -0.62000f, -0.78000f, 1.06000f, 1.14000f, 1.22000f, 0.90000f, 0.98000f, 1.06000f,
+    0.50000f, 1.11254f, 0.86346f, 0.93146f, 0.99946f, -0.23600f, 0.79254f, -0.30000f,
+    0.79254f, -0.37200f, 0.67946f
 };
 
 void SkillNodeNorm(int id, float* nx, float* ny) {
@@ -829,48 +880,33 @@ float SkillNodeY(int id) { float nx,ny; SkillNodeNorm(id,&nx,&ny); return ny; }
 /* --- 邻接：同枝上一行 → 本节点；本节点 → 同枝下一行 --- */
 /* 连线：每个节点连自己的前置（没有前置就连中心） */
 int SkillEdgeCount(int id) {
-    if (id < 0 || id >= SKILL_COUNT || id==SK_ORIGIN) return 0;
-    return id>=20 && id<=24 ? 2 : 1;
+    if (!SkillIsPlayerFacing(id) || id==SK_ORIGIN) return 0;
+    return 1;
 }
 
-int SkillEdgeNeighbor(int id, int i) {
-    static const int cross[5][2]={{1,4},{6,8},{9,12},{13,27},{2,26}};
-    if(id>=20 && id<=24 && i>=0 && i<2) return cross[id-20][i];
-    if (id < 0 || id >= SKILL_COUNT) return SK_ORIGIN;
-    if (id == SK_ORIGIN)         return SK_ORIGIN;
-    {
-        int pre = skillDefs[id].prereq;
-        if (pre >= 0 && pre < SKILL_COUNT && pre != id) return pre;
-    }
-    return SK_ORIGIN;
+int SkillEdgeNeighbor(int id,int edge) {
+    if(!SkillIsPlayerFacing(id) || id==SK_ORIGIN || edge!=0)return SK_ORIGIN;
+    int p=skillDefs[id].prereq;return p>=0?p:SK_ORIGIN;
 }
 
 /* --- 方向键导航：在候选里挑方向最接近、距离最近的 --- */
-int SkillNavNearest(int from, int dir) {
-    if (from < 0 || from >= SKILL_COUNT) return from;
-    {
-        float fx = SkillNodeX(from), fy = SkillNodeY(from);
-        float dx = 0.0f, dy = 0.0f;
-        int best = -1;
-        float bestD = 1e9f, bestDot = -1e9f;
-        if (dir == 0) dy = -1.0f;
-        else if (dir == 1) dy = 1.0f;
-        else if (dir == 2) dx = -1.0f;
-        else dx = 1.0f;
-
-        for (int i = 0; i < SKILL_COUNT; i++) {
-            if (i == from) continue;
-            float vx = SkillNodeX(i) - fx, vy = SkillNodeY(i) - fy;
-            float len = sqrtf(vx * vx + vy * vy);
-            if (len < 0.01f) continue;
-            float dot = (vx * dx + vy * dy) / len;
-            if (dot < 0.30f) continue;             /* 不是这个方向 */
-            if (dot > bestDot + 0.001f || (dot > bestDot - 0.05f && len < bestD)) {
-                bestDot = dot; bestD = len; best = i;
-            }
+int SkillNavNearest(int from,int direction) {
+    if(!SkillIsPlayerFacing(from) || direction<0 || direction>3)return SK_ORIGIN;
+    float dx=direction==2?-1:direction==3?1:0,dy=direction==0?-1:direction==1?1:0;
+    for(int pass=0;pass<2;pass++) {
+        int best=from;float score=1e9f;
+        for(int id=0;id<SKILL_COUNT;id++) {
+            if(id==from || !SkillIsPlayerFacing(id))continue;
+            if(pass==0 && skillDefs[id].prereq!=from && skillDefs[from].prereq!=id)continue;
+            float vx=SkillNodeX(id)-SkillNodeX(from),vy=SkillNodeY(id)-SkillNodeY(from);
+            float distance=sqrtf(vx*vx+vy*vy);if(distance<.001f)continue;
+            float dot=(vx*dx+vy*dy)/distance;if(dot<.3f)continue;
+            float cost=distance/(dot*dot);
+            if(cost<score){score=cost;best=id;}
         }
-        return (best >= 0) ? best : from;
+        if(best!=from)return best;
     }
+    return from;
 }
 
 /* ==================================================================
@@ -887,7 +923,7 @@ static const char* kShortNames[SKILL_COUNT] = {
     "LIGHT", /*  0 */
     "QUIET", /*  1 */
     "GHOST", /*  2 */
-    "DECOY", /*  3 */
+    "HUSH", /*  3 */
     "SIPHON",/*  4 */
     "CRANK", /*  5 */
     "REST",  /*  6 */
@@ -926,21 +962,27 @@ static const char* kShortNames[SKILL_COUNT] = {
     "KILL",   /* 39 */
 
     "SELFT",
+    "CALM","BREAK","READ","FEINT",
+    "LINGER","SPARK","EXIT","RECOV","ECHO","CRANK",
 };
 
 const char* SkillShortName(int id) {
     if (id < 0 || id >= SKILL_COUNT) return "?";
+    if(g_lang==LANG_ZH){
+        static const char* shortZh[SKILL_COUNT]={"轻步","静盖","幽步","静息","蓄电","手摇","修整","代谢","屏息","静面","脱追","假死","制图","解锁","保险","捷径","无声","贪约","阵风","暗行","交易","满载","学徒","短径","夜行","起点","巧手","金息","赌徒","绝境","同步","影步","静落","无形","典当","豪赌","金力","挣脱","反击","反制","内部","镇定","破局","识隙","佯攻","余音","火花","忆路","复苏","测绘","静摇"};
+        return shortZh[id];
+    }
     if (kShortNames[id] && kShortNames[id][0]) return kShortNames[id];
     return skillDefs[id].name;
 }
 
 int SkillNodesLit(void) {
     int n = 0;
-    for (int i = 0; i < SKILL_COUNT; i++) if (skillRank[i] > 0) n++;
+    for (int i = 0; i < SKILL_COUNT; i++) if (SkillIsPlayerFacing(i) && skillRank[i] > 0) n++;
     return n;
 }
 
-void SkillInitOnce(void) { skillRank[SK_ORIGIN]=1; }
+void SkillInitOnce(void) { skillRank[SK_ORIGIN]=1; skillRank[SK_GEN_SELFTEST]=0; }
 
 
 
@@ -976,6 +1018,7 @@ void SkillResetAll(void) {
     SkillRegister();   /* 第 4 轮：保证技能已登记进中枢 */
     int refund = 0;
     for (int i = 0; i < SKILL_COUNT; i++) {
+        if (!SkillIsPlayerFacing(i)) { skillRank[i] = 0; continue; }
         if (i == SK_ORIGIN) { skillRank[i] = 1; continue; }
         for (int r = 0; r < skillRank[i] && r < 3; r++) refund += skillDefs[i].cost[r];
         if (skillRank[i] > 0) refund += skillDefs[i].coreCost * GOLD_PER_CORE * skillRank[i];
@@ -983,8 +1026,8 @@ void SkillResetAll(void) {
     }
     activeKeystone = -1;
     if (refund > 0) WalletAddBank(refund);
-    { extern int metaResetDone; metaResetDone = 1; }
-    { extern void AchUnlock(int); AchUnlock(29); }
+    {  metaResetDone = 1; }
+    {  AchRecordFlag(ACH_FLAG_META_RESET); }
     SaveGame();
 }
 
@@ -1000,3 +1043,126 @@ float SkillCrateGoldMul(void) {
     return m;
 }
 float SkillExtractMul(void) { return SkillOwned(SK_GOLDENESC) ? 1.5f : 1.0f; }
+
+static const char* kSkillNameZh[SKILL_COUNT]={
+    "轻步",
+    "静盖",
+    "鬼步",
+    "静息脉冲",
+    "备用电池",
+    "移动摇电",
+    "休整",
+    "能量代谢",
+    "屏息",
+    "静面",
+    "脱离追踪",
+    "假死",
+    "制图",
+    "快速解锁",
+    "保险丝匠",
+    "捷径",
+    "无声疾行",
+    "贪婪契约",
+    "第二阵风",
+    "暗行",
+    "静默交易",
+    "满载撤离",
+    "摇电学徒",
+    "简易捷径",
+    "夜行者",
+    "起点",
+    "贪婪之手",
+    "金币气息",
+    "赌徒",
+    "绝境疾行",
+    "呼吸同步",
+    "烟中影步",
+    "静默起步",
+    "无形",
+    "以财换命",
+    "豪赌",
+    "财富之力",
+    "挣脱",
+    "反击疾行",
+    "绝境反制",
+    "内部自检",
+    "镇定窗口",
+    "利落脱身",
+    "看准破绽",
+    "佯攻诱敌",
+    "余音静息","备用火花","出口记忆","藏身复苏","回声测绘","静默手摇",
+};
+static const char* kSkillDescZh[SKILL_COUNT]={
+    "每级降低20%行走噪音，并增加3%移动速度。",
+    "搜箱噪音随等级降低，满级时搜箱无声。",
+    "关灯时降低脚步声，满级完全无声。",
+    "G释放静息脉冲：四秒内脚步降噪85%，消耗8电量，冷却24秒。",
+    "每级增加25电量上限；低电时涓流回电，但增加理智消耗。",
+    "允许边走边摇电，以移动和噪音代价换取续航。",
+    "每级提高安全区域的恢复效率。",
+    "将被动理智流失转换为电量消耗；断电时有额外代价。",
+    "降低藏身时被发现的风险。",
+    "静止藏身时让追捕者更快放弃。",
+    "脱离视线后更快摆脱追踪。",
+    "每局一次，从抓捕中脱身。",
+    "揭示安全屋与配电箱位置。",
+    "更快打开锁住的容器。",
+    "减少通关所需保险丝，保留最低需求。",
+    "每局一次，跳过非首领层。",
+    "冲刺无声，但降低体力上限。",
+    "金币收入提高50%，金币压力增加两档。",
+    "体力耗尽后保留短暂冲刺窗口，但降低治疗收益。",
+    "开局关灯，并降低移动噪音。",
+    "搜箱无声并增加箱子收益。",
+    "增加撤离收益。",
+    "摇电更安静，移动摇电的惩罚降低。",
+    "减少保险丝需求，保留最低需求。",
+    "降低开灯耗电。",
+    "技能网中心，免费保留。",
+    "每级金币收入提高20%，额外增加1点构筑威胁。",
+    "携带金币时，每级降低10%噪音。",
+    "开箱时有一定概率获得双倍金币。",
+    "低理智时增加移动速度。",
+    "静止时降低理智流失，持续时间有上限。",
+    "在烟雾中冲刺不发出脚步声。",
+    "静止蓄势后，接下来的短暂移动无声。",
+    "静止三秒后隐去身形，以移动速度为代价。",
+    "低理智时自动花费局内金币换取理智。",
+    "箱子金币有一半概率翻倍，一半概率落空。",
+    "金币档位提供移动加成，最高20%。",
+    "扩大被抓后的挣脱窗口。",
+    "受击后获得三秒移动加成。",
+    "每局一次，在清道夫抓住你时反制。",
+    "内部节点，不向玩家开放。",
+    "反击疾行生效期间，暂停被动理智流失；直接受击仍正常扣除理智。",
+    "扳手成功击退后，获得一秒反击疾行。",
+    "附近存在被硬直的听声鬼时，扳手冷却恢复加快50%。",
+    "玩偶被扑碎后，额外牵制该听声鬼四秒。",
+    "静息脉冲的持续时间从四秒延长至六秒。","每层一次，电量耗尽时自动恢复12电量。","配电箱通电后揭示出口附近区域。","每层一次，静止躲藏三秒后恢复20体力。","释放静息脉冲时揭示三格内的地图。","电量低于25%时手摇发电不会制造噪声。",
+};
+const char* SkillDisplayName(int id) {
+    if(id<0 || id>=SKILL_COUNT)return "?";
+    return g_lang==LANG_ZH?kSkillNameZh[id]:skillDefs[id].name;
+}
+const char* SkillDisplayDescription(int id) {
+    if(id<0 || id>=SKILL_COUNT)return "";
+    return g_lang==LANG_ZH?kSkillDescZh[id]:skillDefs[id].desc;
+}
+float SkillCounterCooldownRate(void) {
+    if(!SkillOwned(SK_COUNTER_OPENING))return 1.0f;
+    for(int i=0;i<MON_HUNTER_MAX;i++) if(monHunters[i].active && monHunters[i].stun>0.0f) {
+        float x=monHunters[i].x-posX,y=monHunters[i].y-posY;
+        if(x*x+y*y<=16.0f)return 1.5f;
+    }
+    return 1.0f;
+}
+float SkillDecoyHoldSeconds(void) { return SkillOwned(SK_COUNTER_FEINT)?14.0f:10.0f;
+     }
+
+int SkillFindByName(const char* query) {
+    if(!query || !query[0])return -1;
+    for(int id=0;id<SKILL_COUNT;id++)if(SkillIsPlayerFacing(id)){
+        if(strstr(skillDefs[id].name,query) || strstr(kSkillNameZh[id],query))return id;
+    }
+    return -1;
+}

@@ -4,7 +4,21 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "difficulty.h"
+#include "monster_rules.h"
+#include "hush.h"
+#include "room_theme.h"
 #include "common.h"
+#include "wallet.h"
+#include "economy.h"
+#include "bestiary.h"
+#include "campaign.h"
+#include "daily.h"
+#include "events.h"
+#include "item_effects.h"
+#include "lang.h"
+#include "run_stats.h"
+#include "state.h"
+#include "threat.h"
 #include "sound_propagation.h"
 #include "sound_event.h"
 #include "music.h"
@@ -121,35 +135,17 @@ float staminaIdle = 0.0f;        /* 停止冲刺后的恢复延迟 */
    「即使在最深的一层 + HUNTED，怪也不会跑得比玩家快」。 */
 static float MonsterSpeedFor(int level, float base, float modMul) {
     if (level < 1) level = 1;
-    float s = base + MONSTER_SPEED_STEP * (float)(level - 1);
-    if (s > MONSTER_SPEED_MAX) s = MONSTER_SPEED_MAX;
-    s *= modMul;
-    if (s > MONSTER_SPEED_FINAL_MAX) s = MONSTER_SPEED_FINAL_MAX;
-
-    /* ==================================================================
-     * v7 第 ㊿ 轮：**THREAT 的速度加成回来了，但先修寻路**
-     * ==================================================================
-     * 第 ③ 轮把上限换成 ThreatSpeedCap()（2.05~2.33）后，
-     * 用户实机反馈「听声鬼会瞬移」。
-     *
-     * 真正的原因不是速度本身，是**寻路重算间隔跟不上**：
-     * 原来每 0.45 秒才 MonPath() 一次，速度 2.33 时这 0.45 秒里
-     * 怪物已经走了 1.05 格 —— 切角、穿墙、看起来就是"瞬移"。
-     *
-     * 修法两件一起做：
-     *   ① repath 间隔 0.45 → 0.22（见下面 Hunt 分支）
-     *   ② 速度上限收敛到 2.20（原文 2.10，仍 < 玩家冲刺 3.0）
-     * ================================================================== */
-    {
-        extern float ThreatSpeedCap(void);
-        float hard = ThreatSpeedCap();
-        if (hard > 2.20f) hard = 2.20f;      /* 不许超过 2.20 */
-        if (hard < MONSTER_SPEED_FINAL_MAX) hard = MONSTER_SPEED_FINAL_MAX;
-        if (s > hard) s = hard;
-    }
-
-    return s;
+    if (!isfinite(base) || base < 0.0f) base = 0.0f;
+    if (!isfinite(modMul) || modMul < 0.0f) modMul = 1.0f;
+    float speed = base + MONSTER_SPEED_STEP * (float)(level - 1);
+    if (speed > MONSTER_SPEED_MAX) speed = MONSTER_SPEED_MAX;
+    /* Threat affects the result and its cap, instead of raising a cap after clipping. */
+    speed = speed * modMul + ThreatValue() * 0.008f;
+    float cap = ThreatSpeedCap();
+    if (speed > cap) speed = cap;
+    return speed;
 }
+
 
 
 /* v3.3 胶水：这个位置有没有粘胶区域。返回 1 = 踩到了。
@@ -185,7 +181,7 @@ static float HitCooldownFor(int level) {
        第 ③ 轮我在报告里写「五项效果全部接线」——
        实际上 ThreatCooldownDelta 一直是死代码。
        这是唯一一项影响"你多久能被抓第二次"的效果。 */
-    { extern float ThreatCooldownDelta(void); t += ThreatCooldownDelta(); }
+    {  t += ThreatCooldownDelta(); }
     if (t < HIT_COOLDOWN_MIN) t = HIT_COOLDOWN_MIN;
     if (t < 0.25f) t = 0.25f;          /* 硬下限：再强也不许贴脸连抓 */
     return t;
@@ -290,17 +286,17 @@ int  CatchCountThisRun(void)  { return s_catchCountRun; }
 void CatchCountResetRun(void) { s_catchCountRun = 0; }
 
 void SpawnMonster(void) {
-    monster.active = 1;
-    monster.state = 0;
-    monster.speed = MonsterSpeedFor(currentLevel, MONSTER_SPEED_BASE, modSpeedMul);
-    monster.pathLen = 0;
-    monster.pathIdx = 0;
-    monster.repath = 0.0f;
-    monster.suspCool = 0.0f;   /* v2.3.1 */
-    monster.stateTimer = 0.0f;
-    monster.wanderTimer = 1.5f;
-    monster.hitCooldown = HitCooldownFor(currentLevel);
-    monster.growlTimer = 3.0f;
+    Hunter0()->active = 1;
+    Hunter0()->state = 0;
+    Hunter0()->speed = HunterMoveSpeed(0,currentLevel,modSpeedMul,ThreatValue());
+    Hunter0()->pathLen = 0;
+    Hunter0()->pathIdx = 0;
+    Hunter0()->repath = 0.0f;
+    Hunter0()->suspCool = 0.0f;   /* v2.3.1 */
+    Hunter0()->stateTimer = 0.0f;
+    Hunter0()->wanderTimer = 1.5f;
+    Hunter0()->hitCooldown = HitCooldownFor(currentLevel);
+    Hunter0()->growlTimer = 3.0f;
     /* v2.1：Boss 层把寻声鬼强化成 Boss（8 倍血、更大只、更慢） */
     /* 2026-11-06：hp 与 boss 血量倍率整体删除（NO_COMBAT 下全是死数据）。
        BOSS 早已删除，bossLevel 恒为 0，那段 if 从来不跑。 */
@@ -308,23 +304,23 @@ void SpawnMonster(void) {
        所以这一段整体去掉。战役的强度递进改由速度/刷怪节奏承担
        （见 MonsterSpeedFor 与 HUNTER_SPAWN_*_T）。 */
     /* v1.15：护甲 0；抗玻璃（它是被瓶子砸醒的），弱钝击 */
-    monster.armor = 0;
-    monster.resist[DT_SLASH] = 0;
-    monster.resist[DT_BLUNT] = -25;
-    monster.resist[DT_SHARD] = 20;
-    monster.stun = 0.0f;
+    Hunter0()->armor = 0;
+    Hunter0()->resist[DT_SLASH] = 0;
+    Hunter0()->resist[DT_BLUNT] = -25;
+    Hunter0()->resist[DT_SHARD] = 20;
+    Hunter0()->stun = 0.0f;
     for (int t = 0; t < 512; t++) {
         int x = 1 + rand() % (MAP_WIDTH - 2);
         int y = 1 + rand() % (MAP_HEIGHT - 2);
         if (worldMap[y][x]) continue;
         if (Dist2(x + 0.5f, y + 0.5f, posX, posY) < 100.0f) continue;
         if (!SpotClear(x + 0.5f, y + 0.5f, 1.4f, 4, -1)) continue;
-        monster.x = x + 0.5f;
-        monster.y = y + 0.5f;
+        Hunter0()->x = x + 0.5f;
+        Hunter0()->y = y + 0.5f;
         return;
     }
-    monster.x = exitX;
-    monster.y = exitY;
+    Hunter0()->x = exitX;
+    Hunter0()->y = exitY;
 }
 
 int HasLOS(float x0, float y0, float x1, float y1) {
@@ -354,19 +350,11 @@ float noiseSrcX = 0.0f, noiseSrcY = 0.0f;   /* v3.0：听觉用 */
 
 /* v3.3 光球护佑：藏身点 4 格内有没有还亮着的光球。
    有的话，躲在里面更难被搜到 —— 柜门缝隙被外面的光晃着，怪不容易注意到。 */
-static int FlareNearHide(void) {
-    extern Thrown thrown[MAX_THROWN];
-    if (hiddenIn < 0 || hiddenIn >= hideSpotCount) return 0;
-    float hx = hideSpots[hiddenIn].x, hy = hideSpots[hiddenIn].y;
-    for (int i = 0; i < MAX_THROWN; i++) {
-        if (!thrown[i].active) continue;
-        float dx = thrown[i].x - hx, dy = thrown[i].y - hy;
-        if (dx * dx + dy * dy <= 16.0f) return 1;    /* 4 格 */
-    }
-    return 0;
-}
+
 
 void MakeNoise(float x, float y, float radius) {
+    if(radius<=14)RoomThemeRedirectNoise(&x,&y);
+    if(radius<=14 && Dist2(x,y,posX,posY)<.16f)radius*=HushNoiseMul()*RoomThemeNoiseMul();
     /* ==================================================================
      * v7 第 ㊿ 轮：**事件的「怪物听觉」倍率一直是死的**
      * ==================================================================
@@ -377,8 +365,8 @@ void MakeNoise(float x, float y, float radius) {
      * 这里把它接进噪音半径：听觉倍率直接缩放"能传多远"。
      * ================================================================ */
     {
-        extern int levelEvent;
-        extern float EventMonsterHearMul(int);   /* events.c 提供的取值函数 */
+
+           /* events.c 提供的取值函数 */
         float h = EventMonsterHearMul(levelEvent);
         if (h > 0.01f && h != 1.0f) radius *= h;
     }
@@ -391,24 +379,13 @@ void MakeNoise(float x, float y, float radius) {
        原来这段在主循环之后，而前面有 `if (Dist2 > radius) return;`，
        于是「没有怪听见就零反馈」：玩家在空地扔石头，HUD 一点反应都没有。 */
     {
-        extern float noiseDisplay, noiseDisplayTimer, noiseSrcX, noiseSrcY;
-        extern int vanished;
-        if (!vanished) {
-            float k = radius / 15.0f;
-            if (k > 1.0f) k = 1.0f;
-            if (k > noiseDisplay) noiseDisplay = k;
-            noiseDisplayTimer = 2.2f;
-            noiseSrcX = x; noiseSrcY = y;
-        }
+        float k = radius / 15.0f;
+        if (k > 1.0f) k = 1.0f;
+        if (k > noiseDisplay) noiseDisplay = k;
+        noiseDisplayTimer = 2.2f;
+        noiseSrcX = x; noiseSrcY = y;
     }
 
-    /* v3.0 修正：隐身时**只屏蔽远处的噪音，近身噪音仍然生效** ——
-       原来隐身时无条件 return，配上 state 自锁就成了永久隐身。
-       现在 4 格内的噪音照常传出去，玩家不能贴脸敲墙还安全。 */
-    {
-        extern int vanished;
-        if (vanished && radius < 4.0f) return;
-    }
     /* v3.0：**噪音要通知所有追捕者** ——
        原来只写 monster，于是扔瓶子引开对追光鬼/影子/蜘蛛完全无效，
        「用噪音控制敌人」这个逃生核心手法只对三分之一的怪成立。 */
@@ -456,59 +433,14 @@ void MakeNoise(float x, float y, float radius) {
     }
 #endif
 
-    {
-        /* 追光怪仍然直接通知（它不吃"声音"这套逻辑，它只认光） */
-        /* 原来写的是 { &lightBeast, &lightBeast } 而循环只跑 1 次 ——
-           数组第二个元素从来没被用过，属历史残留，直接收成一个。 */
-        Monster* all[1] = { &lightBeast };
-        for (int mi = 0; mi < 1; mi++) {
-            Monster* mm = all[mi];
-            if (!mm->active) continue;
-            float r2 = radius;
-            extern float modNoiseMul;
-            /* v3.0：**引怪工具不吃「安静」倍率** ——
-               玩家买 QUIET LID 是想走路更安静；如果敲击/投掷的声音也跟着缩小，
-               等于「越升级越没法用声音控制敌人」，和核心玩法直接冲突。
-               15 以上的是敲击/投掷，14 以下的是脚步等被动噪音。 */
-            /* v6 **补齐漏乘的倍率** ——
-               原来 SkillQuietMul 只在这里乘一次，而 GoldHearMul / RelicNoiseMul /
-               modNoiseMul 在函数末尾才乘、那时主怪早就通知完了。
-               于是「GHOST SHELL 降噪 45%」和「DEAD SILENCE 事件」对两只主怪完全无效，
-               遗物唯一卖点白买。现在被动噪音把三项一起算。 */
-            if (r2 <= 14.0f) {
-                r2 *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;
-                { extern float GoldHearMul(void), ThreatHearMul(void);
-      r2 *= GoldHearMul() * ThreatHearMul(); }   /* v6：金币 + 威胁都放大听觉 */
-            }
-            if (Dist2(x, y, mm->x, mm->y) > r2 * r2) continue;
-            mm->state = 1;
-            mm->tx = x;
-            mm->ty = y;
-            mm->repath = 0.0f;
-            mm->stateTimer = 0.0f;
-            
+    /* Light beasts have no hearing: sound events never assign their targets. */
 
-/* v3.0 改造树「屏息」：玩家藏着时，追捕者更快放弃搜寻。
-               之前这条补丁没落地（验证报告：BenchHideStealth 在 exe 里 0 个调用点）。 */
-            /* v3.0：屏息 = 改造树 + 技能树 HOLD BREATH，再加上静面 STILL FACE */
-            if (hiddenIn >= 0 && (BenchHideStealth() < 1.0f || HideStealthMul() < 1.0f)) {
-                mm->stateTimer = 1.2f * StillFaceMul();
-            }
-            /* v3.3：光球护佑 —— 藏身点 4 格内有亮着的光球时，
-               怪更快放弃（光晃着柜门缝，它认不准）。 */
-            if (hiddenIn >= 0 && FlareNearHide()) {
-                if (mm->stateTimer > 0.8f) mm->stateTimer = 0.8f;
-            }
-
-        }
-    }
-    extern float modNoiseMul;
     /* v6 **金币招怪**：携带金币越多，怪物听得越远。
        这是「奖励就是风险」原则在 CANITY 的落点 ——
        钱让你变强，同时也让你更容易被听见。 */
     {
-        extern float GoldHearMul(void), ThreatHearMul(void), CampaignNoiseAlertMul(void);
-        radius *= GoldHearMul() * ThreatHearMul() * CampaignNoiseAlertMul();   /* v6：金币 + 威胁 + 战役 */
+
+        radius *= EconomyHearMul() * CampaignNoiseAlertMul();   /* v6：金币 + 威胁 + 战役 */
     }
     radius *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;   /* QUIET LID + 遗物 + 事件 */
     /* v3.3：盲螨只认声音。它原来每帧直接朝玩家冲刺，所以玩家“静音走路”
@@ -521,16 +453,16 @@ void MakeNoise(float x, float y, float radius) {
         e->tx = x; e->ty = y;
         e->timer = 0.0f;
     }
-    if (!monster.active) return;
-    if (Dist2(x, y, monster.x, monster.y) > radius * radius) return;
-    monster.state = 1;
-    monster.tx = x;
-    monster.ty = y;
-    monster.repath = 0.0f;
-    monster.stateTimer = 0.0f;
+    if (!Hunter0()->active) return;
+    if (Dist2(x, y, Hunter0()->x, Hunter0()->y) > radius * radius) return;
+    Hunter0()->state = 1;
+    Hunter0()->tx = x;
+    Hunter0()->ty = y;
+    Hunter0()->repath = 0.0f;
+    Hunter0()->stateTimer = 0.0f;
     /* v3.0：记录一次噪音事件，供 HUD 显示 */
     {
-        extern float noiseDisplay, noiseDisplayTimer;
+
         float k = radius / 22.0f;
         if (k > 1.0f) k = 1.0f;
         if (k > noiseDisplay) noiseDisplay = k;
@@ -546,6 +478,9 @@ static void SpawnOneLightBeast(Monster* L) {
        一并带过来，光敏怪会开局就沿着别人的路走、还带着别人的无敌时间。
        这里只借用它的类型，清干净状态再重置。 */
     memset(L, 0, sizeof(lightBeast));
+    int index=(int)(L-lightBeasts);
+    if(currentLevel<MonsterMinimumFloor(SPAWN_LIGHT) ||
+       (index==1 && currentLevel<2 && GoldTier()<3))return;
     L->active = 1;
     L->state = 0;
     L->speed = MonsterSpeedFor(currentLevel, LIGHTBEAST_SPEED_BASE, modSpeedMul);
@@ -567,22 +502,24 @@ static void SpawnOneLightBeast(Monster* L) {
         int y = 1 + rand() % (MAP_HEIGHT - 2);
         if (worldMap[y][x]) continue;
         if (Dist2(x + 0.5f, y + 0.5f, posX, posY) < 144.0f) continue;
-        if (monster.active && Dist2(x + 0.5f, y + 0.5f, monster.x, monster.y) < 4.0f) continue;
+        if (Hunter0()->active && Dist2(x + 0.5f, y + 0.5f, Hunter0()->x, Hunter0()->y) < 4.0f) continue;
         if (!SpotClear(x + 0.5f, y + 0.5f, 1.4f, 4, -1)) continue;
         L->x = x + 0.5f;
         L->y = y + 0.5f;
         return;
     }
-    L->x = exitX;
-    L->y = exitY;
+    L->active = 0; /* No valid spawn cell: never stack bodies on the exit. */
 }
 
-void SpawnLightBeast(void)  { SpawnOneLightBeast(&lightBeasts[0]); }
-void SpawnLightBeast2(void) { SpawnOneLightBeast(&lightBeasts[1]); }
+void SpawnLightBeast(void) {memset(lightBeasts,0,sizeof(lightBeasts));if(rand()%100<MonsterFloorChance(SPAWN_LIGHT,currentLevel))SpawnOneLightBeast(&lightBeasts[0]);}
+void SpawnLightBeast2(void) {
+    if(currentLevel>=3 || GoldTier()>=3 || ThreatValue()>=4)SpawnOneLightBeast(&lightBeasts[1]);
+}
 
 /* 2026-11-06：参数化成"更新指定那只"。
    照抄听声鬼 UpdateOneHunter(Monster* M, float dt) 的做法。 */
 static void UpdateOneLightBeast(Monster* L, float dt) {
+    if (L->active) L->speed = MonsterSpeedFor(currentLevel,LIGHTBEAST_SPEED_BASE,modSpeedMul);
     /* v3.0：**光敏怪也要更新朝向和步频** ——
        原来它从不更新 facing/walkPhase，画出来永远是朝 +X、双腿不动。 */
     {
@@ -610,12 +547,12 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
     /* 目标：看得见的玩家（手电开着）优先，其次是地上的荧光棒 */
     float tx = 0.0f, ty = 0.0f;
     int has = 0;
-    if (flashlightOn && battery > 0.0f && Dist2(posX, posY, L->x, L->y) < 256.0f &&
+    if (hiddenIn<0 && flashlightOn && battery > 0.0f && Dist2(posX, posY, L->x, L->y) < 256.0f &&
         HasLOS(L->x, L->y, posX, posY)) {
         tx = posX; ty = posY; has = 1;
     } else {
         for (int i = 0; i < MAX_THROWN; i++) {
-            if (!thrown[i].active || thrown[i].type != 0) continue;
+            if (!thrown[i].active || (thrown[i].type != 0 && thrown[i].type != 9)) continue;
             if (Dist2(thrown[i].x, thrown[i].y, L->x, L->y) < 256.0f &&
                 HasLOS(L->x, L->y, thrown[i].x, thrown[i].y)) {
                 tx = thrown[i].x; ty = thrown[i].y; has = 1; break;
@@ -624,6 +561,9 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
     }
 
     if (has) {
+        float side=L==&lightBeasts[0]?-.28f:.28f;
+        float ax=tx+side,ay=ty-side;
+        if(ax>1 && ay>1 && ax<MAP_WIDTH-1 && ay<MAP_HEIGHT-1 && !worldMap[(int)ay][(int)ax] && HasLOS(tx,ty,ax,ay)){tx=ax;ty=ay;}
         L->state = 1;
         L->tx = tx; L->ty = ty;
         L->repath -= dt;
@@ -656,8 +596,9 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
             /* v3.3：追光鬼同样会被胶水减速 */
     float step = L->speed * dt * (InGlue(L->x, L->y) ? GLUE_MONSTER_MUL : 1.0f);
             if (step > d) step = d;
-            L->x += dx / d * step;
-            L->y += dy / d * step;
+            float nx=L->x+dx/d*step, ny=L->y+dy/d*step;
+            if(!worldMap[(int)ny][(int)nx]){L->x=nx;L->y=ny;}
+            else {L->pathLen=0;L->repath=0;}
         }
     }
 
@@ -670,8 +611,8 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
         sanity -= 14.0f;
             }
         if (sanity < 0.0f) sanity = 0.0f;
-        extern int tookDamage;
-        { extern int floorTookDamage; floorTookDamage = 1; }
+
+        {  floorTookDamage = 1; }
         tookDamage = 1;
         healFlash = 0.16f;
         if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
@@ -750,6 +691,7 @@ static int   s_hunterSpawned = 1;   /* 第一只开局就在，所以从 1 算�
 void ResetSecondSpawn(void) {
     s_hunterSpawnT = 0.0f;
     s_hunterSpawned = 1;
+    /* The first hunter remains resident, as in the original population model. */
 }
 
 /* 当前活着几只听声鬼 */
@@ -825,8 +767,7 @@ static int PlaceHunter(int idx) {
          * 路径算出来了、pathIdx 也在推进，但 step = speed*dt = 0，
          * 于是一动不动。调试输出里 hunter2/hunter3 的 speed 就是 0.00。
          * ============================================================ */
-        M->speed = MonsterSpeedFor(currentLevel, MONSTER_SPEED_BASE, modSpeedMul)
-                 * (idx == 2 ? HUNTER3_SPEED_MUL : 1.0f);
+        M->speed = HunterMoveSpeed(idx,currentLevel,modSpeedMul,ThreatValue());
         M->x = x;
         M->y = y;
         M->tx = posX;
@@ -845,11 +786,10 @@ static int PlaceHunter(int idx) {
         M->prevY = y;
 
         /* v2.4-beta B02：这一步来自**它所在的方向**，不是正前方 */
-        { extern void AudioPlayWorld(int, float, float, float, float, int);
+        { 
           AudioPlayWorld(SFX_WARDEN, x, y, 0.55f, 20.0f, 2); }
-        pickupMsg = (idx == 1) ? "A SECOND SET OF FOOTSTEPS..."
-                               : "FOOTSTEPS FROM EVERY SIDE...";
-        pickupMsgTimer = 2.2f;
+        (void)0; /* Enemy encounter narration removed. */
+        (void)0; /* No encounter-toast timer. */
         return 1;
     }
     return 0;
@@ -881,8 +821,8 @@ void TestSummonAllHunters(void) {
     /* 调度器别再补了 —— 三只已经全在场 */
     s_hunterSpawned = MON_HUNTER_MAX;
 
-    pickupMsg = "DEBUG: 3 SOUND HUNTERS";
-    pickupMsgTimer = 2.0f;
+    (void)0; /* Enemy encounter narration removed. */
+    (void)0; /* No encounter-toast timer. */
     uiDirty = 1;
     PlaySfx(SFX_WARDEN, 0.9f);
 }
@@ -893,16 +833,17 @@ void TickSecondSpawn(float dt) {
 
     /* 玩家在出口附近时不刷 —— 别在过门的瞬间糊一只到脸上 */
     {
-        extern int breakerOpen, exitChoiceOpen;
+
         if (exitChoiceOpen) return;
         if (breakerOpen) {
-            extern float Dist2(float, float, float, float);
-            extern float exitX, exitY;
+
+
             if (Dist2(posX, posY, exitX, exitY) < 9.0f) return;
         }
     }
 
     s_hunterSpawnT += dt;
+    if(!monHunters[0].active && s_hunterSpawnT>=8.0f)PlaceHunter(0);
 
     /* ==================================================================
      * 第 5 轮：**喘息窗口**（DiffBreathWindow）
@@ -918,15 +859,18 @@ void TickSecondSpawn(float dt) {
     } else {
         s_breathT = 0.0f;
     }
-    if (s_hunterSpawned >= MON_HUNTER_MAX) return;
+    if (s_hunterSpawned >= MON_HUNTER_MAX || currentLevel==1) return;
+    int pressure=GoldTier()+(int)floorf(ThreatValue());
+    if(s_hunterSpawned==1 && currentLevel<2 && pressure<2)return;
+    if(s_hunterSpawned==2 && currentLevel<4 && pressure<6)return;
 
     /* 威胁越高来得越早（保留原来的两个修正，但上限不超过 25%） */
     float adv = 0.0f;
-    { extern float ThreatSpawnAdvance(void); adv = ThreatSpawnAdvance(); }
-    { extern float DailySecondSpawnOffset(void); adv -= DailySecondSpawnOffset(); }
+    {  adv = ThreatSpawnAdvance(); }
+    {  adv -= DailySecondSpawnOffset(); }
 
     /* 第 2 轮：难度把间隔拉长/缩短（轻松 ×1.55 / 硬核 ×0.72） */
-    float base = ((s_hunterSpawned == 1) ? HUNTER_SPAWN_2_T : HUNTER_SPAWN_3_T)
+    float base = (HunterSpawnDelay(currentLevel)*s_hunterSpawned)
                  * DiffThreatIntervalMul();
     if (adv > base * 0.25f) adv = base * 0.25f;
     if (adv < 0.0f) adv = 0.0f;
@@ -980,14 +924,17 @@ void MonsterSearchAround(Monster* m, float cx, float cy) {
 }
 
 
-static void UpdateOneHunter(Monster* M, float dt) {
+/* Private hunter phases. A zero result stops the original update tick. */
+static void HunterPerceive(Monster* M, float dt) {
+    (void)dt;
+
     /* ===== v2.4.14 **怪物扑到玩偶上** =====
        用户反馈：怪贴到玩偶上之后「不消失、没有实际反应、直接走开了」。
        这里补上：怪进入 0.7 格内 → 玩偶当场炸掉（消失）+ 怪顿一下 +
        接下来 10 秒不再刷新目标（suspCool = 10），所以它会原地乱走而不是立刻改追别的。
     */
     {
-        extern Decoy decoysArr[];
+
         for (int di = 0; di < MAX_DECOY; di++) {
             if (!decoysArr[di].active || !decoysArr[di].armed) continue;
             float ddx = M->x - decoysArr[di].x;
@@ -996,21 +943,21 @@ static void UpdateOneHunter(Monster* M, float dt) {
 
             decoysArr[di].active = 0;      /* 玩偶被扑碎 */
             decoysArr[di].armed  = 0;
-            M->stun = 10.0f;             /* v2.4.15：**定身 10 秒**（用户要求） */
+            M->stun = SkillDecoyHoldSeconds();             /* v2.4.15：**定身 10 秒**（用户要求） */
             M->state = 0;
-            M->suspCool = 10.0f;           /* **10 秒内不再刷新目标** */
+            M->suspCool = SkillDecoyHoldSeconds();           /* **10 秒内不再刷新目标** */
             M->suspTarget = -1;
             M->pathLen = 0;
             M->pathIdx = 0;
             M->repath = 0.0f;
             PlaySfx(SFX_GLASS, 1.0f);
             {
-                extern const char* pickupMsg;
-                extern float pickupMsgTimer;
-                extern int   uiDirty;
-                extern int   g_lang;
-                pickupMsg = (g_lang == 1) ? "玩偶被扑碎了" : "DECOY SHREDDED";
-                pickupMsgTimer = 1.4f;
+
+
+
+
+                (void)0; /* Enemy encounter narration removed. */
+                (void)0; /* No encounter-toast timer. */
                 uiDirty = 1;
             }
             break;
@@ -1026,7 +973,7 @@ static void UpdateOneHunter(Monster* M, float dt) {
         float sdx = posX - M->x, sdy = posY - M->y;
         float sd2 = sdx * sdx + sdy * sdy;
         /* v3.0：BLACKOUT 生效期间追捕者完全失明 */
-        extern float ultTimer;
+
         float sight = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
         if (ultTimer > 0.0f) sight = 0.0f;
         if (sd2 < sight * sight && HasLOS(M->x, M->y, posX, posY)) {
@@ -1036,7 +983,7 @@ static void UpdateOneHunter(Monster* M, float dt) {
             M->sightHold += dt;
             if (M->state != 1 && M->sightHold >= 0.6f) {
                 M->state = 1;
-        { extern int floorSpotted, runSpotted; floorSpotted = 1; runSpotted = 1; }
+        {  floorSpotted = 1; runSpotted = 1; }
                 M->repath = 0.0f;
                 M->stateTimer = 0.0f;
                 PlaySfx(SFX_HEART, 0.55f);   /* 心跳：它发现你了 */
@@ -1135,19 +1082,9 @@ static void UpdateOneHunter(Monster* M, float dt) {
         }
     }
 
-    /* v3.0 消失：隐身时追捕者立刻丢失目标 */
-    {
-        extern int vanished;
-        if (vanished && M->active) {
-            M->state = 0;
-            M->pathLen = 0;
-            M->pathIdx = 0;
-        }
-    }
-
     /* v3.0：噪音显示衰减 */
     {
-        extern float noiseDisplay, noiseDisplayTimer;
+
         if (noiseDisplayTimer > 0.0f) {
             noiseDisplayTimer -= dt;
             if (noiseDisplayTimer <= 0.0f) noiseDisplay = 0.0f;
@@ -1162,7 +1099,12 @@ static void UpdateOneHunter(Monster* M, float dt) {
         M->prevX = M->x;
         M->prevY = M->y;
     }
-    if (!M->active) return;
+
+}
+
+static int HunterUpdateState(Monster* M, float dt) {
+    (void)dt;
+    if (!M->active) return 0;
     /* v1.8：玩家进安全屋 → 怪物立刻丢目标 */
     if (playerInSafe && M->state != 0) { M->state = 0; M->pathLen = 0; M->pathIdx = 0; }
     if (M->hitCooldown > 0.0f) M->hitCooldown -= dt;
@@ -1172,7 +1114,7 @@ static void UpdateOneHunter(Monster* M, float dt) {
     if (M->stun > 0.0f) {
         M->stun -= dt;
         if (M->stun < 0.0f) M->stun = 0.0f;
-        return;
+        return 0;
     }
 
     if (M->state == 1) {
@@ -1192,18 +1134,19 @@ static void UpdateOneHunter(Monster* M, float dt) {
                  * ============================================================ */
                 MonPathFor(M, (int)M->x, (int)M->y, (int)M->tx, (int)M->ty);
         }
-        if (Dist2(M->x, M->y, M->tx, M->ty) < 0.45f) {
+        if (Dist2(M->x, M->y, M->tx, M->ty) < 0.45f &&
+            !(!playerInSafe && hiddenIn<0 && ultTimer<=0 && M->sightHold>0 && HasLOS(M->x,M->y,posX,posY))) {
             M->state = 2;
                 /* v3.4：甩脱追捕给金币 —— 这是逃生玩法的核心动作，
                    但它原来是零奖励，玩家没有「主动甩怪」的动力。 */
                 {
-                    extern int carryGold, totalGoldEarned;
-                    extern const char* pickupMsg;
-                    extern float pickupMsgTimer;
-                    carryGold += GOLD_ESCAPE;
-                    totalGoldEarned += GOLD_ESCAPE;
-                    pickupMsg = "ESCAPED  +GOLD";
-                    pickupMsgTimer = 1.2f;
+
+
+
+                    /* Escape reward is owned by the verified pursuit ledger. */
+                    /* Investigating a noise is not an escape. */
+                    (void)0; /* Enemy encounter narration removed. */
+                    (void)0; /* No encounter-toast timer. */
                 }          /* 到了声源，原地搜一圈 */
             /* B04：把"它最后察觉你的地方"锁成搜查锚点。
                没有这一步，memX/memY 一直是 0 —— 它会跑去地图左上角搜。 */
@@ -1218,15 +1161,16 @@ static void UpdateOneHunter(Monster* M, float dt) {
            用户实测「怪物不会离开」：只要视线通就一直贴着，
            永远不放弃也永远抓不到（抓取要求 0.74 格内）。
            追 8 秒还没抓到就降级为搜寻（3 秒），给玩家脱身窗口。 */
-        M->huntTimer += dt;
-        if (M->huntTimer > (HUNT_CHASE_MAX + ThreatChaseBonus())
+        if(!playerInSafe && hiddenIn<0 && ultTimer<=0 && M->sightHold>0){M->tx=posX;M->ty=posY;M->huntTimer=0;}
+        else M->huntTimer += dt;
+        if (!CampaignNoGiveUp() && M->huntTimer > (HUNT_CHASE_MAX + ThreatChaseBonus())
                         * (HunterIndex(M) == 2 ? HUNTER3_CHASE_MUL : 1.0f)) {
             /* v7 第 50 轮：战役第 5 关的「永不放弃」原来只对第一只猎手生效
                （第一只在上面有 CampaignNoGiveUp 判断，这只没有）
                → 第 5 关实际上只有一半是"永不放弃"。 */
-            { extern int CampaignNoGiveUp(void);
+            { 
               if (CampaignNoGiveUp()) M->huntTimer = 0.0f; }
-            { extern void BestiaryMarkEscaped(int); BestiaryMarkEscaped(0); }   /* v6 图鉴：甩掉了 */
+            {  /* Escape knowledge uses the same verified ledger as gold. */ }   /* v6 图鉴：甩掉了 */
             /* v3.0：**超时后要真的走开，不能原地搜** ——
                用户截图「还是在堵门」：原来超时只切到 state=2「原地搜寻」，
                而原地就在玩家旁边，于是它永远堵在那儿。
@@ -1278,6 +1222,12 @@ static void UpdateOneHunter(Monster* M, float dt) {
     }
 
     /* 沿路径走 */
+
+    return 1;
+}
+
+static void HunterFollowPath(Monster* M, float dt) {
+    (void)dt;
     if (M->pathIdx < M->pathLen) {
         float tx = M->path[M->pathIdx][0] + 0.5f;
         float ty = M->path[M->pathIdx][1] + 0.5f;
@@ -1294,6 +1244,11 @@ static void UpdateOneHunter(Monster* M, float dt) {
         }
     }
 
+
+}
+
+static int HunterResolveContact(Monster* M, float dt) {
+    (void)dt;
     /* 靠近时发出低吼（也是给玩家的听觉提示） */
     float pd2 = Dist2(M->x, M->y, posX, posY);
     if (pd2 < 36.0f && M->growlTimer <= 0.0f) {
@@ -1304,19 +1259,7 @@ static void UpdateOneHunter(Monster* M, float dt) {
     /* 抓到玩家：掉理智 + 怪被弹开（以后可以换成真正的地图事件） */
     /* v3.3：**诱饵先替玩家挨这一下** ——
        附近有激活的玩偶就抵掉，玩家不掉理智，怪物还会转向玩偶。 */
-    /* v3.4 CATCH BREAK（局内树 id 14）：每局 2 次，被抓时自动挣脱不掉理智。
-       优先级：诱饵 > CATCH BREAK > 正常受伤。 */
-    extern int catchBreakUsed;   /* v3.4 CATCH BREAK 计数 */
-    if (!playerInSafe && M->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R &&
-        BenchCatchBreak() && catchBreakUsed < 2) {
-        catchBreakUsed++;
-        M->state = 2;
-        M->pathLen = 0;
-        M->pathIdx = 0;
-        pickupMsg = "BROKE FREE!";
-        pickupMsgTimer = 1.2f;
-        PlaySfx(SFX_GLASS, 0.9f);
-    } else     if (!playerInSafe && M->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R && DecoyIntercept()) {
+    if (!playerInSafe && M->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R && DecoyIntercept()) {
         M->hitCooldown = HitCooldownFor(currentLevel);
         for (int di = 0; di < MAX_DECOY; di++) {
             if (decoysArr[di].active && decoysArr[di].armed) {
@@ -1336,21 +1279,21 @@ static void UpdateOneHunter(Monster* M, float dt) {
            原来只包住了扣理智那一行，后面的红屏/尖叫/tookDamage/
            怪物重生全在 if 外照跑 —— 怪贴到 0.55 格内照样红屏，
            而且 tookDamage=1 会让 PERFECT ESCAPE 成就失效。 */
-        /* v3.0 改造树「假死」：每局一次，被抓住时骗过怪物 */
+        /* Persistent PLAY DEAD: once per run. */
         {
-            extern int playDeadUsed;
-            extern int BenchPlayDead(void);
-            /* v3.0：假死现在技能树和改造树任一拥有都可用 */
+
+
+            /* The persistent skill tree owns PLAY DEAD. */
             if (PlayDeadAvailable() && !playDeadUsed) {
                 playDeadUsed = 1;
                 M->stun = 2.5f;
                 M->state = 0;
                 M->pathLen = 0;
                 M->hitCooldown = 2.5f;
-                pickupMsgTimer = 2.0f;
+                (void)0; /* No encounter-toast timer. */
                 PlaySfx(SFX_HEART, 1.0f);
                 uiDirty = 1;
-                return;
+                return 0;
             }
         }
 
@@ -1358,9 +1301,9 @@ static void UpdateOneHunter(Monster* M, float dt) {
             /* v3.0：厚皮三层叠加 —— 改造树 -15%、局内 THICK HIDE -35% */
             sanity -= catchLoss * RunDamageTakenMul() * BenchFearDamageMul() * ThickHideMul();
             CatchCountBump();   /* v2.4.93：这一次记账，下次更疼 */
-            { extern void CatchCountBumpRun(void); CatchCountBumpRun(); }
-            { extern void BestiaryMarkCaught(int); BestiaryMarkCaught(0); }   /* 图鉴：任何一只听声鬼抓到都算 */
-            { extern void FlankOnCaught(void); FlankOnCaught(); }   /* v2.4.96 封喉者扑上来 */
+            {  CatchCountBumpRun(); }
+            {  BestiaryMarkCaught(BST_ID_HUNTER); }   /* 图鉴：任何一只听声鬼抓到都算 */
+            {  FlankOnCaught(); }   /* v2.4.96 封喉者扑上来 */
 
             /* ============================================================
              * **第 2 只（矮个子）的特殊能力：撞到就挂 20% 减速**
@@ -1371,7 +1314,7 @@ static void UpdateOneHunter(Monster* M, float dt) {
              * 所以 0.20 / 0.45 ≈ 0.444 正好等于 20% 减速。
              * ============================================================ */
             if (HunterIndex(M) == 1) {
-                extern void ApplyFx(int, float, float);
+
                 ApplyFx(FX_SLOW, HUNTER2_SLOW_PCT / 0.45f, HUNTER2_SLOW_T);
             }
 
@@ -1379,8 +1322,8 @@ static void UpdateOneHunter(Monster* M, float dt) {
     AddShake(0.30f, 0.22f);
     PlaySfx(SFX_HEART, 0.95f);
         if (sanity < 0.0f) sanity = 0.0f;
-        extern int tookDamage;
-        { extern int floorTookDamage; floorTookDamage = 1; }
+
+        {  floorTookDamage = 1; }
         tookDamage = 1;
         healFlash = 0.18f;
         if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
@@ -1412,7 +1355,13 @@ static void UpdateOneHunter(Monster* M, float dt) {
         }
     }
     /* v3.0：用实际位移更新朝向和走路相位（全局 M 单例） */
-    {
+    
+    return 1;
+}
+
+static void HunterUpdateFacing(Monster* M, float dt) {
+    (void)dt;
+{
         float mdx = M->x - M->prevX;
         float mdy = M->y - M->prevY;
         float d2 = mdx * mdx + mdy * mdy;
@@ -1427,11 +1376,14 @@ static void UpdateOneHunter(Monster* M, float dt) {
            于是它永远站在那儿等你出来。
            现在统计「连续没移动」的时长，超过 2 秒就当作它跟丢了：
            清空目标、回到游荡、并给一个新的漫游点，逼它走开。 */
-        if (d2 > 0.0004f) {          /* 这一帧动了（约 2cm） */
+        if (d2 > (.04f*dt)*(.04f*dt)) {          /* 这一帧动了（约 2cm） */
             M->stillTimer = 0.0f;
         } else {
             M->stillTimer += dt;
-            if (M->stillTimer > 2.0f && M->state != 0) {
+            if(M->stillTimer>1.0f && M->state==1 && !playerInSafe && hiddenIn<0 && M->sightHold>0){
+                M->pathLen=0;M->pathIdx=0;M->repath=0;M->stillTimer=0;
+                MonPathFor(M,(int)M->x,(int)M->y,(int)posX,(int)posY);
+            }else if (M->stillTimer > 2.0f) {
                 M->state = 0;
                 M->pathLen = 0;
                 M->pathIdx = 0;
@@ -1445,13 +1397,24 @@ static void UpdateOneHunter(Monster* M, float dt) {
         M->prevX = M->x;
         M->prevY = M->y;
     }
+
 }
+
+static void UpdateOneHunter(Monster* M, float dt) {
+    if (M->active) M->speed = HunterMoveSpeed((int)(M-monHunters),currentLevel,modSpeedMul,ThreatValue());
+    HunterPerceive(M, dt);
+    if (!HunterUpdateState(M, dt)) return;
+    HunterFollowPath(M, dt);
+    if (!HunterResolveContact(M, dt)) return;
+    HunterUpdateFacing(M, dt);
+}
+
 
 
 /* 三个入口都是薄壳 —— 逻辑只有一份（UpdateOneHunter）。
    原来 UpdateMonster / UpdateMonster2 是 96% 相同的两份拷贝，
    第二只漏了冷却、漏了「永不放弃」，都是复制粘贴带出来的。 */
-void UpdateMonster (float dt) { UpdateOneHunter(&monHunters[0], dt); }
+void UpdateMonster (float dt) { if(s_hunterSpawnT<HunterSpawnDelay(currentLevel))return;UpdateOneHunter(&monHunters[0], dt); }
 void UpdateMonster2(float dt) { UpdateOneHunter(&monHunters[1], dt); }
 void UpdateMonster3(float dt) { UpdateOneHunter(&monHunters[2], dt); }
 
@@ -1479,7 +1442,7 @@ static void KnockbackMonster(Monster* m) {
     /* v2.7：接上 STAGGER（瓶子硬直 +0.2s/级）。原来这里写死 MONSTER_STUN，
        导致技能树里买了 STAGGER 完全没反应。 */
     m->stun = MONSTER_STUN + SkillStunAdd();
-    { extern int knockCountRun; knockCountRun++; }   /* v7：DISRUPTOR 成就用 */
+    {  knockCountRun++; }   /* v7：DISRUPTOR 成就用 */
     m->pathLen = 0;
     m->pathIdx = 0;
     m->state = 0;              /* 被打断，重新游荡 */
@@ -1506,7 +1469,7 @@ int ApplyDamage(Monster* m, int base, int type, float sx, float sy) {
     if (!m || !m->active) return 0;
     MakeNoise(m->x, m->y, 14.0f);
     m->stun = 0.35f;
-    { extern int throwHitCountRun; throwHitCountRun++; }   /* v7：PITCHER 成就用 */
+    {  throwHitCountRun++; }   /* v7：PITCHER 成就用 */
     PlaySfx(SFX_GLASS, 0.5f);
     SpawnParticles(m->x, m->y, 2);
     return 0;

@@ -54,6 +54,7 @@ extern int g_bindings[ACT_COUNT];
 extern const char* actionNames[ACT_COUNT];
 int Blocked(float x, float y);
 void GenerateLevel(void);
+int ThemeRoomBudgetForLevel(int level, int training);
 int ShotBlocked(float x, float y);
 int SpotClear(float x, float y, float minD, int selfKind, int selfIdx);
 extern int bestMainScore;
@@ -90,11 +91,12 @@ float GoldExitAt(int level);
 
 float EndlessDepthBonus(int level);
 
-/* 原 game.c 的 static 状态（第 21 轮提升为模块可见） */
-extern int mapHeld;
-
 int PlayerAtExit(void);
 
 float ExtractDepthMul(int level);
+
+
+/* Reconstitute the searchable shell of a departed mimic. */
+void MimicSpawnShell(int slot, float x, float y);
 
 #endif

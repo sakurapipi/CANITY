@@ -15,6 +15,8 @@
  *   反过来避让房间（房间更"硬"，先放）。
  * ================================================================ */
 #include "common.h"
+#include "room_theme.h"
+#include "collapse.h"
 #include "hatch.h"
 #include "cell_meta.h"
 #include "room_template.h"
@@ -33,7 +35,7 @@
  * 跨平台（Windows / Emscripten）序列相同。
  * ================================================================ */
 static unsigned int RoomRand(void) {
-    extern unsigned int rng_world_next(void);
+
     return rng_world_next();
 }
 
@@ -105,6 +107,10 @@ int RoomPropAdd(float x, float y, int kind) {
     /* 搜查次数：货架最多，箱子其次 */
     roomProps[roomPropCount].searchLeft =
         (kind == ROOMPROP_SHELF) ? 3 : 2;
+    if(kind>=ROOMPROP_THEME_FIRST)roomProps[roomPropCount].searchLeft=1;
+    if(kind==ROOMPROP_CRATES)roomProps[roomPropCount].searchLeft=1;
+    if(kind==6)roomProps[roomPropCount].height=.42f;
+    else if(kind>=ROOMPROP_THEME_FIRST)roomProps[roomPropCount].height=.82f;
     roomProps[roomPropCount].searched = 0;
     roomPropCount++;
     return 1;
@@ -134,6 +140,7 @@ int PropBlocksAt(int cx, int cy) {
  * 控制台：柜体(0) + 抬起的斜面板(1)。
  * ================================================================ */
 int RoomPropLayers(int kind, PropLayer* out, int maxOut) {
+    if(kind>=ROOMPROP_THEME_FIRST && kind<=ROOMPROP_THEME_LAST && out && maxOut>0){out[0].baseZ=0;out[0].halfH=kind==6?.42f:.82f;out[0].spr=kind-ROOMPROP_THEME_FIRST;return 1;}
     if (!out || maxOut <= 0) return 0;
 
     if (kind == ROOMPROP_SHELF) {
@@ -205,7 +212,9 @@ static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
     }
     /* C：再放 1~2 个木箱堆 —— 房间不能只有货架一种东西。
        它们走同一套"放一件→验连通→不行就撤"的流程。 */
-    int crates = 1;   /* 2026-11-06：固定 1 堆，不再随机 1~2 */
+    static const int themeProps[7]={5,4,7,6,2,8,9};
+    propKind=themeProps[t->themeId>=0 && t->themeId<7?t->themeId:0];
+    int crates = 0;   /* 2026-11-06：固定 1 堆，不再随机 1~2 */
 
     /* ==================================================================
      * 2026-11-06：**家具只放角落**
@@ -347,7 +356,7 @@ static int RoomReachable(void) {
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++) seen[y][x] = 0;
 
-    if (worldMap[1][1]) return 1;              /* 出生点被墙堵着：这是别的问题，不判死 */
+    if (worldMap[1][1]) return 0;              /* 出生点被墙堵着：这是别的问题，不判死 */
     int head = 0, tail = 0;
     seen[1][1] = 1; qx[tail] = 1; qy[tail] = 1; tail++;
 
@@ -369,7 +378,6 @@ static int RoomReachable(void) {
 
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++) {
-            if (cellMeta[y][x].roomId == 0) continue;
             if (worldMap[y][x]) continue;
             /* 家具自己占的格当然走不到 —— 那是**它挡住**的，不是堵死。
                不排除的话每放一件家具都会判定失败，全部回滚。 */
@@ -515,14 +523,15 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
      * "家具不要堵路"的教训是同一条。
      * ================================================================ */
     {
-        extern int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId);
-        HatchPlaceInRoom(fx + ROOM_BORDER, fy + ROOM_BORDER, t->w, t->h, t->themeId);
+
+        if(!collapsedLevel && !s_collapseGen)HatchPlaceInRoom(fx + ROOM_BORDER, fy + ROOM_BORDER, t->w, t->h, t->themeId);
     }
     return 1;
 }
 
 /* 保留区检查（用工地的**外墙角**判断） */
 static int ReservationsOk(int fx, int fy, int fw, int fh) {
+    if(fx<1 || fy<1 || fx+fw>=MAP_WIDTH || fy+fh>=MAP_HEIGHT)return 0;
 
     for (int y = fy; y < fy + fh; y++) {
         for (int x = fx; x < fx + fw; x++) {
@@ -574,12 +583,8 @@ int RoomTplPlaced[ROOM_TEMPLATE_COUNT];
  * 这样每一段深度的"房间长相"是统一的，玩家能感觉到自己在地下越走越深，
  * 而不是每层随机抽一个完全无关的场景。
  * ================================================================ */
-static int ThemeTemplateAllowed(int tpl, int level) {
-    if (level <= 3)  return (tpl == 4 || tpl == 1);
-    if (level <= 6)  return (tpl == 2 || tpl == 3);
-    if (level <= 9)  return (tpl == 0 || tpl == 5);
-    return (tpl == 6 || tpl == 0);
-}
+static int ThemeTemplateAllowed(int tpl,int level) {return tpl==RoomThemeTemplateForFloor(level);}
+
 
 /* 在 [idMin,idMax] 里挑一个本层允许的模板；挑不到返回 -1 */
 static int PickAllowedTemplate(int idMin, int idMax, int level) {
@@ -640,7 +645,9 @@ static void RoomDumpIfRequested(int placed);
 
 int GenerateThemeRooms(int wantCount) {
     RoomPropReset();
-    if (wantCount <= 0) return 0;
+    roomCount=0;
+    if (wantCount <= 0){RoomThemeBind();return 0;}
+    if(wantCount>1)wantCount=1;
 
     int placed = 0, attempts = 0;
 
@@ -662,6 +669,7 @@ int GenerateThemeRooms(int wantCount) {
         attempts++;
         if (TryPlace(placed, 0, ROOM_TEMPLATE_COUNT - 1)) placed++;
     }
+    RoomThemeBind();
     RoomDumpIfRequested(placed);
     return placed;
 }
@@ -740,9 +748,11 @@ int RoomReplay(int seed, int wantCount) {
     HatchReset();
     if (wantCount <= 0) { roomSeedUsed = 0; RoomPropReset(); return 0; }
     roomSeedUsed = seed;
-    { extern void rng_world_seed(unsigned int);
+    { 
       rng_world_seed((unsigned)seed); }
     return GenerateThemeRooms(wantCount);
 }
 
 int RoomCount(void) { return roomCount; }
+
+void RoomSetCount(int count){roomCount=count<0?0:count>255?255:count;}

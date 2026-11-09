@@ -11,29 +11,29 @@
 #include "steam_zone.h"
 
 
-int  SteamZoneInit(void) { return 0; }
-void SteamZoneUploadSave(const char* path) { (void)path; }
-void SteamZoneShutdown(void) { }
-void SteamZoneTick(float dt) { (void)dt; }
-int  SteamZoneReady(void) { return 0; }
-int  SteamZoneUnlockAchievement(const char* n) { (void)n; return 0; }
-int  SteamZoneHasAchievement(const char* n) { (void)n; return 0; }
-int  SteamZoneCloudUpload(const char* n, const void* d, int b) { (void)n; (void)d; (void)b; return 0; }
-int  SteamZoneCloudDownload(const char* n, void* b, int s) { (void)n; (void)b; (void)s; return -1; }
-int  SteamZoneCloudGetSize(const char* n) { (void)n; return -1; }
-int  SteamZoneCloudExists(const char* n) { (void)n; return 0; }
-void SteamZoneMusicPause(int p) { (void)p; }
-int  SteamZoneMusicPlaying(void) { return 0; }
-void SteamZoneOpenOverlay(const char* d) { (void)d; }
+int  SteamZoneInit(void) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ return 0; }
+void SteamZoneUploadSave(const char* path) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)path; }
+void SteamZoneShutdown(void) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ }
+void SteamZoneTick(float dt) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)dt; }
+int  SteamZoneReady(void) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ return 0; }
+int  SteamZoneUnlockAchievement(const char* n) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)n; return 0; }
+int  SteamZoneHasAchievement(const char* n) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)n; return 0; }
+int  SteamZoneCloudUpload(const char* n, const void* d, int b) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)n; (void)d; (void)b; return 0; }
+int  SteamZoneCloudDownload(const char* n, void* b, int s) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)n; (void)b; (void)s; return -1; }
+int  SteamZoneCloudGetSize(const char* n) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)n; return -1; }
+int  SteamZoneCloudExists(const char* n) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)n; return 0; }
+void SteamZoneMusicPause(int p) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)p; }
+int  SteamZoneMusicPlaying(void) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ return 0; }
+void SteamZoneOpenOverlay(const char* d) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)d; }
 int  SteamZoneCloudDecide(const void* l, int ll, const void* r, int rl, int* pick) {
     (void)l; (void)ll; (void)r; (void)rl; if (pick) *pick = 0; return 0;
 }
-int  SteamZoneCloudSync(const char* n, void* lb, int* bs) { (void)n; (void)lb; (void)bs; return 0; }
-void SteamZoneSetStatInt(const char* n, int v) { (void)n; (void)v; }
-void SteamZoneStoreStats(void) { }
-void SteamZoneSetRichPresence(const char* k, const char* v) { (void)k; (void)v; }
-void SteamZoneMusicDuck(float s) { (void)s; }
-void SteamZoneMusicDuckTick(float dt) { (void)dt; }
-int  SteamZoneUnlockAchievementIndex(int i) { (void)i; return 0; }
+int  SteamZoneCloudSync(const char* n, void* lb, int* bs) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)n; (void)lb; (void)bs; return 0; }
+void SteamZoneSetStatInt(const char* n, int v) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)n; (void)v; }
+void SteamZoneStoreStats(void) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ }
+void SteamZoneSetRichPresence(const char* k, const char* v) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)k; (void)v; }
+void SteamZoneMusicDuck(float s) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)s; }
+void SteamZoneMusicDuckTick(float dt) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)dt; }
+int  SteamZoneUnlockAchievementIndex(int i) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)i; return 0; }
 const char* SteamZoneStatusText(void) { return "WEB"; }
 

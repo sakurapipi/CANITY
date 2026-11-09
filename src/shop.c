@@ -1,4 +1,8 @@
-#include "common.h"   /* 系统头只在 common.h 里出现（模块约定） */
+#include "common.h"
+#include "tutorial.h"
+#include "sprites.h"
+#include "diagnostics.h"
+#include "item_effects.h"   /* 系统头只在 common.h 里出现（模块约定） */
 #include "economy.h"
 #include "ui.h"
 #include "wallet.h"
@@ -14,7 +18,12 @@
 #include "bench.h"
 #include "upgrade_run.h"
 #include "save.h"
+#include "calibration.h"
+#include "music.h"
+#include "run_economy.h"
 
+static float restCooldown=0,refreshCooldown=0;
+static int serviceUses[3]={0};
 int shopPage = SHP_SHOP;
 int shopRow = 0;
 int shopOverlayOpen = 0;   /* v7 第 51 轮：商店浮层 */
@@ -31,6 +40,8 @@ float ShopCooldownOf(int row) {
     return shopCooldown[row];
 }
 void ShopTickCooldown(float dt) {
+    if(!(dt>0))return;
+    restCooldown=fmaxf(0,restCooldown-dt);refreshCooldown=fmaxf(0,refreshCooldown-dt);
     for (int i = 0; i < SHOP_COOLDOWN_ROWS; i++)
         if (shopCooldown[i] > 0.0f) {
             shopCooldown[i] -= dt;
@@ -38,6 +49,7 @@ void ShopTickCooldown(float dt) {
         }
 }
 void ShopResetCooldowns(void) {
+    restCooldown=refreshCooldown=0;memset(serviceUses,0,sizeof(serviceUses));
     for (int i = 0; i < SHOP_COOLDOWN_ROWS; i++) shopCooldown[i] = 0.0f;
 }
 int shopPrice[SHOP_OFFERS] = {0};
@@ -100,48 +112,20 @@ static void rollDiscount(void) {
  * 这一个 bug 解释了这十轮里所有的「商店打不开 / 一按就崩 / 没有日志」。
  * ================================================================ */
 int ShopPriceAt(int row) {
-    /* ==================================================================
-     * 2026-11-06（用户要求）：**相位信标按百分比定价，极其昂贵**
-     * ------------------------------------------------------------------
-     * 必须放在下面的 `row >= SHOP_OFFERS` 守卫**之前** ——
-     * 那个守卫是按"行号"写的，而调用方 buy 路径传进来的是**物品种类**
-     * （shopOffer[row]，0..SHOP_ITEM_KINDS-1）。相位信标是种类 8，
-     * 放守卫后面会被直接返回 0（第一次就是这么红的）。
-     * ================================================================ */
-    if (row == 8) {
-        /* ==================================================================
-         * 2026-11-06 修正（用户：价格过于昂贵，应该是逐渐增加的百分比）
-         * ------------------------------------------------------------------
-         * 原来一律 70%，太狠。改成**随层数递增的百分比**：
-         *   第 1 层 30% → 每层 +5% → 第 11 层起封顶 80%
-         * 前中期买得起，后期变成"要不要为它清空家底"的取舍。
-         * ================================================================ */
-        extern int carryGold, currentLevel;
-        int lv = currentLevel;
-        if (lv < 1) lv = 1;
-        int pct = 30 + (lv - 1) * 5;
-        if (pct > 80) pct = 80;
-        int p = (int)((float)carryGold * (float)pct / 100.0f);
-        if (p < 120) p = 120;          /* 下限也跟着降：前期身上没钱也能攒一攒 */
-        return p;
-    }
-
-    if (row < 0 || row >= SHOP_OFFERS) return 0;
-    /* 价格优先用 ShopOpen 掷出来的 shopPrice[]；
-       没掷过（还没进过商店）就退回物品表 kItemPrice[] ——
-       这样任何一行在任何时候都有价格，不会再出现 0 元。 */
-    int base = shopPrice[row];
-    if (base <= 0) base = kItemPrice[row];
-    if (row == shopDiscountRow && shopDiscountPct > 0.0f) {
-        int p = (int)((float)base * (1.0f - shopDiscountPct) + 0.5f);
-        if (p < 1) p = 1;
-        return p;
+    int base=ShopBasePriceAt(row);
+    if(base<=0)return 0;
+    if(row>=0 && row<SHOP_OFFERS && shopOffer[row]!=8 && row==shopDiscountRow && shopDiscountPct>0.0f) {
+        float rate=shopDiscountPct;
+        if(rate>.8f)rate=.8f;
+        int price=(int)((double)base*(1.0-rate)+.5);
+        return price>0?price:1;
     }
     return base;
 }
 
+
 int ShopIsDiscounted(int row) {
-    return (row == shopDiscountRow && shopDiscountPct > 0.0f) ? 1 : 0;
+    return row>=0 && row<SHOP_OFFERS && shopOffer[row]!=8 && row==shopDiscountRow && shopDiscountPct>0;
 }
 int attachOwned[ATTACH_COUNT];
 
@@ -166,7 +150,11 @@ int AttachPrice(int id) {
 }
 
 /* 商店报价：3 个不重复的配件 */
+int ShopCanOpen(void) {return hiddenIn>=0;}
+
 void ShopOpen(int level) {
+    if(!ShopCanOpen())return;
+    shopOverlayOpen=0;
     /* ================================================================
      * v6 第 ㉚ 轮：**"打开"函数必须自己打开**
      * ================================================================
@@ -220,7 +208,7 @@ void ShopOpen(int level) {
         int pool[SHOP_ITEM_KINDS];
         int n = 0;
         for (int i = 0; i < SHOP_ITEM_KINDS - 1; i++) pool[n++] = i;
-        if (level >= 3 && (rand() % 100) < 25) pool[n++] = 8;
+        /* A phase beacon replaces a single offer in 2% of stock rolls. */
         for (int k = 0; k < SHOP_OFFERS; k++) {
             int pick = rand() % n;
             int kind = pool[pick];
@@ -228,6 +216,7 @@ void ShopOpen(int level) {
             shopOffer[k] = kind;
             shopPrice[k] = kItemPrice[kind];
         }
+        if(rand()%100<2){int slot=rand()%SHOP_OFFERS;shopOffer[slot]=8;shopPrice[slot]=0;}
     }
 }
 
@@ -235,7 +224,7 @@ int ShopPageCount(void) { return SAFEHOUSE_PAGES; }
 
 const char* ShopPageTitle(void) {
     switch (shopPage) {
-    case SHP_BENCH: return Tr("SAFE HOUSE  -  BENCH", "安全屋  -  改装台");
+
     case SHP_REST:  return Tr("SAFE HOUSE  -  REST",  "安全屋  -  休息");
     case SHP_TREE:  return Tr("WORKBENCH TREE", "改造树");
     case SHP_UPGRADE: return Tr("GOLD UPGRADE", "金币强化");   /* v3.3：原来写死英文且叫 CRYSTAL（核心是另一种货币） */
@@ -264,8 +253,10 @@ static int ShopItemFits(int kind) {
     case 3: return gluePots   < cap;
     case 4: return echoBolts  < cap;
     case 5: return decoys     < cap;
-    case 8: { extern int phaseBeacons; return phaseBeacons < cap; }
-    default: return 1;      /* 电池 / 理智 / 药包 */
+    case 8: {  return phaseBeacons < cap; }
+    case 6: return isfinite(battery) && battery < (float)BatteryMax() - 0.01f;
+    case 7: return isfinite(sanity) && sanity < SanityMax() - 0.01f;
+    default: return 0;
     }
 }
 
@@ -277,9 +268,9 @@ static int ShopSpend(int cost) {
 int ShopRowCount(void) {
     if (shopPage == SHP_TREE) return 0;   /* v2.7：树自己画，不用列表行 */
     switch (shopPage) {
-    case SHP_BENCH: return 4;     /* CORE / MOD / CLEAR / LEAVE */
-    case SHP_REST:  return 5;     /* REST / CHARGE / STAMINA / SHORTCUT / LEAVE */
-    case SHP_UPGRADE: return RUN_UPG_COUNT + 2;   /* 4 条线 + LEAVE */
+
+    case SHP_REST:  return 6;     /* REST / CHARGE / STAMINA / SHORTCUT / LEAVE */
+    case SHP_UPGRADE: return RUN_UPG_COUNT + 1;   /* 4 条线 + LEAVE */
     default:        return SHOP_OFFERS + 1;
     }
 }
@@ -289,13 +280,7 @@ const char* ShopRowText(int row) {
 
     /* v3.0：局内强化页 —— 4 条线，显示等级和价格 */
     if (shopPage == SHP_UPGRADE) {
-        if (row == RUN_UPG_COUNT) {
-            /* v7 B3：协议行 —— 回车循环切换四种协议 */
-            sprintf(sbuf, "CONTRACT  %s   EXIT x%d%%",
-                    ContractName(), (int)(ContractExitMul() * 100.0f));
-            return sbuf;
-        }
-        if (row > RUN_UPG_COUNT) return Tr("LEAVE  (ESC)", "离开  (ESC)");
+        if (row >= RUN_UPG_COUNT) return Tr("LEAVE  (ESC)", "离开  (ESC)");
         int lv = RunUpgLevel(row);
         int cost = RunUpgCost(row);
         /* ==================================================================
@@ -306,7 +291,7 @@ const char* ShopRowText(int row) {
          * 现在把效果说明接在名字后面。
          * ================================================================ */
         {
-            extern int g_lang;
+
             const char* d = (g_lang == LANG_ZH) ? RunUpgDescZh(row) : RunUpgDesc(row);
             if (cost < 0)
                 sprintf(sbuf, "%s  LV%d/%d  MAX   %s",
@@ -388,39 +373,11 @@ const char* ShopRowText(int row) {
         return rb;
     }
 
-    if (shopPage == SHP_BENCH) {
-        /* v3.0：**改装台从「武器配件」改成「随身装备」** ——
-           原来两个槽是 CORE / MOD（武器核心与词条），
-           武器取消后这两个槽完全没意义，页面上只剩两行 "(empty)"。
-           现在改成逃生向的两件随身装备：
-             槽 1 = 手上的投掷物（瓶子/照明弹/砖头/酸/烟）
-             槽 2 = 照明工具（手电状态与电量）
-           内容实时反映当前库存，不是空槽。 */
-        if (row == 0) {
-            int n = 0;
-            if (bottles > 0) n++;
-            if (flares > 0) n++;
-            if (bricks > 0) n++;
-            if (acids > 0) n++;
-            if (smokeBombs > 0) n++;
-            sprintf(sbuf, "%s: %d %s", Tr("THROWABLES", "投掷物"), n,
-                    Tr("kinds", "种"));
-            return sbuf;
-        }
-        if (row == 1) {
-            int bp = (int)(battery + 0.5f);
-            sprintf(sbuf, "%s: %s %d%%", Tr("LIGHT GEAR", "照明"),
-                    flashlightOn ? Tr("ON", "开") : Tr("OFF", "关"), bp);
-            return sbuf;
-        }
-        if (row == 2) return Tr("CHECK INVENTORY", "查看背包");
-        return Tr("LEAVE  (ESC)", "离开  (ESC)");
-    }
+    
 
     /* REST */
     if (row == 0) {
-        if (safeHealLevel == currentLevel) return Tr("RESTED", "已休息");
-        return Tr("REST   +40 SANITY  (25)", "休息   +40 理智  (25)");
+        static char quote[100];snprintf(quote,sizeof(quote),Tr("REST +%.0f SAN  %d GOLD  CD %ds","修整 +%.0f理智  %d金币  冷却%d秒"),ShopServiceGain(0),ShopRestPrice(),(int)ceilf(restCooldown));return quote;
     }
     if (row == 1) {
         if (safeChargeLevel == currentLevel) return Tr("CHARGED", "已充电");
@@ -434,7 +391,7 @@ const char* ShopRowText(int row) {
     }
     if (row == 3) {
         /* v2.0 SHORTCUT：每局一次，Boss 层不可跳 */
-        extern int shortcutUsed, bossLevel;
+
         if (!SkillShortcutAvailable()) return Tr("SHORTCUT (locked)", "跳层（未解锁）");
         if (shortcutUsed)              return Tr("SHORTCUT (used)", "跳层（已用）");
         if (bossLevel)                 return Tr("SHORTCUT (boss floor)", "跳层（首领层）");
@@ -454,45 +411,26 @@ void ShopMoveSel(int delta) {
    方案 v5 决定把 5 页压到 3 页（商店 / 改装台 / 休息），
    TREE 和 UPGRADE 两页退役。枚举值不动（避免大规模重编号），
    只在翻页时跳过它们。 */
-static int ShopIsLivePage(int pg) {
-    /* v6 **恢复全部 5 页** ——
-       之前为了「5 页压 3 页」把 TREE / UPGRADE 从翻页里跳过，
-       但那套压缩从来没真正完成（页签还画 5 个、绘制分支还在），
-       结果改造树（16 节点）和金币强化两整页彻底进不去。
-       现在和画出来的页签保持一致：5 页全开。 */
-    return (pg >= 0 && pg < SAFEHOUSE_PAGES) ? 1 : 0;
-}
+
 
 void ShopPrevPage(void) {
-    for (int k = 0; k < SAFEHOUSE_PAGES; k++) {
-        shopPage = (shopPage + SAFEHOUSE_PAGES - 1) % SAFEHOUSE_PAGES;
-        if (ShopIsLivePage(shopPage)) break;
-    }
-    shopRow = 0;
-    uiDirty = 1;
+    shopPage=ShopPageAtTab((ShopTabOfPage(shopPage)+SAFEHOUSE_PAGES-1)%SAFEHOUSE_PAGES);
+    shopRow=0; uiDirty=1;
 }
+
 
 void ShopTreeMove(int dx, int dy) {
-    int col = shopNodeSel / BENCH_ROWS;
-    int row = shopNodeSel % BENCH_ROWS;
-    col += dx;
-    row += dy;
-    if (col < 0) col = 0;
-    if (col >= BENCH_COLS) col = BENCH_COLS - 1;
-    if (row < 0) row = 0;
-    if (row >= BENCH_ROWS) row = BENCH_ROWS - 1;
-    shopNodeSel = col * BENCH_ROWS + row;
+    shopNodeSel = BenchNavNearest(shopNodeSel, dx, dy);
+    BenchFocusNode(shopNodeSel);
     uiDirty = 1;
 }
 
+
 void ShopNextPage(void) {
-    for (int k = 0; k < SAFEHOUSE_PAGES; k++) {
-        shopPage = (shopPage + 1) % SAFEHOUSE_PAGES;
-        if (ShopIsLivePage(shopPage)) break;
-    }
-    shopRow = 0;
-    uiDirty = 1;
+    shopPage=ShopPageAtTab((ShopTabOfPage(shopPage)+1)%SAFEHOUSE_PAGES);
+    shopRow=0; uiDirty=1;
 }
+
 
 /* 找一个"已拥有但没装在这把武器上"的配件，返回 id；没有则 -1 */
 
@@ -516,28 +454,24 @@ void ShopNextPage(void) {
 static int ShopLeaveRow(int row) {
     switch (shopPage) {
     case SHP_SHOP:    return row >= SHOP_OFFERS;         /* 补给行之后就是 LEAVE */
-    case SHP_BENCH:   return row == 3;                   /* CORE/MOD/CLEAR/LEAVE */
-    case SHP_REST:    return row == 4;                   /* REST/CHARGE/STAMINA/SHORTCUT/LEAVE */
-    case SHP_UPGRADE: return row > RUN_UPG_COUNT;        /* 强化行 + CONTRACT + LEAVE */
+
+    case SHP_REST:    return row >= 5;                   /* REST/CHARGE/STAMINA/SHORTCUT/LEAVE */
+    case SHP_UPGRADE: return row >= RUN_UPG_COUNT;        /* 强化行 + CONTRACT + LEAVE */
     default:          return 0;                          /* SHP_TREE 自己处理 */
     }
 }
 
 void ShopActivate(void) {
+    if(!ShopCanOpen()){ShopLeave();return;}
     /* 鼠标点 LEAVE / 回车敲 LEAVE 都从这里走，和 ESC 同一条路径 */
     if (ShopLeaveRow(shopRow)) { ShopLeave(); return; }
 
     /* v3.0：金币强化 */
     if (shopPage == SHP_UPGRADE) {
-        if (shopRow == RUN_UPG_COUNT) {
-        /* v7 B3：切协议（每局一次，签了不能撕 —— 这里只允许首次切换） */
-        extern int shopContractUsed;
-        if (shopContractUsed) { PlaySfx(SFX_GLASS, 0.4f); return; }
-        ContractCycle();
-        shopContractUsed = 1;
-        PlaySfx(SFX_POWER, 0.7f);
-        return;
-    }
+        if(shopRow>=RUN_UPG_COUNT) {
+            pickupMsg=Tr("SET THE NEXT CONTRACT IN EXPEDITION CONTROL","下一局契约请在行动风险中枢设置");
+            pickupMsgTimer=1.6f;uiDirty=1;return;
+        }
     if (shopRow > RUN_UPG_COUNT) return;      /* 理论到不了：LEAVE 已在上面的 ShopLeaveRow 拦掉 */
         int r = RunUpgTryBuy(shopRow);
         if (r == 0)            { pickupMsg = Tr("UPGRADED", "已强化"); }
@@ -607,7 +541,7 @@ void ShopActivate(void) {
         int kind = (idx >= 0 && idx < SHOP_OFFERS) ? shopOffer[idx] : 0;
         if (kind < 0 || kind >= SHOP_ITEM_KINDS) kind = 0;
         if (!ShopItemFits(kind)) {
-            pickupMsg = Tr("BAG FULL", "背包已满");
+            pickupMsg = (kind == 6 || kind == 7) ? Tr("ALREADY FULL", "状态已满，无需补给") : Tr("BAG FULL", "背包已满");
             pickupMsgTimer = 1.2f;
             uiDirty = 1;
             return;
@@ -649,7 +583,7 @@ void ShopActivate(void) {
                 pickupMsg = Tr("+35 BATTERY", "+35 电量"); break;
         case 8: {
                     /* 2026-11-06：改成投掷物，可以叠加数量 */
-                    extern int phaseBeacons;
+
                     if (phaseBeacons < BottleCap()) phaseBeacons++;
                     pickupMsg = Tr("+1 PHASE BEACON", "+1 相位信标");
                 } break;
@@ -658,102 +592,33 @@ void ShopActivate(void) {
         }
         /* 买入后该行进入冷却 */
         shopCooldown[idx] = kRowCd[idx];
+        TutorialRecordAction(TUTOR_SUPPLY);
         PlaySfx(SFX_POWER, 0.8f);
         pickupMsgTimer = 1.2f;
         uiDirty = 1;
         return;
     }
 
-    if (shopPage == SHP_BENCH) {
-        /* v3.3 **修复文案与动作完全错位** ——
-           界面上画的是 THROWABLES / LIGHT GEAR / CHECK INVENTORY，
-           回车却执行 WeaponAttachAdd / Remove / 清空两个武器配件槽。
-           玩家点「查看背包」会把自己的武器配件清掉（武器早取消了，
-           等于把老存档里的残留配件也一并抹掉）。
-           现在这一页是**只读信息页**：三行都只是看，不产生任何副作用。
-           （武器配件系统本身已被 NO_COMBAT 废掉，这里不再碰它。） */
-        if (shopRow == 2) {
-            int nb = (bottles > 0) + (flares > 0) + (bricks > 0)
-                   + (acids > 0) + (smokeBombs > 0);
-            /* v2.3.7 修复悬空指针：
-               原来是栈上的 char msg[96]，函数一返回 msg 就失效，
-               而 pickupMsg 是全局指针，ui.c 会在之后 1.6 秒持续读它 —— 读到的是已释放的栈。
-               同文件其它同类处都加了 static，唯独这里漏了。 */
-            static char msg[96];
-            snprintf(msg, sizeof(msg),
-                     Tr("BOTTLES %d  FLARES %d  OTHERS %d",
-                        "瓶子 %d  照明弹 %d  其它 %d"),
-                     bottles, flares, nb);
-            pickupMsg = msg;
-            pickupMsgTimer = 1.6f;
-            PlaySfx(SFX_POWER, 0.5f);
-            uiDirty = 1;
-        }
-        return;
+    
+
+    if(shopPage==SHP_REST && shopRow==4){CalibStartAtStation();uiDirty=1;return;}
+    if(shopPage!=SHP_REST || !ShopServiceCanUse(shopRow)) {
+        pickupMsg=ShopServiceStatus(shopRow);
+        pickupMsgTimer=1.4f; uiDirty=1; return;
+    }
+    if(shopRow>=0 && shopRow<3){
+        int row=shopRow,price=ShopServicePrice(row);float gain=ShopServiceGain(row);
+        if(!WalletSpendRun(price))return;
+        if(row==0)sanity=fminf(SanityMax(),sanity+gain);
+        else if(row==1)battery=fminf((float)BatteryMax(),battery+gain);
+        else stamina=fminf(StaminaMax(),stamina+gain);
+        if(serviceUses[row]<31)serviceUses[row]++;
+        restCooldown=0;PlaySfx(SFX_POWER,.8f);SaveGame();uiDirty=1;return;
+    }
+    if(shopRow==3 && ShopServiceCanUse(3)){
+        currentState=STATE_PLAYING;resetInputState=1;firstMouseMove=1;ForceCursor(0);SkipOneLevel();
     }
 
-    /* REST —— v2.0：改成收费（原来免费 +40，8 个安全屋白送 320 理智，
-       让理智彻底不像计时器） */
-    if (shopRow == 0) {
-        if (safeHealLevel == currentLevel) return;
-        if (!ShopSpend(SAFE_REST_COST)) {
-            pickupMsg = Tr("NEED 25 GOLD", "需要 25 金币");
-            pickupMsgTimer = 1.2f;
-            uiDirty = 1;
-            return;
-        }
-        safeHealLevel = currentLevel;
-        sanity += 40.0f;
-        if (sanity > SanityMax()) sanity = SanityMax();
-        PlaySfx(SFX_POWER, 0.9f);
-        pickupMsg = Tr("+40 SANITY (-25)", "+40 理智 (-25)");
-        pickupMsgTimer = 1.2f;
-        uiDirty = 1;
-        return;
-    }
-    if (shopRow == 1) {
-        if (safeChargeLevel == currentLevel) return;
-        safeChargeLevel = currentLevel;
-        battery += 60.0f;
-        if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
-        PlaySfx(SFX_POWER, 0.9f);
-        pickupMsg = Tr("+60 BATTERY", "+60 电量");
-        pickupMsgTimer = 1.2f;
-        uiDirty = 1;
-        return;
-    }
-    /* v2.0：第 4 行 = 跳层（SHORTCUT keystone） */
-    if (shopRow == 3) {
-        extern int shortcutUsed, bossLevel;
-        if (SkillShortcutAvailable() && !shortcutUsed && !bossLevel) {
-            extern int firstMouseMove;
-            currentState = STATE_PLAYING;
-            resetInputState = 1;
-            firstMouseMove = 1;      /* 同上：别把菜单里的鼠标位移带进游戏 */
-            ForceCursor(0);
-            SkipOneLevel();
-        }
-        return;
-    }
-    if (shopRow == 2) {
-        /* v3.3：**体力从免费无限改成 15 金币 + 每层一次**。
-           原来这一行什么都不收，玩家可以躲衣柜→按 T→回车→Esc→跑，
-           无限刷满体力，冲刺等于没有成本。 */
-        if (safeStaminaLevel == currentLevel) return;
-        if (!ShopSpend(15)) {
-            pickupMsg = Tr("NEED 15 GOLD", "需要 15 金币");
-            pickupMsgTimer = 1.2f;
-            uiDirty = 1;
-            return;
-        }
-        safeStaminaLevel = currentLevel;
-        stamina = StaminaMax();
-        pickupMsg = Tr("STAMINA RESTORED (-15)", "体力已恢复 (-15)");
-        pickupMsgTimer = 1.2f;
-        PlaySfx(SFX_POWER, 0.8f);
-        uiDirty = 1;
-        return;
-    }
 }
 
 /* v2.2：开局/换局清一次。原来这两个 static 永不重置，
@@ -780,18 +645,10 @@ void ShopSetSafeLv(int heal, int charge, int stamina) {
 /* v6 **离开安全屋** —— 原来 LEAVE 行画着 "LEAVE (ESC)" 但回车直接 return，
    玩家选中它按回车毫无反馈。这里和 ESC 走同一条路径。 */
 void ShopLeave(void) {
-    extern int resetInputState, uiDirty;
-    extern int firstMouseMove;          /* 2026-11-05：**必须一起置位** */
+
+              /* 2026-11-05：**必须一起置位** */
     currentState = STATE_PLAYING;
-    /* ==================================================================
-     * 2026-11-06（用户实测：**在藏身点里开商店，出来就动不了**）
-     * ------------------------------------------------------------------
-     * 躲进柜子时 hiddenIn >= 0，而 Update 里"藏着就不能动"会清零输入。
-     * 于是从商店回到局内，玩家还处于藏身状态 —— 表现就是"退出来了但
-     * 走不了，像困死在页面里"。
-     * 离开商店一律退出藏身。
-     * ================================================================ */
-    { extern int hiddenIn; hiddenIn = -1; }
+    /* Only the explicit leave-hiding action may clear hiddenIn. */
     resetInputState = 1;
     /* ============================================================
      * 修：**离开商店后视角会瞬间翻转 180°**
@@ -859,7 +716,7 @@ static const char* ShopItemName(int i) {
 }
 
 void DrawShopPanel(void) {
-    extern volatile int g_dbgMark;
+
     g_dbgMark = 100;
     int th = TextHeightWin();
     if (th < 6) th = 6;
@@ -957,8 +814,105 @@ void DrawShopPanel(void) {
 }
 
 void ShopRefresh(void) {
-    if(shopRefreshFloor!=currentLevel) { shopRefreshFloor=currentLevel;shopRefreshUsed=0; }
-    if(shopRefreshUsed) { pickupMsg=Tr("REFRESH USED THIS FLOOR","本层刷新已用完");pickupMsgTimer=1.5f;return; }
-    shopRefreshUsed=1; shopRollLevel=-1; ShopOpen(currentLevel);
-    pickupMsg=Tr("SUPPLIES REFRESHED","补给已刷新"); pickupMsgTimer=1.5f;uiDirty=1;SaveGame();
+    static char message[100];
+    if(refreshCooldown>0){snprintf(message,sizeof(message),Tr("REFRESH IN %ds","刷新冷却剩余%d秒"),(int)ceilf(refreshCooldown));pickupMsg=message;pickupMsgTimer=1.5f;return;}
+    refreshCooldown=60;shopRefreshFloor=currentLevel;shopRefreshUsed=1;shopRollLevel=-1;ShopOpen(currentLevel);
+    pickupMsg=Tr("SUPPLIES REFRESHED: 60s COOLDOWN","补给已刷新，冷却60秒");pickupMsgTimer=1.5f;uiDirty=1;
 }
+int ShopRestPrice(void) {return ShopServicePrice(0);}
+float ShopRestCooldown(void) {return restCooldown;}
+float ShopRefreshCooldown(void) {return refreshCooldown;}
+
+
+int ShopPageAtTab(int index) {
+    static const int pages[SAFEHOUSE_PAGES]={SHP_SHOP,SHP_TREE,SHP_REST,SHP_UPGRADE};
+    return index>=0 && index<SAFEHOUSE_PAGES?pages[index]:SHP_SHOP;
+}
+int ShopTabOfPage(int page) {
+    for(int i=0;i<SAFEHOUSE_PAGES;i++)if(ShopPageAtTab(i)==page)return i;
+    return 0;
+}
+int ShopBasePriceAt(int row) {
+    int kind=row==8?8:(row>=0 && row<SHOP_OFFERS?shopOffer[row]:-1);
+    if(kind<0 || kind>=SHOP_ITEM_KINDS)return 0;
+    if(kind==8)return WalletRun()>0?(int)(((long long)WalletRun()+19)/20):1;
+    double multiplier=1.0+floor(fmaxf(0,runTime)/120)*.025;
+    double price=ceil(kItemPrice[kind]*multiplier);
+    return price>=INT_MAX?INT_MAX:price<1?1:(int)price;
+}
+const char* ShopProductName(int row) {
+    static const char* en[SHOP_ITEM_KINDS]={"SLING STONE","LIGHT ORB","SMOKE BOMB","ADHESIVE","ECHO FORK","DECOY","BATTERY CELL","MEDICAL KIT","PHASE BEACON"};
+    static const char* zh[SHOP_ITEM_KINDS]={"投石","光球","烟雾弹","黏胶罐","回声叉","诱饵玩偶","电池","医疗包","相位信标"};
+    int kind=row>=0 && row<SHOP_OFFERS?shopOffer[row]:-1;
+    return kind>=0 && kind<SHOP_ITEM_KINDS?Tr(en[kind],zh[kind]):"";
+}
+const char* ShopProductDescription(int row) {
+    static const char* en[SHOP_ITEM_KINDS]={"One stone for a distant distraction.","One throwable light source.","Break sight with a smoke cloud.","Slow pursuing creatures.","Reveal nearby routes and hidden threats.","Divert a hunter from your route.","Restore up to 35 battery charge.","Restore up to 25 sanity.","Rare: costs 5% of your current carried gold; place a return anchor."};
+    static const char* zh[SHOP_ITEM_KINDS]={"增加一枚投石，用声音引开追捕者。","增加一个可投掷的光源。","利用烟雾遮断视线，争取脱身空间。","减速经过黏胶区域的追捕者。","利用回声揭示附近路径与可疑目标。","放置玩偶，将听声鬼引向别处。","立即恢复最多35点电量。","立即恢复最多25点理智。","稀有补给，价格为当前携带金币的5%，布置一次性返回锚点。"};
+    int kind=row>=0 && row<SHOP_OFFERS?shopOffer[row]:-1;
+    return kind>=0 && kind<SHOP_ITEM_KINDS?Tr(en[kind],zh[kind]):"";
+}
+int ShopProductSprite(int row) {
+    static const int sprites[SHOP_ITEM_KINDS]={SPR_ITEM_SLING,SPR_ITEM_FLARE,SPR_ITEM_SMOKE,SPR_ITEM_GLUE,SPR_ITEM_ECHO,SPR_ITEM_DECOY,-1,-1,SPR_PHASE_HAND};
+    int kind=row>=0 && row<SHOP_OFFERS?shopOffer[row]:-1;
+    return kind>=0 && kind<SHOP_ITEM_KINDS?sprites[kind]:-1;
+}
+int ShopCanBuyProduct(int row) {
+    if(row<0 || row>=SHOP_OFFERS)return 0;
+    int kind=shopOffer[row];
+    return kind>=0 && kind<SHOP_ITEM_KINDS && ShopItemFits(kind) && ShopCooldownOf(row)<=.05f && WalletCanPayRun(ShopPriceAt(row));
+}
+const char* ShopServiceName(int row) {
+    static const char* en[5]={"RECOVERY POD","CHARGING STATION","BREATHING BREAK","ESCAPE ROUTE","RHYTHM CONSOLE"};
+    static const char* zh[5]={"理智恢复舱","电量补给站","体能休整区","捷径通道","节律校准台"};
+    return row>=0 && row<5?Tr(en[row],zh[row]):"";
+}
+float ShopServiceGain(int row) {
+    float missing=0.0f,amount=0.0f;
+    if(row==0){missing=SanityMax()-sanity;
+        amount=40.0f*BenchHealMul();
+        }
+    if(row==1){missing=(float)BatteryMax()-battery;
+        amount=60.0f;
+        }
+    if(row==2){missing=StaminaMax()-stamina;
+        amount=missing;
+        }
+    if(!isfinite(missing)||missing<0.0f)return 0.0f;
+    return missing<amount?missing:amount;
+}
+int ShopServiceCanUse(int row) {
+    if(row>=0 && row<3)return ShopServiceGain(row)>.01f && WalletCanPayRun(ShopServicePrice(row));
+    if(row==4)return calibCooldown<=0 && MusicCanCalibrate();
+    if(row==3)return SkillShortcutAvailable() && !shortcutUsed && !bossLevel;
+    return 0;
+}
+
+void ShopRestoreCooldowns(float rest,float refresh){restCooldown=isfinite(rest)?fmaxf(0,fminf(90,rest)):0;refreshCooldown=isfinite(refresh)?fmaxf(0,fminf(60,refresh)):0;}
+
+int ShopServicePrice(int row) {
+    static const int base[3]={12,10,8};if(row<0 || row>2)return 0;
+    double quote=ceil(base[row]*BenchRestPriceMul())*pow(2.0,(double)serviceUses[row]);
+    return quote>=INT_MAX?INT_MAX:(int)quote;
+}
+float ShopServiceCooldown(int row){/* FIXED_RESULT: Recovery uses escalating prices instead of a timed cooldown. */(void)row;return 0;}
+const char* ShopServiceStatus(int row) {
+    static char text[120];
+    if(row==4){
+        if(calibCooldown>0){snprintf(text,sizeof(text),Tr("COOLDOWN %ds / FREE","冷却 %d秒 / 免费"),(int)ceilf(calibCooldown));return text;}
+        if(!MusicCanCalibrate())return Tr("WAITING FOR SCORE / AUDIO OUTPUT","等待谱面音乐或音频输出");
+        return Tr("QWER / 40s / UP TO +10 SANITY","QWER四键 / 40秒 / 最多恢复10理智");
+    }
+    if(row<3 && ShopServiceGain(row)<=.01f)return Tr("RESOURCE FULL / NO RECOVERY NEEDED","资源已满 / 暂不需要恢复");
+    if(row==3) {
+        if(!SkillShortcutAvailable())return Tr("UNLOCK SHORTCUT IN META TREE","需在局外解锁捷径技能");
+        if(shortcutUsed)return Tr("USED / RESETS NEXT RUN","本局已用 / 下局重置");
+        if(bossLevel)return Tr("UNAVAILABLE ON BOSS FLOORS","首领层不可使用");
+    }
+    if(!WalletCanPayRun(ShopServicePrice(row)))return Tr("INSUFFICIENT RUN GOLD","局内金币不足");
+    return Tr("READY / CLICK OR ENTER TO USE","可用 / 点击或回车使用");
+}
+
+int ShopServiceUses(int row){return row>=0 && row<3?serviceUses[row]:0;}
+void ShopCaptureServices(int counts[3]){memcpy(counts,serviceUses,sizeof(serviceUses));}
+void ShopRestoreServices(const int counts[3]){for(int i=0;i<3;i++)serviceUses[i]=counts[i]<0?0:counts[i]>31?31:counts[i];restCooldown=0;}

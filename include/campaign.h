@@ -73,5 +73,7 @@ float CampaignSanityMulNow(void);
 float CampaignBatteryMulNow(void);
 float CampaignGoldMulNow(void);
 
+void CampaignBuildFloor(void);
+int CampaignThemeNow(void);
 #endif /* CANITY_CAMPAIGN_H */
 const char* CampaignRuleZh(int stage);

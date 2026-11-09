@@ -28,7 +28,7 @@ extern float staminaIdle;
 /* ==================================================================
  * 2026-11-06（用户要求）：**追光怪 +1 只**
  * ------------------------------------------------------------------
- * 照抄听声鬼的既有做法（`monHunters[]` + `#define monster monHunters[0]`）：
+ * 照抄听声鬼的既有做法（`monHunters[]` + `Hunter0()` pointer accessor）：
  *   实体变成数组，旧的单数名字保留成宏指向 [0]，
  *   于是原有 132 处引用**一行都不用改**。
  * 第二只通过 lightBeast2 / UpdateLightBeast2 访问。
@@ -65,6 +65,8 @@ void ClearFx(void);
 
 /* ---- 怪物 ---- */
 void SpawnMonster(void);
+int MonsterCollect(Monster** out, int maxOut, int includeLightBeast);
+void MonsterStunAll(float seconds);
 void UpdateMonster(float dt);
 void SpawnLightBeast(void);
 void SpawnLightBeast2(void);   /* 第二只（2026-11-06） */
@@ -91,7 +93,6 @@ extern float noiseDisplayTimer;
 extern float noiseSrcX, noiseSrcY;
 int ApplyDamage(Monster* m, int base, int type, float sx, float sy);
 
-
 /* v2.4.94 封喉 / 包夹（flank.c） */
 void  FlankBuild(void);
 void  FlankReset(void);
@@ -100,7 +101,20 @@ void  FlankOnCaught(void);
 int   FlankChokeOnExitPath(float px, float py, float* gx, float* gy);
 int   FlankBlocksPlayer(float nx, float ny);
 
+/* Hunter catch bookkeeping and delayed-spawn lifecycle. */
+int  CatchCountThisRun(void);
 
+void CatchCountBumpRun(void);
 
+void CatchCountResetRun(void);
 
+void CatchCountResetFloor(void);
+
+void TickSecondSpawn(float dt);
+
+void ResetSecondSpawn(void);
+
+void CollectorResetRun(void);
+void CollectorSaveRun(int out[3]);
+void CollectorLoadRun(const int data[3]);
 #endif /* CANITY_ENTITY_H */

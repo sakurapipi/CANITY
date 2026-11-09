@@ -10,7 +10,7 @@
 #include "common.h"
 #include "gamepad.h"
 
-void GamepadInit(void) { }
-void GamepadPoll(void) { }
-int  GamepadConnected(void) { return 0; }
+void GamepadInit(void) { /* STUB: Browser Gamepad API has not been connected; keyboard and mouse are separate. */ }
+void GamepadPoll(void) { /* STUB: Browser Gamepad API has not been connected; keyboard and mouse are separate. */ }
+int  GamepadConnected(void) { /* STUB: Browser Gamepad API has not been connected; keyboard and mouse are separate. */ return 0; }
 

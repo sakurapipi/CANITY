@@ -691,7 +691,86 @@ static void test_difficulty_roundtrips_through_save(void) {
     difficulty = saved;
 }
 
+static void test_continue_rejects_invalid_exit_and_facing(void) {
+    clear_meta(); StartGame();
+    runInProgress = 1;
+    SaveTestClearReadOnly();
+    exitX = -1000.0f; exitY = NAN;
+    dirX = NAN; dirY = 0.0f;
+    SaveGame();
+    ContinueRun();
+    CHECK(exitX >= 1.0f && exitX <= MAP_WIDTH - 1.0f &&
+          exitY >= 1.0f && exitY <= MAP_HEIGHT - 1.0f,
+          "clamped saved exits cannot be overwritten by raw coordinates later");
+    CHECK(dirX == 1.0f && dirY == 0.0f,
+          "invalid saved facing falls back to a finite camera direction");
+    exitX = 2.5f; exitY = 3.5f;
+    dirX = 3.0f; dirY = 4.0f;
+    SaveGame();
+    ContinueRun();
+    CHECK(fabsf(dirX - 0.6f) < 0.0001f && fabsf(dirY - 0.8f) < 0.0001f,
+          "finite nonunit saved facing is normalized before camera setup");
+}
+
+static void test_saving_preserves_live_skill_ranks(void) {
+    clear_meta(); StartGame(); SaveTestClearReadOnly();
+    runInProgress = 1;
+    int expected[SKILL_COUNT];
+    for (int id = 0; id < SKILL_COUNT; id++) {
+        expected[id] = SkillIsPlayerFacing(id) ? skillDefs[id].maxRank : 0;
+        skillRank[id] = expected[id];
+    }
+    SaveGame();
+    CHECK(memcmp(expected, skillRank, sizeof(expected)) == 0,
+          "serialization must not restore zeroed saved ranks into live skills");
+    const SaveBlob* blob = SaveTestBlob();
+    for (int id = 0; id < SKILL_COUNT; id++) {
+        if(!SkillIsPlayerFacing(id))continue;
+        int stored = id < 26 ? blob->skillRank[id] :
+                     id < 30 ? blob->extraSkillRanks[id-26] :
+                     id < 41 ? blob->archetypeRanks[id-30] : blob->metaExpansionRanks[id-41];
+        CHECK(stored == expected[id], "every player skill persists to its stable storage region");
+    }
+    memset(skillRank, 0, sizeof(skillRank));
+    ContinueRun();
+    CHECK(memcmp(expected, skillRank, sizeof(expected)) == 0,
+          "all player skills, including archetypes, survive a save/continue roundtrip");
+}
+
+static void test_v37_prefix_is_migrated_to_v38(void) {
+    clear_meta(); StartGame(); SaveTestClearReadOnly();
+    runInProgress = 1;
+    SaveGame();
+    SaveBlob legacy = *SaveTestBlob();
+    legacy.version = 37;
+    legacy.archetypeRanks[0] = 1;
+    legacy.musicVolume = 0.65f;
+    int written = 0;
+    for (int slot = 0; slot < 3; slot++) for (int cand = 0; cand < 6; cand++) {
+        char path[MAX_PATH];
+        SavePathForSlot(cand, slot, path, sizeof(path));
+        FILE* file = fopen(path, "wb");
+        if (!file) continue;
+        size_t size = offsetof(SaveBlob, bestiaryExtraKnowledge);
+        int ok = fwrite(&legacy, 1, size, file) == size;
+        fclose(file);
+        written += ok;
+    }
+    CHECK(written > 0, "v37 migration fixture must be written");
+    CHECK(LoadSettings(), "the true v37 prefix must remain loadable");
+    CHECK(SaveTestBlob()->version == SAVE_VERSION, "v37 must be promoted without archiving a supported save");
+    CHECK(skillRank[SK_GHOST_BREATH] == 1, "v37 archetype ranks keep their original slots");
+    CHECK(fabsf(SaveTestBlob()->musicVolume - 0.65f) < 0.0001f, "migration keeps independent music volume");
+    CHECK(SaveTestBlob()->bestiaryExtraKnowledge[0] == 0 &&
+          SaveTestBlob()->bestiaryExtraKnowledge[1] == 0 &&
+          SaveTestBlob()->bestiaryExtraKnowledge[2] == 0,
+          "missing mimic extension defaults to zero, never reads adjacent settings bytes");
+}
+
 void TestSuite_save(void) {
+    test_saving_preserves_live_skill_ranks();
+    test_v37_prefix_is_migrated_to_v38();
+    test_continue_rejects_invalid_exit_and_facing();
     test_save_v34_items();
     test_training_items_do_not_leak();
     test_menu_save_keeps_run();
@@ -704,3 +783,5 @@ void TestSuite_save(void) {
     test_save_unknown_chunk_roundtrip();
     test_save_backend_errors();
 }
+
+void TestSuite_legacy_fixtures(void){test_legacy_fixtures();}

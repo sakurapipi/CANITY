@@ -1,0 +1,135 @@
+/* Four-lane rhythm calibration. Rewards settle only after a completed chart. */
+#include "common.h"
+#include "tutorial.h"
+#include "calibration.h"
+#include "score_charts.h"
+#include "entity.h"
+#include "state.h"
+#include "loop_api.h"
+#include "player_api.h"
+#include "world_api.h"
+#include "present_api.h"
+#include "lang.h"
+#include "audio.h"
+#include "plat.h"
+#include "control_effect.h"
+#include "music.h"
+#include "bench.h"
+#include "run_economy.h"
+
+int calibActive=0,calibResult=0;
+float calibPos=.5f,calibZoneC=.5f,calibCooldown=0,calibResultTimer=0;
+static const ScoreChart* chart;
+static int stationSession=0;
+static unsigned char judged[512];
+static float elapsed=0,lastSpace=-10,drainBudget=0;
+static int errors=0,combo=0,pending=0,level=-1,startLatch=0;
+static int hits=0,bestCombo=0;static float restored=0,charged=0;
+static unsigned char laneLatch[4];
+static float HitWindow(void) {return fmaxf(.085f,.18f-(currentLevel-1)*.006f);}
+float CalibZoneScale(void) {return HitWindow()/.18f;}
+float CalibSpeedScale(void) {return fminf(1.6f,1.0f+(currentLevel-1)*.025f);}
+int CalibNoteCount(void) {return calibActive && chart?chart->count:0;}
+int CalibNoteLane(int note) {return chart && note>=0 && note<chart->count?chart->notes[note].lane:0;}
+static int Enabled(int note) {return chart->notes[note].difficulty<=1+(currentLevel>=4)+(currentLevel>=8);}
+float CalibNoteOffset(int note) {
+    if(!chart || note<0 || note>=chart->count || judged[note] || !Enabled(note))return -999;
+    return chart->notes[note].ms*.001f-elapsed;
+}
+int CalibErrors(void) {return errors;}
+float CalibBatteryRestored(void){return charged;}
+int CalibCombo(void) {return combo;}
+int CalibPendingReward(void) {return pending;}
+void CalibAccumulateDrain(float amount) {if(calibActive && amount>0 && isfinite(amount))drainBudget+=amount;}
+static void Finish(int result) {
+    if(result==3 && hiddenIn>=0){hiddenIn=-1;resetInputState=1;holdTimer=0;keyPressed[g_bindings[ACT_INTERACT]]=0;}
+    calibActive=0;calibResult=result;calibResultTimer=3;calibCooldown=guideMode?3:30;
+    static char message[160];
+    if(result==1){
+        TutorialRecordAction(TUTOR_RHYTHM);int gold=RunEconomyRhythmGold(hits,bestCombo);
+        snprintf(message,sizeof(message),LangTr("COMPLETE: +%.1f SAN / +%.1f CELL / +%d GOLD","完成：理智+%.1f / 电量+%.1f / 金币+%d"),(double)restored,(double)charged,gold);PlaySfx(SFX_POWER,.55f);
+    }else snprintf(message,sizeof(message),LangTr("%s / %.1f SANITY ALREADY RESTORED","%s / 已即时恢复%.1f理智"),result==3?LangTr("FAILED: LEFT COVER","失误超限：已离开藏身点"):LangTr("CANCELLED","取消"),(double)restored);
+    pickupMsg=message;stationSession=0;memset(keyPressed,0,sizeof(keyPressed));pickupMsgTimer=3;uiDirty=1;
+}
+void CalibStart(void) {
+    if(calibActive || (!stationSession && hiddenIn<0 && !trainingMode) || calibCooldown>0)return;
+    if(!MusicCanCalibrate()){pickupMsg=LangTr("CHART MUSIC NOT READY","谱面音乐尚未就绪");pickupMsgTimer=1.4f;return;}
+    int scene=(int)MusicCurrentScene();if(scene<0 || scene>=6)scene=MUSIC_EXPLORE;
+    chart=&scoreCharts[scene];
+    if(chart->count>512 || chart->count<=0)return;
+    memset(judged,0,sizeof(judged));elapsed=-AudioOutputLatencySeconds()-.006f;errors=combo=pending=hits=bestCombo=0;restored=charged=0;drainBudget=0;
+    for(int lane=0;lane<4;lane++)laneLatch[lane]=(unsigned char)PlatKeyDown("QWER"[lane]);
+    level=currentLevel;lastSpace=-10;calibActive=1;calibResult=0;
+    MusicSeekSeconds((float)chart->startSample/44100.0f);uiDirty=1;
+}
+void CalibLock(void) {
+    if(!calibActive)return;
+    if(elapsed-lastSpace<=.35f)Finish(2);
+    else lastSpace=elapsed;
+}
+static void Hit(int lane) {
+    int best=-1;float delta=10;
+    for(int i=0;i<chart->count;i++) {
+        if(judged[i] || !Enabled(i) || chart->notes[i].lane!=lane)continue;
+        float d=fabsf(chart->notes[i].ms*.001f-elapsed);
+        if(d<delta){delta=d;best=i;}
+    }
+    if(best<0 || delta>HitWindow()){errors++;combo=0;PlaySfx(SFX_CRANK,.25f);}
+    else {
+        judged[best]=1;combo++;hits++;if(combo>bestCombo)bestCombo=combo;
+        float gain=.6f*(1+fminf(20,(float)(combo-1))*.05f)+BenchRhythmHealBonus();
+        float before=sanity;sanity=fminf(SanityMax(),sanity+gain);restored+=sanity-before;pending=(int)floorf(restored+.5f);
+        float cellBefore=battery;battery=fminf((float)BatteryMax(),battery+gain*1.25f);charged+=battery-cellBefore;
+        PlaySfx(SFX_PICKUP,.18f);
+    }
+    if(errors>5)Finish(3);
+}
+void CalibTick(float dt) {
+    if(!(dt>0))return;
+    calibCooldown=fmaxf(0,calibCooldown-dt);calibResultTimer=fmaxf(0,calibResultTimer-dt);
+    if(!calibActive)return;
+    if(currentLevel!=level || (stationSession?currentState!=STATE_SAFEHOUSE:(!trainingMode && hiddenIn<0))){Finish(2);return;}
+    if(hiddenIn>=0){
+        battery=fminf((float)BatteryMax(),battery+HIDE_BATTERY_REGEN*(flashlightOn?.5f:1)*dt);
+        sanity=fminf(SanityMax(),sanity+HIDE_SANITY_REGEN*dt);
+    }
+    elapsed+=dt;calibPos=elapsed/40.0f;
+    for(int i=0;i<chart->count && calibActive;i++) {
+        if(judged[i] || !Enabled(i))continue;
+        if(chart->notes[i].ms*.001f<elapsed-HitWindow()){
+            judged[i]=1;errors++;combo=0;if(errors>5)Finish(3);
+        }
+    }
+    if(calibActive && elapsed>=40)Finish(1);
+    uiDirty=1;
+}
+void CalibHandleInput(int inSafe) {
+    (void)inSafe;
+    if(currentState!=STATE_PLAYING || ControlActive())return;
+    int down=PlatKeyDown(VK_SPACE);
+    if(keyPressed[VK_SPACE] && (hiddenIn>=0 || trainingMode)) {
+        keyPressed[VK_SPACE]=0;
+        if(!startLatch){startLatch=1;if(calibActive)CalibLock();else CalibStart();}
+    }
+    if(!down)startLatch=0;
+    if(calibActive)for(int lane=0;lane<4 && calibActive;lane++){
+        static const int keys[4]={'Q','W','E','R'};
+        int key=keys[lane];
+        if(!PlatKeyDown(key))laneLatch[lane]=0;
+        if(keyPressed[key]){keyPressed[key]=0;if(!laneLatch[lane]){laneLatch[lane]=1;Hit(lane);}}
+    }
+}
+void CalibResetRun(void) {stationSession=0;calibActive=calibResult=0;elapsed=calibCooldown=calibResultTimer=0;startLatch=0;chart=NULL;}
+
+void CalibStartAtStation(void) {
+    if(calibActive || currentState!=STATE_SAFEHOUSE || calibCooldown>0)return;
+    stationSession=1;CalibStart();if(!calibActive)stationSession=0;
+}
+void CalibInputKey(int key) {
+    if(!calibActive)return;
+    if(key==VK_ESCAPE){Finish(2);return;}
+    if(key==VK_SPACE){CalibLock();return;}
+    for(int lane=0;lane<4;lane++)if(key=="QWER"[lane]){
+        laneLatch[lane]=1;keyPressed[key]=0;Hit(lane);return;
+    }
+}

@@ -25,6 +25,10 @@
 #include "state.h"
 #include "economy.h"
 #include "common.h"
+#include "monster_rules.h"
+#include "bestiary.h"
+#include "hints.h"
+#include "run_stats.h"
 #include "loop_api.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -68,7 +72,7 @@
 
 /* 算出本次要扣多少**点**理智 */
 static float scavSanityLoss(void) {
-    extern int carryGold;
+
 
     float pct = SCAV_SAN_PCT_BASE;
 
@@ -146,6 +150,7 @@ typedef struct {
 Scavenger scavenger;
 static float scavCooldown = 0.0f;   /* 走掉之后的冷却 */
 
+/* Live state queries. SpeedNow exposes the shared movement tuning constant. */
 int   ScavengerActive(void)   { return scavenger.active; }
 float ScavengerSpeedNow(void) { return SCAV_SPEED; }
 int   ScavengerRifling(void) { return scavenger.eating >= 0; }
@@ -354,8 +359,8 @@ static void stepAlongBfs(float* x, float* y, float sp, float dt) {
    现在**每帧都锁玩家当前坐标**（躲着时锁藏身点），
    它永远朝着你此刻所在的位置走。 */
 static void retargetToPlayer(void) {
-    extern int hiddenIn;
-    extern HideSpot hideSpots[];
+
+
     if (hiddenIn >= 0 && hiddenIn < HIDESPOT_MAX && hideSpots[hiddenIn].active) {
         scavenger.tx = hideSpots[hiddenIn].x;
         scavenger.ty = hideSpots[hiddenIn].y;
@@ -368,10 +373,11 @@ static void retargetToPlayer(void) {
 /* 触发检查 —— 每帧调用，内部只做轻量判断 */
 
 void ScavengerTickTrigger(float dt) {
+    /* Always available: activation is governed by hiding/time, not gold tier. */
     /* 2026-11-08：floorTime 不再参与触发判定（它只增不减，会永久上锁），
        改成 s_quietT。这里不再 extern floorTime。 */
-    extern int   hideStreak;
-    extern int   trainingMode;
+
+
     if (trainingMode) return;
     /* 2026-11-08：安静计时**在冷却期间也走** —— 否则"安静 180 秒"实际是
        215 秒（35 秒冷却 + 180 秒），和玩家理解的字面意思不符。
@@ -415,10 +421,10 @@ void ScavengerTickTrigger(float dt) {
     s_quietT = 0.0f;          /* 2026-11-08：出场即重置安静计时 */
     retargetToPlayer();
 
-    { extern void BestiaryMarkSeen(int); BestiaryMarkSeen(4); }
+    {  BestiaryMarkSeen(BST_ID_SCAVENGER); BestiaryNoteFloor(BST_ID_SCAVENGER, currentLevel); }
     PlaySfx(SFX_GLASS, 0.45f);
-    pickupMsg = (g_lang == LANG_ZH) ? "有东西在靠近…" : "SOMETHING IS COMING";
-    pickupMsgTimer = 2.0f;
+    (void)0; /* Enemy encounter narration removed. */
+    (void)0; /* No encounter-toast timer. */
 }
 
 /* 干完活走人：进入冷却，并把 hideStreak 清零，这样之后还能再来 */
@@ -430,24 +436,24 @@ static void scavengerLeave(void) {
     scavenger.searchT = 0.0f;
     scavCooldown = SCAV_COOLDOWN;
     s_quietT = 0.0f;          /* 2026-11-08：安静计时也一起归零 */
-    { extern int hideStreak; hideStreak = 0; }
+    {  hideStreak = 0; }
 }
 
-void UpdateScavenger(float dt) {
+static int ScavengerPreflight(float dt) {
     /* v2.4.98 EXIT_SPAWN_GUARD：玩家站在出口附近时不清道夫不出现 ——
        否则它会贴着脸生成，把正在选"继续/撤离"的玩家撞死。 */
     {
-        extern int breakerOpen, exitChoiceOpen;
-        extern float Dist2(float, float, float, float);
-        extern float exitX, exitY;
-        if (exitChoiceOpen) { scavenger.active = 0; return; }
+
+
+
+        if (exitChoiceOpen) { scavenger.active = 0; return 0; }
         if (breakerOpen && Dist2(posX, posY, exitX, exitY) < 9.0f) {
-            if (!scavenger.active) return;   /* 还没出场就推迟 */
+            if (!scavenger.active) return 0;   /* 还没出场就推迟 */
         }
     }
 
-    { extern int trainingMode; if (trainingMode) return; }
-    if (!scavenger.active) return;
+    {  if (trainingMode) return 0; }
+    if (!scavenger.active) return 0;
 
     /* ---- ⓪ 寿命 & 卡死检测（修 bug②：不再永久站着）---- */
     /* ===== v2.4.39 **固定追击时间** =====
@@ -460,7 +466,7 @@ void UpdateScavenger(float dt) {
     scavenger.life -= dt;
     if (scavenger.life <= 0.0f) {
         scavengerLeave();        /* 追够了 → 消失 + 40 秒冷却 */
-        return;
+        return 0;
     }
 
     scavenger.stuckT += dt;
@@ -484,7 +490,7 @@ void UpdateScavenger(float dt) {
                 }
             }
             /* 连挪 8 次都挪不出去，才算真的废了 —— 这时才走人 */
-            if (!freed) { scavengerLeave(); return; }
+            if (!freed) { scavengerLeave(); return 0; }
             scavenger.lastX = scavenger.x;
             scavenger.lastY = scavenger.y;
         }
@@ -494,8 +500,8 @@ void UpdateScavenger(float dt) {
     if (scavenger.warnT > 0.0f) {
         scavenger.warnT -= dt;
         if (scavenger.warnT <= 0.0f) {
-            extern int hiddenIn;
-            extern HideSpot hideSpots[];
+
+
             int spot = scavenger.grabSpot;
 
             if (hiddenIn >= 0 && hiddenIn == spot) {
@@ -508,13 +514,13 @@ void UpdateScavenger(float dt) {
                 if (spot >= 0 && spot < HIDESPOT_MAX) {
                     hideSpots[spot].broken = 1;   /* 真的撬坏，要花钱修 */
                 }
-                { extern int resetInputState; hiddenIn = -1; resetInputState = 1; }
+                {  hiddenIn = -1; resetInputState = 1; }
                 PlaySfx(SFX_SCREAM, 0.7f);
-                pickupMsg = (g_lang == LANG_ZH) ? "它把柜门拉开了！" : "IT OPENED THE LOCKER!";
-                pickupMsgTimer = 2.2f;
+                (void)0; /* Enemy encounter narration removed. */
+                (void)0; /* No encounter-toast timer. */
                 scavenger.grabSpot = -1;
                 scavengerLeave();
-                return;
+                return 0;
             }
 
             /* ================================================================
@@ -530,10 +536,8 @@ void UpdateScavenger(float dt) {
             if (spot >= 0 && spot < HIDESPOT_MAX && hideSpots[spot].active) {
                 hideSpots[spot].broken = 1;
                 PlaySfx(SFX_GLASS, 0.7f);
-                pickupMsg = (g_lang == LANG_ZH)
-                    ? "它把柜门拽坏了 —— 它还在找你"
-                    : "IT RIPPED THE LOCKER APART - IT IS STILL HUNTING";
-                pickupMsgTimer = 2.2f;
+                (void)0; /* Enemy encounter narration removed. */
+                (void)0; /* No encounter-toast timer. */
             }
             scavenger.grabSpot = -1;
             scavenger.warnT = 0.0f;
@@ -541,17 +545,15 @@ void UpdateScavenger(float dt) {
             scavenger.eating = -1;
             scavenger.searchT = 0.0f;
             scavenger.life = (scavenger.life < 12.0f) ? 12.0f : scavenger.life;
-            return;
+            return 0;
         }
-        return;
+        return 0;
     }
 
-    /* ---- ② **每帧**锁定玩家当前位置 ---- */
-    retargetToPlayer();
+    return 1;
+}
 
-    float dx = scavenger.tx - scavenger.x, dy = scavenger.ty - scavenger.y;
-    float d = sqrtf(dx * dx + dy * dy);
-
+static int ScavengerEncounter(float dt, float d) {
     /* ===== v2.4.29 **玩家跑出柜子后被逮到** =====
        条件：玩家不在藏身点里，且清道夫贴到 0.85 格内。
        惩罚：30% 减速 120 秒 + 理智按 25→50 随层成长。
@@ -560,7 +562,7 @@ void UpdateScavenger(float dt) {
          跑出来被抓     = 25~50 理智 + 120 秒瘸腿（但不坏柜子）
     */
     {
-        extern int hiddenIn;
+
         if (hiddenIn < 0) {
             float cdx = posX - scavenger.x, cdy = posY - scavenger.y;
             if (cdx * cdx + cdy * cdy < SCAV_CATCH_R * SCAV_CATCH_R) {
@@ -571,10 +573,10 @@ void UpdateScavenger(float dt) {
                 if (loss > SCAV_CATCH_SAN_MAX) loss = SCAV_CATCH_SAN_MAX;
                 sanity -= loss * RunDamageTakenMul();
                 /* 2026-11-08（第 4 轮）：第一次被抓住时教"按 K 丢钱引开" */
-                { extern void HintOnce(int); HintOnce(5); }
+                /* Automatic encounter hint removed. */
                 /* 第 9 轮「以牙还牙」：挨了一下之后 3 秒跑更快 */
-                { extern int SkillCounterBackOwned(void);
-                  extern float retaliateT;
+                { 
+
                   if (SkillCounterBackOwned()) retaliateT = 3.0f; }
                 if (sanity < 0.0f) sanity = 0.0f;
 
@@ -586,56 +588,53 @@ void UpdateScavenger(float dt) {
                 AddHitFlash(0.80f);
                 AddShake(0.30f, 0.22f);
                 PlaySfx(SFX_SCREAM, 0.85f);
-                pickupMsg = (g_lang == LANG_ZH)
-                    ? "它抓住了你！减速 30%，持续 2 分钟"
-                    : "IT CAUGHT YOU!  -30% SPEED FOR 2 MIN";
-                pickupMsgTimer = 2.2f;
-                { extern int floorSpotted, runSpotted;
+                (void)0; /* Enemy encounter narration removed. */
+                (void)0; /* No encounter-toast timer. */
+                { 
                   floorSpotted = 1; runSpotted = 1; }
                 /* 第 9 轮「反杀」：每局一次，抓住你的瞬间把它打退 */
                 {
-                    extern int SkillCounterKillOwned(void);
-                    extern int counterKillUsed;
+
+
                     if (SkillCounterKillOwned() && !counterKillUsed) {
                         counterKillUsed = 1;
                         sanity += loss;          /* 撤销这次掉理智 */
                         if (sanity > 100.0f) sanity = 100.0f;
-                        pickupMsg = (g_lang == LANG_ZH)
-                            ? "反杀！它被打了回去" : "COUNTERKILL! IT BACKS OFF";
-                        pickupMsgTimer = 2.2f;
+                        (void)0; /* Enemy encounter narration removed. */
+                        (void)0; /* No encounter-toast timer. */
                         AddShake(0.30f, 0.20f);
                         scavengerLeave();
-                        return;
+                        return 0;
                     }
                 }
                 scavengerLeave();      /* 抓完就走，进入 40 秒冷却 */
-                return;
+                return 0;
             }
         }
     }
 
     /* ---- ③ 到达目标附近 ---- */
     if (d < SCAV_ARRIVE_R) {
-        extern int hiddenIn;
+
 
         /* (a) 玩家躲着 → 拉柜门 */
         if (hiddenIn >= 0) {
             scavenger.warnT = SCAV_GRAB_WARN;
             scavenger.grabSpot = hiddenIn;
         /* v2.4-beta B02：刮擦声来自柜门外那一边 */
-        { extern void AudioPlayWorld(int, float, float, float, float, int);
+        { 
           AudioPlayWorld(SFX_SCAVENGER, scavenger.x, scavenger.y, 0.85f, 18.0f, 3); }
             PlaySfx(SFX_STEP, 0.9f);
-            pickupMsg = (g_lang == LANG_ZH) ? "柜门被抓住了！" : "THE LOCKER IS GRABBED!";
-            pickupMsgTimer = 1.4f;
-            return;
+            (void)0; /* Enemy encounter narration removed. */
+            (void)0; /* No encounter-toast timer. */
+            return 0;
         }
 
         /* (b) 玩家没躲 → 翻箱。安全规则：只吃 content == 0（空箱），
                保险丝 / 电池一律不动，宁可不吃也不能让玩家卡关。 */
         if (scavenger.eating < 0 && scavenger.searchT <= 0.0f) {
-            extern Container containers[MAX_CONTAINERS];
-            extern int containerCount;
+
+
             int best = -1;
             float bestD = 1e9f;
             for (int ci = 0; ci < containerCount; ci++) {
@@ -651,13 +650,13 @@ void UpdateScavenger(float dt) {
             if (best >= 0) {
                 scavenger.eating = best;
                 scavenger.eatT = 0.0f;
-                pickupMsg = (g_lang == LANG_ZH) ? "它在翻箱子！" : "IT IS RIFLING YOUR CRATES!";
-                pickupMsgTimer = 1.6f;
+                (void)0; /* Enemy encounter narration removed. */
+                (void)0; /* No encounter-toast timer. */
             } else {
                 /* 没箱子可翻 → 原地翻找 2 秒再走（有动作，不是傻站着） */
                 scavenger.searchT = SCAV_SEARCH_TIME;
-                pickupMsg = (g_lang == LANG_ZH) ? "它到处翻找…" : "IT IS SEARCHING…";
-                pickupMsgTimer = 1.6f;
+                (void)0; /* Enemy encounter narration removed. */
+                (void)0; /* No encounter-toast timer. */
             }
         }
 
@@ -665,14 +664,14 @@ void UpdateScavenger(float dt) {
         if (scavenger.searchT > 0.0f) {
             scavenger.searchT -= dt;
             if (scavenger.searchT <= 0.0f) { scavengerLeave(); }
-            return;
+            return 0;
         }
 
         /* (d) 吃箱子 */
         if (scavenger.eating >= 0) {
             scavenger.eatT += dt;
             if (scavenger.eatT >= SCAV_EAT_TIME) {
-                extern Container containers[MAX_CONTAINERS];
+
                 int ci = scavenger.eating;
                 if (ci >= 0 && ci < MAX_CONTAINERS && containers[ci].active &&
                     containers[ci].content == 0) {
@@ -682,9 +681,13 @@ void UpdateScavenger(float dt) {
                 scavengerLeave();
             }
         }
-        return;
+        return 0;
     }
 
+    return 1;
+}
+
+static void ScavengerMove(float dt) {
     /* ---- ④ 沿 BFS 梯度走过去（永远有路）---- */
     /* v2.4.39 **关键修复**：BFS 距离场原来是出生时建一次就不再更新 ——
        于是梯度永远指向「你召唤它那一刻站的位置」，
@@ -727,13 +730,25 @@ void UpdateScavenger(float dt) {
                     vol = 0.22f + vol * 0.78f;  /* 远处也留一点，让你听见它在靠近 */
                     /* v2.4-beta B02：脚步带位置 —— 玩家能听出它从哪边绕过来。
                        原来只是按距离调音量，方向信息完全丢失。 */
-                    { extern void AudioPlayWorld(int, float, float, float, float, int);
+                    { 
                       AudioPlayWorld(SFX_SCAV_STEP, scavenger.x, scavenger.y,
                                      vol, 12.0f, 1); }
                 }
             }
         }
     }
+}
+
+void UpdateScavenger(float dt) {
+    if (!ScavengerPreflight(dt)) return;
+    /* ---- ② **每帧**锁定玩家当前位置 ---- */
+    retargetToPlayer();
+
+    float dx = scavenger.tx - scavenger.x, dy = scavenger.ty - scavenger.y;
+    float d = sqrtf(dx * dx + dy * dy);
+
+    if (!ScavengerEncounter(dt, d)) return;
+    ScavengerMove(dt);
 }
 
 /* v2.3.9：训练营用 —— 强制把清道夫摆到指定位置当标本 */

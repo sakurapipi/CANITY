@@ -31,7 +31,9 @@ extern int  bankGold, dailyMode, trainingMode, campaignMode;
 extern int  runInProgress;
 
 /* main.c 里的崩溃现场标记，被 shop.c 引用 */
+#ifndef CANITY_SHARED_DIAGNOSTICS
 volatile int g_dbgMark = 0;
+#endif
 
 static void reset_between_runs(void) {
     bankGold = 0;

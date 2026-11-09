@@ -15,31 +15,33 @@
 /* 历史颜色字面量尚未全量迁移；新改处复用语义色，局部迁移需说明范围。       */
 /* ------------------------------------------------------------------ */
 
+unsigned int UiThemeColor(int role);
 /* ==================== ① 语义色 ==================== */
 /* 文字 */
-#define UI_INK        0x00C8C4BCu   /* 正文 */
-#define UI_INK_DIM    0x008E897Fu   /* 次要提示（实际对比度另行测量） */
-#define UI_INK_FAINT  0x00606868u   /* 极弱（装饰） */
-#define UI_INK_TITLE  0x00E8D8B0u   /* 标题 */
+#define UI_INK        0x00C5D7E8u   /* 正文 */
+#define UI_INK_DIM    0x008DA6BDu   /* 次要提示（实际对比度另行测量） */
+#define UI_INK_FAINT  0x005F7891u   /* 极弱（装饰） */
+#define UI_INK_TITLE  0x00D9F0FFu   /* 标题 */
 
 /* 语义 */
-#define UI_ACCENT     0x00FFB040u   /* 强调（琥珀）—— 选中/已购 */
-#define UI_DANGER     0x00D04030u   /* 危险/不可用 */
-#define UI_OK         0x0060C8A0u   /* 安全/可执行 */
-#define UI_WARN       0x00E0A020u   /* 警告/冷却中 */
-#define UI_INFO       0x0080C0E0u   /* 信息/中性蓝 */
+#define UI_GOLD       0x00E5BD66u   /* Currency only; the interface remains blue. */
+#define UI_ACCENT     (UiThemeColor(0))   /* 强调（冰蓝）—— 选中/已购 */
+#define UI_DANGER     0x00E2341Au   /* 危险/不可用 */
+#define UI_OK         0x009DDDAEu   /* 安全/可执行 */
+#define UI_WARN       0x00E9BC74u   /* 警告/冷却中 */
+#define UI_INFO       0x008DC9EDu   /* 信息/中性蓝 */
 
 /* 面（背景） */
-#define UI_BG_PANEL   0x00161C1Cu   /* 面板底 */
-#define UI_BG_ROW     0x00202828u   /* 行底（可点） */
-#define UI_BG_SEL     0x00403A20u   /* 行底（选中） */
-#define UI_BG_HOVER   0x00303838u   /* 行底（悬停） */
-#define UI_BG_LOCKED  0x00161412u   /* 行底（锁定） */
+#define UI_BG_PANEL   (UiThemeColor(2))   /* 面板底 */
+#define UI_BG_ROW     (UiThemeColor(3))   /* 行底（可点） */
+#define UI_BG_SEL     (UiThemeColor(4))   /* 行底（选中） */
+#define UI_BG_HOVER   (UiThemeColor(6))   /* 行底（悬停） */
+#define UI_BG_LOCKED  0x00111B29u   /* 行底（锁定） */
 
 /* 边 */
-#define UI_EDGE       0x00C8B060u   /* 面板外框 */
-#define UI_EDGE_HOT   0x00FFE070u   /* 面板外框（聚焦） */
-#define UI_EDGE_DIM   0x00505858u   /* 分隔线 */
+#define UI_EDGE       (UiThemeColor(5))   /* 面板外框 */
+#define UI_EDGE_HOT   (UiThemeColor(1))   /* 面板外框（聚焦） */
+#define UI_EDGE_DIM   0x002B4258u   /* 分隔线 */
 
 /* ==================== ② 间距网格 ==================== */
 /* 4 的倍数。这里是设计单位；UIS() 与当前 UI 逻辑画布的变换须一致核对。 */
@@ -92,4 +94,6 @@ void UiSectionRule(int cx, int y, int w);
 void UiFooterRule(int x0, int x1, int y);
 void UiCornerMarks(int x0, int y0, int x1, int y1);
 
+void UiDecayFrame(void);
+void UiCorrodeRect(int x0,int y0,int x1,int y1);
 #endif

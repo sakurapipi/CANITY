@@ -35,8 +35,30 @@ typedef enum {
     AK_BESTIARY,     /* 见过 N 种怪 */
     AK_SKILLNODES,   /* 局外技能树点亮 N 个 */
     AK_THREAT,       /* 单局 THREAT 达到 N */
-    AK_ECHOCELLS     /* 回声弹累计揭示 N 格 */
+    AK_ECHOCELLS,    /* 回声弹累计揭示 N 格; stable legacy kind */
+    AK_BESTIARYMASTER /* all current dossiers reach their counter stage */
 } AchKind;
+
+typedef enum {
+    ACH_FLAG_STARTED = 1,
+    ACH_FLAG_TEN_MINUTES = 2,
+    ACH_FLAG_HALF_HOUR = 3,
+    ACH_FLAG_CLAWBACK = 4,
+    ACH_FLAG_CLEAN_ESCAPE = 5,
+    ACH_FLAG_PERFECT_ESCAPE = 6,
+    ACH_FLAG_WARDEN_CLEAN = 7,
+    ACH_FLAG_NO_CONTAINER = 8,
+    ACH_FLAG_LIGHTLESS = 9,
+    ACH_FLAG_UNDER_WARDEN = 10,
+    ACH_FLAG_DOUBLE_HUNT = 11,
+    ACH_FLAG_GOLD_ON_FLOOR_12 = 12,
+    ACH_FLAG_META_RESET = 13,
+    ACH_FLAG_FULL_HIDE = 14,
+    ACH_FLAG_FIRST_EXIT = 15,
+    ACH_FLAG_COUNT = 16
+} AchFlag;
+
+#define ACH_GOLD_FLOOR_12 12000
 
 /* ---- 成就分类 ---- */
 enum {
@@ -100,7 +122,7 @@ typedef struct {
        于是 target 2~7 走 flags[2..7]，target 10~14 又走 flags[2..6] ——
        两组成就读同一个槽：解了"十分钟"会连带解"守门人视野内撤离"。
        现在放宽到 16，target 直接当下标。 */
-    int flags[16];
+    int flags[ACH_FLAG_COUNT];
 } AchSnap;
 
 void InitAchievements(void);
@@ -108,6 +130,7 @@ void AchCheck(const AchSnap* s);
 
 /* 手动解锁（特殊成就用） */
 void AchUnlock(int idx);
+void AchRecordFlag(AchFlag flag);
 
 /* 进度累加（AK_* 之外的计数型） */
 void AchAddProgress(int idx, int amount);

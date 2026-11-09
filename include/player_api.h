@@ -67,8 +67,8 @@ extern int crankTimeTotal;
 extern int tookDamage;
 
 extern float ghostStillT;
-extern float secondWindTimer, vanishTimer, vanishHold, pawnCd, retaliateT;
-extern int vanished, lastResortUsed, counterKillUsed;
+extern float secondWindTimer, pawnCd, retaliateT;
+extern int lastResortUsed, counterKillUsed;
 extern int sprintedAnyFloor;
 extern float lowSanitySeconds;
 extern int holdingNow;
@@ -87,6 +87,7 @@ extern float modSpeedMul;
 
 
 
+int FlashlightUseAllowed(void);
 float BatteryDrainRate(void);
 
 float SafeHealRate(void);
@@ -95,7 +96,7 @@ float SafeHealRate(void);
 
 
 /* Shared player effect/escape state. */
-extern int runSpotted, catchBreakUsed, playDeadUsed, ultUsed;
+extern int runSpotted, playDeadUsed, ultUsed;
 extern float ultTimer, hideBlockTimer;
 
 #endif

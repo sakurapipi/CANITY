@@ -8,6 +8,8 @@
  *   · game.c 暴露的公开变量（下面 extern 声明）
  */
 #include "common.h"
+#include "echo_marks.h"
+#include "phase.h"
 #include "loop_api.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -65,7 +67,7 @@ void EchoTryTrigger(float x, float y) {
      * 现在四个出口（落地 / 撞墙 / 打怪 / 空中到期）都会调到这里，
      * 连投计数才和"扔了几次"真正对应上。
      * ================================================================== */
-    extern SuspicionPoint susp[SUSP_MAX];
+
     throwChain++;
     throwChainTimer = THROW_CHAIN_IDLE;
     if (throwChain < THROW_CHAIN_NEED) return;
@@ -78,7 +80,7 @@ void EchoTryTrigger(float x, float y) {
 
     SuspicionAdd(x, y, 100.0f, 1.5f, 30.0f, SUSP_THROW);
     /* B05：连锁回响也有位置 —— 它发生在你扔出去的那个地方 */
-    { extern void AudioPlayWorld(int, float, float, float, float, int);
+    { 
       AudioPlayWorld(SFX_ECHO, x, y, 0.95f, 24.0f, 2); }
     pickupMsg = (g_lang == LANG_ZH) ? "回响炸开了" : "ECHO BURST";
     pickupMsgTimer = 1.6f;
@@ -115,11 +117,11 @@ static int StoneBreakLockAt(float x, float y);
 int StoneBreakLockAtTest(float x, float y) { return StoneBreakLockAt(x, y); }
 
 static int StoneBreakLockAt(float x, float y) {
-    extern Container containers[];
-    extern int containerCount;
-    extern int g_lang;
-    extern const char* pickupMsg;
-    extern float pickupMsgTimer;
+
+
+
+
+
 
     int best = -1;
     float bestD = STONE_LOCK_RADIUS * STONE_LOCK_RADIUS;
@@ -142,18 +144,18 @@ static int StoneBreakLockAt(float x, float y) {
     /* 砸锁的动静比普通落地大得多 —— 这就是它的代价 */
     MakeNoise(x, y, STONE_LOCK_NOISE);
     /* B05：破锁的碎玻璃声来自**箱子那边** —— 隔墙听得到，也听得出方向 */
-    { extern void AudioPlayWorld(int, float, float, float, float, int);
+    { 
       AudioPlayWorld(SFX_GLASS, x, y, 1.0f, 24.0f, 3); }
-    { extern void AddShake(float, float); AddShake(0.10f, 0.08f); }
+    {  AddShake(0.10f, 0.08f); }
 
     pickupMsg = (g_lang == LANG_ZH) ? "石头砸开了锁！" : "THE STONE BROKE THE LOCK!";
     pickupMsgTimer = 1.6f;
-    { extern int uiDirty; uiDirty = 1; }
+    {  uiDirty = 1; }
     return 1;
 }
 
 void ThrowItem(int type, float charge) {
-    { extern void HintOnce(int); HintOnce(0); }   /* v7 B4: 第一次投掷 */
+    {  HintOnce(0); }   /* v7 B4: 第一次投掷 */
     g_throwOk = 0;
     if (charge < 0.1f) charge = 0.1f;
     if (charge > 1.0f) charge = 1.0f;
@@ -334,9 +336,9 @@ static void ShotImpact(int i, float x, float y) {
     }
     if (sp->effect == FX_ECHO_SCAN) {
         /* 回声弹：声呐扫描 —— 揭地形 + 标记资源 + 暴露活物 */
-        extern float echoScanT;
-        extern float echoScanX, echoScanY;
-        extern int explored[MAP_HEIGHT][MAP_WIDTH];
+
+
+
         int cx0 = (int)x, cy0 = (int)y;
         int rad = 14;
         int gy, gx;
@@ -355,17 +357,17 @@ static void ShotImpact(int i, float x, float y) {
                 explored[gy][gx] = 1;
             }
         }
-        { extern void EchoMarksScan(float, float, float);
+        { 
           EchoMarksScan(x, y, ECHO_RADIUS); }
         pickupMsg = (g_lang == LANG_ZH) ? "声呐扫描：资源已标出（有声）"
                                         : "SONAR: RESOURCES MARKED (LOUD)";
         pickupMsgTimer = 1.8f;
-        { extern void AudioPlayWorld(int, float, float, float, float, int);
+        { 
           AudioPlayWorld(SFX_ECHO, x, y, 0.85f, 22.0f, 2); }
         return;
     }
     if (sp->effect == FX_PHASE) {
-        extern void PhaseOnThrowLanded(int kind, float lx, float ly);
+
         PhaseOnThrowLanded(kind, x, y);
         return;
     }
@@ -419,7 +421,7 @@ void UpdateShots(float dt) {
                代价是瓶子要花一个投掷格。
                命中半径 1.2 格（比扳手的 0.7 宽），因为瓶子有溅射。 */
             if (shot[i].kind == 1) {
-                extern void  CollectorBurstBounty(void);
+
                 if (CollectorActive()) {
                     float cdx = CollectorX() - shot[i].x;
                     float cdy = CollectorY() - shot[i].y;
@@ -430,11 +432,11 @@ void UpdateShots(float dt) {
                 /* v2.4.58 瓶子增强：落点附近的普通怪被震一下（硬直 0.35 秒） */
                 {
 
-                    extern int trainingMode;
+
                     if (!trainingMode) {
                         /* 落点 1.5 格内的**所有**猎手都被震一下。
                            原来只判 monster，第 2、3 只完全免疫。 */
-                        extern int MonsterCollect(Monster**, int, int);
+
                         /* 变量名别叫 near —— 那是 Windows 的宏（__near） */
                         Monster* inRange[MON_HUNTER_MAX + 1];
                         int nn = MonsterCollect(inRange, MON_HUNTER_MAX + 1, 1);
@@ -452,14 +454,8 @@ void UpdateShots(float dt) {
                 /* 2026-11-08（第 6 轮）：噪音也读表 —— 不再按 kind 写死 */
                 const ShotSpec* nsp = ShotSpecFor(shot[i].kind);
                 float nz = nsp->noise;
-                /* v3.4：SILENT THROW（局内树 id 2）投掷物落地不再产生噪音 */
-                if (BenchSilentThrow()) nz = 0.0f;
                 if (nsp->noiseScaled) nz += shot[i].charge * 12.0f;   /* 投石 8 ~ 20 */
-                if (BenchSilentThrow()) nz = 0.0f;   /* v3.4：静投压过所有分支 */
-                /* v6 第 ㉟ 轮：**诱饵**（改造树第 2 列的第二顶点）
-           投掷物噪音 ×3 —— 纯引怪流。第 ⑩ 轮加了没接。 */
-        { extern int BenchLure(void); if (BenchLure()) nz *= 3.0f; }
-        if (nz > 0.0f) MakeNoise(shot[i].x, shot[i].y, nz);
+                if (nz > 0.0f) MakeNoise(shot[i].x, shot[i].y, nz);
             }
             shot[i].active = 0;
             continue;
@@ -524,7 +520,7 @@ void UpdateShots(float dt) {
                 /* 投掷物也要能打中第 2、3 只听声鬼 ——
                    原来这里是手写两条 push，扩到三只之后它们免疫投掷物。 */
                 Monster* targets[MON_HUNTER_MAX + 1];
-                extern int MonsterCollect(Monster**, int, int);
+
                 int nTargets = MonsterCollect(targets, MON_HUNTER_MAX + 1, 1);
                 for (int t = 0; t < nTargets; t++) {
                     Monster* m = targets[t];
@@ -649,7 +645,7 @@ void UpdateShots(float dt) {
                 SpawnGlue(shot[i].x, shot[i].y);
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
             } else if (shot[i].kind == 10) {
-                extern void EchoMarksScan(float, float, float);
+
                 EchoMarksScan(shot[i].x, shot[i].y, ECHO_RADIUS);
             } else if (shot[i].z > 0.0f) {
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
@@ -700,8 +696,6 @@ void FlareHealReset(void) { s_floorFlareHealed = 0.0f; }
 float FlareHealBudgetLeft(void) { return FLARE_HEAL_FLOOR_BUDGET - s_floorFlareHealed; }
 
 void FlareHealTick(float dt) {
-    extern int   MAX_THROWN_HACK;   /* 占位，实际用 MAX_THROWN */
-    (void)MAX_THROWN_HACK;
 
     /* ==================================================================
      * 2026-11-06（用户实测：「闪光弹不能回理智，你没有做好」）

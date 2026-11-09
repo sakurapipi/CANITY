@@ -40,12 +40,22 @@ WINDRES = tool('CANITY_WINDRES', 'windres')
 # 唯一的源文件清单来源：CI 与 Release 都读它，避免三边命令漂移。
 sys.path.insert(0, str(root / 'tools'))
 from build_sources import game_sources, test_canity_sources  # noqa: E402
+from build_cache import file_digest, inputs_digest, include_digest, tool_identity, read_profile, write_profile  # noqa: E402
 
 cache = root / 'work' / 'codex-build'
 cache.mkdir(parents=True, exist_ok=True)
 
-headers = list((root / 'include').glob('*'))
-newest = max(p.stat().st_mtime for p in headers if p.is_file())
+compile_flags = ['-Iinclude', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror']
+sources = game_sources(root)
+profile_path = cache / 'compile-profile.json'
+previous = read_profile(profile_path)
+configuration = dict(compiler=tool_identity(GCC), flags=compile_flags, working_directory=str(root),
+                     includes=include_digest(root))
+source_hashes = {src.relative_to(root).as_posix(): file_digest(src) for src in sources}
+rebuild_all = previous.get('configuration') != configuration
+previous_sources = previous.get('sources', {})
+if not isinstance(previous_sources, dict):
+    previous_sources = {}
 
 
 def run(cmd, env=None):
@@ -57,24 +67,32 @@ def run(cmd, env=None):
 print('toolchain: gcc=%s' % GCC, flush=True)
 print('toolchain: windres=%s' % WINDRES, flush=True)
 
-# ---- 资源：改了 rc 就要重编，否则版本信息/图标是旧的 ----
+# ---- 资源：图标、清单或 windres 改变也不能复用旧资源 ----
 res_o = root / 'res' / 'canity_res.o'
 rc = root / 'res' / 'canity.rc'
-if not res_o.exists() or res_o.stat().st_mtime < rc.stat().st_mtime:
+resource_inputs = [p for p in (root / 'res').rglob('*')
+                   if p.is_file() and p.suffix.lower() in {'.rc', '.h', '.ico', '.manifest', '.bmp', '.png'}]
+resources = dict(compiler=tool_identity(WINDRES), inputs=inputs_digest(root, resource_inputs))
+if not res_o.exists() or previous.get('resources') != resources:
     run([WINDRES, rc, '-O', 'coff', '-o', res_o])
     print('resource: rebuilt canity_res.o', flush=True)
 
 # ---- 逐个编译（增量）----
 objects = []
-for src in game_sources(root):
+compiled_sources = {} if rebuild_all else dict(previous_sources)
+for src in sources:
     obj = cache / (str(src.relative_to(root)).replace('\\', '_').replace('/', '_') + '.o')
-    if not obj.exists() or obj.stat().st_mtime < max(src.stat().st_mtime, newest):
-        run([GCC, '-c', src, '-Iinclude', '-std=c99', '-O2',
-             '-Wall', '-Wextra', '-Werror', '-o', obj])
+    source_key = src.relative_to(root).as_posix()
+    if (not obj.exists() or rebuild_all
+            or previous_sources.get(source_key) != source_hashes[source_key]):
+        run([GCC, '-c', src, *compile_flags, '-o', obj])
+    compiled_sources[source_key] = source_hashes[source_key]
+    write_profile(profile_path, dict(configuration=configuration, sources=compiled_sources, resources=resources))
     objects.append(obj)
 
 libs = ['-lgdi32', '-luser32', '-lwinmm']
 run([GCC, *objects, res_o, *libs, '-mwindows', '-o', root / 'canity_verify.exe'])
+write_profile(profile_path, dict(configuration=configuration, sources=source_hashes, resources=resources))
 print('C99 game build: PASS', flush=True)
 if args.build_only:
     raise SystemExit(0)

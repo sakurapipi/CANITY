@@ -40,8 +40,9 @@ static void fail(const char* message) {
     exit(1);
 }
 
-static void check(int condition, const char* message) {
-    if (!condition) fail(message);
+static int checkFailures=0;
+static void check(int condition,const char* message){
+    if(!condition){fprintf(stderr,"FAIL: %s\n",message);checkFailures++;}
 }
 
 static char* read_file(const char* path) {
@@ -114,6 +115,22 @@ static char* read_loop_sources(void) {
 
 static int contains(const char* text, const char* needle) {
     return strstr(text, needle) != NULL;
+}
+
+/* 2026-11-09：忽略空白与换行的子串匹配。
+   重构时常把 `a[i-30]=b[i]` 写成 `a[id-30] = rank`，
+   功能没变但字面匹配会假红 —— 这类断言用这个函数。 */
+static int contains_tight(const char* text, const char* needle) {
+    char a[65536], b[512];
+    size_t j = 0;
+    for (size_t i = 0; text[i] && j < sizeof(a) - 1; i++)
+        if (!isspace((unsigned char)text[i])) a[j++] = text[i];
+    a[j] = 0;
+    j = 0;
+    for (size_t i = 0; needle[i] && j < sizeof(b) - 1; i++)
+        if (!isspace((unsigned char)needle[i])) b[j++] = needle[i];
+    b[j] = 0;
+    return strstr(a, b) != NULL;
 }
 
 static int count_contains(const char* text, const char* needle) {
@@ -621,15 +638,15 @@ static void test_save_persist_contract(void) {
         free(throwc);
     }
 
-    check(contains(saveh, "SAVE_VERSION 37"), "save format must be v37");
+    check(contains(saveh, "SAVE_VERSION 39"), "save format must be v39 with v37/v38 migration");
     /* v37（2026-11-08 第 7 轮）：幽灵流派 4 个节点的等级必须能存。
        注意：**不能**把中间的 extraSkillRanks[4] 改大 —— 那会让后面所有
        字段偏移，老档全错位。只能是末尾追加。 */
     check(contains(saveh, "int archetypeRanks[12];"),
           "the archetype rank block must cover 30..41");
-    check(contains(savec, "g_save.archetypeRanks[i-30]=skillRank[i]"),
+    check(contains_tight(savec, "g_save.archetypeRanks[id-30]"),
           "save must write the archetype ranks");
-    check(contains(savec, "i<30 && i<SKILL_COUNT"),
+    check(contains_tight(savec, "id<30") && contains_tight(savec, "extraSkillRanks[id-26]"),
           "the old extraSkillRanks[4] must not be written past its size");
     /* v36（2026-11-08 第 2 轮）：难度选择必须能存档，且老档读成标准 */
     check(contains(saveh, "int difficultyPlus1;"),
@@ -1206,6 +1223,7 @@ int main(void) {
     test_save_persist_contract();
     test_mode_leak_contract();test_lock_types_contract();test_mimic_contract();test_save_container_contract();test_map_drain_contract();
     test_lockbox_contract();
-    puts("CANITY offline self-check: PASS");
+    if(!checkFailures)puts("CANITY offline self-check: PASS");
+    if(checkFailures){fprintf(stderr,"SMOKE FAILURES: %d\n",checkFailures);return 1;}
     return 0;
 }

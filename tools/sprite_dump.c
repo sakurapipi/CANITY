@@ -10,7 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef CANITY_SHARED_DIAGNOSTICS
 volatile int g_dbgMark = 0;
+#endif
 
 static void writePpm(const char* path, int w, int h, const unsigned int* px) {
     FILE* f = fopen(path, "wb");

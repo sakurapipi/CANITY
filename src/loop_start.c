@@ -1,5 +1,7 @@
 /* Orchestration ownership split; stage ordering remains in the entry point. */
 #include "common.h"
+#include "run_economy.h"
+#include "room_theme.h"
 #include "lockbox.h"
 #include "mimic.h"
 #include "echo_marks.h"
@@ -74,9 +76,22 @@ void LoopQueueStart(int mode, int stage) {
     pendingCampaignStage = stage;
 }
 
+static int replaceRunPending=0,replaceRunChoice=0,replaceRunApproved=0;
+int LoopRunReplacementPending(void){return replaceRunPending;}
+int LoopRunReplacementChoice(void){return replaceRunChoice;}
+void LoopToggleRunReplacement(void){replaceRunChoice=!replaceRunChoice;uiDirty=1;}
+void LoopResolveRunReplacement(int approve){
+    if(!replaceRunPending)return;
+    replaceRunPending=0;uiDirty=1;LoopClearInputEdges();resetInputState=1;
+    if(approve){replaceRunApproved=1;StartGame();}
+    else {pendingStartMode=START_NORMAL;pendingCampaignStage=0;}
+}
+
 static void ResetModeFlags(void) {
+    RoomThemeSetMadness(0);
     isEndlessRun = 0;
     trainingMode = 0;
+    guideMode = 0;
     dailyMode = 0;
     campaignMode = 0;
     campaignStage = 0;
@@ -91,6 +106,9 @@ static void ResetModeFlags(void) {
    必须在 SaveGame() 之后调用（先让存档记下 daily/campaign 模式），
    否则会把「退出时还在每日挑战里」这件事也清掉，Continue 就回不去了。 */
 void ResetRunModeFlags(void) {
+    LoopClearInputEdges();
+    LoopCancelTransientInput();
+    PlayerResetSprintGrace();
     ResetModeFlags();
     runInProgress = 0;
     exitChoiceOpen = 0;
@@ -100,12 +118,13 @@ void ResetRunModeFlags(void) {
 }
 
 static void InitializeRunEconomy(void) {
+    if(trainingMode){carryGold=0;carryAtRunStart=0;return;}
     /* v3.4 银行：按选择的档位从存款里取出本金 */
     {
         int p = bankCarryPct;
         if (p < 0) p = 0;
         if (p >= BANK_CARRY_STEPS) p = BANK_CARRY_STEPS - 1;
-        int take = (int)((float)bankGold * (float)(p * BANK_STEP_PCT) / 100.0f + 0.5f);
+        int take = (int)((double)WalletBank() * (double)(p * BANK_STEP_PCT) / 100.0 + 0.5);
         {   /* v6：取款走 Wallet（银行 → 携带） */
             take = WalletWithdraw(take);
         }
@@ -168,7 +187,7 @@ static void InitializeRunEconomy(void) {
     }
     throwSelected = 0;
     runInProgress = 1;
-    runTime = 0.0f;
+    runTime = 0.0f;RunEconomyReset();
 }
 
 static void InitializeRunScene(void) {
@@ -238,7 +257,7 @@ static void InitializeRunScene(void) {
        那是个测试场，所有机制都该能试。这里直接发一个。 */
     {  mimicsEscapedThisRun = 0; }
     floorsNoSanityLoss=dailyEscapeCount=wardenCleanFloors=fullHideDone=0;
-    doubleHuntSeconds=0.0f; RewardResetPending();
+    doubleHuntSeconds=0.0f; LoopResetHuntAchievements(); RewardResetPending();
     totalGoldEarned = 0;
     bottlesKilled = 0;
     faceDodged = 0;
@@ -246,7 +265,7 @@ static void InitializeRunScene(void) {
     fusesCollectedRun = 0;
     mapsFullyExplored = 0;
     tookDamage = 0;
-    {  contractKind=1;shopContractUsed=0; }
+    { contractKind=(bankRiskPlan>=0 && bankRiskPlan<4)?bankRiskPlan:1; shopContractUsed=1; }
     flashlightOffLevel = 0;
     sprintedThisLevel = 0;
     hideCount = 0;
@@ -267,6 +286,12 @@ static void InitializeRunScene(void) {
 }
 
 void StartGame(void) {
+    int replacing=SaveHasPendingRun() || (runInProgress && !trainingMode);
+    if(pendingStartMode!=START_TRAINING && pendingStartMode!=START_GUIDE && replacing && !replaceRunApproved){
+        replaceRunPending=1;replaceRunChoice=0;ForceCursor(1);uiDirty=1;return;
+    }
+    replaceRunApproved=0;
+    CollectorResetRun();
     /* v6：**出口弹窗状态必须重置** —— 否则暂停→主菜单→新局会带着
        上一次的弹窗标志进来，开局即被冻结。 */
     exitChoiceOpen = 0;
@@ -280,7 +305,9 @@ void StartGame(void) {
     /* v3.0：这几个也必须在开局清零，否则上一局用过之后新局直接失效 */
     CalibResetRun();
     lastResortUsed = 0;
-    secondWindTimer = 0.0f;
+    PlayerResetSprintGrace();
+    LoopClearInputEdges();
+    LoopCancelTransientInput();
 
     int startMode = pendingStartMode;
     int startStage = pendingCampaignStage;
@@ -335,7 +362,7 @@ void StartGame(void) {
     /* ==================================================================
      * 2026-11-07（v2.4.2 / B3）：**训练营物资不许带进正常对局**
      * ------------------------------------------------------------------
-     * 原来是 if (trainingMode) phaseBeacons = 5; —— 只有训练场赋值，
+     * 原来是 if (trainingMode && !guideMode) phaseBeacons = 5; —— 只有训练场赋值，
      * 普通新局**从不重置** phaseBeacons。玩家在同一个进程里先玩训练场、
      * 再开正式局，就会带着训练场的 5 枚信标进正式局。
      * 现在无条件先归零，再按模式发放。
@@ -343,7 +370,7 @@ void StartGame(void) {
     {
 
         phaseBeacons = 0;
-        if (trainingMode) phaseBeacons = 5;
+        if (trainingMode && !guideMode) phaseBeacons = 5;
     }
     /* 2026-11-05：新局同样要重置鼠标基准 ——
        从菜单/商店直接开局时，lastMousePos 还是上一次的位置，

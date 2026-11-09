@@ -21,6 +21,14 @@
 
 #include "common.h"
 
+enum {
+    BST_ID_NONE = -1, BST_ID_HUNTER = 0, BST_ID_LIGHT = 1,
+    BST_ID_SPIDER = 2, BST_ID_FACE_JUMPER = BST_ID_SPIDER, BST_ID_COLLECTOR = 3, BST_ID_SCAVENGER = 4,
+    BST_ID_WARDEN = 5, BST_ID_MIMIC = 6
+};
+#define BESTIARY_LEGACY_COUNT 6
+#define BESTIARY_LEGACY_VALUES 18
+#define BESTIARY_EXTRA_VALUES 3
 #define BESTIARY_COUNT 7   /* 2026-11-05：+1 宝箱怪 */
 
 /* ---- 揭示阶段 ---- */
@@ -66,16 +74,11 @@ void BestiaryRegister(void);
 void BestiaryMarkSeen(int id);
 int  BestiaryIsSeen(int id);
 
-/* ==================================================================
- * 2026-11-08（第 1 轮）：**首次遭遇播报**
- * ------------------------------------------------------------------
- * 图鉴是"事后查阅"，玩家在局内根本不知道自己面对的是什么。
- * 这个接口返回 1 表示"这次是第一次见到，调用方负责播报"。
- * 只在本进程内记一次（不进存档），所以每次启动游戏都会重新播报一遍 ——
- * 对新手来说这是好事。
- * ================================================================== */
-int  BestiaryAnnounce(int id);
+/* Encounter discovery does not create an on-screen toast. */
 int  BestiarySeenAll(void);
+int  BestiaryIsActive(int id);
+int  BestiaryActiveCount(void);
+int  BestiaryCountSeen(int seenMask);
 
 /* 逃脱一次 / 被抓一次（驱动揭示阶段） */
 void BestiaryMarkEscaped(int id);
@@ -83,12 +86,17 @@ void BestiaryMarkCaught(int id);
 
 /* 当前揭示阶段（BST_*） */
 int BestiaryStage(int id);
+int BestiaryFloorsSeen(int id);
 void BestiaryBeginFloor(void);
+/* Legacy six-entry layout is fixed at 18 integers, independent of catalog size. */
 void BestiarySave(int* values);
+void BestiarySaveExtra(int* values);
+void BestiaryLoadExtra(const int* values);
 void BestiaryLoad(const int* values);
 
 /* 危险度 1~5（从真实常量算） */
 int BestiaryDanger(int id);
 
-#endif /* CANITY_BESTIARY_H */
 void BestiaryNoteFloor(int id, int level);   /* v7：遇到过的层数也算学习进度 */
+
+#endif /* CANITY_BESTIARY_H */

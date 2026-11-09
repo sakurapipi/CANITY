@@ -1,5 +1,10 @@
 /* Orchestration ownership split; stage ordering remains in the entry point. */
 #include "common.h"
+#include "echo_marks.h"
+#include "run_economy.h"
+#include "hush.h"
+#include "room_theme.h"
+#include "loop_private.h"
 #include "art_direction.h"
 #include "core_tick.h"
 #include "lockbox.h"
@@ -68,6 +73,13 @@
 #include "score.h"
 #include "loop_private.h"
 
+static unsigned int s_previousHuntMask;
+static int s_hidingEntireHunt;
+void LoopResetHuntAchievements(void) {
+    s_previousHuntMask=0u;
+    s_hidingEntireHunt=0;
+}
+
 static float s_decoyKeyCd = 0.0f;
 
 
@@ -133,6 +145,11 @@ static void UpdateSmokeBlindness(void) {
 /* Private update stages: return 0 to stop the current tick. */
 static int UpdatePreflight(float dt) {
 
+    if(calibActive && (currentState==STATE_PLAYING || currentState==STATE_SAFEHOUSE)){
+        CalibTick(dt);CalibHandleInput(0);return 0;
+    }
+    if(currentState==STATE_SAFEHOUSE){ShopTickCooldown(dt);CalibTick(dt);}
+    if(calibActive && currentState==STATE_SAFEHOUSE)return 0;
     TickFrameBegin();   /* 第 4 轮：每帧复位 tick 顺序守卫 */
     {  playerMoveSpeedNow = 0.0f; }   /* v8: 守门人判断「在动/冲刺」用 */
     /* v7：可疑点表每帧衰减 / 过期 */
@@ -148,13 +165,24 @@ static int UpdatePreflight(float dt) {
     DailyTick();   /* Calendar rollover also applies while in menus. */
     if(currentState==STATE_PLAYING && exitChoiceOpen && !keyPressed['1'] && !keyPressed['2']) return 0;
     if(currentState==STATE_PLAYING && !trainingMode) {
-        if(Hunter0()->active && Hunter0()->state==2 && lightBeast.active && lightBeast.state==2) doubleHuntSeconds+=dt;
-        else if(doubleHuntSeconds<30.0f) doubleHuntSeconds=0.0f;
-        static int hidingHunt=0;
-        if(hiddenIn>=0 && (Hunter0()->state==2 || lightBeast.state==2)) hidingHunt=1;
-        if(hiddenIn<0) hidingHunt=0;
-        if(hidingHunt && Hunter0()->state!=2 && lightBeast.state!=2) { fullHideDone=1; hidingHunt=0; }
-    }
+        unsigned int chasing=0u; int soundHunters=0;
+        for(int i=0;i<MON_HUNTER_MAX;i++) {
+            Monster* actor=&monHunters[i];
+            if(actor->active && actor->state==1 && Dist2(actor->tx,actor->ty,posX,posY)<4.0f) {
+                chasing |= 1u<<i; soundHunters++;
+            }
+        }
+        for(int i=0;i<2;i++) if(lightBeasts[i].active && lightBeasts[i].state==1)
+            chasing |= 1u<<(MON_HUNTER_MAX+i);
+        if(soundHunters>=2) {
+            if(doubleHuntSeconds<30.0f) doubleHuntSeconds+=dt;
+        } else if(doubleHuntSeconds<30.0f) doubleHuntSeconds=0.0f;
+        /* Arm only when a hunt begins while already hidden; entering midway is not "entire". */
+        if(hiddenIn<0) s_hidingEntireHunt=0;
+        else if(chasing && !s_previousHuntMask) s_hidingEntireHunt=1;
+        if(s_hidingEntireHunt && !chasing) { fullHideDone=1; s_hidingEntireHunt=0; }
+        s_previousHuntMask=chasing;
+    } else { s_previousHuntMask=0; s_hidingEntireHunt=0; }
     {   /* v7 B4：第一次携带超过 8000 时提一句 */
         if (carryGold >= 8000) HintOnce(4);
     }
@@ -165,7 +193,7 @@ static int UpdatePreflight(float dt) {
         if(currentState==STATE_PLAYING && !exitChoiceOpen) { ScavengerTickTrigger(dt); UpdateScavenger(dt); }
     }
     /* v7：扳手冷却递减 */
-    {  if (wrenchCd > 0.0f) { wrenchCd -= dt; if (wrenchCd < 0.0f) wrenchCd = 0.0f; } }
+    {  if (wrenchCd > 0.0f) { wrenchCd -= dt*SkillCounterCooldownRate(); if (wrenchCd < 0.0f) wrenchCd = 0.0f; } }
 
     /* Playable timers are advanced only after the pause/map gate. */
     /* v2.1 屏幕特效推进：抖动 / 红闪 / 枪口闪 */
@@ -222,6 +250,8 @@ static int UpdatePreflight(float dt) {
 }
 
 static int UpdatePlayableTimers(float dt, int* safe) {
+    HushTick(dt);
+    RoomThemeTick(dt);
     CalibTick(dt);   /* 校准小游戏计时（冷却与滑块） */
     MimicTick(dt);   /* 宝箱怪状态机 */
     {  EchoMarksTick(dt); }   /* 回声标记寿命 */
@@ -322,6 +352,8 @@ static int UpdateSurvival(float dt, int inSafe) {
 }
 
 static int UpdateCoverInput(void) {
+    if(calibActive){CalibHandleInput(0);return 0;}
+    if(!guideMode && keyPressed['B']){keyPressed['B']=0;if(!trainingMode){SaveGame();if(g_saveError)return 0;}LoopQueueStart(START_GUIDE,0);StartGame();return 0;}
     /* 先判断交互目标，决定这一帧能不能移动 */
     /* ===== v3.3 交互目标优先级重排 =====
        试玩实测卡关：「站在带锁箱子前时配电箱就在正前方，
@@ -477,7 +509,7 @@ static int UpdateCoverInput(void) {
         }
     }
 
-    holdingNow = (hoverKind != 0 && ActionIsDown(ACT_INTERACT));
+    holdingNow = (!calibActive && hoverKind != 0 && ActionIsDown(ACT_INTERACT));
     }
 
     return 1;
@@ -507,7 +539,7 @@ static int UpdateEarlyActions(float dt) {
                 int profit = carryGold - carryAtRunStart;
                 if (profit < 0) profit = 0;
                 int extra=0; /* Depth and contract are applied once by BankSettle. */
-                carryGold += extra;
+                WalletAddRun(extra);
                 exitChoiceOpen = 0;
                 lastExtractDepthMul = dm;
                 /* v6 **必须先清 runInProgress** —— BankSettle 内部会 SaveGame，
@@ -548,16 +580,7 @@ static int UpdateEarlyActions(float dt) {
        而且现在商店是浮层，不再依赖安全屋状态机，
        所以干脆允许**任何时候**按 T 打开。 */
 
-    if (currentState == STATE_PLAYING && trainingMode && keyPressed['B']) {
-        keyPressed['B'] = 0;
-
-        tutorialGuideOn = !tutorialGuideOn;
-        pickupMsg = tutorialGuideOn
-            ? (g_lang == LANG_ZH ? "引导已展开" : "GUIDE ON")
-            : (g_lang == LANG_ZH ? "引导已收起" : "GUIDE OFF");
-        pickupMsgTimer = 1.2f;
-        uiDirty = 1;
-    }
+    
 
     /* v3.3：**C 键激活诱饵**（右键负责放置，C 负责激活） */
     if (currentState == STATE_PLAYING && keyPressed['C']) {
@@ -566,7 +589,7 @@ static int UpdateEarlyActions(float dt) {
         for (int i = 0; i < MAX_DECOY; i++)
             if (decoysArr[i].active && !decoysArr[i].armed) { any = 1; break; }
         if (any) {
-            ArmDecoy();
+            ArmDecoy();TutorialRecordAction(TUTOR_DECOY);
             /* ===== v2.4.63 **不要写死秒数** =====
                原来文案写死「每 3 秒」，后来把 DECOY_SHOUT_EVERY 改成 1.5 之后
                这句话就成了错的（用户实机看到的就是它）。
@@ -666,7 +689,7 @@ static int UpdateRestAndShop(float dt, int inSafe) {
         static int tPrev = 0;
 
         int tNow = PlatKeyDown('T');
-        if (tNow && !tPrev && currentState == STATE_PLAYING && !shopOverlayOpen) {
+        if (tNow && !tPrev && currentState == STATE_PLAYING && !shopOverlayOpen && ShopCanOpen()) {
             ShopOpen(currentLevel);
             currentState = STATE_SAFEHOUSE;
             shopPage = 0;
@@ -677,7 +700,7 @@ static int UpdateRestAndShop(float dt, int inSafe) {
         tPrev = tNow;
     }
 
-    if (currentState == STATE_PLAYING && keyPressed['T']) {   /* v7 第 52 轮：随时可开 */
+    if (currentState == STATE_PLAYING && keyPressed['T'] && ShopCanOpen()) {   /* v7 第 52 轮：随时可开 */
         keyPressed['T'] = 0;
         /* v7 第 51 轮：**开浮层，不切状态**
            STATE_SAFEHOUSE 那条路径一进就崩（已用 demo4 复现），
@@ -685,7 +708,8 @@ static int UpdateRestAndShop(float dt, int inSafe) {
         {
 
             ShopOpen(currentLevel);
-            shopOverlayOpen = 1;
+            shopOverlayOpen = 0;
+            currentState=STATE_SAFEHOUSE;shopPage=SHP_SHOP;shopRow=0;
             ForceCursor(1);
             uiDirty = 1;
         }
@@ -828,49 +852,21 @@ static void UpdatePhaseAndCrank(float dt) {
         }
     }
 
-    if ((HasKeystone(SK_DECOY) || trainingMode) && IsActionPressed(ACT_DECOY)) {
-        /* ==================================================================
-         * 2026-11-05 修「DECOY 超模 / 可以无限使用」
-         * ------------------------------------------------------------------
-         * 技能树里这条的描述是：
-         *     "G: throw a stone (8s cd), noise 14"
-         * 但这里**从来没有冷却判定** —— 每按一次 G 就无条件放一发 14 格噪音，
-         * 玩家可以一直按，把所有怪无限往一个点引。
-         * 现在补上描述承诺的 8 秒；冷却中给明确提示，不做静默吞键。
-         * ================================================================== */
-        if (s_decoyKeyCd > 0.0f) {
-
-            pickupMsg = (g_lang == LANG_ZH) ? "投石冷却中" : "STONE ON COOLDOWN";
-            pickupMsgTimer = 0.8f;
-        } else {
-            float px = posX, py = posY;
-            for (float d = DECOY_MIN; d <= DECOY_MAX; d += 0.5f) {
-                float tx = posX + dirX * d, ty = posY + dirY * d;
-                if (Blocked(tx, ty)) break;
-                px = tx; py = ty;
-            }
-            MakeNoise(px, py, DECOY_NOISE);
-            decoySelfTimer = DECOY_SELF_TIME;
-            s_decoyKeyCd = DECOY_KEY_COOLDOWN;
-            PlaySfx(SFX_STEP, 0.7f);
-            /* P1-2：教程「制造噪音」这一步的完成条件 */
-            if (trainingMode) TutorialRecordNoise();
-        }
-    }
+    if((SkillOwned(SK_DECOY) || trainingMode) && !calibActive && IsActionPressed(ACT_DECOY))HushActivate();
 
     /* 手摇发电：站着摇，摇满一次回一截电；期间不能移动 */
     cranking = 0;
-    if (ActionIsDown(ACT_CRANK) && battery < (float)BatteryMax() - 0.1f && !holdingNow) {
+    if (!calibActive && ActionIsDown(ACT_CRANK) && battery < (float)BatteryMax() - 0.1f && !holdingNow) {
         cranking = 1;
         crankTimer += dt;
         crankClick += dt;
         if (crankClick >= 0.30f) {
             crankClick = 0.0f;
             PlaySfx(SFX_CRANK, 0.45f);
-            MakeNoise(posX, posY, 12.0f * RunCrankNoiseMul()*(SkillOwned(SK_APPRENTICE)?0.5f:1.0f));   /* v2.2：FAST CRANK 的 +15% 噪声 */
+            MakeNoise(posX, posY, (SkillOwned(SK_SILENT_CRANK) && battery<BatteryMax()*.25f?0.0f:12.0f) * RunCrankNoiseMul()*(SkillOwned(SK_APPRENTICE)?0.5f:1.0f));   /* v2.2：FAST CRANK 的 +15% 噪声 */
         }
         /* v3.4：SPARE CELL 满级时摇电时间 -30%（2.4 → 1.68 秒） */
-        if (crankTimer >= 2.4f * RunCrankTimeMul() * SkillCrankTimeMul()) {
+        if (crankTimer >= 2.4f * RunCrankTimeMul() * SkillCrankTimeMul() * BenchCrankTimeMul()) {
             crankTimer = 0.0f;
             int wasDead = (battery <= 0.5f);
             /* v3.4：SPARE CELL 满级 → 一次 +55（基础 32） */
@@ -896,7 +892,7 @@ static void UpdatePhaseAndCrank(float dt) {
            原来 crankTimer 一松手就归零，不足 2.4 秒的部分全丢。
            现在按比例结算：攒了 1.5 秒就给 1.5/2.4 × 32 ≈ 20 点。
            ≥ 0.3 秒才给，避免「点一下就白送」。 */
-        float full = 2.4f * RunCrankTimeMul() * SkillCrankTimeMul();
+        float full = 2.4f * RunCrankTimeMul() * SkillCrankTimeMul() * BenchCrankTimeMul();
         if (crankTimer >= 0.3f && full > 0.01f) {
             int wasDeadPart = (battery <= 0.5f);   /* v6：早松手也判断是否没电 */
             float part = crankTimer / full;
@@ -992,6 +988,13 @@ static void CompleteHeldFurniture(void) {
 
                 if (hoverIndex >= 0 && hoverIndex < MAX_ROOM_PROPS && roomProps[hoverIndex].active) {
                     RoomProp* rp = &roomProps[hoverIndex];
+                    if(rp->kind>=ROOMPROP_THEME_FIRST){
+                        rp->searched++;rp->searchLeft=0;
+                        if(rp->kind==6 || rp->kind==9){sanity=fminf(SanityMax(),sanity+6);pickupMsg=Tr("SALVAGED MEDICAL RESERVE: +6 SAN","取用急救储备：理智+6");}
+                        else if(rp->kind==4){WalletAddRun(12);pickupMsg=Tr("ARCHIVE DRAWER: +12 GOLD","档案抽屉：金币+12");}
+                        else {battery=fminf((float)BatteryMax(),battery+8);pickupMsg=Tr("RECOVERED DEVICE CELL: +8 BATTERY","检修装置取回电芯：电量+8");}
+                        pickupMsgTimer=2;hoverKind=0;uiDirty=1;return;
+                    }
                     int n = rp->searched;
                     rp->searched++;
                     if (rp->searchLeft > 0) rp->searchLeft--;
@@ -1006,7 +1009,7 @@ static void CompleteHeldFurniture(void) {
                             pickupMsg = (g_lang == LANG_ZH) ? "翻到电池 +18" : "FOUND A BATTERY +18";
                         } else {
                             int g2 = 18 + (int)(rand() % 25);
-                            carryGold += g2;
+                            WalletAddRun(g2);
                             static char gb2[64];
                             snprintf(gb2, sizeof(gb2), (g_lang == LANG_ZH) ? "翻到 %d 金币" : "FOUND %d GOLD", g2);
                             pickupMsg = gb2;
@@ -1016,7 +1019,7 @@ static void CompleteHeldFurniture(void) {
                         pickupMsg = (g_lang == LANG_ZH) ? "翻到一根保险丝！" : "FOUND A FUSE!";
                     } else {
                         int g2 = 18 + (int)(rand() % 25);
-                        carryGold += g2;
+                        WalletAddRun(g2);
                         static char gb3[64];
                         snprintf(gb3, sizeof(gb3), (g_lang == LANG_ZH) ? "翻到 %d 金币" : "FOUND %d GOLD", g2);
                         pickupMsg = gb3;
@@ -1030,13 +1033,17 @@ static void CompleteHeldFurniture(void) {
 static void CompleteHeldContainer(void) {
 
                 Container* c = &containers[hoverIndex];
+                if(c->searched)return;
                 c->searched = 1;
+                for(int ei=0;ei<ECHO_MARK_MAX;ei++)if(echoMarkActive[ei] && echoMarkKind[ei]!=0 && Dist2(echoMarkX[ei],echoMarkY[ei],c->x,c->y)<.1f)echoMarkActive[ei]=0;
+                if(!trainingMode && CellMetaAt((int)c->x,(int)c->y)->roomId){int reward=(int)((45+fminf(70,currentLevel*5))*EndlessDepthBonus(currentLevel));WalletAddRun(reward);totalGoldEarned+=reward;}
+                if(!trainingMode){int stipend=(int)((8+fminf(20,currentLevel*2))*BenchCrateGoldMul());WalletAddRun(stipend);totalGoldEarned+=stipend;}
         {  hideStreak = 0; }   /* v7：搜过箱子，连躲计数清零 */
         SpawnParticles(c->x, c->y, 2);   /* v2.1：翻箱扬起灰尘 */
                 searchedCount++;
                 runSearched++;
-        int shardGain = (int)(GoldSearchAt(currentLevel) * SkillScavengerShardMul() * SkillCrateGoldMul()
-                              * RelicShardMul() * modShardMul + 0.5f);   /* v2.0：遗物+事件 */
+        int shardGain = (int)(GoldSearchAt(currentLevel) * SkillScavengerShardMul() * SkillCrateGoldMul() * BenchCrateGoldMul()
+                              * RelicShardMul() * modShardMul * RoomThemeLootMul() + 0.5f);   /* v2.0：遗物+事件 */
                 /* 第 8 轮「赌徒」：50% 双倍 / 50% 归零 —— 把开箱变成赌注 */
                 {
 
@@ -1048,7 +1055,7 @@ static void CompleteHeldContainer(void) {
                 /* 2026-11-08（第 5 轮）：战役金币倍率 */
                 { 
                   shardGain = (int)(shardGain * CampaignGoldMulNow()); }
-                carryGold += shardGain;    /* v1.8：先记在待上缴里 */
+                WalletAddRun(shardGain);    /* v1.8：先记在待上缴里 */
                 /* 2026-11-08（第 4 轮）：HINT_GOLD 文案写好了却从没触发过 ——
                    第一次拿到金币时教一句"钱在结算时进银行"。 */
                 {  
@@ -1096,9 +1103,9 @@ static void CompleteHeldContainer(void) {
                 else if (c->content == 9) { if (decoys < BottleCap()) { decoys++; pickupMsg = "+DECOY"; } }
                 /* v3.4：箱子现在是主要金币来源（掉落表 35%） */
                 else if (c->content == 10) {
-                    int gld = (int)(GoldSearchAt(currentLevel) * SkillScavengerShardMul() * SkillCrateGoldMul()
-                                    * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
-                    carryGold += gld;
+                    int gld = (int)(GoldSearchAt(currentLevel) * SkillScavengerShardMul() * SkillCrateGoldMul() * BenchCrateGoldMul()
+                                    * RelicShardMul() * modShardMul * RoomThemeLootMul() * SkillGoldMul() + 0.5f);
+                    WalletAddRun(gld);
                     totalGoldEarned += gld;
                     {
                         static char gmsg[48];
@@ -1128,8 +1135,8 @@ static void CompleteHeldContainer(void) {
          * ============================================================ */
         if (c->mimicShell) {
             int bigGold = MIM_GOLD_BASE + MIM_GOLD_STEP * currentLevel;
-            bigGold = (int)((float)bigGold * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
-            carryGold += bigGold;
+            bigGold = (int)((float)bigGold * RelicShardMul() * modShardMul * RoomThemeLootMul() * SkillGoldMul() + 0.5f);
+            WalletAddRun(bigGold);
             totalGoldEarned += bigGold;
 
             fusesHeld++;                 /* 必给一根保险丝 */
@@ -1178,7 +1185,7 @@ static void CompleteHeldBreaker(void) {
                 {  WardenSpawnIfPowered(); }   /* v7 B1: 通电 -> 守门人出现 */
         SpawnParticles(breaker.x, breaker.y, 0);   /* v2.1：通电火花 */
                     fusesHeld -= fusesNeeded;
-                    carryGold += (int)(GoldBreakerAt(currentLevel) * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);   /* v2.0 */
+                    WalletAddRun((int)(GoldBreakerAt(currentLevel) * RelicShardMul() * modShardMul * RoomThemeLootMul() * SkillGoldMul() + 0.5f));   /* v2.0 */
                     totalGoldEarned += (int)GoldBreakerAt(currentLevel);
                     PlaySfx(SFX_POWER, 0.75f);
                 }
@@ -1200,7 +1207,7 @@ static void UpdateHeldInteraction(float dt) {
            被咬的那一帧不推进 holdTimer，也不触发"翻完"结算。 */
         int mimicBit = 0;
         if (hoverKind == 1) {
-            float prog = holdTimer / (SEARCH_TIME * RunSearchTimeMul());
+            float prog = holdTimer / (SEARCH_TIME * RunSearchTimeMul() * BenchSearchTimeMul());
             if (MimicOnSearchStep(hoverIndex, prog)) {
                 holdTimer = 0.0f;
                 hideBlockTimer = 0.4f;
@@ -1208,12 +1215,13 @@ static void UpdateHeldInteraction(float dt) {
             }
         }
         holdTimer += dt;
-        if (!mimicBit && holdTimer >= SEARCH_TIME * RunSearchTimeMul()) {
+        if (!mimicBit && holdTimer >= SEARCH_TIME * RunSearchTimeMul() * BenchSearchTimeMul()) {
             holdTimer = 0.0f;
             /* v3.0：翻完箱也上 0.4 秒封锁 ——
                否则 E 还按着，同一帧/下一帧就会被旁边的藏身点吸进去。 */
             hideBlockTimer = 0.4f;
-            if (hoverKind == 4) CompleteHeldHatch();
+            if (hoverKind == 5) RoomThemeUseSwitch();
+            else if (hoverKind == 4) CompleteHeldHatch();
             else if (hoverKind == 3) CompleteHeldFurniture();
             else if (hoverKind == 1) CompleteHeldContainer();
             else if (hoverKind == 2) CompleteHeldBreaker();
@@ -1452,7 +1460,7 @@ static void UpdatePlayerAudio(float dt, const PlayerFrameInput* movement) {
 static void UpdateWorldThreats(float dt, const PlayerFrameInput* movement) {
     (void)movement;
     /* v1.17 训练场：无限道具、不掉理智、标本固定不动 */
-    if (trainingMode) UpdateTrainingPad(dt);   /* 第 4 轮：抽成函数 */
+    if (trainingMode && !guideMode) UpdateTrainingPad(dt);   /* 第 4 轮：抽成函数 */
 
     TickMark(TICK_SMOKES);
     UpdateSmokes(dt);
@@ -1490,43 +1498,14 @@ static void UpdateWorldThreats(float dt, const PlayerFrameInput* movement) {
      * 纯表现层：只读怪的位置，不改任何 AI 状态。
      * ================================================================ */
     /* 2026-11-08（第 11 轮）：训练营七站 —— 走进 1.5 格播一句提示 */
-    if (trainingMode) {
-
-        int st = TrainingStationsTick(posX, posY);
-        if (st >= 0) {
-            pickupMsg = TrainingStationText(st);
-            pickupMsgTimer = 4.0f;
-            PlaySfx(SFX_PICKUP, 0.45f);
-            /* ==========================================================
-             * 2026-11-08（第 12 轮）：**站点与教程步骤联动**
-             * ----------------------------------------------------------
-             * 原来空间引导（七站）和教程步骤（TUT_*）是两套独立推进，
-             * 玩家会看到"站在手电站上、提示却在说走路"。
-             *
-             * 现在：走到第 N 站，就把教程快进到对应步骤 —— 只前进不回退，
-             * 所以走回头路不会把教程弄乱。
-             * ========================================================== */
-            {
-                TutorialVisitStation(st);
-            }
-        }
-    }
+    
     {  (void)TelegraphTick(dt); }
     /* 第 4 轮：**被发现预警** —— 只有守门人有锁定预警，别的怪从
        "没发现"到"开追"是瞬间的，玩家只能硬吃。这里把那一瞬间变成可读的。 */
     {  (void)DetectAlertTick(dt); }
     /* 第 4 轮：第一次被追时，教一次"怎么躲"。
        只在第一次（本局）弹，之后不再打扰。 */
-    if (DetectAlertAge() < 0.05f) {
-        static int oncePerRun = 0;
-        if (!oncePerRun && !tutorialGuideOn && hiddenIn < 0 && !trainingMode) {
-            oncePerRun = 1;
-            pickupMsg = (g_lang == LANG_ZH)
-                ? "被追时：断视线 → 关手电 → 躲进柜子"
-                : "WHEN CHASED: BREAK SIGHT > KILL THE LIGHT > HIDE";
-            pickupMsgTimer = 3.4f;
-        }
-    }
+    
     /* ==================================================================
      * 2026-11-06 审计补：**控制效果的唯一输入点**
      * ------------------------------------------------------------------
@@ -1694,7 +1673,7 @@ static void CompleteCampaignExit(void) {
                 UpdateExplored();
                 return;
             }
-            carryGold += CampaignReward(campaignStage);
+            WalletAddRun(CampaignReward(campaignStage));
             if (campaignStage < CAMPAIGN_STAGE_COUNT - 1) {
                 campaignStage++;
                 currentLevel=CampaignStartFloor(campaignStage);
@@ -1747,7 +1726,7 @@ static void AdvanceRegularFloor(void) {
                 if (lastScore.score > bestEndlessScore) bestEndlessScore = lastScore.score;
             }
             if (currentLevel == 20 || currentLevel == 40 ||
-                currentLevel == 60 || currentLevel == 80) carryGold += GOLD_PER_CORE;   /* v3.4 */
+                currentLevel == 60 || currentLevel == 80) WalletAddRun(GOLD_PER_CORE);   /* v3.4 */
             /* v3.0：**每层 +35 能量**（数值审查 #1 的核心修复）——
                原来这行只写在战役分支里，主线/无尽从不补给，
                一局只有 19 刀的能量，第 2 层就开始「打不起」。 */
@@ -1783,6 +1762,8 @@ static void UpdateExitProgression(float dt) {
     int atExit = (breakerOpen &&
                   Dist2(posX, posY, exitX, exitY) < EXIT_ENTER_R2 * EXIT_ENTER_R2);
 
+    if(!trainingMode && atExit)RunEconomyFloorGold();
+
     /* v6 **出口二选一：弹窗** ——
        只有「还没弹过、也不是刚选了深入」才弹。 */
     if (!trainingMode && !isFinalFloor && !exitChoiceOpen && !exitGoDeeper && atExit) {
@@ -1813,19 +1794,19 @@ static void UpdateExitProgression(float dt) {
         if (WardenActive() && !floorTookDamage) wardenCleanFloors++; else wardenCleanFloors=0;
         DailyObserve(DQ_NOHIT,floorsNoSanityLoss);
         int evThisLevel = levelEvent;   /* v1.8：GenerateLevel 会重置 levelEvent，先存 */
-        carryGold += (int)(GoldExitAt(currentLevel) * RelicShardMul() * modShardMul * SkillGoldMul() + 0.5f);
+        /* Floor gold already paid once on reaching the powered exit. */
         /* v6 **探索奖励** —— 按本层容器数折算，补上之前缺失的 GOLD_NEWROOM 渠道。
            原来 GOLD_NEWROOM 只定义不发放，「首次进新房间 +5」这条收入是空的。 */
-        carryGold += containerCount * GOLD_NEWROOM;   /* v2.0 */
-        totalGoldEarned += (int)(GoldExitAt(currentLevel)*RelicShardMul()*modShardMul+0.5f)+containerCount*GOLD_NEWROOM;
+        /* Exploration stipend is included in the same once-per-floor reward. */   /* v2.0 */
+        /* Both extraction and deeper-floor choices share that reward. */
         if (currentLevel > bestLevel) bestLevel = currentLevel;
-        if (currentLevel == 1) AchUnlock(0);  /* FIRST STEPS */
+        /* Achievement conditions are evaluated from LoopCheckAchievements. */
         /* 战役模式：每段连续 3 层；段内换层不重置资源，段间才切规则/重开资源。 */
         if (campaignMode) { CompleteCampaignExit(); return; }
         /* v2.2：每日挑战通关 —— 今天第一次给 1 核心 */
         if (dailyMode && !dailyClearedToday) {
             dailyClearedToday = 1;
-            carryGold += GOLD_PER_CORE;   /* v3.4 */
+            WalletAddRun(GOLD_PER_CORE);   /* v3.4 */
         }
         if (currentLevel >= WIN_LEVEL && !isEndlessRun) {
             /* 主线通关：走进第 10 层的出口就是结局，不再生成下一层 */
@@ -1843,15 +1824,13 @@ static void UpdateExitProgression(float dt) {
                 ScoreInput si = { currentLevel, 1, 0, runSearched, bottlesKilled, runTime, modsSeenCount };
                 ComputeScore(&si, &lastScore);
                 if (lastScore.score > bestMainScore) bestMainScore = lastScore.score;
-                carryGold += GOLD_PER_CORE;   /* v3.4 */
+                WalletAddRun(GOLD_PER_CORE);   /* v3.4 */
             }
-            AchUnlock(1);  /* FIRST EXIT（原来 2 = FLOOR 5，解错了） */
+            AchRecordFlag(ACH_FLAG_FIRST_EXIT);
             {  dailyEscapeCount++; }   /* v7：每日「撤离 N 次」 */
-            if (sanity >= SanityMax()-0.01f) AchUnlock(14);  /* PERFECT ESCAPE */
+
             /* v2.8：属性面板删了，成就改成「技能树普通节点全满」 */
-            if (SkillsAllMaxed()) {
-                AchUnlock(25);  /* TREE MASTER（原来 15 = DISRUPTOR） */
-            }
+
             /* v3.3 **修复 3 个永远解不开的通关成就** ——
                它们的判定写在 CheckAchievements 里（gameWon && ...），
                但 CheckAchievements 只在 STATE_PLAYING 执行，
@@ -1862,7 +1841,7 @@ static void UpdateExitProgression(float dt) {
                39 / 35 / 36 —— 新表只有 32 条，越界的被静默丢弃。
                39(TRUE ENDING) 和 35(BLOOD PRICE) 在新表里没有对应项，删掉；
                36(GHOST RUN) → 20(LIGHTLESS)，语义完全一致。 */
-            if (!runLightUse)        AchUnlock(20);  /* LIGHTLESS */
+
             DailyObserve(DQ_ESCAPE,dailyEscapeCount);
             LoopCheckAchievements(); BankSettle(1); hasSave=0;
             uiDirty = 1;
@@ -1957,8 +1936,9 @@ void Update(float dt) {
     if (!UpdateThrowInput(dt)) return;
     UpdateThreatsAndAudio(dt, &movement);
     UpdateWorldParticles(dt);
+    RunEconomyTick(dt);
     UpdateExitProgression(dt);
 }
 
-void LoopResetDecoyCooldown(void) { s_decoyKeyCd = 0.0f; }
+void LoopResetDecoyCooldown(void) { s_decoyKeyCd = 0.0f;HushReset(); }
 

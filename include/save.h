@@ -7,6 +7,9 @@
 #define CANITY_SAVE_H
 
 #include "common.h"
+#include "cell_meta.h"
+#include "map_rooms.h"
+#include "hatch.h"
 #include "relics.h"
 
 #define SAVE_MAGIC 0x43414E32u   /* "CAN2" */
@@ -17,7 +20,8 @@
    —— 参见 LoadSettings 里的迁移逻辑。 */
 /* v28: 末尾追加 Dynamic Res + 通关记录；v25/v26/v27 都按前缀迁移。
    v27 及更早的存档没有这两个字段，读档时按文件长度取默认值。 */
-#define SAVE_VERSION 37   /* v37: 末尾追加 ghostSkillRanks[4]（幽灵流派 4 个节点） */   /* v36（2026-11-08）：末尾追加 difficultyPlus1
+/* v38 appends isolated mimic knowledge; all v37 field offsets stay unchanged. */
+#define SAVE_VERSION 44   /* v37: 末尾追加 ghostSkillRanks[4]（幽灵流派 4 个节点） */   /* v36（2026-11-08）：末尾追加 difficultyPlus1
                            *   （0 = 老档 → 按标准难度；1/2/3 = 轻松/标准/硬核）
                            * v35：末尾追加 rngVersion（v34 及更早按旧 rand 序列重放）
                            * v34：末尾追加投掷物/信标/爆脸怪计数（v33 短档仍然可读） */
@@ -25,6 +29,7 @@
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
 #define SAVE_FILE "canity.sav"
+int SaveAwardTrainingGraduation(void);
 #endif
 
 /* 存档结果（UI 要显示）：0 = 还没试过，1 = 写成功，2 = 一个位置都写不进去。
@@ -286,7 +291,27 @@ typedef struct {
      * ================================================================ */
     /* 2026-11-08（第 8 轮）：30..37 一共 8 个流派节点。
        这是 SaveBlob 的**最后一个字段**，加长不影响前面任何偏移。 */
-    int archetypeRanks[12];   /* 30..41 预留（当前 30..39 已用）*/
+    int archetypeRanks[12];   /* Stable v37 slots: player IDs 30..39; 40 internal, 41 reserved. */
+    /* v38: entry 6 must not overlap the six-entry legacy knowledge array. */
+    int bestiaryExtraKnowledge[3];
+    int metaExpansionRanks[4]; /* v39: IDs 41..44, never overlays v37/v38 fields. */
+    int bankRiskPlanPlus1; /* zero in old saves means STANDARD. */
+    int commonSkillRanks[6]; /* v40: IDs 45..50, append-only. */
+    int archivedJumperKnowledge[4]; /* old seen/escape/caught/floor history */
+    int roomEventSpent;
+    float restCooldownSave,refreshCooldownSave;
+    unsigned commonRuntimeMask;
+    int commonRuntimeFloor;
+    int trainingGraduated; /* v41: profile reward, not run state. */
+    int runMadness; /* v41: covenant persists only within this run. */
+    int serviceUsesV42[3];
+    int rewardFloorV42;unsigned escapeRewardMaskV42;int rhythmGoldV42;
+    uint64_t benchOwnedV42;
+    int decorV43;CellMeta cellsV43[MAP_HEIGHT][MAP_WIDTH];
+    int propCountV43;RoomProp propsV43[MAX_ROOM_PROPS];
+    int hatchCountV43;Hatch hatchesV43[MAX_HATCHES];
+    int roomEventKindV43;float roomEventTimeV43;
+    int collectorRunV44[3]; /* appearances, thefts, last attempted floor */
 } SaveBlob;
 
 /* ==================================================================
@@ -315,4 +340,5 @@ void ContinueRun(void);
 int SaveHasPendingRun(void);
 void DeleteSave(void);
 
+int SaveAwardTrainingGraduation(void);
 #endif /* CANITY_SAVE_H */

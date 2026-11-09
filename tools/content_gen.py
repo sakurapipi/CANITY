@@ -227,6 +227,7 @@ def _apply_on(root, en, zh, short, branch, rank, cost):
 
     # ① SKILL_COUNT +1
     common = common.replace(m.group(0), '#define SKILL_COUNT %d' % (count + 1), 1)
+    common = re.sub(r'(#define\s+SKILL_PLAYER_COUNT\s+)(\d+)', lambda value: value[1]+str(int(value[2])+1),common,count=1)
 
     # ② 枚举加一项（在 SK 枚举的闭合 } 前）
     span = None
@@ -279,14 +280,14 @@ def _verify(root):
         return len([x for x in re.split(r'[,\s]+', body[1:]) if x.strip()])
 
     return [
-        ('SKILL_COUNT = %d' % count, count == 41),
+        ('one internal definition is excluded from players', count == int(re.search(r'#define\s+SKILL_PLAYER_COUNT\s+(\d+)',common).group(1))+1),
         ('skillDefs 行数 == SKILL_COUNT',
          len(re.findall(r'\{\s*"', _array_body(skills, 'skillDefs'))) == count),
         ('kNodeNX 项数 == SKILL_COUNT', n_items(skills, 'kNodeNX') == count),
         ('kNodeNY 项数 == SKILL_COUNT', n_items(skills, 'kNodeNY') == count),
         ('kShortNames 项数 == SKILL_COUNT',
          len(re.findall(r'"[^"]*"', _array_body(skills, 'kShortNames'))) == count),
-        ('kSkillList 项数 == SKILL_COUNT', n_items(ui, 'kSkillList') == count),
+        ('kSkillList excludes internal ID 40', n_items(ui, 'kSkillList') == count-1),
     ]
 
 
@@ -360,6 +361,7 @@ def apply_skill(a):
         m = re.search(r'#define\s+SKILL_COUNT\s+(\d+)', common)
         count = int(m.group(1))
         common = common.replace(m.group(0), '#define SKILL_COUNT %d' % (count + 1), 1)
+    common = re.sub(r'(#define\s+SKILL_PLAYER_COUNT\s+)(\d+)', lambda value: value[1]+str(int(value[2])+1),common,count=1)
 
         sym = 'SK_GEN_' + re.sub(r'\W', '_', en).upper()
         common = _enum_append(common, sym)

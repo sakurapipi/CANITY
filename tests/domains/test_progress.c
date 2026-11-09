@@ -4,6 +4,7 @@
  * 入口：TestSuite_progress()
  */
 #include "../test_common.h"
+#include "player_api.h"
 
 static void test_daily(void) {
     unsigned goals=0,mods=0,res=0;
@@ -85,6 +86,7 @@ static void test_shop_full_bag_no_charge(void) {
     extern void ShopOpen(int);
     extern void ShopActivate(void);
     extern int ShopRowCount(void);
+    (void)0; int priceNow = 0;
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
     StartGame();
@@ -136,11 +138,19 @@ static void test_shop_full_bag_no_charge(void) {
     shopPrice[0] = 40;
     flares = cap; bottles = cap; smokeBombs = cap;
     gluePots = cap; echoBolts = cap; decoys = cap;
+    /* 2026-11-09：电池用例原来只把背包塞满，没管电池本身 ——
+       而 ShopItemFits(6) 会拒绝"电池已满"（提示"状态已满"），
+       那是设计如此。要让这条用例验的是"背包满不挡电池"，
+       必须把电池压到半格。 */
+    { extern float battery; battery = (float)BatteryMax() * 0.5f; }
     carryGold = 500;
     before = carryGold + bankGold;
+    /* 2026-11-09：价格走的是 kItemPrice[kind] 固定表，
+       shopPrice[] 只是显示用的旧字段 —— 所以要按真实价断言。 */
+    { extern int ShopPriceAt(int); priceNow = ShopPriceAt(0); }
     { extern float shopCooldown[SHOP_COOLDOWN_ROWS]; shopCooldown[0] = 0.0f; }
     ShopActivate();
-    CHECK(carryGold + bankGold == before - 40,
+    CHECK(carryGold + bankGold == before - priceNow,
           "battery is not bag-limited and must remain purchasable at full bag");
 }
 
@@ -220,10 +230,10 @@ static void test_trees_shop(void) {
     bankGold=1000000;
     for(int pass=0;pass<30;++pass)for(int id=0;id<SKILL_COUNT;++id)if(SkillCanBuy(id))SkillBuy(id);
     /* 2026-11-08：硬编码 30 会随节点增加而假失败 —— 用 SKILL_COUNT */
-    CHECK(SkillNodesLit()==SKILL_COUNT,"every network node must be reachable/buyable");
-    CHECK(activeKeystone>=16 && activeKeystone<=19,"four capstones have one active choice");
+    CHECK(SkillNodesLit()==SKILL_PLAYER_COUNT,"every network node must be reachable/buyable");
+    CHECK(activeKeystone>=0 && SkillIsPlayerFacing(activeKeystone) && skillDefs[activeKeystone].isKeystone,"a collected crown is the active choice across all three archetypes");
     int equipped=activeKeystone;CHECK(SkillSwitchKeystone(equipped==16?17:16),"owned capstones switch without losing purchases");
-    CHECK(SkillNodesLit()==SKILL_COUNT,"capstone switching preserves the collected tree");
+    CHECK(SkillNodesLit()==SKILL_PLAYER_COUNT,"capstone switching preserves the collected tree");
     clear_meta();
     for(int col=0;col<4;++col) {
         BenchResetRun();ThreatReset();carryGold=10000;
@@ -279,8 +289,8 @@ static void test_runs_and_layout(void) {
         /* 2026-11-08：判据改成"重叠面积 >= 8% 才算" —— 与 tools/skill_layout_check.py 同口径。
            斜辐条上相邻的轴对齐矩形会擦边 1~2%，视觉上看不出来；
            真正的"糊成一团"远超 8%。 */
-        for(int i=0;i<SKILL_COUNT;++i){RECT a=SkillNodeRect(i);int aw=a.right-a.left, ah=a.bottom-a.top;
-            for(int j=0;j<i;++j){RECT b=SkillNodeRect(j);
+        for(int i=0;i<SKILL_COUNT;++i){if(!SkillIsPlayerFacing(i))continue;RECT a=SkillNodeRect(i);int aw=a.right-a.left, ah=a.bottom-a.top;
+            for(int j=0;j<i;++j){if(!SkillIsPlayerFacing(j))continue;RECT b=SkillNodeRect(j);
                 int ox=(a.right<b.right?a.right:b.right)-(a.left>b.left?a.left:b.left);
                 int oy=(a.bottom<b.bottom?a.bottom:b.bottom)-(a.top>b.top?a.top:b.top);
                 { long long share = 0;
@@ -311,8 +321,8 @@ static void test_music(void) {
 
 static void test_wrench(void) {
     clear_meta();bankGold=0;bankCarryPct=0;StartGame();dailyMode=0;
-    monster.active=lightBeast.active=1;
-    monster.x=lightBeast.x=posX+0.4f;monster.y=lightBeast.y=posY;
+    Hunter0()->active=lightBeast.active=1;
+    Hunter0()->x=lightBeast.x=posX+0.4f;Hunter0()->y=lightBeast.y=posY;
     int before=knockCountRun;WrenchStartSwing(1.0f);
     for(int i=0;i<12;++i)WrenchTick(0.04f);
     CHECK(knockCountRun==before+2,"a wrench swing affects both hunters once");
@@ -325,7 +335,7 @@ static void test_wrench(void) {
      *   ① 冷却期内再挥**不生效**
      *   ② 冷却走完之后能再挥
      * ================================================================ */
-    monster.x=lightBeast.x=posX+0.4f;monster.y=lightBeast.y=posY;
+    Hunter0()->x=lightBeast.x=posX+0.4f;Hunter0()->y=lightBeast.y=posY;
     WrenchStartSwing(1.0f);for(int i=0;i<12;++i)WrenchTick(0.04f);
     CHECK(knockCountRun==before+2,
           "a second swing inside the cooldown must not land (wrench is cooldown-based now)");
@@ -339,11 +349,11 @@ static void test_wrench(void) {
         CHECK(wrenchCd > 0.0f, "starting a swing must arm the cooldown");
         wrenchCd = 0.0f;
     }
-    monster.x=lightBeast.x=posX+0.4f;monster.y=lightBeast.y=posY;
+    Hunter0()->x=lightBeast.x=posX+0.4f;Hunter0()->y=lightBeast.y=posY;
     WrenchStartSwing(1.0f);for(int i=0;i<12;++i)WrenchTick(0.04f);
     CHECK(knockCountRun==before+4,
           "after the cooldown expires a new swing lands again");
-    CHECK(monster.active && lightBeast.active,"wrench never kills a monster");
+    CHECK(Hunter0()->active && lightBeast.active,"wrench never kills a monster");
     /* ==================================================================
      * 扳手必须也能击退第 2、3 只听声鬼
      * （2026-11-03：原来 targets[] 里只有 {&monster, &lightBeast}）
@@ -520,10 +530,16 @@ static void test_three_archetypes_are_wired(void) {
     skillRank[SK_COUNTER_FREE] = 1;  skillRank[SK_COUNTER_BACK] = 1;
     skillRank[SK_COUNTER_KILL] = 1;
 
+    activeKeystone=SK_GHOST_FORM;
     one = SkillGhostStepOwned() + SkillGhostLandOwned() + SkillGhostFormOwned()
         + SkillRaiderPawnOwned() + SkillRaiderGambleOwned() + SkillRaiderPowerOwned()
         + SkillCounterFreeOwned() + SkillCounterBackOwned() + SkillCounterKillOwned();
-    CHECK(one == 9, "all nine owned-flags must flip to 1");
+    CHECK(one == 7, "six ordinary effects and exactly the equipped crown are active");
+    CHECK(SkillOwned(SK_GHOST_FORM) && SkillOwned(SK_RAIDER_POWER) && SkillOwned(SK_COUNTER_KILL),
+          "inactive crowns retain their purchased ranks");
+    activeKeystone=SK_RAIDER_POWER;
+    CHECK(!SkillGhostFormOwned() && SkillRaiderPowerOwned() && !SkillCounterKillOwned(),
+          "equipping raider never activates ghost or counter crown simultaneously");
 
     /* 三个流派都必须真的存在于表里（名字非空、有价格） */
     {
@@ -841,7 +857,123 @@ static void test_achievements_in_hub(void) {
     ContentReset();
 }
 
+static void test_bench_recover_runtime_rate(void) {
+    unsigned int saved = benchOwned;
+    float savedSanity = sanity;
+    benchOwned = 0u;
+    float base = SafeHealRate();
+    float staminaBase = StaminaMax();
+    float batteryBase = BenchBatteryCapMul();
+    float lightBase = BenchLightRangeMul();
+    CHECK(base > 0.0f, "safe room has positive base healing");
+    benchOwned = 1u << BENCH_RECOVER;
+    CHECK(fabsf(SafeHealRate() - base * 1.50f) < 0.0001f,
+          "RECOVER node 10 increases the actual safe-room rate exactly once");
+    benchOwned = 1u << BENCH_TEMPERED;
+    CHECK(fabsf(SafeHealRate() - base) < 0.0001f,
+          "TEMPERED node 19 must not activate retired recovery behavior");
+    CHECK(BenchKnockStunMul() == 2.0f, "TEMPERED doubles wrench stun");
+    benchOwned = (1u << BENCH_ENDURANCE) | (1u << BENCH_LIGHT_PACK);
+    CHECK(StaminaMax() > staminaBase && BenchMoveMul() == 1.06f,
+          "current body nodes change stamina and movement");
+    benchOwned = (1u << BENCH_BIG_CELL) | (1u << BENCH_SEARCHLIGHT);
+    CHECK(BenchBatteryCapMul() > batteryBase && BenchLightRangeMul() > lightBase,
+          "current light nodes change capacity and range");
+    CHECK(BenchFlashDrainMul() == 1.20f, "SEARCHLIGHT also charges its battery penalty");
+    benchOwned = 1u << BENCH_DESPERATE;
+    sanity = 30.0f;
+    CHECK(BenchMoveMul() == 1.0f && BenchWalkNoiseMul() == 1.0f,
+          "DESPERATE is inactive at the exact sanity threshold");
+    sanity = 29.0f;
+    CHECK(BenchMoveMul() == 1.10f && BenchWalkNoiseMul() == 0.80f,
+          "DESPERATE activates both advertised effects below 30 sanity");
+    sanity = savedSanity;
+    benchOwned = saved;
+}
+
+/* A field named monster must compile: object-like aliases must not return. */
+static void test_hunter_accessor_names(void) {
+    struct { int monster, monster2, monster3; } probe = { 1, 2, 3 };
+    CHECK(probe.monster + probe.monster2 + probe.monster3 == 6,
+          "hunter slot names cannot capture unrelated struct members");
+    CHECK(Hunter0() == &monHunters[0] && Hunter1() == &monHunters[1] && Hunter2() == &monHunters[2],
+          "named hunter accessors preserve the original array-slot identities");
+}
+
+static void test_developer_skill_is_not_player_content(void) {
+    int savedRank = skillRank[SK_GEN_SELFTEST];
+    skillRank[SK_GEN_SELFTEST] = 1;
+    CHECK(!SkillIsPlayerFacing(SK_GEN_SELFTEST) && !SkillCanBuy(SK_GEN_SELFTEST) &&
+          SkillCost(SK_GEN_SELFTEST) == -1 && !SkillOwned(SK_GEN_SELFTEST),
+          "developer definition cannot be purchased or grant player ownership");
+    CHECK(SkillClampRank(SK_GEN_SELFTEST, 1) == 0, "developer rank is not restored as progression");
+    for (int id = 0; id < SKILL_COUNT; id++) for (int direction = 0; direction < 4; direction++) {
+        if(!SkillIsPlayerFacing(id))continue;
+        int next = SkillNavNearest(id, direction);
+        CHECK(SkillIsPlayerFacing(next), "player navigation never selects the internal test slot");
+    }
+    skillRank[SK_GEN_SELFTEST] = savedRank;
+}
+
+static void test_bestiary_storage_is_bounded_and_separate(void) {
+    int saved[BESTIARY_LEGACY_VALUES], extra[BESTIARY_EXTRA_VALUES];
+    BestiarySave(saved); BestiarySaveExtra(extra);
+    int seed[BESTIARY_LEGACY_VALUES];
+    for (int i = 0; i < BESTIARY_LEGACY_VALUES; i++) seed[i] = 100+i;
+    int mimic[3] = { 206, 306, 406 };
+    BestiaryLoad(seed); BestiaryLoadExtra(mimic);
+    struct { int values[BESTIARY_LEGACY_VALUES]; int guard; } buffer;
+    buffer.guard = 0x12345678;
+    BestiarySave(buffer.values);
+    CHECK(buffer.guard == 0x12345678, "seven catalog entries cannot overrun the legacy 18-integer buffer");
+    CHECK(memcmp(seed, buffer.values, sizeof(seed)) == 0,
+          "mimic counters cannot overlap hunter caught/floor records");
+    int actual[3]; BestiarySaveExtra(actual);
+    CHECK(memcmp(actual, mimic, sizeof(mimic)) == 0, "mimic knowledge has its own three-value region");
+    BestiaryLoad(buffer.values); BestiaryLoadExtra(actual);
+    CHECK(bestiaryCaught[BST_ID_HUNTER] == seed[6] && bestiaryCaught[BST_ID_MIMIC] == mimic[1],
+          "legacy and extended creature identities survive loading independently");
+    BestiaryLoad(saved); BestiaryLoadExtra(extra);
+}
+
+static void test_bestiary_completion_uses_current_identities(void) {
+    CHECK(!BestiaryIsActive(BST_ID_FACE_JUMPER), "archived encounters do not block current completion");
+    CHECK(BestiaryCountSeen(1 << BST_ID_FACE_JUMPER) == 0,
+          "a retired or historically misattributed encounter cannot count as an active creature");
+    CHECK(BestiaryCountSeen((1 << BESTIARY_COUNT)-1) == BESTIARY_COUNT-1,
+          "current completion counts exactly the active catalog rows");
+    CHECK(BestiaryCountSeen(1 << 20) == 0, "reserved seen bits cannot grant encounter achievements");
+    CHECK(SkillNavNearest(SK_GEN_SELFTEST, 0) == SK_ORIGIN,
+          "stale developer selection falls back to a player node");
+}
+
+static void test_triangular_paths_and_run_wallet(void) {
+    clear_meta(); activeKeystone=-1;
+    CHECK(SkillNodeY(SK_GHOST_FORM)<SkillNodeY(SK_ORIGIN), "ghost path points north");
+    CHECK(SkillNodeX(SK_RAIDER_POWER)<SkillNodeX(SK_ORIGIN) && SkillNodeY(SK_RAIDER_POWER)>SkillNodeY(SK_ORIGIN),
+          "raider path points southwest");
+    CHECK(SkillNodeX(SK_COUNTER_KILL)>SkillNodeX(SK_ORIGIN) && SkillNodeY(SK_COUNTER_KILL)>SkillNodeY(SK_ORIGIN),
+          "counter path points southeast");
+    CHECK(skillDefs[SK_COUNTER_FREE].prereq==SK_SLIP,
+          "counter progression does not require buying the ghost crown");
+    BenchResetRun(); ThreatReset(); bankGold=12345; carryGold=benchNodes[BENCH_ENDURANCE].cost;
+    float quoted=BenchThreatCostOf(BENCH_ENDURANCE);
+    CHECK(BenchTryBuy(BENCH_ENDURANCE)==1,"a first run node can be bought with run gold alone");
+    CHECK(carryGold==0 && bankGold==12345,"run nodes never draw on the bank");
+    CHECK(fabsf(ThreatValue()-quoted)<0.0001f,"displayed threat quote equals applied build pressure");
+    CHECK(fabsf(ThreatRatio()-ThreatValue()/THREAT_MAX)<0.0001f,"pressure ratio uses the same value as runtime effects");
+    CHECK(BenchNavNearest(BENCH_BULL,1,0)==BENCH_SWIFT,"keyboard can reach alternative capstones in the new graph");
+    CHECK(!WalletSpendRun(-1) && !WalletSpendBank(-1),"negative transaction prices are rejected");
+    BenchResetRun(); ThreatReset(); clear_meta();
+}
+
 void TestSuite_progress(void) {
+    test_triangular_paths_and_run_wallet();
+    test_bestiary_completion_uses_current_identities();
+    test_developer_skill_is_not_player_content();
+    test_bestiary_storage_is_bounded_and_separate();
+    test_hunter_accessor_names();
+    test_bench_recover_runtime_rate();
     test_daily();
     test_double_reward_rounds();
     test_shop_full_bag_no_charge();

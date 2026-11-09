@@ -101,6 +101,13 @@ def check_save_partition(bad):
 # 现在：桩回到各自分区（audio_web.c / music_web.c / ...），
 # 平台层只管平台。这条规则防止它再次退化。
 SYMBOL_OWNERS = {
+    'tutorial.h': (re.compile(r'(^|/)src/loop_tutorial\.c$'),),
+    'calibration.h': (re.compile(r'(^|/)src/loop_calibration\.c$'),),
+    'wrench.h': (re.compile(r'(^|/)src/loop_wrench\.c$'),),
+    'run_rewards.h': (re.compile(r'(^|/)src/loop_rewards\.c$'),),
+    'player_tick.h': (re.compile(r'(^|/)src/loop_player_tick\.c$'),),
+    'interaction.h': (re.compile(r'(^|/)src/loop_interaction\.c$'),),
+    'item_effects.h': (re.compile(r'(^|/)src/loop_items\.c$'),),
     'audio.h':       (re.compile(r'(^|/)audio(_[a-z0-9]+)?\.c$'),),
     'music.h':       (re.compile(r'(^|/)music(_[a-z0-9]+)?\.c$'),),
     'gamepad.h':     (re.compile(r'(^|/)gamepad(_[a-z0-9]+)?\.c$'),),
@@ -119,7 +126,7 @@ def _declared_funcs(header_path):
         s = ln.strip()
         if s.startswith('*') or s.startswith('/*') or s.startswith('//'):
             continue
-        m = re.match(r'^(?:void|int|float|double|long|const\s+char\s*\*)\s+([A-Za-z_]\w*)\s*\(', s)
+        m = re.match(r'^(?:void|int|float|double|long|PlayerFrameInput|const\s+char\s*\*)\s+([A-Za-z_]\w*)\s*\(', s)
         if m:
             names.append(m.group(1))
     return names
@@ -128,7 +135,7 @@ def _declared_funcs(header_path):
 def _who_defines(func):
     """找出哪些 .c 在文件作用域定义了这个函数。"""
     # 必须带函数体（{）才算"定义"；不带的是原型/调用，不能判成归属
-    pat = re.compile(r'^(?:void|int|float|double|long|const\s+char\s*\*)\s+' +
+    pat = re.compile(r'^(?:void|int|float|double|long|PlayerFrameInput|const\s+char\s*\*)\s+' +
                      re.escape(func) + r'\s*\([^;{]*\)\s*\{', re.M)
     hits = []
     for root, _dirs, files in os.walk(os.path.join(ROOT, 'src')):

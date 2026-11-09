@@ -4,6 +4,9 @@
  * 契约：include/collapse.h   卡片：docs/modules/collapse.md
  */
 #include "common.h"
+#include "room_theme.h"
+#include "neutral.h"
+#include "spider.h"
 #include "loop_api.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -32,6 +35,7 @@ static int   s_collapseRerollCount = 0; /* 进程内累计重掷次数（测试�
 
 /* 原层快照 —— 只在崩塌开始时写一次，失败时整块还原 */
 typedef struct {
+    RoomThemeState roomThemeSave;
     int   worldMap[MAP_HEIGHT][MAP_WIDTH];
     int   explored[MAP_HEIGHT][MAP_WIDTH];
     CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
@@ -57,8 +61,10 @@ typedef struct {
 static CollapseSnapshot* s_collapseSnap = NULL;
 
 static void CollapseSnapshotTake(void) {
+    
     if (!s_collapseSnap) s_collapseSnap = (CollapseSnapshot*)malloc(sizeof(CollapseSnapshot));
     if (!s_collapseSnap) return;
+    s_collapseSnap->roomThemeSave=roomTheme;
     memcpy(s_collapseSnap->worldMap, worldMap, sizeof(worldMap));
     memcpy(s_collapseSnap->explored, explored, sizeof(explored));
     memcpy(s_collapseSnap->cellMeta, cellMeta, sizeof(cellMeta));
@@ -87,6 +93,7 @@ static void CollapseSnapshotTake(void) {
 
 static void CollapseSnapshotRestore(void) {
     if (!s_collapseSnap) return;
+    roomTheme=s_collapseSnap->roomThemeSave;
     memcpy(worldMap, s_collapseSnap->worldMap, sizeof(worldMap));
     memcpy(explored, s_collapseSnap->explored, sizeof(explored));
     memcpy(cellMeta, s_collapseSnap->cellMeta, sizeof(cellMeta));
@@ -111,10 +118,10 @@ static void CollapseSnapshotRestore(void) {
     modNoiseMul  = s_collapseSnap->modNoiseMulSave;
     /* 审计·中 7：临时实体会在新层重新生成过一次，回滚后必须按老地图重刷，
        否则蜘蛛/拾光虫停在新层的出生点（可能是墙里或不可达区）。 */
-    { extern void SpiderReset(void);  SpiderReset(); }
-    { extern void NeutralReset(void); NeutralReset(); }
-    { extern void SpawnLightBeast(void);  SpawnLightBeast(); }
-    { extern void SpawnLightBeast2(void); SpawnLightBeast2(); }
+    {   SpiderReset(); }
+    {  NeutralReset(); }
+    {   SpawnLightBeast(); }
+    {  SpawnLightBeast2(); }
     fusesNeeded = s_collapseSnap->fusesNeeded;
     roomCount = s_collapseSnap->roomCount;
 }
@@ -211,6 +218,7 @@ int CollapseTick(float dt) {
         s_collapseRerolled = 1;
         s_collapseRerollCount++;
         CollapseSnapshotTake();
+        if(!s_collapseSnap){collapseArmed=0;screenBlackout=0;pickupMsg=(g_lang==LANG_ZH)?"这里塌不动":"IT WON'T GIVE WAY";pickupMsgTimer=2;return 1;}
         collapsedLevel = 1;
         s_collapseGen = 1;      /* 告诉 GenerateLevel：这一次是崩塌重掷 */
         GenerateLevel();
@@ -256,4 +264,3 @@ int CollapseBusy(void) { return collapseArmed; }
    没有它就没法区分"塌了"和"黑屏完什么都没发生"，
    而那正是本轮抓到的 bug。 */
 int CollapseRerollCount(void) { return s_collapseRerollCount; }
-

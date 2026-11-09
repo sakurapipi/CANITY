@@ -36,7 +36,6 @@ int  UIS(int v);
 /* 窗口过程把改绑按键交给它消费；返回 1 = 已处理 */
 int RebindConsumeKey(int vk);
 
-#endif /* CANITY_UI_H */
 void PageTabRect(int idx, int* x0, int* y0, int* x1, int* y1);   /* v2.8 */
 
 /* v3.0：绘制原语对外暴露（锁箱 / 其它模块要用） */
@@ -46,7 +45,33 @@ void FrameRectWin(int x0, int y0, int x1, int y1, unsigned int color, float alph
 int  TextScale(void);
 void DrawTextSmallWin(int xWin, int yWin, const char* t, unsigned int color);
 int  DrawTextSmallWidth(const char* t);
+void DrawTextSmallLiteralWin(int x,int y,const char* text,unsigned int color);
+int TextSmallLiteralWidth(const char* text);
+void UiTrimSmallText(char* text,int width);
 void DrawTextWin(int x, int y, const char* t, unsigned int color);
 void DrawTextCenterWin(int cx, int y, const char* t, unsigned int color);
 int  TextHeightWin(void);
 int  TextWidthWin(const char* t);
+
+/* Input hit testing and skill-tree viewport operations. */
+int HubBackButtonAt(int mx, int my);
+
+int ShopBackButtonAt(int mx, int my);
+
+int HubZoomButtonAt(int mx, int my);
+
+void SkillZoomAt(float factor, int mx, int my);
+
+void SkillFocusNode(int id);
+void SkillCenterOn(int id);
+
+int SkillDragWasClick(void);
+
+void HubPurchaseRect(RECT* rect);
+int HubPurchaseAt(int x,int y);
+int TextMediumLiteralWidth(const char* text);
+int TextMediumLiteralHeight(void);
+void DrawTextMediumLiteralWin(int x,int y,const char* text,unsigned int color);
+int SkillPickAt(int x,int y);
+void RunReplacementButtonRect(int index,RECT* rect);
+#endif /* CANITY_UI_H */

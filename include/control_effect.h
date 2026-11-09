@@ -76,4 +76,8 @@ int         ControlMashLeft(void);
 float       ControlTimeLeft(void);
 float       ControlImmune(void);
 
+
+/* Timeout the active control interaction. */
+void ControlTimeout(void);
+
 #endif /* CANITY_CONTROL_EFFECT_H */

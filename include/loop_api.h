@@ -6,11 +6,19 @@
 #define CANITY_LOOP_API_H
 
 #include "common.h"
+#include "tutorial.h"
+#include "run_rewards.h"
 
 /* 状态机（循环层） */
 extern GameState currentState;
+extern int runLightUse;
+extern float exitChoiceT;
 
 void ResetRunModeFlags(void);
+int LoopRunReplacementPending(void);
+int LoopRunReplacementChoice(void);
+void LoopToggleRunReplacement(void);
+void LoopResolveRunReplacement(int approve);
 extern int g_forceMod;
 void Update(float dt);
 extern int autoPaused;
@@ -44,39 +52,6 @@ unsigned int RunRngNext(void);
 void RunRngSeed(unsigned int seed);
 unsigned int RunRngState(void);
 void RunRngSetState(unsigned int st);
-
-/* 原 game.c 的 static 状态（第 21 轮提升为模块可见） */
-extern float tutorialTimer;
-extern float tutorialActionTimer;
-extern float tutorialStepTimer;
-extern float tutorialStartX;
-extern float tutorialStartY;
-extern float tutorialStartDirX;
-extern float tutorialStartDirY;
-extern int tutorialLightOff;
-extern int tutorialThrown;
-extern int tutorialKnocked;
-extern int tutorialMapOpened;
-extern int pendingSkillDraft;
-extern int pendingStartMode;
-extern int pendingCampaignStage;
-
-/* 教程步骤枚举（原 game.c，拆块需要） */
-enum {
-    TUT_MOVE = 0,
-    TUT_LOOK,
-    TUT_SPRINT,
-    TUT_LIGHT,
-    TUT_MAP,
-    TUT_SEARCH,
-    TUT_CRANK,
-    TUT_THROW,
-    TUT_KNOCK,
-    TUT_HIDE,       /* 第 4 轮：被追的时候该往哪躲 —— 玩家原话「要怎么躲」 */
-    TUT_BREAKER,
-    TUT_EXIT,
-    TUT_DONE
-};
 
 extern int tutorialStep;
 

@@ -2,6 +2,8 @@
  * Canity — 局内强化实现（v3.0）
  */
 #include "common.h"
+#include "tutorial.h"
+#include "wallet.h"
 #include "upgrade_run.h"
 #include "loop_api.h"
 #include "player_api.h"
@@ -48,8 +50,9 @@ int RunUpgTryBuy(int kind) {
     int cost = RunUpgCost(kind);
     if (cost < 0) return 2;
     if (carryGold < cost) return 4;
-    { extern int WalletSpendRun(int); WalletSpendRun(cost); }
+    {  WalletSpendRun(cost); }
     upg[kind]++;
+    TutorialRecordAction(TUTOR_UPGRADE);
     PlaySfx(SFX_POWER, 0.9f);
     return 0;
 }
@@ -162,7 +165,7 @@ float RunUpgWrenchCooldown(void) {
     int lv = RunUpgWrenchLevel();
     float cd = 8.0f - (float)lv;    /* 每级 -1 秒 */
     if (cd < 5.0f) cd = 5.0f;       /* 冷却上限（最短）5 秒 */
-    return cd;
+    return cd*BenchWrenchCooldownMul();
 }
 int RunUpgWrenchCharges(void) {
     return ((RunUpgWrenchLevel() <= 0) ? 2 : 4)+BenchKnockCharges();

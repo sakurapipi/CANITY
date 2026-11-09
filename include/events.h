@@ -59,4 +59,8 @@ int         EventScoreOf(int ev);
 /* 按权重随机抽一个事件；无事件时返回 -1 */
 int EventPickRandom(unsigned int* seed);
 
+
+/* Hearing modifier of a floor event. */
+float EventMonsterHearMul(int ev);
+
 #endif /* CANITY_EVENTS_H */

@@ -45,4 +45,8 @@ void BuildSynergyList(char* out, int cap);
 
 void BuildReset(void);
 
+
+/* Whether a draft card has an implemented gameplay effect. */
+int BuildCardImplemented(int irId);
+
 #endif /* CANITY_BUILD_TAGS_H */

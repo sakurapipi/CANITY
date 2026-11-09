@@ -31,6 +31,8 @@ int RoomCount(void);
 /* C：**木箱堆** —— 复用现有的 SPR_PROP_CRATE，零新美术。
    作用是让房间不只有货架：仓储室该有箱子堆，锅炉房也该有杂物。 */
 #define ROOMPROP_CRATES  2
+#define ROOMPROP_THEME_FIRST 3
+#define ROOMPROP_THEME_LAST 9
 
 typedef struct {
     float x, y;
@@ -101,4 +103,5 @@ extern int roomSeedUsed;
 /* 用指定种子重放房间放置（读档路径）。返回实际放下的房间数。 */
 int RoomReplay(int seed, int wantCount);
 
+void RoomSetCount(int count);
 #endif /* CANITY_MAP_ROOMS_H */

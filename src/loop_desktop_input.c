@@ -1,5 +1,7 @@
 /* Orchestration ownership split; stage ordering remains in the entry point. */
 #include "common.h"
+#include "help_book.h"
+#include "ui_menu.h"
 #include "echo_marks.h"
 #include "run_stats.h"
 #include "threat.h"
@@ -69,49 +71,50 @@ static int mapHeld = 0;
 
 void LoopResetMapHold(void) { mapHeld = 0; }
 
+static void CancelPointerDrag(void) {
+    if (SkillIsDragging()) SkillDragEnd();
+    if (treeDragging) BenchDragEnd();
+    sliderDragging = 0;
+}
+
+void LoopCancelTransientInput(void) {
+    CancelPointerDrag();
+    if (mapHeld) {
+        mapHeld = 0;
+        isMapOpen = 0;
+        mapFullScreen = 0;
+    }
+    isCharging = 0;
+    mouseCharge = 0.0f;
+    holdingNow = 0;
+    holdTimer = 0.0f;
+    cranking = 0;
+    /* Throw-button edge history is private to loop_frame.c and resyncs on this flag. */
+    resetInputState = 1;
+    firstMouseMove = 1;
+}
+
+
+static int bankPointerSlider=-1;
+static int bankSelectedSlider=0;
+int BankSelectedControl(void) { return bankSelectedSlider; }
+void CanityMouseRelease(void) {
+    if(bankPointerSlider>=0) { bankPointerSlider=-1;
+         SaveGame();
+         }
+}
 static void ClickMenu(int mx, int my) {
     MouseToLogical(&mx, &my);
-    if (currentState == STATE_HELP) { currentState = STATE_MAIN_MENU; uiDirty = 1; return; }
+    if(LoopRunReplacementPending() || currentState==STATE_SKILL_PICK){CanityMouseClick(mx,my);return;}
+    if (currentState == STATE_HELP) { HelpBookClick(mx,my); return; }
 
     /* v1.8：主菜单 / 暂停菜单鼠标点击直接执行。
        用"行带"算下标，矩形差几像素也点得中；没落在行上就选最近的一行，
        保证点击永远有反馈（之前玩家反馈"暂停页鼠标点了没反应"）。 */
-    if (currentState == STATE_MAIN_MENU || currentState == STATE_PAUSED) {
-        MenuGeo g = GetMenuGeo();
-        int idx = -1;
-        if (g.rowH > 0 && my >= g.firstY) idx = (my - g.firstY) / g.rowH;
-        if (idx < 0 || idx >= g.count) {
-            int best = 0, bestD = 1 << 30;
-            for (int i = 0; i < g.count; i++) {
-                RECT r = RowRect(g, i);
-                int d = abs(my - (r.top + r.bottom) / 2);
-                if (d < bestD) { bestD = d; best = i; }
-            }
-            idx = best;
-        }
-        if (idx >= 0 && idx < g.count) {
-            menuSelection = idx;
-            ActivateMenuItem();
-            uiDirty = 1;
-        }
-        return;
-    }
-
-        /* v2.2 修复：安全屋 / 选武器原来没有命中分支，掉进通用兜底 ——
-       点哪一行执行的都是"光标原来那一行"（买错东西、直接用掉跳层）。 */
-    if (currentState == STATE_SAFEHOUSE) {
-        MenuGeo g2 = GetMenuGeo();
-        for (int i = 0; i < g2.count; i++) {
-            RECT r = RowRect(g2, i);
-            if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
-                if (currentState == STATE_SAFEHOUSE) shopRow = i;
-                /* 2026-11-08：武器光标已删 */
-                ActivateMenuItem();
-                return;
-            }
-        }
-        return;
-    }
+    if(currentState==STATE_MAIN_MENU || currentState==STATE_PAUSED){CanityMouseClick(mx,my);return;}
+    if (currentState == STATE_SAFEHOUSE) { CanityMouseClick(mx,my); return; }
+    if (currentState == STATE_BANK) { CanityMouseClick(mx,my); return; }
+    
 
 if (currentState == STATE_HUB) {
         {
@@ -268,12 +271,8 @@ int  itemHasStock(void);
  * 这样少一个键，也不会出现"点暂停没反应、点返回又不知道会去哪"。
  * ================================================================== */
 void CanityMenuAction(void) {
-    /* 从任何界面回到局内之前，先退出藏身状态 ——
-       否则玩家会觉得"出来了但动不了"。 */
-    if (currentState == STATE_SAFEHOUSE && currentState != STATE_PLAYING) {
-
-        hiddenIn = -1;
-    }
+    if(LoopRunReplacementPending()){LoopResolveRunReplacement(0);return;}
+    /* Closing an interface preserves the live hiding state. */
     switch (currentState) {
     case STATE_PLAYING:
         {  PauseGame(); }
@@ -385,9 +384,25 @@ void CanityMouseWheel(int delta, int mx, int my) {
  * CanityMouseLook（指针锁定后的相对位移），那条路是独立的。
  * ================================================================== */
 void CanityMouseMove(int mx, int my) {
+    if(LoopRunReplacementPending())return;
     /* 入参已是渲染(=逻辑)空间，见 HitTestMenu 的契约 */
     g_mousePos.x = mx;
     g_mousePos.y = my;
+    if(currentState==STATE_BANK && bankPointerSlider>=0) {
+        if(PlatKeyDown(VK_LBUTTON))BankSetSliderFromPointer(bankPointerSlider,mx);
+        else CanityMouseRelease();
+        return;
+    }
+    if(currentState==STATE_SAFEHOUSE && shopPage!=SHP_TREE) {
+        safehouseHoverTab=-1;
+        for(int tab=0;tab<SAFEHOUSE_PAGES;tab++) {
+            int x0,y0,x1,y1;PageTabRect(tab,&x0,&y0,&x1,&y1);
+            if(mx>=x0 && mx<=x1 && my>=y0 && my<=y1)safehouseHoverTab=tab;
+        }
+        int row=SafehouseCardAt(mx,my);
+        if(row>=0) {shopRow=row;uiDirty=1;}
+        return;
+    }
     if (currentState != STATE_PLAYING) {
         HitTestMenu(mx, my);
         uiDirty = 1;
@@ -395,6 +410,14 @@ void CanityMouseMove(int mx, int my) {
 }
 
 void CanityMouseClick(int mx, int my) {
+    if(LoopRunReplacementPending()){
+        for(int i=0;i<2;i++){RECT r;RunReplacementButtonRect(i,&r);if(mx>=r.left && mx<r.right && my>=r.top && my<r.bottom){LoopResolveRunReplacement(i);return;}}return;
+    }
+    if(currentState==STATE_SKILL_PICK){int i=SkillPickAt(mx,my);if(i>=0){skillPickSel=i;CloseSkillPick();}return;}
+    if(currentState==STATE_HELP){HelpBookClick(mx,my);return;}
+    if(currentState==STATE_SAFEHOUSE && shopPage==SHP_SHOP){RECT r;ShopRefreshButtonRect(&r);
+        if(mx>=r.left && mx<r.right && my>=r.top && my<r.bottom){ShopRefresh();return;}}
+
     g_mousePos.x = mx;
     g_mousePos.y = my;
 
@@ -416,6 +439,23 @@ void CanityMouseClick(int mx, int my) {
         HitTestMenu(mx, my);
         if (hitRow) ActivateMenuItem();
         uiDirty = 1;
+        return;
+    }
+    if(currentState==STATE_BANK) {
+        RECT back;BankBackRect(&back);
+        if(mx>=back.left && mx<=back.right && my>=back.top && my<=back.bottom) { CanityMouseRelease();CanityMenuAction();return; }
+        int slider=BankSliderAt(mx,my);
+        if(slider>=0) { bankSelectedSlider=slider;bankPointerSlider=slider;BankSetSliderFromPointer(slider,mx); }
+        return;
+    }
+    if(currentState==STATE_SAFEHOUSE && shopPage!=SHP_TREE) {
+        if(ShopBackButtonAt(mx,my)) {ShopLeave();return;}
+        for(int tab=0;tab<SAFEHOUSE_PAGES;tab++) {
+            int x0,y0,x1,y1;PageTabRect(tab,&x0,&y0,&x1,&y1);
+            if(mx>=x0 && mx<=x1 && my>=y0 && my<=y1) {shopPage=ShopPageAtTab(tab);shopRow=0;uiDirty=1;return;}
+        }
+        int row=SafehouseCardAt(mx,my);
+        if(row>=0) {shopRow=row;ShopActivate();uiDirty=1;}
         return;
     }
     /* 技能树「返回」按钮：点它就回主菜单（用户报告退不出去） */
@@ -441,6 +481,18 @@ void CanityMouseClick(int mx, int my) {
         }
     }
 
+    if (currentState == STATE_SAFEHOUSE && shopPage == SHP_TREE) {
+        if (BenchBuyButtonAt(mx,my)) { BenchDragEnd(); ShopActivate(); return; }
+        for (int tab = 0; tab < SAFEHOUSE_PAGES; tab++) {
+            int x0,y0,x1,y1; PageTabRect(tab,&x0,&y0,&x1,&y1);
+            if (mx>=x0 && mx<=x1 && my>=y0 && my<=y1) {
+                shopPage=ShopPageAtTab(tab); shopRow=0; uiDirty=1; return;
+            }
+        }
+        int id = BenchNodeAt(mx,my);
+        if (id >= 0) { shopNodeSel=id; BenchDragEnd(); uiDirty=1; }
+        return;
+    }
     /* 技能树的 + / - 缩放按钮优先命中（点它们不该去选节点） */
     if (currentState == STATE_HUB) {
 
@@ -452,6 +504,12 @@ void CanityMouseClick(int mx, int my) {
         }
     }
 
+    if(currentState==STATE_HUB) {
+        if(HubPurchaseAt(mx,my)) {ActivateHubRow();uiDirty=1;return;}
+        int id=SkillNodeHitTest(mx,my);
+        if(id>=0) {hubSelection=id;ActivateHubRow();uiDirty=1;}
+        return;
+    }
     if (currentState == STATE_SETTINGS || currentState == STATE_HUB ||
         currentState == STATE_SAFEHOUSE || currentState == STATE_ACHIEVEMENTS ||
         currentState == STATE_BESTIARY || currentState == STATE_BANK) {
@@ -634,36 +692,8 @@ static void KeyHandleGameOver(const MenuKeyInput* key) {
 
 }
 
-static void KeyHandleHelp(const MenuKeyInput* key) {
-    const int vk = key->vk;
-    const int menuUp = key->up;
-    const int menuDown = key->down;
-    const int menuConfirm = key->confirm;
-    const int menuCancel = key->cancel;
+static void KeyHandleHelp(const MenuKeyInput* key) {if(!key->repeat)HelpBookKey(key->vk);}
 
-            if (vk == VK_TAB) { helpPage = 1 - helpPage; uiDirty = 1; }
-            /* v6 **光标范围要和面板一致** ——
-               原来光标在 HELP_ROWS(23) 里滚，但每页只画 8 行，
-               移到第 9 行以后屏幕上没有任何高亮（玩家以为帮助页坏了），
-               helps[6..12]（瓶子 / 跳脸虫说明）永远看不到。
-               现在光标限制在单页 8 行，翻页由 Tab / 光标跨越自动跟随。 */
-            {
-                int before = menuSelection;
-                if (menuUp)   menuSelection = (menuSelection + HELP_PAGE_ROWS - 1) % HELP_PAGE_ROWS;
-                if (menuDown) menuSelection = (menuSelection + 1) % HELP_PAGE_ROWS;
-                if (menuSelection != before) uiDirty = 1;
-                /* 在单页内滚到底再按下 → 翻页 */
-                if (menuDown && menuSelection == 0 && before == HELP_PAGE_ROWS - 1)
-                    helpPage = (helpPage + 1) % 2;
-                if (menuUp && before == 0)
-                    helpPage = (helpPage + 1) % 2;
-            }
-            MenuGeo hg = GetMenuGeo();
-            if (menuSelection < hg.scrollOffset) menuScrollOffsets[STATE_HELP] = menuSelection;
-            else if (menuSelection >= hg.scrollOffset + hg.maxVisibleRows) menuScrollOffsets[STATE_HELP] = menuSelection - hg.maxVisibleRows + 1;
-            if (menuCancel || menuConfirm) { currentState = STATE_MAIN_MENU; uiDirty = 1; }
-
-}
 
 static void KeyHandleSkillPick(const MenuKeyInput* key) {
     const int vk = key->vk;
@@ -676,7 +706,7 @@ static void KeyHandleSkillPick(const MenuKeyInput* key) {
             int dn = menuDown || vk == 'S';
             if (up) { skillPickSel = (skillPickSel + INRUN_CHOICES - 1) % INRUN_CHOICES; uiDirty = 1; }
             if (dn) { skillPickSel = (skillPickSel + 1) % INRUN_CHOICES; uiDirty = 1; }
-            if (menuConfirm) CloseSkillPick();
+            if (menuConfirm && !key->repeat) CloseSkillPick();
 
 }
 
@@ -708,11 +738,7 @@ static void KeyHandleSafehouse(const MenuKeyInput* key) {
              *      · 鼠标拖过画布之后按任意键 → 画布被拽回原位
              *    修：只在**真的从别的页切到树页**时居中一次。
              * ================================================================== */
-            if (vk == VK_SPACE && !(repeat) && shopPage != SHP_TREE) {
-                if (calibActive) CalibLock();
-                else             CalibStart();
-                return;
-            }
+            if (vk == VK_F5 && !repeat){ShopRefresh();return;}
             if (vk == VK_TAB) ShopNextPage();
             /* 只在「切到树页」这一下居中，之后不再干扰玩家的视角 */
             {
@@ -782,7 +808,13 @@ static void KeyHandleHub(const MenuKeyInput* key) {
             /* v6：**HOME 复位** —— 原来这句写在 SAFEHOUSE 分支里，
                条件恒假，技能树的复位键永远不生效。 */
             if (vk == VK_HOME) { SkillResetView(); return; }
-            if (vk == VK_TAB) {
+            if(vk==VK_TAB && !key->repeat){
+                static int branch=-1;const int roots[3]={0,4,8};branch=(branch+1)%3;
+                hubSelection=roots[branch];SkillCenterOn(hubSelection);uiDirty=1;return;
+            }
+            if(vk=='P' && !key->repeat){
+                int parent=skillDefs[hubSelection].prereq;
+                if(parent>=0){hubSelection=parent;SkillCenterOn(parent);uiDirty=1;}
                 return;
             }
             /* v2.2 修复：原来这里只处理 ESC —— 方向键和回车一个都不响应，
@@ -814,35 +846,18 @@ static void KeyHandleHub(const MenuKeyInput* key) {
 }
 
 static void KeyHandleBank(const MenuKeyInput* key) {
-    const int menuUp = key->up;
-    const int menuLeft = key->left;
-    const int menuRight = key->right;
-    const int menuConfirm = key->confirm;
-    const int menuCancel = key->cancel;
-
-            /* v6 **独立银行页的输入** —— 全部符合玩家习惯：
-                 ESC                     返回主菜单
-                 Enter / Space           下一个携带比例
-                 S / ↓ / →               下一个比例
-                 W / ↑ / ←               上一个比例
-               鼠标点击在别处处理（点哪都算回车）。 */
-            if (menuCancel) {
-                SaveGame();
-                currentState = STATE_MAIN_MENU;
-                menuSelection = 0;
-                ForceCursor(1);
-                uiDirty = 1;
-                return;
-            }
-            {
-
-                int moved3 = 0;
-                if (menuConfirm || menuRight) { bankCarryPct = (bankCarryPct + 1) % BANK_CARRY_STEPS; moved3 = 1; }
-                else if (menuUp || menuLeft)             { bankCarryPct -= 1; moved3 = 1; }
-                if (moved3) { PlaySfx(SFX_POWER, 0.6f); uiDirty = 1; }
-            }
-
+    if(key->cancel) {CanityMouseRelease();
+        CanityMenuAction();
+        return;
+        }
+    if(key->up)bankSelectedSlider=0;
+    if(key->down)bankSelectedSlider=1;
+    if(key->left)BankAdjustSlider(bankSelectedSlider,-1);
+    if(key->right)BankAdjustSlider(bankSelectedSlider,1);
+    if(key->confirm)SaveGame();
+    uiDirty=1;
 }
+
 
 static void KeyHandleBestiary(const MenuKeyInput* key) {
     const int menuUp = key->up;
@@ -857,7 +872,7 @@ static void KeyHandleBestiary(const MenuKeyInput* key) {
             if (bestiarySel < bg.scrollOffset) menuScrollOffsets[STATE_BESTIARY] = bestiarySel;
             else if (bestiarySel >= bg.scrollOffset + bg.maxVisibleRows)
                 menuScrollOffsets[STATE_BESTIARY] = bestiarySel - bg.maxVisibleRows + 1;
-            if (menuConfirm || menuCancel) {
+            if (menuCancel || (menuConfirm && bestiarySel == BESTIARY_COUNT)) {
                 currentState = STATE_MAIN_MENU;
                 menuSelection = 0;
                 uiDirty = 1;
@@ -1068,7 +1083,7 @@ static int KeyHandleGlobalShortcut(int vk, int repeat) {
 }
 
 static int KeyHandleLock(int vk) {
-        if (lockActive) {
+        if (lockActive && currentState==STATE_PLAYING) {
             /* v3.3 **真的只认 Esc / M** ——
                注释一直这么写，代码却是「除打开键外任何键都关」，两回事。
                试玩实测：「解开锁盘时按一次 W，面板立刻消失，
@@ -1121,7 +1136,8 @@ static int KeyPrepareInput(int* code, int repeat) {
          * 这里和「切投掷槽位」一样，在消息里立即处理，
          * 不依赖 Update 走到哪一行。
          * ================================================================ */
-        if (currentState == STATE_PLAYING && vk == 'T') {
+        if (currentState == STATE_PLAYING && vk == 'T' && !repeat) {
+            if(!ShopCanOpen()){pickupMsg=Tr("HIDE BEFORE OPENING SUPPLIES","进入藏身点后才能打开局内商店");pickupMsgTimer=1.6f;return 1;}
             /* v7 第 ㊿ 轮：**改回切状态**
                崩溃的真正原因是 ShopPriceAt() 无限递归（已修），
                不是这条状态路径。而这条路径是进改造树 / 局内强化 /
@@ -1171,6 +1187,32 @@ static int KeyPrepareInput(int* code, int repeat) {
 }
 
 int CanityKeyDown(int vk, int repeat) {
+    if(LoopRunReplacementPending()){
+        if(!repeat){if(vk==VK_ESCAPE || vk=='N')LoopResolveRunReplacement(0);else if(vk=='Y')LoopResolveRunReplacement(1);else if(vk==VK_LEFT || vk==VK_RIGHT || vk==VK_TAB){LoopToggleRunReplacement();}else if(vk==VK_RETURN || vk==VK_SPACE)LoopResolveRunReplacement(LoopRunReplacementChoice());}return 0;
+    }
+    /* Reject invalid public/platform input before locks, rebinding or indexing. */
+    if (vk <= 0 || vk >= 256) return 0;
+    if(calibActive && (currentState==STATE_PLAYING || currentState==STATE_SAFEHOUSE)) {
+        if(!repeat)CalibInputKey(vk);
+        return 0;
+    }
+    if(currentState==STATE_PLAYING && vk=='K' && !repeat){CalibStart();return 0;}
+    if(currentState==STATE_HELP) {
+        if(!repeat) {
+            if(vk==(int)g_bindings[ACT_MENU_UP] || vk=='W')vk=VK_UP;
+            else if(vk==(int)g_bindings[ACT_MENU_DOWN] || vk=='S')vk=VK_DOWN;
+            else if(vk==(int)g_bindings[ACT_MENU_LEFT] || vk=='A')vk=VK_LEFT;
+            else if(vk==(int)g_bindings[ACT_MENU_RIGHT] || vk=='D')vk=VK_RIGHT;
+            HelpBookKey(vk);
+        }
+        return 0;
+    }
+    if(currentState==STATE_PLAYING && vk=='B' && !repeat && !guideMode) {
+        if(!trainingMode){SaveGame();if(g_saveState==2)return 0;}
+        LoopClearInputEdges();LoopCancelTransientInput();
+        LoopQueueStart(START_GUIDE,0);StartGame();return 0;
+    }
+    if(currentState==STATE_SAFEHOUSE && vk==VK_F5) {if(!repeat)ShopRefresh();return 0;}
     if (KeyHandleGlobalShortcut(vk, repeat)) return 0;
     if (KeyHandleLock(vk)) return 0;
     if (KeyPrepareInput(&vk, repeat)) return 0;
@@ -1209,12 +1251,15 @@ static void MapCursorRefresh(void) {
 
 static LRESULT WindowMouseMove(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     (void)hwnd; (void)uMsg; (void)wParam; (void)lParam;
+    if(currentState==STATE_BANK || (currentState==STATE_SAFEHOUSE && shopPage!=SHP_TREE)) {
+        int x=(short)LOWORD(lParam),y=(short)HIWORD(lParam);MouseToLogical(&x,&y);CanityMouseMove(x,y);return 0;
+    }
 
             /* v6：技能树拖拽中 */
             if (currentState == STATE_HUB && SkillIsDragging()) {
                 int wx = (short)LOWORD(lParam), wy = (short)HIWORD(lParam);
                 POINT pt = { wx, wy };
-                ScreenToClient(g_hwnd, &pt);
+                /* lParam is already in client coordinates. */
                 int mx2 = pt.x, my2 = pt.y;
                 MouseToLogical(&mx2, &my2);
                 SkillDragMove(mx2, my2);
@@ -1271,14 +1316,7 @@ static LRESULT WindowMouseMove(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             int mx = (short)LOWORD(lParam), my = (short)HIWORD(lParam);
             /* v1.8：三选一面板支持鼠标悬停选中 */
             if (currentState == STATE_SKILL_PICK) {
-                MenuGeo sg = GetMenuGeo();
-                for (int i = 0; i < INRUN_CHOICES; i++) {
-                    RECT rr = RowRect(sg, i);
-                    if (my >= rr.top && my < rr.bottom) {
-                        if (skillPickSel != i) { skillPickSel = i; uiDirty = 1; }
-                        break;
-                    }
-                }
+                MouseToLogical(&mx,&my);CanityMouseMove(mx,my);
                 return 0;
             }
 
@@ -1430,12 +1468,17 @@ static LRESULT WindowMouseWheel(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 static LRESULT WindowLeftDown(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     (void)hwnd; (void)uMsg; (void)wParam; (void)lParam;
+    if(currentState==STATE_BANK || (currentState==STATE_SAFEHOUSE && shopPage!=SHP_TREE)) {
+        int x=(short)LOWORD(lParam),y=(short)HIWORD(lParam);MouseToLogical(&x,&y);CanityMouseClick(x,y);
+        if(bankPointerSlider>=0)PlatSetCapture(1);
+        return 0;
+    }
 
             /* v6：**技能树拖拽平移** —— 按下即开始拖，和改造树一致 */
             if (currentState == STATE_HUB) {
                 int wx = (short)LOWORD(lParam), wy = (short)HIWORD(lParam);
                 POINT pt = { wx, wy };
-                ScreenToClient(g_hwnd, &pt);
+                /* lParam is already in client coordinates. */
                 int dx = pt.x, dy = pt.y;
                 MouseToLogical(&dx, &dy);
                 /* ==================================================
@@ -1447,6 +1490,7 @@ static LRESULT WindowLeftDown(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                  * ================================================== */
                 {
 
+                    if(HubPurchaseAt(dx,dy)) {CanityMouseClick(dx,dy);return 0;}
                     if (HubBackButtonAt(dx, dy)) {
                         SaveGame();
                         currentState = STATE_MAIN_MENU;
@@ -1489,7 +1533,7 @@ static LRESULT WindowLeftDown(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                     int x0, y0, x1, y1;
                     PageTabRect(t, &x0, &y0, &x1, &y1);
                     if (mx0 >= x0 && mx0 <= x1 && my0 >= y0 && my0 <= y1) {
-                        shopPage = t;
+                        shopPage = ShopPageAtTab(t);
                         shopRow = 0;
                         uiDirty = 1;
                         return 0;
@@ -1501,15 +1545,9 @@ static LRESULT WindowLeftDown(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 }
                 /* 树节点 */
                 if (shopPage == SHP_TREE) {
-                    for (int id = 0; id < BENCH_COUNT; id++) {
-                        int cx = (int)(BenchNodeWorldX(id) * treeVK + treeVX);
-                        int cy = (int)(BenchNodeWorldY(id) * treeVK + treeVY);
-                        int hw = (int)(75.0f * treeVK), hh = (int)(27.0f * treeVK);
-                        if (mx0 >= cx - hw && mx0 <= cx + hw && my0 >= cy - hh && my0 <= cy + hh) {
-                            shopNodeSel = id;
-                            uiDirty = 1;
-                            return 0;
-                        }
+                    int id = BenchNodeAt(mx0,my0);
+                    if (id >= 0) {
+                        BenchDragEnd(); shopNodeSel = id; uiDirty = 1; return 0;
                     }
                 }
             }
@@ -1564,6 +1602,7 @@ static LRESULT WindowSizeChanged(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+        case WM_CHAR: if(currentState==STATE_HELP){HelpBookText((unsigned)wParam);return 0;}break;
         case WM_DESTROY:
             SaveGame();
             PostQuitMessage(0);
@@ -1585,7 +1624,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_ACTIVATE:
             uiDirty = 1;
             if (LOWORD(wParam) == WA_INACTIVE) {
-                memset(keys, 0, sizeof(keys));
+                LoopClearInputEdges();
+                LoopCancelTransientInput();
                 if (currentState == STATE_PLAYING) { autoPaused = 1; PauseGame(); }
             } else {
                 /* 窗口重新获得焦点：若是因失焦自动暂停，则自动恢复 */
@@ -1601,8 +1641,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_KILLFOCUS:
             /* 按住 TAB 看图时切走窗口会收不到 KEYUP，这里兜底关掉 */
-            if (mapHeld) { mapHeld = 0; isMapOpen = 0; mapFullScreen = 0; }
-            memset(keys, 0, sizeof(keys));
+            LoopClearInputEdges();
+            LoopCancelTransientInput();
             return 0;
 
         case WM_SETFOCUS:
@@ -1640,6 +1680,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_LBUTTONUP:
+            if(currentState==STATE_BANK) {CanityMouseRelease();PlatSetCapture(0);return 0;}
             /* 2026-11-05：松开要通知锁盘 —— 过载的判定就发生在这一刻 */
             if (lockActive) {
                 LockHoldEnd();
@@ -1654,11 +1695,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (wasClick) {
                     int mx = (short)LOWORD(lParam), my = (short)HIWORD(lParam);
                     POINT pt = { mx, my };
-                    ScreenToClient(g_hwnd, &pt);
                     int dx = pt.x, dy = pt.y;
                     MouseToLogical(&dx, &dy);
-                    int id = SkillNodeHitTest(dx, dy);
-                    if (id >= 0 && hubSelection != id) { hubSelection = id; uiDirty = 1; }
+                    CanityMouseClick(dx,dy);
                 }
                 return 0;
             }
@@ -1671,7 +1710,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
 
         case WM_CAPTURECHANGED:
-            sliderDragging = 0;
+            CancelPointerDrag();
             return 0;
 
         case WM_KEYDOWN:

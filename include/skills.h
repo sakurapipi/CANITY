@@ -1,13 +1,7 @@
-/*
- * Canity — 技能系统（局外技能树 + 局内技能池）
- *
- * 设计依据：docs/终极方案_v2.md
- *   · 局外 15 项：9 个两级节点 + 3 个分支 keystone + 3 个跨支 keystone
- *   · keystone 全局只能持有 1 个，切换花 3 核心
- *   · 解锁条件：对应分支累计投入 >= 6 点
- *   · 局内 16 项：每通关 2 层三选一，大招第 5 层后进池且一局只能拿一个
- *
- * 这个文件只放"数据 + 查询函数"，不碰 UI、不碰渲染，方便自检与调参。
+/* Three-path meta constellation (bank gold), separate run drafts, and stable skill IDs.
+ * 40 player nodes include ORIGIN; SELFTEST is metadata only. Three archetypes point
+ * north / southwest / southeast; shared nodes bridge the interior. Existing ranks
+ * survive topology changes. Owned keystones remain compatible with old saves.
  */
 #ifndef CANITY_SKILLS_H
 #define CANITY_SKILLS_H
@@ -52,6 +46,13 @@ int SkillNavNearest(int from, int dir);
 /* v6：节点里显示用的短名（详情条仍用全名） */
 const char* SkillShortName(int id);
 int SkillNodesLit(void);
+int SkillIsPlayerFacing(int id);
+const char* SkillDisplayName(int id);
+const char* SkillDisplayDescription(int id);
+int SkillFindByName(const char* query);
+float SkillCounterCooldownRate(void);
+float SkillDecoyHoldSeconds(void);
+int SkillClampRank(int id, int rank);
 void SkillInitOnce(void);
 float SkillGoldMul(void);
 float SkillCrateGoldMul(void);
@@ -63,6 +64,8 @@ void SkillResetAll(void);
 
 /* 查询 */
 int SkillCost(int id);                       /* 下一级花费，-1 = 已满 */
+int SkillArchetype(int id); /* 0 ghost, 1 raider, 2 counter, -1 shared */
+const char* SkillArchetypeName(int branch, int chinese);
 int SkillBranchPoints(int branch);           /* 该分支已投入点数 */
 int SkillKeystoneUnlocked(int id);           /* 分支点数是否够 */
 int SkillCanBuy(int id);                     /* 是否可以买（点数/前置/核心/keystone 上限） */
@@ -87,8 +90,8 @@ float SkillNoiseMul(void);        /* 冲刺脚步噪声倍率 */
 float SkillSearchNoiseMul(void);  /* 翻箱噪声倍率 */
 float SkillRestAdd(void);
 /* v2.8：原本 Hub 的 6 项基础升级折进技能树节点，每级给属性 */
-int   SkillBatteryAdd(void);    /* SIPHON      +20 电量上限/级 */
-float SkillSpeedAdd(void);      /* LIGHT STEP  +6%  移速/级 */
+int   SkillBatteryAdd(void);    /* SIPHON      +25 电量上限/级 */
+float SkillSpeedAdd(void);      /* LIGHT STEP  +3%  移速/级 */
 float SkillQuietMul(void);      /* QUIET LID   -15% 噪声/级 */
 float SkillEcoMul(void);        /* GHOST STEP  -12% 手电耗电/级 */
 float SkillCalmMul(void);       /* REST        -10% 理智流失/级 */
@@ -169,15 +172,12 @@ int   RunFuseLess(void);
 /* 自检：返回 0 = 通过 */
 int SkillsSelfTest(void);
 
-
 /* ===== v3.4 新增机制查询（方案 v5 §4.2）===== */
 int   SkillSpareCellMaxed(void);   /* 备用电池：摇电 +55 且快 30% */
 float SkillCrankBonus(void);       /* 摇电一次给多少电量 */
 float SkillCrankTimeMul(void);     /* 摇电所需时间倍率 */
 int   SkillGhostSilent(void);      /* 鬼步满级：关灯时脚步完全无声 */
 int   SkillCartoMaxed(void);       /* 制图满级：开局标出安全屋+配电箱 */
-
-
 
 /* ==================== v3.0 逃生向效果（统一入口） ==================== */
 float HideStealthMul(void);      /* 屏息：藏身被发现概率 */
@@ -188,5 +188,30 @@ int   SilentRunOwned(void);      /* 静音冲刺 keystone */
 float QuietSoleMul(void);        /* 静底：走路噪音 */
 float ColdBloodMul(void);        /* 冷血：理智流失 */
 float ThickHideMul(void);        /* 厚皮：被抓扣理智 */
+
+/* Additional progression queries implemented by skills.c. */
+int SkillRaiderGambleOwned(void);
+
+int SkillGhostStepOwned(void);
+
+int SkillGhostLandOwned(void);
+
+int SkillRaiderPawnOwned(void);
+
+int SkillGhostBreathRank(void);
+
+int SkillRaiderPowerOwned(void);
+
+int SkillGhostFormOwned(void);
+
+int SkillCounterBackOwned(void);
+
+int SkillCounterKillOwned(void);
+
+int SkillCounterFreeOwned(void);
+
+float SkillNodeX(int id);
+
+float SkillNodeY(int id);
 
 #endif /* CANITY_SKILLS_H */

@@ -4,6 +4,24 @@
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
 #include "common.h"
+#include "run_economy.h"
+#include "wallet.h"
+#include "room_theme.h"
+#include "hush.h"
+#include "loop_private.h"
+#include "cell_meta.h"
+#include "control_effect.h"
+#include "core_rng.h"
+#include "difficulty.h"
+#include "economy.h"
+#include "hatch.h"
+#include "item_effects.h"
+#include "map_rooms.h"
+#include "neutral.h"
+#include "phase.h"
+#include "run_stats.h"
+#include "spider.h"
+#include "state.h"
 #include "campaign.h"
 #include "achievements.h"
 #include "save.h"
@@ -142,13 +160,7 @@ int  g_saveError = 0;          /* 失败时的 GetLastError */
 int  g_saveErrAll[SAVE_CAND_COUNT] = {0};  /* 每个候选的失败码，排查用 */
 char g_savePath[MAX_PATH] = "";/* 最近一次写入成功的路径 */
 
-/* 2026-11-05：**文件 I/O 已搬到存档分区的后端** ——
-   WriteWholeFile / ReadWholeFile 现在叫 SaveBackendWrite / SaveBackendRead，
-   住在 src/save/save_backend.c。
-   这样「谁碰存档文件」只有一个答案（铁律十八），
-   云同步也能复用同一套原子写。
-
-   下面这两个薄壳只为让本文件其余代码不用整段改名。 */
+/* Compatibility wrappers delegate all byte I/O to the save backend. */
 #include "save_format.h"
 
 static int WriteWholeFile(const char* path, const void* data, size_t n) {
@@ -572,6 +584,7 @@ static void CopyDisplaySettings(SaveBlob* s) {
     s->bindings[BINDING_SLOTS - 1] = BINDING_SCHEMA;
     s->lang = g_lang;
     s->saveSlot = g_saveSlot;
+    s->bankRiskPlanPlus1=bankRiskPlan+1;
 }
 
 /* 训练场里 SaveGame 会整份跳过；但设置是在训练场里改的也得存。
@@ -617,6 +630,286 @@ int SaveHasPendingRun(void) {
     return g_save.hasRun ? 1 : 0;
 }
 
+/* Three stable storage regions; serialization must never restore live ranks. */
+typedef char save_skill_capacity_check[(SKILL_COUNT <= 41+4+6) ? 1 : -1];
+typedef char save_skill_regions_check[(sizeof(g_save.skillRank)/sizeof(int) == 26 &&
+    sizeof(g_save.extraSkillRanks)/sizeof(int) == 4 &&
+    sizeof(g_save.archetypeRanks)/sizeof(int) >= 11 &&
+    sizeof(g_save.metaExpansionRanks)/sizeof(int) == 4 && sizeof(g_save.commonSkillRanks)/sizeof(int) >= SKILL_COUNT-45) ? 1 : -1];
+typedef char save_bestiary_regions_check[(sizeof(g_save.bestiaryKnowledge)/sizeof(int) == BESTIARY_LEGACY_VALUES &&
+    sizeof(g_save.bestiaryExtraKnowledge)/sizeof(int) == BESTIARY_EXTRA_VALUES) ? 1 : -1];
+static void CaptureSkillRanks(void) {
+    for (int id = 0; id < SKILL_COUNT; id++) {
+        int rank = SkillClampRank(id, skillRank[id]);
+        if (id < 26) g_save.skillRank[id] = rank;
+        else if (id < 30) g_save.extraSkillRanks[id-26] = rank;
+        else if(id<41)g_save.archetypeRanks[id-30] = rank;
+        else if(id<45)g_save.metaExpansionRanks[id-41]=rank;
+        else g_save.commonSkillRanks[id-45]=rank;
+    }
+}
+static void RestoreSkillRanks(void) {
+    for (int id = 0; id < SKILL_COUNT; id++) {
+        int rank = id < 26 ? g_save.skillRank[id] :
+                   id < 30 ? g_save.extraSkillRanks[id-26] :
+                   id < 41 ? g_save.archetypeRanks[id-30] :
+                   id < 45 ? g_save.metaExpansionRanks[id-41] : g_save.commonSkillRanks[id-45];
+        skillRank[id] = SkillClampRank(id, rank);
+    }
+    SkillInitOnce();
+}
+
+static void CaptureSaveWorld(void) {
+    int graduated=g_save.trainingGraduated;
+    int archive[4];memcpy(archive,g_save.archivedJumperKnowledge,sizeof(archive));
+    memset(&g_save, 0, sizeof(g_save));
+    memcpy(g_save.archivedJumperKnowledge,archive,sizeof(archive));
+    g_save.trainingGraduated=graduated;g_save.runMadness=RoomThemeMadness();
+    g_save.roomEventSpent=roomTheme.spent;
+    g_save.restCooldownSave=ShopRestCooldown();g_save.refreshCooldownSave=ShopRefreshCooldown();
+    g_save.commonRuntimeMask=HushRuntimeMask();g_save.commonRuntimeFloor=HushRuntimeFloor();
+    g_save.magic = SAVE_MAGIC;
+    g_save.version = SAVE_VERSION;
+    g_save.gameVersion = CANITY_VERSION_NUM;
+
+    CopyDisplaySettings(&g_save);
+    g_save.carryGold = carryGold;
+    g_save.upgBattery = upgBattery;
+    g_save.upgSpeed = upgSpeed;
+    g_save.upgQuiet = upgQuiet;
+    g_save.upgSanity = upgSanity;
+    g_save.upgEco = upgEco;
+    g_save.upgRest = upgRest;
+    g_save.bestLevel = bestLevel;
+
+    g_save.hasRun = runInProgress;
+    g_save.level = currentLevel;
+    g_save.sanity = sanity;
+    g_save.battery = battery;
+    g_save.stamina = stamina;
+    g_save.energy = energy;
+    g_save.benchOwnedSave = (unsigned)benchOwned;
+    g_save.decorV43=1;memcpy(g_save.cellsV43,cellMeta,sizeof(cellMeta));
+    g_save.propCountV43=roomPropCount;memcpy(g_save.propsV43,roomProps,sizeof(roomProps));
+    g_save.hatchCountV43=hatchCount;memcpy(g_save.hatchesV43,hatches,sizeof(hatches));
+    RoomThemeSaveEvent(&g_save.roomEventKindV43,&g_save.roomEventTimeV43);
+    CollectorSaveRun(g_save.collectorRunV44);
+    g_save.benchOwnedV42=benchOwned;ShopCaptureServices(g_save.serviceUsesV42);
+    RunEconomyCapture(&g_save.rewardFloorV42,&g_save.escapeRewardMaskV42,&g_save.rhythmGoldV42);
+    g_save.hideSpotSaveCount = hideSpotCount;
+    for (int i = 0; i < 6; i++) g_save.hideSpotSave[i] = hideSpots[i];
+    g_save.hiddenInSave = hiddenIn;
+    /* v3.3：安全屋每层限一次的标记也要存，否则读档后可以同层再免费充一次 */
+    {
+
+        g_save.safeHealLvSave    = ShopSafeHealLv();
+        g_save.safeChargeLvSave  = ShopSafeChargeLv();
+        g_save.safeStaminaLvSave = ShopSafeStaminaLv();
+    }
+    /* v3.3：跨局累计的成就计数器 */
+    {
+
+
+
+
+        g_save.achFloorsNoLight    = floorsNoLight;
+        g_save.achFloorsFlawless   = floorsFlawless;
+        g_save.achFloorsPacifist   = floorsPacifist;
+        g_save.achFloorsFast       = floorsFast;
+        g_save.achMapsExplored     = mapsFullyExplored;
+        g_save.achFusesRun         = fusesCollectedRun;
+        g_save.achLocksOpened      = locksOpened;
+        g_save.achHideCount        = hideCount;
+        g_save.achTotalThrown      = totalThrown;
+        g_save.achCrankSecondsTotal= crankSecondsTotal;
+        g_save.achLowSanitySeconds = lowSanitySeconds;
+    }
+    /* v3.4 银行 */
+    {
+
+        g_save.bankGoldSave    = bankGold;
+        g_save.bankHistMaxSave = bankHistMax;
+        g_save.bankCarryPctSave= bankCarryPct;
+        g_save.runPrincipalSave = carryAtRunStart;
+        g_save.carryGoldSave   = carryGold;   /* v6：本局本金 */
+    }
+    /* v7 第 ㊿ 轮：数组是 runUpgSave[5]，原来只存 4 个 → 第 5 项（扳手）永远丢 */
+    for (int i = 0; i < 5; i++) g_save.runUpgSave[i] = RunUpgLevel(i);
+    /* v29：第 6 条单独存（数组不能加长，见 save.h 的注释） */
+    { 
+      g_save.runUpgMinimapSave = RunUpgMapDrainLevel(); }
+    g_save.flashlightOn = flashlightOn;
+    g_save.posX = posX; g_save.posY = posY;
+    g_save.dirX = dirX; g_save.dirY = dirY;
+    g_save.exitX = exitX; g_save.exitY = exitY;
+    g_save.fusesHeld = fusesHeld;
+    g_save.fusesNeeded = fusesNeeded;
+    g_save.breakerOpen = breakerOpen;
+    g_save.breakerActive = breaker.active;
+    g_save.breakerX = breaker.x;
+    g_save.breakerY = breaker.y;
+    g_save.searchedCount = searchedCount;
+    g_save.runTime = runTime;
+    g_save.nContainers = containerCount;
+    for (int i = 0; i < MAX_CONTAINERS; i++) g_save.cont[i] = containers[i];
+    memcpy(g_save.worldMap, worldMap, sizeof(worldMap));
+    /* v2.4-rc：房间重放种子也进档 */
+    {  
+      g_save.roomSeed = roomSeedUsed;
+    /* 第 6 轮：记下本档用的是哪套随机序列 —— 读档时按它重放房间 */
+    {  g_save.rngVersion = rng_version(); }
+    /* 第 2 轮：难度存 difficulty+1 —— 老档缺这个字段读到 0，
+       明确表示"没设过 → 用标准"，不会误判成轻松。 */
+    {  g_save.difficultyPlus1 = difficulty + 1; }
+      g_save.roomCount = RoomCount();
+      /* v33：舱门已用状态（位掩码，按**种类**记，不记坐标） */
+      {  g_save.hatchUsedMask = HatchUsedMask(); } }
+    memcpy(g_save.explored, explored, sizeof(explored));
+
+    /* v6 新增字段 */
+    g_save.flares = flares;
+    g_save.bottles = bottles;
+    g_save.safeActive = safeRoom.active;
+    g_save.safeX = safeRoom.x;
+    g_save.safeY = safeRoom.y;
+    g_save.levelMod = levelMod;
+    g_save.modSanityMul = modSanityMul;
+    g_save.modSpeedMul = modSpeedMul;
+    g_save.themeId = themeId;
+    g_save.nThrown = 0;
+    for (int i = 0; i < MAX_THROWN; i++) {
+        g_save.thr[i] = thrown[i];
+        if (thrown[i].active) g_save.nThrown++;
+    }
+}
+
+static void CaptureSaveProgress(void) {
+    /* v7 新增：成就系统 */
+    for (int i = 0; i < ACH_COUNT; i++) {
+        g_save.achUnlocked[i] = g_achievements[i].unlocked;
+        g_save.achProgress[i] = g_achievements[i].progress;
+    }
+
+    BackupSave();     /* v2.0：写坏之前先留一份 .bak */
+    /* v9：投掷物 / 待上缴金币 / 局内技能，以前完全没存 */
+    g_save.bricks = bricks;
+    g_save.acids = acids;
+    g_save.smokeBombs = smokeBombs;
+    g_save.carryGold = carryGold;
+    g_save.runSkillMask = runSkillMask;
+    g_save.lang = g_lang;
+    g_save.saveSlot = g_saveSlot;
+    /* v13：v2.0 新系统 */
+    for (int i = 0; i < RELIC_COUNT; i++) g_save.relicOwned[i] = relicOwned[i];
+    g_save.relicTotal = relicTotal;
+    g_save.dailyMode = dailyMode;
+    /* v7：每日任务进度存盘 */
+    { 
+      int da[15] = {0};
+      DailySaveTo(da);
+      g_save.dailyGoalId    = da[0];
+      g_save.dailyGoalParam = da[1];
+      g_save.dailyProgress  = da[2];
+      g_save.dailyDone      = da[3];
+      g_save.dailyStreak    = da[4];
+      g_save.dailyQuestDate = (unsigned)da[5];
+      g_save.dailyLastCompletedDate = (unsigned)da[6];
+      for (int j=0;j<8;++j) g_save.dailySamples[j] = da[7+j]; }
+    { 
+
+
+
+      g_save.knockRunSave=knockCountRun; g_save.throwHitRunSave=throwHitCountRun;
+      g_save.echoRunSave=echoCellsTotalRun; g_save.dailyEscapeRunSave=dailyEscapeCount;
+      g_save.cleanFloorsSave=floorsNoSanityLoss; g_save.wardenFloorsSave=wardenCleanFloors;
+      g_save.fullHideSave=fullHideDone; g_save.doubleHuntSave=doubleHuntSeconds;
+      g_save.lastRunGoldSave=lastRunGold; g_save.lastRunKeptSave=lastRunKept; g_save.lastRunCaughtSave=lastRunCaught; }
+    /* 2026-11-08：26..29 进老字段，30..33 进新字段（v37 追加） */
+    /* v37：幽灵流派 30..33 */
+    { 
+      g_save.shopRefreshFloorSave=shopRefreshFloor; g_save.shopRefreshUsedSave=shopRefreshUsed;
+      g_save.contractKindSave=contractKind; g_save.contractLockedSave=shopContractUsed;
+      g_save.threatSave=ThreatValue(); }
+    BestiarySave(g_save.bestiaryKnowledge);
+    BestiarySaveExtra(g_save.bestiaryExtraKnowledge);
+    g_save.dailySeed = dailySeed;
+    g_save.campaignMode = campaignMode;
+    g_save.campaignStage = campaignStage;
+    g_save.firePots = firePots;
+    g_save.gluePots = gluePots;
+    g_save.mirrors = mirrors;
+    /* v34：2026-11-06 —— 这三类投掷物以前完全没进档，读档即消失。
+       同一处写齐，避免以后再漏一个。 */
+    { 
+      g_save.echoBolts        = echoBolts;
+      g_save.decoys           = decoys;
+      g_save.phaseBeacons     = phaseBeacons;
+      g_save.jumperSpawnedRun = jumperSpawnedRun; }
+    g_save.bankStreak = bankStreak;
+    g_save.modBatteryMul = modBatteryMul;
+    g_save.modShardMul = modShardMul;
+    g_save.modNoiseMul = modNoiseMul;
+    /* v11：武器局外成长 */
+    for (int i = 0; i < 3; i++) {
+        g_save.weaponRank[i] = weaponRank[i];
+        g_save.weaponXp[i] = weaponXp[i];
+        g_save.weaponAttach[i][0] = weaponAttach[i][0];
+        g_save.weaponAttach[i][1] = weaponAttach[i][1];
+    }
+    for (int i = 0; i < ATTACH_COUNT; i++) g_save.attachOwned[i] = attachOwned[i];
+    g_save.curWeapon = curWeapon;
+    g_save.runUltimate = runUltimate;
+
+    CaptureSkillRanks();
+    g_save.cores = cores;
+    g_save.activeKeystone = activeKeystone;
+    g_save.bestMainScore = bestMainScore;
+    g_save.seenMonsters = bestiarySeen;
+
+    /* v8 新增：无尽模式进度 */
+    g_save.bestEndlessLevel = bestEndlessLevel;
+    g_save.bestEndlessScore = bestEndlessScore;
+    g_save.isEndlessRunSaved = isEndlessRun;
+    /* v28：通关记录必须持久化，否则重启后 Endless 又从菜单里消失 */
+    g_save.gameClearedSave = gameCleared;
+}
+
+static void WriteSaveCandidates(void) {
+    /* 逐个候选试写，第一个成功的就用它 */
+    char p[MAX_PATH];
+    int firstErr = 0;
+    for (int i = 0; i < SAVE_CAND_COUNT; i++) {
+        SavePathCand(i, p, sizeof(p));
+        /* v2.4-alpha R10：同一个出口；失败返回 SAVE_ERR_*（负数），
+           这里映射成一个非 0 值给下面的错误累积逻辑。 */
+        unsigned char* wbuf2 = NULL;
+        int wn2 = SaveFileBytes(&g_save, &wbuf2);
+        int err;
+        if (wn2 > 0) {
+            err = WriteWholeFile(p, wbuf2, (size_t)wn2);
+        } else {
+            err = SAVE_ERR_CAPACITY;
+            g_saveError = wn2;
+        }
+        if (wbuf2) { free(wbuf2); wbuf2 = NULL; }
+        if (err == 0) {
+            g_saveState = 1; SaveBackendUpload(p);
+            g_saveError = 0;
+            strncpy(g_savePath, p, sizeof(g_savePath) - 1);
+            g_savePath[sizeof(g_savePath) - 1] = 0;
+            return;
+        }
+        if (i == 0) firstErr = err;
+        g_saveErrAll[i] = err;
+    }
+    /* 一个都写不进去：记下 exe 目录那次的错误码 + 路径，UI 会显示出来 */
+    g_saveState = 2;
+    g_saveError = firstErr;
+    SavePathCand(0, p, sizeof(p));
+    strncpy(g_savePath, p, sizeof(g_savePath) - 1);
+    g_savePath[sizeof(g_savePath) - 1] = 0;
+}
+
 void SaveGame(void) {
     /* 训练场不是正式进度：写进去的话 Continue 会读出一张走廊图。
        但设置项仍然要落盘，否则在教程里改完设置重开就白改了。 */
@@ -660,13 +953,15 @@ void SaveGame(void) {
      * 后果：玩家回主菜单改个设置再 Continue，房间会重新生成、
      *       已用舱门复位、三类投掷物与爆脸怪计数清零。
      * ================================================================ */
-    enum { RUN_SPAN_COUNT = 3 };
+    enum { RUN_SPAN_COUNT = 4 };
     typedef struct { size_t off, len; } RunSpan;
     RunSpan runSpans[RUN_SPAN_COUNT];
     runSpans[0].off = offsetof(SaveBlob, hasRun);
     runSpans[0].len = offsetof(SaveBlob, hudDetail) - runSpans[0].off;
     runSpans[1].off = offsetof(SaveBlob, isEndlessRunSaved);
     runSpans[1].len = sizeof(int);
+    runSpans[3].off=offsetof(SaveBlob,roomEventSpent);
+    runSpans[3].len=sizeof(SaveBlob)-runSpans[3].off;
     runSpans[2].off = offsetof(SaveBlob, roomSeed);
     /* 第 6 轮：末尾多了 rngVersion —— 它也是"运行态"（读档重放要用），
        所以这一段必须把它包进来，否则回主菜单存盘会把它清成 0（旧序列），
@@ -689,250 +984,23 @@ void SaveGame(void) {
     (void)sizeof(assert_run_block_size);
     (void)sizeof(assert_run_span0_ends_at_hud);
     (void)sizeof(assert_endless_flag_before_run_block);
-    memset(&g_save, 0, sizeof(g_save));
-    g_save.magic = SAVE_MAGIC;
-    g_save.version = SAVE_VERSION;
-    g_save.gameVersion = CANITY_VERSION_NUM;
-
-    CopyDisplaySettings(&g_save);
-    g_save.carryGold = carryGold;
-    g_save.upgBattery = upgBattery;
-    g_save.upgSpeed = upgSpeed;
-    g_save.upgQuiet = upgQuiet;
-    g_save.upgSanity = upgSanity;
-    g_save.upgEco = upgEco;
-    g_save.upgRest = upgRest;
-    g_save.bestLevel = bestLevel;
-
-    g_save.hasRun = runInProgress;
-    g_save.level = currentLevel;
-    g_save.sanity = sanity;
-    g_save.battery = battery;
-    g_save.stamina = stamina;
-    g_save.energy = energy;
-    g_save.benchOwnedSave = benchOwned;
-    g_save.hideSpotSaveCount = hideSpotCount;
-    for (int i = 0; i < 6; i++) g_save.hideSpotSave[i] = hideSpots[i];
-    g_save.hiddenInSave = hiddenIn;
-    /* v3.3：安全屋每层限一次的标记也要存，否则读档后可以同层再免费充一次 */
-    {
-        extern int  ShopSafeHealLv(void), ShopSafeChargeLv(void), ShopSafeStaminaLv(void);
-        g_save.safeHealLvSave    = ShopSafeHealLv();
-        g_save.safeChargeLvSave  = ShopSafeChargeLv();
-        g_save.safeStaminaLvSave = ShopSafeStaminaLv();
-    }
-    /* v3.3：跨局累计的成就计数器 */
-    {
-        extern int floorsNoLight, floorsFlawless, floorsPacifist, floorsFast;
-        extern int mapsFullyExplored, fusesCollectedRun, hideCount, totalThrown;
-        extern float crankSecondsTotal, lowSanitySeconds;
-        extern int locksOpened;
-        g_save.achFloorsNoLight    = floorsNoLight;
-        g_save.achFloorsFlawless   = floorsFlawless;
-        g_save.achFloorsPacifist   = floorsPacifist;
-        g_save.achFloorsFast       = floorsFast;
-        g_save.achMapsExplored     = mapsFullyExplored;
-        g_save.achFusesRun         = fusesCollectedRun;
-        g_save.achLocksOpened      = locksOpened;
-        g_save.achHideCount        = hideCount;
-        g_save.achTotalThrown      = totalThrown;
-        g_save.achCrankSecondsTotal= crankSecondsTotal;
-        g_save.achLowSanitySeconds = lowSanitySeconds;
-    }
-    /* v3.4 银行 */
-    {
-        extern int bankGold, bankHistMax, bankCarryPct, carryGold;
-        g_save.bankGoldSave    = bankGold;
-        g_save.bankHistMaxSave = bankHistMax;
-        g_save.bankCarryPctSave= bankCarryPct;
-        g_save.runPrincipalSave = carryAtRunStart;
-        g_save.carryGoldSave   = carryGold;   /* v6：本局本金 */
-    }
-    /* v7 第 ㊿ 轮：数组是 runUpgSave[5]，原来只存 4 个 → 第 5 项（扳手）永远丢 */
-    for (int i = 0; i < 5; i++) g_save.runUpgSave[i] = RunUpgLevel(i);
-    /* v29：第 6 条单独存（数组不能加长，见 save.h 的注释） */
-    { extern int RunUpgMapDrainLevel(void);
-      g_save.runUpgMinimapSave = RunUpgMapDrainLevel(); }
-    g_save.flashlightOn = flashlightOn;
-    g_save.posX = posX; g_save.posY = posY;
-    g_save.dirX = dirX; g_save.dirY = dirY;
-    g_save.exitX = exitX; g_save.exitY = exitY;
-    g_save.fusesHeld = fusesHeld;
-    g_save.fusesNeeded = fusesNeeded;
-    g_save.breakerOpen = breakerOpen;
-    g_save.breakerActive = breaker.active;
-    g_save.breakerX = breaker.x;
-    g_save.breakerY = breaker.y;
-    g_save.searchedCount = searchedCount;
-    g_save.runTime = runTime;
-    g_save.nContainers = containerCount;
-    for (int i = 0; i < MAX_CONTAINERS; i++) g_save.cont[i] = containers[i];
-    memcpy(g_save.worldMap, worldMap, sizeof(worldMap));
-    /* v2.4-rc：房间重放种子也进档 */
-    { extern int roomSeedUsed; extern int RoomCount(void);
-      g_save.roomSeed = roomSeedUsed;
-    /* 第 6 轮：记下本档用的是哪套随机序列 —— 读档时按它重放房间 */
-    { extern int rng_version(void); g_save.rngVersion = rng_version(); }
-    /* 第 2 轮：难度存 difficulty+1 —— 老档缺这个字段读到 0，
-       明确表示"没设过 → 用标准"，不会误判成轻松。 */
-    { extern int difficulty; g_save.difficultyPlus1 = difficulty + 1; }
-      g_save.roomCount = RoomCount();
-      /* v33：舱门已用状态（位掩码，按**种类**记，不记坐标） */
-      { extern int HatchUsedMask(void); g_save.hatchUsedMask = HatchUsedMask(); } }
-    memcpy(g_save.explored, explored, sizeof(explored));
-
-    /* v6 新增字段 */
-    g_save.flares = flares;
-    g_save.bottles = bottles;
-    g_save.safeActive = safeRoom.active;
-    g_save.safeX = safeRoom.x;
-    g_save.safeY = safeRoom.y;
-    g_save.levelMod = levelMod;
-    g_save.modSanityMul = modSanityMul;
-    g_save.modSpeedMul = modSpeedMul;
-    g_save.themeId = themeId;
-    g_save.nThrown = 0;
-    for (int i = 0; i < MAX_THROWN; i++) {
-        g_save.thr[i] = thrown[i];
-        if (thrown[i].active) g_save.nThrown++;
-    }
-
-    /* v7 新增：成就系统 */
-    for (int i = 0; i < ACH_COUNT; i++) {
-        g_save.achUnlocked[i] = g_achievements[i].unlocked;
-        g_save.achProgress[i] = g_achievements[i].progress;
-    }
-
-    BackupSave();     /* v2.0：写坏之前先留一份 .bak */
-    /* v9：投掷物 / 待上缴金币 / 局内技能，以前完全没存 */
-    g_save.bricks = bricks;
-    g_save.acids = acids;
-    g_save.smokeBombs = smokeBombs;
-    g_save.carryGold = carryGold;
-    g_save.runSkillMask = runSkillMask;
-    g_save.lang = g_lang;
-    g_save.saveSlot = g_saveSlot;
-    /* v13：v2.0 新系统 */
-    for (int i = 0; i < RELIC_COUNT; i++) g_save.relicOwned[i] = relicOwned[i];
-    g_save.relicTotal = relicTotal;
-    g_save.dailyMode = dailyMode;
-    /* v7：每日任务进度存盘 */
-    { extern void DailySaveTo(int*);
-      int da[15] = {0};
-      DailySaveTo(da);
-      g_save.dailyGoalId    = da[0];
-      g_save.dailyGoalParam = da[1];
-      g_save.dailyProgress  = da[2];
-      g_save.dailyDone      = da[3];
-      g_save.dailyStreak    = da[4];
-      g_save.dailyQuestDate = (unsigned)da[5];
-      g_save.dailyLastCompletedDate = (unsigned)da[6];
-      for (int j=0;j<8;++j) g_save.dailySamples[j] = da[7+j]; }
-    { extern int knockCountRun,throwHitCountRun,echoCellsTotalRun,dailyEscapeCount;
-      extern int floorsNoSanityLoss,wardenCleanFloors,fullHideDone;
-      extern float doubleHuntSeconds;
-      extern int lastRunGold,lastRunKept,lastRunCaught;
-      g_save.knockRunSave=knockCountRun; g_save.throwHitRunSave=throwHitCountRun;
-      g_save.echoRunSave=echoCellsTotalRun; g_save.dailyEscapeRunSave=dailyEscapeCount;
-      g_save.cleanFloorsSave=floorsNoSanityLoss; g_save.wardenFloorsSave=wardenCleanFloors;
-      g_save.fullHideSave=fullHideDone; g_save.doubleHuntSave=doubleHuntSeconds;
-      g_save.lastRunGoldSave=lastRunGold; g_save.lastRunKeptSave=lastRunKept; g_save.lastRunCaughtSave=lastRunCaught; }
-    /* 2026-11-08：26..29 进老字段，30..33 进新字段（v37 追加） */
-    for(int i=26;i<30 && i<SKILL_COUNT;++i) g_save.extraSkillRanks[i-26]=skillRank[i];
-    /* v37：幽灵流派 30..33 */
-    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.archetypeRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
-    for(int i=30;i<SKILL_COUNT;++i) g_save.archetypeRanks[i-30]=skillRank[i];
-    { extern int shopRefreshFloor,shopRefreshUsed,contractKind,shopContractUsed;
-      g_save.shopRefreshFloorSave=shopRefreshFloor; g_save.shopRefreshUsedSave=shopRefreshUsed;
-      g_save.contractKindSave=contractKind; g_save.contractLockedSave=shopContractUsed;
-      g_save.threatSave=ThreatValue(); }
-    BestiarySave(g_save.bestiaryKnowledge);
-    g_save.dailySeed = dailySeed;
-    g_save.campaignMode = campaignMode;
-    g_save.campaignStage = campaignStage;
-    g_save.firePots = firePots;
-    g_save.gluePots = gluePots;
-    g_save.mirrors = mirrors;
-    /* v34：2026-11-06 —— 这三类投掷物以前完全没进档，读档即消失。
-       同一处写齐，避免以后再漏一个。 */
-    { extern int echoBolts, decoys, phaseBeacons, jumperSpawnedRun;
-      g_save.echoBolts        = echoBolts;
-      g_save.decoys           = decoys;
-      g_save.phaseBeacons     = phaseBeacons;
-      g_save.jumperSpawnedRun = jumperSpawnedRun; }
-    g_save.bankStreak = bankStreak;
-    g_save.modBatteryMul = modBatteryMul;
-    g_save.modShardMul = modShardMul;
-    g_save.modNoiseMul = modNoiseMul;
-    /* v11：武器局外成长 */
-    for (int i = 0; i < 3; i++) {
-        g_save.weaponRank[i] = weaponRank[i];
-        g_save.weaponXp[i] = weaponXp[i];
-        g_save.weaponAttach[i][0] = weaponAttach[i][0];
-        g_save.weaponAttach[i][1] = weaponAttach[i][1];
-    }
-    for (int i = 0; i < ATTACH_COUNT; i++) g_save.attachOwned[i] = attachOwned[i];
-    g_save.curWeapon = curWeapon;
-    g_save.runUltimate = runUltimate;
-
-    for (int i = 0; i < 26; i++) g_save.skillRank[i] = skillRank[i];
-    g_save.cores = cores;
-    g_save.activeKeystone = activeKeystone;
-    g_save.bestMainScore = bestMainScore;
-    g_save.seenMonsters = bestiarySeen;
-
-    /* v8 新增：无尽模式进度 */
-    g_save.bestEndlessLevel = bestEndlessLevel;
-    g_save.bestEndlessScore = bestEndlessScore;
-    g_save.isEndlessRunSaved = isEndlessRun;
-    /* v28：通关记录必须持久化，否则重启后 Endless 又从菜单里消失 */
-    g_save.gameClearedSave = gameCleared;
-
+    CaptureSaveWorld();
+    CaptureSaveProgress();
     /* v28：没有活动对局（在菜单里改设置/买东西）→ 进度段沿用上一份存档，
        不要让空的运行时世界把 Continue 覆盖掉。 */
     if (keepPendingRun) {
         int si;
+        int graduated=g_save.trainingGraduated;
         for (si = 0; si < RUN_SPAN_COUNT; si++) {
             if (runSpans[si].len == 0) continue;
             memcpy((char*)&g_save + runSpans[si].off,
                    (const char*)&prev + runSpans[si].off,
                    runSpans[si].len);
         }
+        g_save.trainingGraduated=graduated;
     }
 
-    /* 逐个候选试写，第一个成功的就用它 */
-    char p[MAX_PATH];
-    int firstErr = 0;
-    for (int i = 0; i < SAVE_CAND_COUNT; i++) {
-        SavePathCand(i, p, sizeof(p));
-        /* v2.4-alpha R10：同一个出口；失败返回 SAVE_ERR_*（负数），
-           这里映射成一个非 0 值给下面的错误累积逻辑。 */
-        unsigned char* wbuf2 = NULL;
-        int wn2 = SaveFileBytes(&g_save, &wbuf2);
-        int err;
-        if (wn2 > 0) {
-            err = WriteWholeFile(p, wbuf2, (size_t)wn2);
-        } else {
-            err = SAVE_ERR_CAPACITY;
-            g_saveError = wn2;
-        }
-        if (wbuf2) { free(wbuf2); wbuf2 = NULL; }
-        if (err == 0) {
-            g_saveState = 1; SaveBackendUpload(p);
-            g_saveError = 0;
-            strncpy(g_savePath, p, sizeof(g_savePath) - 1);
-            g_savePath[sizeof(g_savePath) - 1] = 0;
-            return;
-        }
-        if (i == 0) firstErr = err;
-        g_saveErrAll[i] = err;
-    }
-    /* 一个都写不进去：记下 exe 目录那次的错误码 + 路径，UI 会显示出来 */
-    g_saveState = 2;
-    g_saveError = firstErr;
-    SavePathCand(0, p, sizeof(p));
-    strncpy(g_savePath, p, sizeof(g_savePath) - 1);
-    g_savePath[sizeof(g_savePath) - 1] = 0;
+    WriteSaveCandidates();
 }
 
 /* v3.2：选择「最近保存过」的存档槽。
@@ -980,7 +1048,7 @@ static int FindNewestSaveSlot(void) {
         SaveGame，把存款覆盖成 0 —— 玩家全部存款静默消失。
    现在启动读设置时也恢复，写回去的值就是对的。 */
 static void RestoreBankFromSave(void) {
-    extern int bankGold, bankHistMax, bankCarryPct, carryGold;
+
     int rawGold = g_save.bankGoldSave;
     int rawHist = g_save.bankHistMaxSave;
     int rawPct  = g_save.bankCarryPctSave;
@@ -988,6 +1056,7 @@ static void RestoreBankFromSave(void) {
     bankGold     = rawGold > 0 ? rawGold : 0;
     bankHistMax  = rawHist > 0 ? rawHist : 1;
     bankCarryPct = rawPct;
+    bankRiskPlan=g_save.bankRiskPlanPlus1>=1 && g_save.bankRiskPlanPlus1<=4?g_save.bankRiskPlanPlus1-1:1;
 
     /* 三个字段全是 0 → 这份存档根本没有银行段（老档），把 0..3 换算成 21 档 */
     if (rawGold == 0 && rawHist == 0 && rawPct >= 0 && rawPct <= 3) {
@@ -1007,7 +1076,7 @@ static void RestoreBankFromSave(void) {
        `if (carryGold > carryGold) carryGold = carryGold;`
        —— 局部 extern 把全局自己遮住，条件永远为假（编译器 -Wtautological-compare 直接报）。
        本意应该是「夹到合法范围」，负值已经在上一条处理掉了，这句删掉即可。 */
-    { extern int carryGold; if (carryGold < 0) carryGold = 0; }
+    {  if (carryGold < 0) carryGold = 0; }
 }
 
 /* ==================================================================
@@ -1234,7 +1303,13 @@ static size_t LegacyValidBytes(size_t oldSize, int containerBytes, int container
 
 typedef char legacySave24_must_fit[(sizeof(LegacySaveV24) <= sizeof(SaveBlob)) ? 1 : -1];
 
-int LoadSettings(void) {
+typedef struct {
+    size_t fileSize;
+    int hasMusicField, hasDynamicResField, hasGameClearedField;
+    char usedPath[MAX_PATH];
+} LoadedSaveInfo;
+
+static int ReadSettingsCandidate(LoadedSaveInfo* info) {
     char p[MAX_PATH];
     memset(&g_save, 0, sizeof(g_save));
     /* 先定位最近使用的存档槽，再按槽读文件 */
@@ -1244,18 +1319,17 @@ int LoadSettings(void) {
     /* P0-1：老档的 Container 布局不同（v28 及更早是 32 字节，
        现在是 40），必须在**原始字节**上重排。
        所以记住是哪个文件读成功的，迁移时再读一次它的原始字节。 */
-    char usedPath[MAX_PATH];
-    usedPath[0] = 0;
+    info->usedPath[0] = 0;
     for (int i = 0; i < SAVE_CAND_COUNT && fs < 0; i++) {
         const char* cand = SavePathCand(i, p, sizeof(p));
         fs = ReadSaveFile(cand, &g_save);
-        if (fs > 0) { snprintf(usedPath, sizeof(usedPath), "%s", cand); }
+        if (fs > 0) { snprintf(info->usedPath, sizeof(info->usedPath), "%s", cand); }
         if (fs <= 0) {
             /* v2.2：主档读不出来就试 .bak —— 原来只写不读，等于白备份 */
             char bak[MAX_PATH];
             snprintf(bak, sizeof(bak), "%s.bak", cand);
             fs = ReadSaveFile(bak, &g_save);
-            if (fs > 0) { snprintf(usedPath, sizeof(usedPath), "%s", bak); }
+            if (fs > 0) { snprintf(info->usedPath, sizeof(info->usedPath), "%s", bak); }
         }
     }
     if (fs <= 0) {
@@ -1263,8 +1337,8 @@ int LoadSettings(void) {
         if (PlatSystemLanguageZh()) g_lang = LANG_ZH;
         return 0;
     }
-    size_t fileSize = (size_t)fs;
-    size_t want = (fileSize < sizeof(g_save)) ? fileSize : sizeof(g_save);
+    info->fileSize = (size_t)fs;
+    size_t want = (info->fileSize < sizeof(g_save)) ? info->fileSize : sizeof(g_save);
     size_t got = want;
     /* v3.0：**magic 不对要换下一个候选** ——
        原来直接 return 0，于是「路径 0 有个损坏文件」会把
@@ -1274,17 +1348,17 @@ int LoadSettings(void) {
             const char* c2 = SavePathCand(i, p, sizeof(p));
             long f2 = ReadSaveFile(c2, &g_save);
             if (f2 > 0 && g_save.magic == SAVE_MAGIC) {
-                fs = f2; snprintf(usedPath, sizeof(usedPath), "%s", c2); break;
+                fs = f2; snprintf(info->usedPath, sizeof(info->usedPath), "%s", c2); break;
             }
             char b2[MAX_PATH];
             snprintf(b2, sizeof(b2), "%s.bak", c2);
             f2 = ReadSaveFile(b2, &g_save);
             if (f2 > 0 && g_save.magic == SAVE_MAGIC) {
-                fs = f2; snprintf(usedPath, sizeof(usedPath), "%s", b2); break;
+                fs = f2; snprintf(info->usedPath, sizeof(info->usedPath), "%s", b2); break;
             }
         }
         if (g_save.magic != SAVE_MAGIC) return 0;
-        fileSize = (size_t)fs;
+        info->fileSize = (size_t)fs;
     }
 
     /* 存档**格式**版本：接受 v4 / v5（老结构）与 v6（当前结构）。
@@ -1306,20 +1380,25 @@ int LoadSettings(void) {
        而不是被一个错误的迁移静默毁掉。 */
     /* 读进来的字节可能比当前结构短：先把尾部清零，后面才能安全地按
        “缺字段取默认值”处理。 */
-    int hasMusicField = (fileSize >= offsetof(SaveBlob, musicVolume) + sizeof(float));
+    info->hasMusicField = (info->fileSize >= offsetof(SaveBlob, musicVolume) + sizeof(float));
     /* v28 字段：v27 及更早的存档不包含它们，读档时按「字段是否完整在文件里」判断，
        缺字段时取默认值（Dynamic Res 默认开、未通关）。 */
-    int hasDynamicResField = (fileSize >= offsetof(SaveBlob, dynamicRes) + sizeof(int));
-    int hasGameClearedField = (fileSize >= offsetof(SaveBlob, gameClearedSave) + sizeof(int));
-    if (fileSize < sizeof(g_save))
-        memset((char*)&g_save + fileSize, 0, sizeof(g_save) - fileSize);
+    info->hasDynamicResField = (info->fileSize >= offsetof(SaveBlob, dynamicRes) + sizeof(int));
+    info->hasGameClearedField = (info->fileSize >= offsetof(SaveBlob, gameClearedSave) + sizeof(int));
+    if (info->fileSize < sizeof(g_save))
+        memset((char*)&g_save + info->fileSize, 0, sizeof(g_save) - info->fileSize);
 
+    return 1;
+}
+
+static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
+    int originalVersion=g_save.version;
     /* v24（2.3.3 及更早）的布局和现在不同：成就 40→32、技能树 20→26、
        还删了 pendingShards。只在版本号和文件长度都精确匹配时迁移，
        对不上就继续走“归档不解释”的安全路径。 */
     /* 2026-11-06（P0-1）：**v24 的迁移本身是坏的，先停用**。
        LegacySaveV24 定义时用的是**新版** Container（40 字节），
-       所以 `fileSize == sizeof(LegacySaveV24)` 对真实的 v24 文件
+       所以 `info->fileSize == sizeof(LegacySaveV24)` 对真实的 v24 文件
        永远不成立；即使凑巧成立，那段 memcpy 也会把 cont[] 之后
        整段读错。与其用错误的迁移静默毁档，不如归档不解释 ——
        数据还在盘上（.v24.bak），可以人工回滚。 */
@@ -1352,21 +1431,21 @@ int LoadSettings(void) {
         /* 2026-11-07（B1）：迁移前先在盘上留一份原件。
            迁移是"读旧布局 -> 写成新布局"，一旦哪里算错，玩家进度就没了；
            留一份 .v<旧版本>.bak 才能人工回滚。已存在就不覆盖。 */
-        if (usedPath[0]) {
+        if (info->usedPath[0]) {
             char bk[MAX_PATH + 24];
-            snprintf(bk, sizeof(bk), "%s.v%d.bak", usedPath, g_save.version);
+            snprintf(bk, sizeof(bk), "%s.v%d.bak", info->usedPath, g_save.version);
             { FILE* probe = fopen(bk, "rb");
               if (probe) fclose(probe);
-              else if (!PlatCopyPath(usedPath, bk)) { /* 备份失败不阻断，下面仍会拒绝写入 */ } }
+              else if (!PlatCopyPath(info->usedPath, bk)) { /* 备份失败不阻断，下面仍会拒绝写入 */ } }
         }
-        if (raw && usedPath[0]) {
-            long rn = ExtractLegacyPayload(usedPath, raw, (long)sizeof(SaveBlob) + 4096, NULL);
+        if (raw && info->usedPath[0]) {
+            long rn = ExtractLegacyPayload(info->usedPath, raw, (long)sizeof(SaveBlob) + 4096, NULL);
             if (rn > 0) {
                 migrated = LoadLegacyBlob(raw, (size_t)rn, legacyCont,
                                           LEGACY_CONTAINER_COUNT,
                                           LEGACY_MAP_W, LEGACY_MAP_H, &g_save);
                 if (migrated)
-                    fileSize = LegacyValidBytes((size_t)rn, legacyCont,
+                    info->fileSize = LegacyValidBytes((size_t)rn, legacyCont,
                                                 LEGACY_CONTAINER_COUNT,
                                                 LEGACY_MAP_W, LEGACY_MAP_H);
             }
@@ -1376,8 +1455,8 @@ int LoadSettings(void) {
             /* 重排失败：不解释，走下面的归档路径 */
             g_save.version = 0;
         } else {
-            if (fileSize < sizeof(g_save))
-                memset((char*)&g_save + fileSize, 0, sizeof(g_save) - fileSize);
+            if (info->fileSize < sizeof(g_save))
+                memset((char*)&g_save + info->fileSize, 0, sizeof(g_save) - info->fileSize);
             g_save.version = SAVE_VERSION;
             if (g_save.runPrincipalSave == 0) g_save.runPrincipalSave = g_save.carryGoldSave;
         }
@@ -1421,6 +1500,15 @@ int LoadSettings(void) {
     if (g_save.version == 36) {
         g_save.version = SAVE_VERSION;
     }
+    /* v38 appends only mimic knowledge; the zero-filled tail preserves v37 reads. */
+    if(g_save.version>=37 && g_save.version<=43){g_save.resIndex=RES_AUTO;g_save.scale=0;}
+    if (g_save.version == 37 || g_save.version == 38 || g_save.version == 39 || g_save.version == 40 || g_save.version == 41 || g_save.version == 42 || g_save.version == 43) g_save.version = SAVE_VERSION;
+    if(originalVersion>=25 && originalVersion<40){
+        g_save.archivedJumperKnowledge[0]=(g_save.seenMonsters>>2)&1;
+        for(int i=0;i<3;i++){g_save.archivedJumperKnowledge[i+1]=g_save.bestiaryKnowledge[i*6+2];g_save.bestiaryKnowledge[i*6+2]=0;}
+        g_save.seenMonsters&=~(1<<2);
+        /* A historical face-jumper encounter cannot unlock the new spider. */
+    }
     if (g_save.version != SAVE_VERSION) {
         char oldp[MAX_PATH], arc[MAX_PATH + 24];   /* v3.0：留 ".v%d.bak" 的位置 */
         SavePathCand(0, oldp, sizeof(oldp));
@@ -1430,9 +1518,13 @@ int LoadSettings(void) {
         }
         return 0;
     }
+    return 1;
+}
+
+static void ApplyLoadedSettings(const LoadedSaveInfo* info) {
     /* 旧档没有音乐音量字段：在下面读到 volumeF 之后回退到音效音量。 */
-    if (!hasMusicField) g_save.musicVolume = 0.0f;
-    int isOldSave = (fileSize < sizeof(SaveBlob));
+    if (!info->hasMusicField) g_save.musicVolume = 0.0f;
+    int isOldSave = (info->fileSize < sizeof(SaveBlob));
 
     /* 迁移：老存档缺的字段给默认值。
        v5 及更早没有键位表和 ECO/REST 升级 —— 键位取出厂默认（比
@@ -1444,7 +1536,7 @@ int LoadSettings(void) {
            正好等于 bindings 的偏移量，不能用严格小于偏移量来判断）。 */
         size_t bindOff  = (size_t)((char*)&g_save.bindings[0] - (char*)&g_save);
         size_t bindNeed = bindOff + sizeof(g_save.bindings);
-        if (fileSize < bindNeed) {
+        if (info->fileSize < bindNeed) {
             static const int defBindings[ACT_COUNT] = BINDINGS_DEFAULT;
             for (int a = 0; a < ACT_COUNT; a++) g_save.bindings[a] = defBindings[a];
             g_save.upgEco = 0;
@@ -1469,7 +1561,7 @@ int LoadSettings(void) {
     fpsCapIndex = g_save.fpsCap;
     renderScaleIndex = g_save.scale;
     /* v28：Dynamic Res 以前完全没有进存档，重启后总是回到默认开。 */
-    dynamicRes = hasDynamicResField ? g_save.dynamicRes : 1;
+    dynamicRes = info->hasDynamicResField ? g_save.dynamicRes : 1;
     if (dynamicRes < 0 || dynamicRes > 1) dynamicRes = 1;
     fovIndex = g_save.fov;
     vignetteOn = g_save.vignette;
@@ -1485,7 +1577,7 @@ int LoadSettings(void) {
      *
      * 存的是 difficulty+1：0 = 老档（没设过）→ 标准，不是轻松。
      * ================================================================ */
-    { extern int difficulty;
+    { 
       int dv = g_save.difficultyPlus1;
       difficulty = (dv >= 1 && dv <= 3) ? (dv - 1) : 1; }
     /* v28：**语言选项在启动时也必须恢复**。
@@ -1507,7 +1599,7 @@ int LoadSettings(void) {
     volumeF = g_save.volume;
     /* v2.7：写成 !(x >= lo && x <= hi) 才能挡住 NaN（NaN 的所有比较都是假） */
     if (!(volumeF >= 0.0f && volumeF <= 1.0f)) volumeF = 0.8f;
-    musicVolumeF = hasMusicField ? g_save.musicVolume : volumeF;
+    musicVolumeF = info->hasMusicField ? g_save.musicVolume : volumeF;
     if (!(musicVolumeF >= 0.0f && musicVolumeF <= 1.0f)) musicVolumeF = volumeF;
     if (carryGold < 0) carryGold = 0;
     if (upgBattery < 0 || upgBattery > UPG_MAX) upgBattery = 0;
@@ -1544,24 +1636,27 @@ int LoadSettings(void) {
 
     /* v2.7：resolutions[] 有 RES_COUNT=8 档，原来夹 0..4，
        选 1920x1080 / 2560x1440 重启就被重置回 800x600。 */
-    if (resIndex < 0 || resIndex >= RES_COUNT) resIndex = 0;
-    if (fpsCapIndex < 0 || fpsCapIndex > 4) fpsCapIndex = 1;
+    if (resIndex < 0 || resIndex >= RES_COUNT) resIndex = RES_AUTO;
+    if (fpsCapIndex < 0 || fpsCapIndex > 4) fpsCapIndex = 4;
     if (renderScaleIndex < 0 || renderScaleIndex > 3) renderScaleIndex = 0;
     if (fovIndex < 0 || fovIndex > 4) fovIndex = 2;
     if (!(gammaValue >= 0.7f && gammaValue <= 1.6f)) gammaValue = 1.0f;
     if (!(mouseSens >= 0.2f && mouseSens <= 3.0f)) mouseSens = 1.0f;
+}
 
+static void RestoreLoadedProgress(const LoadedSaveInfo* info) {
     /* v7 新增：恢复成就数据（如果存档里有）。
        v6 **判据改成「成就段是否完整在文件里」** ——
-       原来用 fileSize >= sizeof(SaveBlob)，等于「文件必须包含当前结构体的全部尾部字段」。
+       原来用 info->fileSize >= sizeof(SaveBlob)，等于「文件必须包含当前结构体的全部尾部字段」。
        于是每次往 SaveBlob 尾巴追加字段，都会把所有历史存档判成老档，
        把成就 / 技能树 / cores / 图鉴 / 无尽进度整段清零，哪怕那些字段其实读得到。
        现在用成就段的起始偏移做判据：只要文件覆盖到该段就正常读。 */
         size_t achOff = (size_t)((char*)&g_save.achUnlocked[0] - (char*)&g_save);
-    if (fileSize >= achOff) {
+    if (info->fileSize >= achOff) {
         for (int i = 0; i < ACH_COUNT; i++) {
             g_achievements[i].unlocked = g_save.achUnlocked[i];
             g_achievements[i].progress = g_save.achProgress[i];
+            if (!g_achievements[i].unlocked && kAchDefs[i].kind == AK_BESTIARYMASTER) g_achievements[i].progress = 0;
         }
         /* 1.8.0：技能树 / 核心 / keystone */
         for (int i = 0; i < 26; i++) {
@@ -1572,13 +1667,12 @@ int LoadSettings(void) {
         }
         cores = g_save.cores < 0 ? 0 : g_save.cores;
         activeKeystone = g_save.activeKeystone;
-        if (activeKeystone < -1 || activeKeystone >= SKILL_COUNT) activeKeystone = -1;
+        if (activeKeystone != -1 && !SkillIsPlayerFacing(activeKeystone)) activeKeystone = -1;
         if (activeKeystone >= 0 && !skillDefs[activeKeystone].isKeystone) activeKeystone = -1;
         bestMainScore = g_save.bestMainScore < 0 ? 0 : g_save.bestMainScore;
         /* P0-2：图鉴解锁位掩码只保留真实存在的位 ——
        坏档里 104857600 这种值会让"已解锁数量"变成荒谬的数字。 */
     {
-        extern int BestiaryUnlockedCount(void);
         int mask = g_save.seenMonsters;
         int valid = 0;
         for (int bi = 0; bi < BESTIARY_COUNT && bi < 31; bi++) valid |= (1 << bi);
@@ -1604,7 +1698,7 @@ int LoadSettings(void) {
     /* v28：恢复「曾经通关」记录。
        v27 及更早没有这个字段 —— 用 FIRST EXIT 成就回填，老玩家升级后
        不会突然失去已经解锁的无尽模式（这个成就正好在成功撤离/通关时解锁）。 */
-    if (hasGameClearedField) {
+    if (info->hasGameClearedField) {
         gameCleared = g_save.gameClearedSave ? 1 : 0;
     } else {
         gameCleared = (g_achievements[1].unlocked != 0);
@@ -1614,134 +1708,31 @@ int LoadSettings(void) {
     if (g_save.saveSlot >= 0 && g_save.saveSlot < SAVE_SLOTS)
         g_saveSlot = g_save.saveSlot;
 
-    for(int i=26;i<30 && i<SKILL_COUNT;++i) { int r=g_save.extraSkillRanks[i-26]; skillRank[i]=(r>=0 && r<=3)?r:0; }
     /* v37：幽灵流派 30..33 */
-    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.archetypeRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
     SkillInitOnce();
+    RestoreSkillRanks();
     BestiaryLoad(g_save.bestiaryKnowledge);
+    BestiaryLoadExtra(g_save.bestiaryExtraKnowledge);
     RestoreBankFromSave();
     { int da[15] = {g_save.dailyGoalId, g_save.dailyGoalParam, g_save.dailyProgress,
         g_save.dailyDone, g_save.dailyStreak, (int)g_save.dailyQuestDate,
         (int)g_save.dailyLastCompletedDate};
       for (int j=0;j<8;++j) da[7+j]=g_save.dailySamples[j];
       DailyLoadFrom(da); }
+}
+
+int LoadSettings(void) {
+    LoadedSaveInfo info;
+    memset(&info, 0, sizeof(info));
+    if (!ReadSettingsCandidate(&info)) return 0;
+    if (!MigrateSettingsCandidate(&info)) return 0;
+    ApplyLoadedSettings(&info);
+    RestoreLoadedProgress(&info);
     return g_save.hasRun;
 }
 
 /* 把存档里的进度灌回运行时 */
-void ContinueRun(void) {
-    /* ==================================================================
-     * 2026-11-06（审计补）：**读档要清掉"场上的临时系统"**
-     * ------------------------------------------------------------------
-     * 蜘蛛 / 拾光虫 / 控制效果 / 信标放置 都是各自模块的 static 状态，
-     * 不随存档走。读档时如果不重置，会把上一次运行的残留带进来：
-     *   · 一进游戏就"被蛛网抓住"，场上却没有任何蜘蛛
-     *     （而且旧代码里蛛网**没有挣脱路径**，等于永久卡死）
-     *   · 蜘蛛坐标还停在上一次的位置，可能已经在墙里
-     *   · 上一层放的信标坐标被当成这一层的
-     * ================================================================== */
-    { extern void ControlReset(void); ControlReset(); }
-    /* 审计·低 11：抱脸虫的 10 秒锁定不随存档走，读档必须清掉，
-       否则在锁定期间存档退出，读档后会莫名其妙继续不能动。 */
-    { extern float jumperControlT; jumperControlT = 0.0f; }
-    { extern void SpiderReset(void);  SpiderReset(); }
-    { extern void NeutralReset(void); NeutralReset(); }
-    { extern void PhaseResetPlacement(void); PhaseResetPlacement(); }
-
-    /* v28：**读档前必须先清模式标志**。
-       原来越野：每日/战役 → 暂停 → 主菜单（标志还留着）→ 教程 → 退出教程
-       （trainingMode 留着）→ Continue → 读出来的挑战地图上，
-       trainingMode 仍是 1：道具无限、出口判定被跳过，于是卡在关卡里。
-       现在训练/教程/每日/战役/无尽全部清零，再由存档决定这一局是什么模式。 */
-    if (!g_save.hasRun) {
-        /* 存档里没有可继续的进度（例如只写过设置的档）：别造一局空世界。 */
-        hasSave = 0;
-        runInProgress = 0;
-        return;
-    }
-    ResetRunModeFlags();
-    { extern int knockCountRun,throwHitCountRun,echoCellsTotalRun,dailyEscapeCount;
-      extern int floorsNoSanityLoss,wardenCleanFloors,fullHideDone;
-      extern float doubleHuntSeconds;
-      knockCountRun=g_save.knockRunSave; throwHitCountRun=g_save.throwHitRunSave;
-      echoCellsTotalRun=g_save.echoRunSave; dailyEscapeCount=g_save.dailyEscapeRunSave;
-      floorsNoSanityLoss=g_save.cleanFloorsSave; wardenCleanFloors=g_save.wardenFloorsSave;
-      fullHideDone=g_save.fullHideSave; doubleHuntSeconds=g_save.doubleHuntSave; }
-    { extern int shopRefreshFloor,shopRefreshUsed,contractKind,shopContractUsed;
-      shopRefreshFloor=g_save.shopRefreshFloorSave; shopRefreshUsed=g_save.shopRefreshUsedSave;
-      contractKind=g_save.contractKindSave; shopContractUsed=g_save.contractLockedSave;
-      ThreatReset(); ThreatAdd(g_save.threatSave); }
-    currentLevel = g_save.level;
-    /* v3.0：**读档必须夹取** ——
-       外部改过的档可能带 NaN：sanity=NaN 时 `sanity <= 0` 永不成立（死不掉），
-       pos=NaN 时 Blocked() 失效（可以穿墙）。 */
-    if (currentLevel < 1) currentLevel = 1;
-    if (currentLevel > 999) currentLevel = 999;
-    sanity = g_save.sanity;
-    /* v3.0：NaN / 越界一律拉回合法区间 */
-    if (!(sanity == sanity)) sanity = 100.0f;
-    if (sanity < 0.0f) sanity = 0.0f;
-    if (sanity > 100.0f) sanity = 100.0f;
-    battery = g_save.battery;
-    if (!(battery == battery)) battery = 100.0f;
-    if (battery < 0.0f) battery = 0.0f;
-    if (battery > 100.0f) battery = 100.0f;
-    stamina = g_save.stamina;
-    if (!(stamina == stamina)) stamina = 100.0f;
-    if (stamina < 0.0f) stamina = 0.0f;
-    if (stamina > 130.0f) stamina = 130.0f;
-    energy = g_save.energy;
-    benchOwned = g_save.benchOwnedSave;
-    hideSpotCount = g_save.hideSpotSaveCount;
-    if (hideSpotCount < 0) hideSpotCount = 0;
-    if (hideSpotCount > 6) hideSpotCount = 6;
-    for (int i = 0; i < 6; i++) hideSpots[i] = g_save.hideSpotSave[i];
-    hiddenIn = g_save.hiddenInSave;
-    /* v3.3：恢复安全屋每层限一次的标记（老档没有这几个字段，读到 0 也安全） */
-    {
-        extern void ShopSetSafeLv(int, int, int);
-        ShopSetSafeLv(g_save.safeHealLvSave,
-                      g_save.safeChargeLvSave,
-                      g_save.safeStaminaLvSave);
-    }
-    /* v3.3：恢复跨局累计的成就计数器（老档读到 0，安全） */
-    {
-        extern int floorsNoLight, floorsFlawless, floorsPacifist, floorsFast;
-        extern int mapsFullyExplored, fusesCollectedRun, hideCount, totalThrown;
-        extern float crankSecondsTotal, lowSanitySeconds;
-        extern int locksOpened;
-        floorsNoLight      = g_save.achFloorsNoLight;
-        floorsFlawless     = g_save.achFloorsFlawless;
-        floorsPacifist     = g_save.achFloorsPacifist;
-        floorsFast         = g_save.achFloorsFast;
-        mapsFullyExplored  = g_save.achMapsExplored;
-        fusesCollectedRun  = g_save.achFusesRun;
-        locksOpened        = g_save.achLocksOpened;
-        hideCount          = g_save.achHideCount;
-        totalThrown        = g_save.achTotalThrown;
-        crankSecondsTotal  = g_save.achCrankSecondsTotal;
-        lowSanitySeconds   = g_save.achLowSanitySeconds;
-    }
-    /* v3.4/v6 银行：统一走 RestoreBankFromSave，只有一份逻辑 */
-    for(int i=26;i<30 && i<SKILL_COUNT;++i) { int r=g_save.extraSkillRanks[i-26]; skillRank[i]=(r>=0 && r<=3)?r:0; }
-    /* v37：幽灵流派 30..33 */
-    for(int i=30;i<SKILL_COUNT;++i) { int r=g_save.archetypeRanks[i-30]; skillRank[i]=(r>=0 && r<=3) ? r : 0; }
-    SkillInitOnce();
-    BestiaryLoad(g_save.bestiaryKnowledge);
-    RestoreBankFromSave();
-    if (hiddenIn >= hideSpotCount) hiddenIn = -1;
-    RunUpgLoadFromSave(g_save.runUpgSave);
-    { extern void RunUpgLoadExtra(int);
-      RunUpgLoadExtra(g_save.runUpgMinimapSave); }   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
-    if (!(energy > 0.0f)) energy = ENERGY_MAX;
-    flashlightOn = g_save.flashlightOn;
-    /* v8：模式规则优先于存档里的开关状态 ——
-       每日“不能开手电”/ SALVAGE keystone 读档后必须保持关闭；
-       战役第 1 关“关不掉”读档后必须保持开启。 */
-    {
-        if (DailyForbidLight() || HasKeystone(SK_SALVAGE)) flashlightOn = 0;
-        else if (CampaignFlashlightLocked()) flashlightOn = 1;
-    }
+static void RestoreRunGeometry(void) {
     /* v3.0：坐标必须夹在地图内且非 NaN */
     #define CLAMP_POS(v, wrap) do { \
         if (!((v) == (v)) || (v) < 1.0f || (v) > (float)(wrap) - 1.0f) (v) = 1.5f; \
@@ -1754,7 +1745,16 @@ void ContinueRun(void) {
     CLAMP_POS(exitY, MAP_HEIGHT);
     #undef CLAMP_POS
     dirX = g_save.dirX; dirY = g_save.dirY;
-    exitX = g_save.exitX; exitY = g_save.exitY;
+    /* NaN/zero/overflow-facing data must never reach camera projection. */
+    {
+        double length2 = (double)dirX * dirX + (double)dirY * dirY;
+        if (!(length2 >= 0.000001 && length2 <= 1000000.0)) {
+            dirX = 1.0f; dirY = 0.0f;
+        } else if (fabs(length2 - 1.0) > 0.000001) {
+            float inverseLength = (float)(1.0 / sqrt(length2));
+            dirX *= inverseLength; dirY *= inverseLength;
+        }
+    }
     fusesHeld = g_save.fusesHeld;
     fusesNeeded = g_save.fusesNeeded;
     breakerOpen = g_save.breakerOpen;
@@ -1778,22 +1778,27 @@ void ContinueRun(void) {
      * 和 roomProps（家具 + 碰撞）是运行时数据，必须用保存的种子重放。
      * roomSeed == 0（v29 老档）→ 当作"无房间层"，什么都不做。
      * ================================================================== */
-    { extern int RoomReplay(int, int);
-      extern void rng_set_version(int);
+    { 
+
       /* 第 6 轮：**先定引擎再重放** —— 老档（0）走 C 标准库 rand 序列，
          新档（2）走 xorshift32。顺序反了房间就会重放成另一套布局。 */
       rng_set_version(g_save.rngVersion);
-      if (g_save.roomSeed != 0 && g_save.roomCount > 0)
+      if(g_save.decorV43==1 && g_save.propCountV43>=0 && g_save.propCountV43<=MAX_ROOM_PROPS && g_save.hatchCountV43>=0 && g_save.hatchCountV43<=MAX_HATCHES){
+          memcpy(cellMeta,g_save.cellsV43,sizeof(cellMeta));roomPropCount=g_save.propCountV43;memcpy(roomProps,g_save.propsV43,sizeof(roomProps));hatchCount=g_save.hatchCountV43;memcpy(hatches,g_save.hatchesV43,sizeof(hatches));
+          RoomSetCount(g_save.roomCount);RoomThemeBind();
+      }else if (g_save.roomSeed != 0 && g_save.roomCount > 0)
           (void)RoomReplay(g_save.roomSeed, g_save.roomCount);
-      else { extern void CellMetaReset(void); CellMetaReset(); }
+      else {  CellMetaReset(); }
       /* ================================================================
        * v33：**重放之后**才能标已用 —— RoomReplay 会先 HatchReset 清表，
        * 标早了就没有门可以标。老档这个字段是 0，行为与旧版一致。
        * ================================================================ */
-      { extern void HatchApplyUsedMask(int);
+      { 
         HatchApplyUsedMask(g_save.hatchUsedMask); } }
     memcpy(explored, g_save.explored, sizeof(explored));
+}
 
+static void RestoreRunInventory(void) {
     /* v4 新增：安全屋 / 投掷物 / 词条 / 主题 */
     /* v3.0：**道具数量必须夹取** ——
        玩家实测「道具栏突然变成 MIRROR X99 / FLARE X99 / BOTTLE X99」，
@@ -1836,7 +1841,7 @@ void ContinueRun(void) {
     gluePots = g_save.gluePots;   CLAMP_ITEM_RARE(gluePots);
     mirrors = g_save.mirrors;   CLAMP_ITEM_RARE(mirrors);
     /* v34：三类投掷物 + 爆脸怪计数。v33 短档读进来是 0，夹取不改变语义。 */
-    { extern int echoBolts, decoys, phaseBeacons, jumperSpawnedRun;
+    { 
       echoBolts    = g_save.echoBolts;     CLAMP_ITEM_RARE(echoBolts);
       decoys       = g_save.decoys;        CLAMP_ITEM_RARE(decoys);
       phaseBeacons = g_save.phaseBeacons;  CLAMP_ITEM(phaseBeacons);
@@ -1882,6 +1887,9 @@ void ContinueRun(void) {
     /* v3.1：界面固定英文。老存档里的 lang 字段仍保留，但不再覆盖运行时语言；
        否则中文存档一进来整页菜单/提示还是中文。 */
     g_lang = (g_save.lang==LANG_ZH) ? LANG_ZH : LANG_EN;
+}
+
+static void RestoreRunEquipment(void) {
     /* v11：恢复武器局外成长 */
     for (int i = 0; i < 3; i++) {
         weaponRank[i] = (g_save.weaponRank[i] >= 0 && g_save.weaponRank[i] <= 3) ? g_save.weaponRank[i] : 0;
@@ -1906,6 +1914,9 @@ void ContinueRun(void) {
     SpawnLightBeast();
     SpawnLightBeast2();   /* 2026-11-06：追光怪两只 */
     isEndlessRun = g_save.isEndlessRunSaved;  /* 恢复无尽模式标记 */
+}
+
+static void ResumeRestoredRun(void) {
     /* 读档不重掷跳脸虫：本关不会突然蹦出来。
        触发器留成 -1，等下一层进关时再掷。 */
     jumperTrigger = -1.0f;
@@ -1941,6 +1952,134 @@ void ContinueRun(void) {
     #undef CLAMP_ITEM_RARE
 }
 
+void ContinueRun(void) {
+    LoopResetHuntAchievements();
+    /* ==================================================================
+     * 2026-11-06（审计补）：**读档要清掉"场上的临时系统"**
+     * ------------------------------------------------------------------
+     * 蜘蛛 / 拾光虫 / 控制效果 / 信标放置 都是各自模块的 static 状态，
+     * 不随存档走。读档时如果不重置，会把上一次运行的残留带进来：
+     *   · 一进游戏就"被蛛网抓住"，场上却没有任何蜘蛛
+     *     （而且旧代码里蛛网**没有挣脱路径**，等于永久卡死）
+     *   · 蜘蛛坐标还停在上一次的位置，可能已经在墙里
+     *   · 上一层放的信标坐标被当成这一层的
+     * ================================================================== */
+    {  ControlReset(); }
+    /* 审计·低 11：抱脸虫的 10 秒锁定不随存档走，读档必须清掉，
+       否则在锁定期间存档退出，读档后会莫名其妙继续不能动。 */
+    {  jumperControlT = 0.0f; }
+    {   SpiderReset(); }
+    {  NeutralReset(); }
+    {  PhaseResetPlacement(); }
+
+    /* v28：**读档前必须先清模式标志**。
+       原来越野：每日/战役 → 暂停 → 主菜单（标志还留着）→ 教程 → 退出教程
+       （trainingMode 留着）→ Continue → 读出来的挑战地图上，
+       trainingMode 仍是 1：道具无限、出口判定被跳过，于是卡在关卡里。
+       现在训练/教程/每日/战役/无尽全部清零，再由存档决定这一局是什么模式。 */
+    if (!g_save.hasRun) {
+        /* 存档里没有可继续的进度（例如只写过设置的档）：别造一局空世界。 */
+        hasSave = 0;
+        runInProgress = 0;
+        return;
+    }
+    ResetRunModeFlags();
+    { 
+
+
+      knockCountRun=g_save.knockRunSave; throwHitCountRun=g_save.throwHitRunSave;
+      echoCellsTotalRun=g_save.echoRunSave; dailyEscapeCount=g_save.dailyEscapeRunSave;
+      floorsNoSanityLoss=g_save.cleanFloorsSave; wardenCleanFloors=g_save.wardenFloorsSave;
+      fullHideDone=g_save.fullHideSave; doubleHuntSeconds=g_save.doubleHuntSave; }
+    { 
+      shopRefreshFloor=g_save.shopRefreshFloorSave; shopRefreshUsed=g_save.shopRefreshUsedSave;
+      contractKind=g_save.contractKindSave; shopContractUsed=g_save.contractLockedSave;
+      /* Restore threat after the skill ranks below: saved totals include GREEDY HAND. */ }
+    currentLevel = g_save.level;
+    /* v3.0：**读档必须夹取** ——
+       外部改过的档可能带 NaN：sanity=NaN 时 `sanity <= 0` 永不成立（死不掉），
+       pos=NaN 时 Blocked() 失效（可以穿墙）。 */
+    if (currentLevel < 1) currentLevel = 1;
+    if (currentLevel > 999) currentLevel = 999;
+    sanity = g_save.sanity;
+    /* v3.0：NaN / 越界一律拉回合法区间 */
+    if (!(sanity == sanity)) sanity = 100.0f;
+    if (sanity < 0.0f) sanity = 0.0f;
+    if (sanity > 100.0f) sanity = 100.0f;
+    battery = g_save.battery;
+    if (!(battery == battery)) battery = 100.0f;
+    if (battery < 0.0f) battery = 0.0f;
+    if (battery > 100.0f) battery = 100.0f;
+    stamina = g_save.stamina;
+    if (!(stamina == stamina)) stamina = 100.0f;
+    if (stamina < 0.0f) stamina = 0.0f;
+    if (stamina > 130.0f) stamina = 130.0f;
+    energy = g_save.energy;
+    benchOwned=(g_save.benchOwnedV42?g_save.benchOwnedV42:g_save.benchOwnedSave)&((UINT64_C(1)<<BENCH_COUNT)-1);
+    hideSpotCount = g_save.hideSpotSaveCount;
+    if (hideSpotCount < 0) hideSpotCount = 0;
+    if (hideSpotCount > 6) hideSpotCount = 6;
+    for (int i = 0; i < 6; i++) hideSpots[i] = g_save.hideSpotSave[i];
+    hiddenIn = g_save.hiddenInSave;
+    /* v3.3：恢复安全屋每层限一次的标记（老档没有这几个字段，读到 0 也安全） */
+    {
+
+        ShopSetSafeLv(g_save.safeHealLvSave,
+                      g_save.safeChargeLvSave,
+                      g_save.safeStaminaLvSave);
+    }
+    /* v3.3：恢复跨局累计的成就计数器（老档读到 0，安全） */
+    {
+
+
+
+
+        floorsNoLight      = g_save.achFloorsNoLight;
+        floorsFlawless     = g_save.achFloorsFlawless;
+        floorsPacifist     = g_save.achFloorsPacifist;
+        floorsFast         = g_save.achFloorsFast;
+        mapsFullyExplored  = g_save.achMapsExplored;
+        fusesCollectedRun  = g_save.achFusesRun;
+        locksOpened        = g_save.achLocksOpened;
+        hideCount          = g_save.achHideCount;
+        totalThrown        = g_save.achTotalThrown;
+        crankSecondsTotal  = g_save.achCrankSecondsTotal;
+        lowSanitySeconds   = g_save.achLowSanitySeconds;
+    }
+    /* v3.4/v6 银行：统一走 RestoreBankFromSave，只有一份逻辑 */
+    /* v37：幽灵流派 30..33 */
+    SkillInitOnce();
+    RestoreSkillRanks();
+    ThreatRestoreTotal(g_save.threatSave);
+    BestiaryLoad(g_save.bestiaryKnowledge);
+    BestiaryLoadExtra(g_save.bestiaryExtraKnowledge);
+    ShopRestoreCooldowns(g_save.restCooldownSave,g_save.refreshCooldownSave);
+    HushRestoreRuntime(g_save.commonRuntimeFloor,g_save.commonRuntimeMask);
+    RestoreBankFromSave();
+    if (hiddenIn >= hideSpotCount) hiddenIn = -1;
+    RunUpgLoadFromSave(g_save.runUpgSave);
+    { 
+      RunUpgLoadExtra(g_save.runUpgMinimapSave); }   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
+    if (!(energy > 0.0f)) energy = ENERGY_MAX;
+    flashlightOn = g_save.flashlightOn;
+    /* v8：模式规则优先于存档里的开关状态 ——
+       每日“不能开手电”/ SALVAGE keystone 读档后必须保持关闭；
+       战役第 1 关“关不掉”读档后必须保持开启。 */
+    {
+        if (DailyForbidLight() || HasKeystone(SK_SALVAGE)) flashlightOn = 0;
+        else if (CampaignFlashlightLocked()) flashlightOn = 1;
+    }
+    RestoreRunGeometry();
+    RestoreRunInventory();
+    RestoreRunEquipment();
+    roomTheme.spent=g_save.roomEventSpent?1:0;
+    RoomThemeSetMadness(g_save.runMadness);
+    RoomThemeLoadEvent(g_save.roomEventKindV43,g_save.roomEventTimeV43);
+    CollectorLoadRun(g_save.collectorRunV44);
+    ShopRestoreServices(g_save.serviceUsesV42);RunEconomyRestore(g_save.rewardFloorV42,g_save.escapeRewardMaskV42,g_save.rhythmGoldV42);
+    ResumeRestoredRun();
+}
+
 void DeleteSave(void) {
     char p[MAX_PATH];
     for (int i = 0; i < SAVE_CAND_COUNT; i++) {
@@ -1961,4 +2100,17 @@ void DeleteSave(void) {
     g_save.hasRun = 0;
     hasSave = 0;
     runInProgress = 0;
+}
+
+int SaveAwardTrainingGraduation(void) {
+    SaveSettingsOnly();
+    if(g_saveState==2)return 0;
+    if(g_save.trainingGraduated)return 2;
+    int before=bankGold,beforeMax=g_save.bankHistMaxSave,beforeHistory=bankHistMax;
+    WalletAddBank(1500);
+    g_save.trainingGraduated=1;g_save.bankGoldSave=bankGold;
+    if(g_save.bankHistMaxSave<bankGold)g_save.bankHistMaxSave=bankGold;
+    SaveSettingsOnly();
+    if(g_saveState==2){bankGold=before;bankHistMax=beforeHistory;g_save.bankGoldSave=before;g_save.bankHistMaxSave=beforeMax;g_save.trainingGraduated=0;return 0;}
+    return 1;
 }

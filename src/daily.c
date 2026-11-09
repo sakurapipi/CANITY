@@ -34,6 +34,7 @@
  * 种子 = 年月日 → 同一天全世界一样（公平）
  */
 #include "common.h"
+#include "run_stats.h"
 #include "save.h"
 #include "daily.h"
 #include "loop_api.h"
@@ -70,12 +71,12 @@ static const GoalDef kGoals[DQ_COUNT] = {
 static const char* kGoalEn[DQ_COUNT] = {
     "Collect %d gold", "Escape %d time(s)", "Reach floor %d", "Search %d containers",
     "Knock back %d times", "Hit with throwables %d times",
-    "Survive %d minutes in one run", "Take no sanity loss for %d floors"
+    "Survive %d minutes in one run", "Clear %d floors without taking damage"
 };
 static const char* kGoalZh[DQ_COUNT] = {
     "收集 %d 金币", "撤离 %d 次", "到达第 %d 层", "打开 %d 个箱子",
     "击退 %d 次", "投掷命中 %d 次",
-    "单局存活 %d 分钟", "连续 %d 层不掉理智"
+    "单局存活 %d 分钟", "连续 %d 层未受伤害"
 };
 
 static const char* kModEn[DM_COUNT] = {
@@ -180,6 +181,31 @@ static int PickWeighted(unsigned int h, int count, int neutralIdx, int neutralPe
 /* 生成                                                                */
 /* ================================================================== */
 
+typedef struct {const char* en;const char* zh;int goal,target,mod,restriction,theme;} DailyScenario;
+static const DailyScenario scenarios[14]={
+    {"ARCHIVE COURIER","档案信使",DQ_SEARCH,8,DM_SILENT,DR_NONE,1},
+    {"BLACKOUT SALVAGE","停电打捞",DQ_COLLECT,600,DM_DARK,DR_NOMAP,5},
+    {"COLD RELAY","冷凝接力",DQ_FLOOR,3,DM_THIN,DR_NONE,4},
+    {"SILENT DEPARTURE","静默撤离",DQ_ESCAPE,1,DM_SILENT,DR_NOSPRINT,0},
+    {"DEBT COLLECTOR","债务追索",DQ_COLLECT,900,DM_GREED,DR_NONE,2},
+    {"LAST TOOL","最后工具",DQ_KNOCK,5,DM_HUNT,DR_NOMAP,5},
+    {"LIGHTLESS PATH","无光归途",DQ_FLOOR,3,DM_RICH,DR_NOLIGHT,6},
+    {"ECHO MARKSMAN","回声投手",DQ_THROW,4,DM_SILENT,DR_NONE,1},
+    {"WARD EVACUATION","病房撤离",DQ_SEARCH,10,DM_DARK,DR_NONE,3},
+    {"VAULT RUNNER","密库行者",DQ_SEARCH,12,DM_RICH,DR_NOSPRINT,0},
+    {"UNBROKEN ROUTE","无伤回路",DQ_NOHIT,2,DM_NORMAL,DR_NONE,4},
+    {"OVERCHARGED","过载行动",DQ_COLLECT,1000,DM_FAST,DR_NONE,2},
+    {"NO MAP HOME","无图返航",DQ_ESCAPE,1,DM_THIN,DR_NOMAP,6},
+    {"SECOND SIGNAL","第二信号",DQ_FLOOR,4,DM_HUNT,DR_NONE,5}};
+static int ScenarioIndex(unsigned seed){
+    int y=(int)(seed/10000),m=(int)(seed/100%100),d=(int)(seed%100);
+    static const int days[12]={0,31,59,90,120,151,181,212,243,273,304,334};
+    if(m<1 || m>12 || y<1)return 0;
+    int a=y-1;unsigned ordinal=(unsigned)(365*a+a/4-a/100+a/400+days[m-1]+d);
+    if(m>2 && y%4==0 && (y%100!=0 || y%400==0))ordinal++;
+    return (int)(ordinal%14);
+}
+
 void DailyGenerateForDate(unsigned int seed) {
     unsigned int h1 = DailyHash(seed);
     unsigned int h2 = DailyHash(seed ^ 0xA5A5A5A5u);
@@ -221,6 +247,8 @@ void DailyGenerateForDate(unsigned int seed) {
         s_daily.goalParam = v;
     }
 
+    const DailyScenario* scenario=&scenarios[ScenarioIndex(seed)];
+    s_daily.goalId=scenario->goal;s_daily.goalParam=scenario->target;s_daily.modId=scenario->mod;s_daily.restrictId=scenario->restriction;
     s_daily.progress = 0;
     s_daily.done = 0;
     s_ready = 1;
@@ -342,9 +370,9 @@ void DailyMarkDone(void) {
     s_daily.streak++;
     s_daily.lastCompleted = s_daily.seed;
 
-    int reward = 800;
-    if (s_daily.streak == 3) reward += 1500;
-    if (s_daily.streak == 7) reward += 5000;
+    int reward = 400;
+    if (s_daily.streak == 3) reward += 300;
+    if (s_daily.streak == 7) reward += 900;
 
     /* ==================================================================
      * 2026-11-06（v2.4-alpha R13）：**记下来，不在这一帧给钱**
@@ -374,9 +402,9 @@ void DailyMarkDone(void) {
      * 代价是玩家可能损失一次奖励，但**绝不会重复发放**。
      * ================================================================== */
     {
-        extern int g_saveState;
-        extern const char* pickupMsg;
-        extern float pickupMsgTimer;
+
+
+
 
         WalletAddBank(reward);
         SaveGame();
@@ -410,11 +438,11 @@ void DailyTick(void) {
        这里只处理"其它原因导致的待落盘"。 */
     if (s_pendingSave) {
         s_pendingSave = 0;
-        { extern void SaveGame(void); SaveGame(); }
+        {  SaveGame(); }
     }
     /* 极端情况下（加钱后连退钱都失败）留一条待发奖励，下一帧再试 */
     if (s_pendingReward > 0) {
-        extern int g_saveState;
+
         int r = s_pendingReward;
         WalletAddBank(r);
         SaveGame();
@@ -430,7 +458,7 @@ void DailyTick(void) {
        这样昨天的进度不会被重复计到今天的任务上。 */
     DailyGenerate();
     {
-        extern int totalGoldEarned, runSearched, knockCountRun, throwHitCountRun, dailyEscapeCount;
+
         s_daily.samples[DQ_COLLECT] = totalGoldEarned;
         s_daily.samples[DQ_SEARCH]  = runSearched;
         s_daily.samples[DQ_KNOCK]   = knockCountRun;
@@ -443,6 +471,7 @@ void DailyTick(void) {
 /* 查询                                                                */
 /* ================================================================== */
 
+/* Queries read the generated/loaded challenge and its current saved progress. */
 int DailyGoalId(void)      { return s_daily.goalId; }
 int DailyGoalParam(void)   { return s_daily.goalParam; }
 int DailyModId(void)       { return s_daily.modId; }
@@ -507,15 +536,13 @@ int DailyForbidMonsterMap(void) { return dailyMode && s_daily.restrictId == DR_N
 /* 文案                                                                */
 /* ================================================================== */
 
-const char* DailyGoalTextEn(void) {
-    static char b[96];
-    snprintf(b, sizeof(b), kGoalEn[s_daily.goalId], s_daily.goalParam);
-    return b;
+const char* DailyGoalTextEn(void){
+    static char b[224];char goal[96];snprintf(goal,sizeof(goal),kGoalEn[s_daily.goalId],s_daily.goalParam);
+    snprintf(b,sizeof(b),"%s / %s",DailyScenarioName(0),goal);return b;
 }
-const char* DailyGoalTextZh(void) {
-    static char b[96];
-    snprintf(b, sizeof(b), kGoalZh[s_daily.goalId], s_daily.goalParam);
-    return b;
+const char* DailyGoalTextZh(void){
+    static char b[224];char goal[96];snprintf(goal,sizeof(goal),kGoalZh[s_daily.goalId],s_daily.goalParam);
+    snprintf(b,sizeof(b),"%s / %s",DailyScenarioName(1),goal);return b;
 }
 const char* DailyModTextEn(void)  { return kModEn[s_daily.modId]; }
 const char* DailyModTextZh(void)  { return kModZh[s_daily.modId]; }
@@ -527,3 +554,6 @@ const char* DailyRestrictTextZh(void) { return kResZh[s_daily.restrictId]; }
  * （加目标时忘了补表 → 这里直接编译失败，而不是运行期读越界）
  * ================================================================== */
 typedef char daily_goal_table_check[(sizeof(kGoals) / sizeof(kGoals[0]) == DQ_COUNT) ? 1 : -1];
+
+int DailyVisualThemeNow(void){return scenarios[ScenarioIndex(s_daily.seed)].theme;}
+const char* DailyScenarioName(int chinese){const DailyScenario* s=&scenarios[ScenarioIndex(s_daily.seed)];return chinese?s->zh:s->en;}

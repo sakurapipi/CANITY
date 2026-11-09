@@ -18,4 +18,8 @@ int  CollapseBusy(void);          /* 1 = 崩塌进行中（冻结输入用） */
 int  CollapseRerollCount(void);   /* 重掷次数（测试/平衡用） */
 int  CollapseUnstickPlayer(void); /* 把玩家从墙里挪出来；1 = 真的挪过 */
 
+
+/* Read-only blackout intensity for presentation. */
+extern float screenBlackout;
+
 #endif /* CANITY_COLLAPSE_H */

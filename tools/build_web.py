@@ -95,6 +95,8 @@ def main(argv):
         *srcs,
         '-Iinclude',
         '-std=c99',
+        '-Werror=implicit-function-declaration',
+        '-Werror=incompatible-pointer-types',
         '-DCANITY_WEB=1',
         '-O0' if debug else '-O2',
         '-sWASM=1',
@@ -103,7 +105,7 @@ def main(argv):
         '-sSTACK_SIZE=1048576',
         '-sASSERTIONS=%d' % (1 if debug else 0),
         '-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPU32,HEAP32,UTF8ToString,stringToUTF8',
-        '-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_CanityProbeWorldSound,_CanityProbePanner,_CanityActionVk,_CanityActionMenu,_CanityActionPause,_CanityActionFlashlight,_CanityProbeFlashlight,_CanityProbeState,_CanityProbeMenu,_CanityProbeKeys,_CanityProbeUpdates,_CanityProbeDt,_CanityProbeGameKey,_CanityProbeDir,_CanityProbeLayout',
+        '-sEXPORTED_FUNCTIONS=_CanityUiFlags,_CanityUiAccent,_HelpBookText,_main,_malloc,_free,_CanityProbeWorldSound,_CanityProbePanner,_CanityActionVk,_CanityActionMenu,_CanityActionPause,_CanityActionFlashlight,_CanityProbeFlashlight,_CanityProbeState,_CanityProbeMenu,_CanityProbeKeys,_CanityProbeUpdates,_CanityProbeDt,_CanityProbeGameKey,_CanityProbeDir,_CanityProbeLayout',
         '-sINCOMING_MODULE_JS_API=canvas,print,printErr,setStatus,onRuntimeInitialized,locateFile',
         '--shell-file', str(SHELL),
     ]
@@ -126,6 +128,9 @@ def main(argv):
     if p.returncode:
         print('构建失败（退出码 %d）' % p.returncode, file=sys.stderr)
         return p.returncode
+
+    if (ROOT / 'music').is_dir():
+        shutil.copytree(ROOT / 'music', DIST / 'music', dirs_exist_ok=True)
 
     # Emscripten 会把 shell 里 {{{ SCRIPT }}} 之外的东西保留，但下载链接是写死的，
     # 这里做一次产出清点，方便直接看结果。

@@ -96,4 +96,9 @@ int  HatchGateCheck(int idx, char* why, int cap);   /* 1 = 可以开 */
 void HatchFireEffect(int idx);
 const char* HatchTitle(int idx);
 
+/* Room placement and player-facing effect description. */
+int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId);
+
+const char* HatchEffectLine(int idx);
+
 #endif /* HATCH_H */

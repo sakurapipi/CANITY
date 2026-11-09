@@ -21,6 +21,7 @@
 EM_JS(void, js_plat_init, (void), {
     if (typeof Module === 'undefined') return;
     Module._keys = new Uint8Array(256);
+    Module._keyPulses = new Uint8Array(256);
     Module._mouseDX = 0;
     Module._mouseDY = 0;
     Module._locked = false;
@@ -37,14 +38,20 @@ EM_JS(void, js_plat_init, (void), {
 
         function setKey(e, down) {
             var c = e.keyCode | 0;
-            if (c >= 0 && c < 256) Module._keys[c] = down ? 1 : 0;
+            if(c>=0 && c<256){
+                if(down && !Module._keys[c])Module._keyPulses[c]=1;
+                Module._keys[c]=down?1:0;
+            }
             /* 方向键/空格会滚动页面，游戏里必须吃掉 */
             if (down && (c === 32 || (c >= 37 && c <= 40) || c === 9)) e.preventDefault();
         }
         window.addEventListener('keydown', function (e) { setKey(e, true); }, false);
         window.addEventListener('keyup', function (e) { setKey(e, false); }, false);
+        window.addEventListener('keydown', function(e){if(!e.isComposing && !e.repeat && e.key.length===1 && Module._HelpBookText)Module._HelpBookText(e.key.codePointAt(0));});
+        window.addEventListener('compositionend', function(e){if(Module._HelpBookText)for(var ch of e.data)Module._HelpBookText(ch.codePointAt(0));});
         window.addEventListener('blur', function () {
             if (Module._keys) Module._keys.fill(0);
+            if(Module._keyPulses)Module._keyPulses.fill(0);
         }, false);
 
         /* 鼠标键：与 Win32 的 VK_LBUTTON(1)/VK_RBUTTON(2)/VK_MBUTTON(4) 对齐，
@@ -149,7 +156,7 @@ EM_JS(void, js_get_size, (int* w, int* h), {
    而它跑在 main() 里 —— 整个游戏直接不启动（黑屏）。
    用 EM_JS 传参就没有"拼坏"的可能。 */
 EM_JS(int, js_show_perf, (double pix, double spr, double tex, double total), {
-    if ((location.search || '').indexOf('perf') < 0) return 0;
+    if ((location.search || "").indexOf('perf') < 0) return 0;
     var h = document.querySelector('#boot h1');
     if (!h) return 0;
     h.style.fontSize = '13px';
@@ -161,12 +168,17 @@ EM_JS(int, js_show_perf, (double pix, double spr, double tex, double total), {
 });
 
 EM_JS(int, js_has_selftest, (void), {
-    return (location.search || '').indexOf('selftest') >= 0 ? 1 : 0;
+    return (location.search || "").indexOf('selftest') >= 0 ? 1 : 0;
 });
 
 EM_JS(int, js_key_down, (int vk), {
-    return (vk >= 0 && vk < 256 && Module._keys) ? Module._keys[vk] : 0;
+    return (vk>=0 && vk<256 && Module._keys) ? (Module._keys[vk] || (Module._keyPulses && Module._keyPulses[vk]) ? 1 : 0) : 0;
 });
+
+EM_JS(void, js_consume_key_pulses, (void), {
+    if(Module._keyPulses)Module._keyPulses.fill(0);
+});
+void PlatConsumeKeyPulses(void){js_consume_key_pulses();}
 
 EM_JS(void, js_take_mouse, (int* dx, int* dy), {
     HEAP32[dx >> 2] = Module._mouseDX | 0;
@@ -265,7 +277,7 @@ EM_JS(int, js_file_read, (const char* name, void* buf, int cap), {
 EM_JS(int, js_file_write, (const char* name, const void* buf, int len), {
     try {
         var key = 'canity:' + UTF8ToString(name);
-        var s = '';
+        var s = "";
         for (var i = 0; i < len; i++) s += String.fromCharCode(HEAPU8[(buf + i) | 0]);
         localStorage.setItem(key, btoa(s));
         localStorage.setItem(key + '#ts', String(Date.now()));
@@ -356,7 +368,7 @@ unsigned int PlatTicksMs(void) {
     return (unsigned int)(emscripten_get_now());
 }
 
-void PlatSleepMs(int ms) {
+void PlatSleepMs(int ms) { /* PLATFORM_NOOP: Browser contract: no blocking sleep, native minimization, absolute cursor/capture or directory operation. */
     (void)ms;   /* 主线程不能阻塞；让出一帧即可 */
 }
 
@@ -372,7 +384,7 @@ void PlatWindowSize(int* w, int* h) {
     if (h) *h = ch;
 }
 
-int PlatMinimized(void) { return 0; }
+int PlatMinimized(void) { /* PLATFORM_NOOP: Browser contract: no blocking sleep, native minimization, absolute cursor/capture or directory operation. */ return 0; }
 
 /* ==================================================================
  * 2026-11-06（用户实测：**手机端移动 / 挥击 / 摇电全部失效**）
@@ -398,7 +410,7 @@ EM_JS(int, js_focused, (void), {
 
 int PlatFocused(void) { return js_focused(); }
 
-void PlatRestoreWindow(void) {
+void PlatRestoreWindow(void) { /* PLATFORM_NOOP: Browser contract: no blocking sleep, native minimization, absolute cursor/capture or directory operation. */
     /* 浏览器里没有"还原窗口"这回事；抢焦点只能由用户手势触发 */
 }
 
@@ -463,7 +475,7 @@ void PlatCursorPos(int* x, int* y) {
     if (y) *y = 0;
 }
 
-void PlatSetCursorPos(int x, int y) { (void)x; (void)y; }
+void PlatSetCursorPos(int x, int y) { /* PLATFORM_NOOP: Browser contract: no blocking sleep, native minimization, absolute cursor/capture or directory operation. */ (void)x; (void)y; }
 
 void PlatRequestQuit(void) {
     /* 浏览器里"退出游戏"= 回到标题；主循环不能自己停掉 */
@@ -494,7 +506,7 @@ int PlatTakeMouseClick(int* x, int* y) {
     return r;
 }
 
-void PlatSetCapture(int on) {
+void PlatSetCapture(int on) { /* PLATFORM_NOOP: Browser contract: no blocking sleep, native minimization, absolute cursor/capture or directory operation. */
     /* 指针锁定是全局的，拖拽期间不需要额外捕获 */
     (void)on;
 }
@@ -538,7 +550,7 @@ int PlatWriteFileAtomic(const char* path, const void* data, int len) {
     return PlatWriteFileBytes(path, data, len);
 }
 
-void PlatMakeDir(const char* path) { (void)path; }   /* 浏览器没有目录 */
+void PlatMakeDir(const char* path) { /* PLATFORM_NOOP: Browser contract: no blocking sleep, native minimization, absolute cursor/capture or directory operation. */ (void)path; }   /* 浏览器没有目录 */
 
 int PlatDeletePath(const char* path) {
     if (!path) return -1;
@@ -574,7 +586,7 @@ void PlatLog(const char* msg) {
     if (msg) emscripten_log(EM_LOG_CONSOLE, "%s", msg);
 }
 
-void PlatSfx(int id, float gain) { (void)id; (void)gain; }
+void PlatSfx(int id, float gain) { /* STUB: Optional platform SFX hook is not connected; gameplay uses the audio backend. */ (void)id; (void)gain; }
 
 /* ---------------------------------------------------------------------
  * 配乐（music.c 在网页构建里被排除，MCI 是 Win32 的东西）

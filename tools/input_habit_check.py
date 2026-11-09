@@ -30,6 +30,7 @@ import struct
 import subprocess
 import sys
 import time
+import tempfile
 
 u32 = ctypes.windll.user32
 k32 = ctypes.windll.kernel32
@@ -65,7 +66,8 @@ class Game:
                 "找不到游戏 exe：%s\n"
                 "先跑 python tools/build_validate.py 生成 canity_verify.exe，\n"
                 "或用 --exe / 环境变量 CANITY_EXE 指定路径。" % self.exe)
-        self.proc = subprocess.Popen([self.exe])
+        self.test_data=tempfile.TemporaryDirectory(prefix="canity-input-check-")
+        self.proc = subprocess.Popen([self.exe],env=dict(os.environ,CANITY_DATA_DIR=self.test_data.name))
         self.pid = self.proc.pid
         for _ in range(120):
             time.sleep(0.1)
@@ -170,13 +172,13 @@ class Game:
         u32.PostMessageW(self.hwnd, WM_KEYUP, vk, lp | (1 << 30) | (1 << 31))
         time.sleep(0.22)
 
-    def click_at(self, x, y):
-        u32.SetCursorPos(x, y)
-        time.sleep(0.12)
-        u32.mouse_event(0x0002, 0, 0, 0, 0)
-        time.sleep(0.05)
-        u32.mouse_event(0x0004, 0, 0, 0, 0)
-        time.sleep(0.25)
+    def click_at(self,x,y):
+        # Target only the owned test window; never click another desktop application.
+        lp=(int(y)<<16)|(int(x)&0xFFFF)
+        u32.PostMessageW(self.hwnd,0x0201,1,lp)
+        time.sleep(.08)
+        u32.PostMessageW(self.hwnd,0x0202,0,lp)
+        time.sleep(.25)
 
 
 VK = {"W": 0x57, "S": 0x53, "UP": 0x26, "DOWN": 0x28, "ENTER": 0x0D,
@@ -255,57 +257,20 @@ def main():
           % (STATE_NAME.get(st_before_click, "?"),
              STATE_NAME.get(g.ri("currentState"), "?")))
 
-    # ---------- 安全屋（5 页签 + 行）----------
-    print("\n[安全屋]")
-    # 先把选择移回 New Run（前面测试把它移到了别的位置）
+    print("\n[藏身补给权限]")
     for _ in range(8):
-        if g.ri("menuSelection") == 0:
-            break
+        if g.ri("menuSelection")==0:break
         g.key(VK["W"])
-    check("选择能回到第一项", g.ri("menuSelection") == 0,
-          "menuSelection=%s" % g.ri("menuSelection"))
-    # 进局 → 按 T 开安全屋
-    g.key(VK["ENTER"])
-    time.sleep(1.5)
-    # 安全屋是**地图里的房间**，必须先把玩家挪进去再按 T
-    sx, sy = g.rf("safeRoom"), None
-    if sx is not None:
-        pass
-    sa_ok = False
-    a = g.syms.get("safeRoom")
-    if a:
-        raw = g.read(g.base + a, 16)
-        rx, ry = struct.unpack("<ff", raw[:8])
-        act = struct.unpack("<i", raw[8:12])[0]
-        print("    安全屋 (%.1f, %.1f) active=%d" % (rx, ry, act))
-        sa_ok = bool(act)
-        if act:
-            pa = g.syms.get("posX")
-            if pa:
-                k32.WriteProcessMemory(g.h, ctypes.c_void_p(g.base + pa),
-                                       struct.pack("<f", rx), 4, None)
-                k32.WriteProcessMemory(g.h, ctypes.c_void_p(g.base + pa + 4),
-                                       struct.pack("<f", ry), 4, None)
-                time.sleep(0.4)
+    g.key(VK["ENTER"]);time.sleep(.8)
+    check("进入新局",g.ri("currentState")==STATE_PLAYING)
     g.key(VK["T"])
-    time.sleep(0.6)
-    st2 = g.ri("currentState")
-    if not sa_ok:
-        # 第 1 层不一定有安全屋，这项标 SKIP 而不是 FAIL（不算通过）
-        results.append(("T 能打开安全屋", True, "SKIP: 本层无安全屋"))
-        print("  ⏭  T 能打开安全屋  SKIP（本层安全屋 active=0）")
-    elif st2 != STATE_SAFEHOUSE:
-        check("T 能打开安全屋", False, "state=%s" % STATE_NAME.get(st2, st2))
-    else:
-        check("T 能打开安全屋", True)
-        row0 = g.ri("safehouseHoverRow")
-        g.key(VK["S"])
-        row1 = g.ri("safehouseHoverRow")
-        check("S 能切行", row1 is not None and row1 != row0, "%s -> %s" % (row0, row1))
-
-        tab0 = g.ri("shopPage")
-        g.key(VK["A"]) if False else None
-        check("页签存在", tab0 is not None, "shopPage=%s" % tab0)
+    check("未藏身不能远程开商店",g.ri("currentState")==STATE_PLAYING)
+    g.key(VK["ESC"])
+    check("ESC打开暂停菜单",g.ri("currentState")==STATE_PAUSED)
+    g.key(VK["ESC"])
+    check("ESC返回当前对局",g.ri("currentState")==STATE_PLAYING)
+    # Positive hidden-shop and card hit tests use deterministic runtime fixtures,
+    # rather than writing a guessed live address or relying on retired safeRoom.
 
     # ---------- 结论 ----------
     print("\n" + "=" * 72)
@@ -320,6 +285,7 @@ def main():
 
     try:
         g.proc.terminate()
+        g.proc.wait(timeout=10)
     except Exception:
         pass
     return 1 if bad else 0

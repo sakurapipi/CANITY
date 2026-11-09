@@ -4,7 +4,12 @@
  */
 #include "difficulty.h"
 #include "common.h"
+#include "lang.h"
+#include "present_api.h"
+#include "skills.h"
 #include "entity.h"
+#include "bestiary.h"
+#include "monster_rules.h"
 #include "spider.h"
 #include "control_effect.h"
 #include "audio.h"
@@ -47,18 +52,20 @@ void SpiderReset(void) {
  * ================================================================== */
 void SpiderDispel(void) {
     if (!s_spider.active) return;
+    BestiaryMarkEscaped(BST_ID_SPIDER);
     s_spider.active = 0;
     s_respawnCd = SPIDER_RESPAWN_COOLDOWN;
     PlaySfx(SFX_GLASS, 0.8f);
     {
-        extern int g_lang;
-        extern const char* pickupMsg;
-        extern float pickupMsgTimer;
-        pickupMsg = (g_lang == 1) ? "蜘蛛被砸散了" : "THE SPIDER SCATTERS";
-        pickupMsgTimer = 1.6f;
+
+
+
+        (void)0; /* Enemy encounter narration removed. */
+        (void)0; /* No encounter-toast timer. */
     }
 }
 
+/* Live spider state and respawn timer, not constant placeholder implementations. */
 float SpiderRespawnCd(void) { return s_respawnCd; }
 
 int SpiderActive(void) { return s_spider.active; }
@@ -84,9 +91,9 @@ static int SpawnCell(float* ox, float* oy) {
 
 int SpiderTrySpawn(int level) {
     if (s_respawnCd > 0.0f) return 0;      /* 刚被砸掉，本层不再刷新 */
-    if (level < SPIDER_MIN_LEVEL) return 0;
+    if(!MonsterEligible(SPAWN_SPIDER,level))return 0;
     {
-        int chance = SPIDER_APPEAR_BASE + (level - SPIDER_MIN_LEVEL) * SPIDER_APPEAR_STEP;
+        int chance = MonsterFloorChance(SPAWN_SPIDER,level);
         if (chance > SPIDER_APPEAR_CAP) chance = SPIDER_APPEAR_CAP;
         if (rand() % 100 >= chance) return 0;
     }
@@ -97,6 +104,7 @@ int SpiderTrySpawn(int level) {
     s_spider.state  = SPIDER_PATROL;
     s_spider.x = x; s_spider.y = y;
     s_spider.tx = x; s_spider.ty = y;
+    BestiaryMarkSeen(BST_ID_SPIDER);BestiaryNoteFloor(BST_ID_SPIDER,level);
     return 1;
 }
 
@@ -223,20 +231,19 @@ void SpiderTick(float dt) {
                （轻松 ×1.6 窗口，硬核 ×0.75） */
             /* 第 9 轮「挣脱」：窗口 ×1.5（反击者流派） */
             float webWin = SPIDER_WEB_WINDOW * DiffQteWindowMul();
-            { extern int SkillCounterFreeOwned(void);
+            { 
               if (SkillCounterFreeOwned()) webWin *= 1.5f; }
             if (ControlBeginTimed(CTRL_SPIDER_WEB, webWin,
                                   SPIDER_WEB_REDUCE,
                                   SPIDER_WEB_MIN)) {
+                BestiaryMarkCaught(BST_ID_SPIDER);
                 PlaySfx(SFX_GLUE, 0.9f);
                 /* 2026-11-06（用户要求）：命中时屏幕上给明确提示 */
-                extern int g_lang;
-                extern const char* pickupMsg;
-                extern float pickupMsgTimer;
-                pickupMsg = (g_lang == 1)
-                    ? "被蛛网缠住了 —— 连按空格，最快 1 秒"
-                    : "WEBBED - MASH SPACE, 1s MINIMUM";
-                pickupMsgTimer = 2.2f;
+
+
+
+                (void)0; /* Enemy encounter narration removed. */
+                (void)0; /* No encounter-toast timer. */
             }
         }
         s_spider.state = SPIDER_COOLDOWN;

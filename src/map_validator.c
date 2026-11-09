@@ -4,6 +4,7 @@
  * 所以在游戏里、在测试里、在洪泛工具里都能安全调用。
  */
 #include "common.h"
+#include "map_topology.h"
 #include "map_validator.h"
 #include "cell_meta.h"
 #include "map_rooms.h"
@@ -95,7 +96,7 @@ void MapValidate(MapCheck* out) {
     /* ---- ⑤ 全图连通性：孤立空地太多说明生成器把地图切碎了 ---- */
     for (int y = 1; y < MAP_HEIGHT - 1; y++)
         for (int x = 1; x < MAP_WIDTH - 1; x++) {
-            if (worldMap[y][x]) continue;
+            if (worldMap[y][x] || PropBlocksAt(x,y)) continue;
             out->floors++;
             if (!seen[y][x]) out->isolatedFloors++;
         }
@@ -120,9 +121,15 @@ void MapValidate(MapCheck* out) {
            孤立空间本身不是死局 —— 只要保险丝/配电箱/出口都不在里面。
            真正的保证由 game.c 的"容器候选按可达性过滤"给出。
            这里留一个比例字段，供洪泛统计观察生成器的切碎程度。 */
-    if (out->floors > 0 && out->isolatedFloors * 100 > out->floors * 40) {
-        /* 超过 40% 说明地图基本碎成几块，那已经不是设计而是故障 */
+    if (out->floors > 0 && out->isolatedFloors > 0) {
+        /* Blocking furniture is excluded above; every remaining floor must connect. */
         out->ok = 0;
-        SetErr(out, "map is shattered: more than 40% of floors are isolated");
+        SetErr(out, "map contains unreachable walkable floor cells");
     }
+    int geometry[MAP_HEIGHT][MAP_WIDTH];
+    for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)geometry[y][x]=worldMap[y][x] || PropBlocksAt(x,y);
+    MapTopology topology=MapTopologyMeasure(&geometry[0][0],MAP_WIDTH,MAP_HEIGHT);
+    if(!MapTopologyAccepts(topology)){out->ok=0;SetErr(out,"topology exceeds reachability/dead-end bounds");}
+    if(out->rooms>1){out->ok=0;SetErr(out,"more than one themed room");}
+
 }

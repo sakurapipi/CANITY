@@ -497,6 +497,18 @@ static void test_three_hunters(void) {
     CHECK(HunterIndex(&monHunters[1]) == 1, "index of hunter 2");
     CHECK(HunterIndex(&monHunters[2]) == 2, "index of hunter 3");
 
+    /* 2026-11-09：威胁值会给所有怪加同一偏移
+       （MonsterSpeedFor 里 +ThreatValue()*0.008）。
+       前面的用例把威胁抬起来后，两只都撞 ThreatSpeedCap() 上限 →
+       速度相等，这条断言就假红了。
+       先清零威胁，再重新召唤（召唤会按当前威胁重算速度）。 */
+    { extern void ThreatReset(void); ThreatReset(); }
+    TestSummonAllHunters();
+    for (int i = 0; i < MON_HUNTER_MAX; ++i) {
+        monHunters[i].state = 1;
+        monHunters[i].stun = 0.0f;
+    }
+
     /* 第 3 只要明显更快（用户：移动速度特别快） */
     CHECK(monHunters[2].speed > monHunters[0].speed * 1.2f,
           "hunter 3 is markedly faster than hunter 1");
@@ -649,7 +661,7 @@ static void test_monster_search_around(void) {
 extern float RunUpgWrenchStun(void);
 extern int   RunUpgWrenchLevel(void);   /* 读 upg[4] */
 extern void  RunUpgSetLevel(int idx, int lv);
-extern int   BestiaryAnnounce(int id);
+
 
 static void test_wrench_stun_has_a_floor_at_low_level(void) {
     /* 旧实现：level < 3 一律 0 —— 砸中只有击退，怪立刻贴回来 */
@@ -662,15 +674,20 @@ static void test_wrench_stun_has_a_floor_at_low_level(void) {
     RunUpgSetLevel(4, saved);
 }
 
-static void test_bestiary_announces_only_once(void) {
-    /* 同一只怪在一次进程里只播报一次，第二次返回 0 */
-    int first = BestiaryAnnounce(6);      /* 用一个少见的 id */
-    int again = BestiaryAnnounce(6);
-    CHECK(first == 1, "the first encounter must be announced");
-    CHECK(again == 0, "the same monster must not be announced twice");
-    CHECK(BestiaryAnnounce(-1) == 0, "invalid ids must not be announced");
-    CHECK(BestiaryAnnounce(BESTIARY_COUNT) == 0, "out-of-range ids must not be announced");
+static void test_bestiary_discovers_silently(void) {
+    int oldSeen=bestiarySeen;
+    const char* oldMessage=pickupMsg;float oldTimer=pickupMsgTimer;
+    pickupMsg="UNCHANGED";pickupMsgTimer=.75f;
+    BestiaryMarkSeen(BST_ID_MIMIC);BestiaryMarkSeen(BST_ID_MIMIC);
+    CHECK(BestiaryIsSeen(BST_ID_MIMIC),"silent discovery still unlocks the correct archive entry");
+    CHECK(strcmp(pickupMsg,"UNCHANGED")==0 && pickupMsgTimer==.75f,
+          "discovery must not replace or restart an on-screen message");
+    int validSeen=bestiarySeen;
+    BestiaryMarkSeen(-1);BestiaryMarkSeen(BESTIARY_COUNT);
+    CHECK(bestiarySeen==validSeen,"invalid discovery IDs cannot change knowledge");
+    bestiarySeen=oldSeen;pickupMsg=oldMessage;pickupMsgTimer=oldTimer;
 }
+
 
 static void test_scavenger_does_not_vanish_when_you_leave(void) {
     /* 直接验状态机：抓柜门 → 玩家出柜 → 预警到期后它必须还在场上。
@@ -896,7 +913,7 @@ void TestSuite_actors(void) {
     test_monster_search_around();
     /* 第 1 轮：玩家反馈三条 */
     test_wrench_stun_has_a_floor_at_low_level();
-    test_bestiary_announces_only_once();
+    test_bestiary_discovers_silently();
     test_scavenger_does_not_vanish_when_you_leave();
     test_telegraph_is_silent_without_threats();
     test_telegraph_bands_by_distance();

@@ -7,7 +7,9 @@
 
 #include <stdio.h>
 
+#ifndef CANITY_SHARED_DIAGNOSTICS
 volatile int g_dbgMark = 0;
+#endif
 
 extern float exitX, exitY;
 extern int   runInProgress, bankGold, dailyMode, trainingMode, campaignMode;

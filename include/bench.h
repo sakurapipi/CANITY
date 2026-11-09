@@ -1,17 +1,6 @@
-/*
- * Canity — 局内改造树（v2.7）
- *
- * 安全屋按 T 打开。4 条分支 × 3 层 = 12 个节点，用**局内金币**买，
- * **跨局保留**（元进度）。和局外 20 节点技能树互不相干。
- *
- * v3.3 修正：这里原来写「每局重置」，但实现和存盘都是跨局累积的
- * （benchOwnedSave 进 SaveBlob，BenchResetRun 全项目 0 调用点）——
- * 玩家花金币买的东西不该一局就没了。注释跟着实现改，函数保留待用。
- *
- * 设计约束（见 docs 调研记录）：
- *   · 精确数字，不用抽象图标 —— "能量上限 +15" 而不是 "★★☆"
- *   · 每层都能看到"为什么买不了"：前置 / 金币差多少
- *   · 连线表达状态：已解锁实线，未解锁虚线
+/* Current 28-node run attribute tree. Purchases persist within a saved run.
+ * ResetRun is used by new-run/refund paths, not normal floor transitions.
+ * Legacy mechanism nodes were retired; do not reintroduce neutral-value hooks.
  */
 #ifndef CANITY_BENCH_H
 #define CANITY_BENCH_H
@@ -19,103 +8,100 @@
 #include "common.h"
 
 #define BENCH_COLS 4
-#define BENCH_ROWS 4   /* v3.4（方案 v5 §3.2）：3 → 4，12 节点扩到 16 */
-#define BENCH_COUNT (BENCH_COLS * BENCH_ROWS + 4)   /* v6：+4 个"第二顶点"，4 类 ×(3 层 + 2 选 1 顶点)=20 */
+#define BENCH_ROWS 4
+#define BENCH_COUNT 40
 
-/* 节点 id = col * BENCH_ROWS + row  (row 0 = 最便宜那层) */
+/* Saved bit positions: never reorder when changing UI layout or descriptions. */
+typedef enum {
+    BENCH_ENDURANCE = 0,
+    BENCH_LIGHT_PACK = 1,
+    BENCH_ECONOMY = 2,
+    BENCH_BULL = 3,
+    BENCH_BIG_CELL = 4,
+    BENCH_SAVER = 5,
+    BENCH_BRIGHT = 6,
+    BENCH_EVERLIGHT = 7,
+    BENCH_COMPOSURE = 8,
+    BENCH_THICK_SKIN = 9,
+    BENCH_RECOVER = 10,
+    BENCH_IRON_MIND = 11,
+    BENCH_SPARE_TOOL = 12,
+    BENCH_LONG_HANDLE = 13,
+    BENCH_HEAVY_HEAD = 14,
+    BENCH_SHOCK = 15,
+    BENCH_SWIFT = 16,
+    BENCH_SEARCHLIGHT = 17,
+    BENCH_DESPERATE = 18,
+    BENCH_TEMPERED = 19,
+    BENCH_SOFT_SOLES = 20, BENCH_TOOL_COOLING = 21,
+    BENCH_FIELD_REST = 22, BENCH_RESERVE_LIGHT = 23,
+    BENCH_BALANCED_LOAD=24, BENCH_CLEAR_MIND, BENCH_BREATH_CONTROL, BENCH_WIDE_BEAM,
+    BENCH_CALM_RESERVE=28, BENCH_SCAVENGE, BENCH_RHYTHM_FOCUS, BENCH_TRIAGE, BENCH_SECOND_CELL, BENCH_LIGHT_TOUCH, BENCH_RUNNER, BENCH_STEADY_HANDS, BENCH_CRANK_TORQUE, BENCH_POCKET_CHANGE, BENCH_OPENING_BONUS, BENCH_DEEP_DIVIDEND,
+} BenchNodeId;
 
 typedef struct {
-    const char* name;        /* 英文名 */
-    const char* nameZh;      /* 中文名 */
-    const char* desc;        /* 精确效果（英文） */
-    const char* descZh;      /* 精确效果（中文） */
-    int cost;                /* 金币价格 */
-    int col, row;            /* 网格位置（用来画） */
-    int star;                /* 1 = ★ 节点（第三条） */
+    const char* name;
+    const char* nameZh;
+    const char* desc;
+    const char* descZh;
+    int cost;
+    int col, row;
+    int star;
 } BenchNode;
 
 extern const BenchNode benchNodes[];
+extern uint64_t benchOwned;
 
-/* 本局已购买位掩码（1 << id） */
-extern unsigned int benchOwned;
-/* 2026-11-05：benchKills 已删除 —— 「嗜血」节点在改造树重做时已不存在，
-   这个计数器只剩声明和清零，没有任何读写者（铁律四十四）。 */
-
-void BenchResetRun(void);                  /* 开局清空 */
-int  BenchHas(int id);                     /* 是否已购买 */
-int  BenchPrereqOk(int id);                /* 前置是否满足 */
-int  BenchCanBuy(int id);                  /* 前置 + 金币都够 */
-int  BenchTryBuy(int id);                  /* 返回 0=成功，否则失败原因码 */
-
-/* —— 效果查询（没买就是 0 / 1.0） —— */
-int   BenchEnergyMax(int base);            /* 弹匣 / 电池库 / 嗜血 加成后的上限 */
-/* BenchDamageMul 已删（第 13 轮：常量桩零调用）*/
-float BenchSanityDrainMul(void);           /* 厚皮：理智流失倍率 */
-float BenchFlashDrainMul(void);            /* 省电：手电耗电倍率 */
-float BenchBatteryPickupMul(void);         /* 电池库：电池拾取倍率 */
-/* BenchLowSpeedAdd 已删（第 13 轮：常量桩零调用）*/
-/* BenchArmorIgnore 已删（第 13 轮：常量桩零调用）*/
-/* BenchDarkSense 已删（第 13 轮：常量桩零调用）*/
-/* BenchExecuteThreshold 已删（第 13 轮：常量桩零调用）*/
-int   BenchSecondWind(void);               /* 第二口气：还有没有 */
-/* BenchMonsterSpeedMul 已删（第 13 轮：常量桩零调用）*/
-/* BenchDrainPenalty 已删（第 13 轮：常量桩零调用）*/
-/* ---- v3.0 逃生试炼：新效果接口 ---- */
-float BenchWalkNoiseMul(void);   /* 轻步：走路噪音 */
-float BenchHideStealth(void);    /* 屏息：藏身被发现概率 */
-int   BenchVanish(void);         /* 消失 */
-int   BenchStaminaBonus(void);   /* 耐力：体力上限 */
-/* BenchSprintMul 已删（第 13 轮：常量桩零调用）*/
-int   BenchSecondWind(void);     /* 二次呼吸 */
-int   BenchHearing(void);        /* 听觉 */
-int   BenchInnerEye(void);       /* 心眼 */
-int   BenchPremonition(void);    /* 预知 */
-float BenchFearDamageMul(void);  /* 厚皮：恐惧伤害 */
-float BenchDarkFearMul(void);    /* 镇定：黑暗恐惧 */
-int   BenchPlayDead(void);       /* 假死 */
-
-/* BenchAlchemy 已删（第 13 轮：常量桩零调用）*/
-
-/* ---- 画布视口（v2.9，照搬思维导图模型） ---- */
-#define BENCH_NODE_WX  260.0f   /* v2.9：跟着框加宽 */      /* 节点世界间距（横向） */
-#define BENCH_NODE_WY  130.0f      /* 节点世界间距（纵向） */
-extern float treeVX, treeVY, treeVK;
-extern int   treeDragging;
-
-float BenchNodeWorldX(int id);
-float BenchNodeWorldY(int id);
-void  BenchFocusNode(int id);
-void  BenchDragStart(int mx, int my);
-void  BenchDragMove(int mx, int my);
-void  BenchDragEnd(void);
-void  BenchZoomAt(float factor, int mx, int my);
-void  BenchResetView(void);
-void  BenchPanBy(float dxScreen, float dyScreen);
-
-
-/* ===== v3.4 新增的 10 个机制 accessor（方案 v5 §3.2）=====
-   节点 id = col * BENCH_ROWS + row，BENCH_ROWS 现为 4。 */
-float BenchSearchQuiet(void);    /* 1  QUIET LID    翻箱噪音倍率 */
-int   BenchSilentThrow(void);    /* 2  SILENT THROW 投掷无声 */
-int   BenchCrankWalk(void);      /* 5  CRANK WALK   边走边摇 */
-int   BenchSlide(void);          /* 6  SLIDE        滑铲 */
-int   BenchDeepPocket(void);     /* 8  DEEP POCKET  携带上限 +2 */
-float BenchSteadyHand(void);     /* 9  STEADY HAND  蓄力时间倍率 */
-int   BenchSalvage(void);        /* 10 SALVAGE      可捡回 */
-int   BenchTwinThrow(void);      /* 11 TWIN THROW   双投 */
-float BenchBatterySaver(void);   /* 13 SPARE CELL   耗电倍率 */
-int   BenchCatchBreak(void);     /* 14 CATCH BREAK  挣脱 */
+void BenchResetRun(void);
+void BenchRefundRun(void);
+int BenchHas(int id);
+int BenchPrereqOk(int id);
+int BenchCanBuy(int id);
+/* 1 success; 2 owned; 3 invalid/missing prerequisite; 4 funds; 5 other capstone. */
+int BenchTryBuy(int id);
+float BenchThreatCostOf(int id);
+int BenchPrereqId(int id);
+int BenchArchetype(int id);
+const char* BenchShortName(int id);
+int BenchNavNearest(int from, int dx, int dy);
+int BenchNodeAt(int x, int y);
+void BenchBuyButtonRect(int* x0,int* y0,int* x1,int* y1);
+int BenchBuyButtonAt(int x,int y);
+void BenchNodeBoxSize(int* width, int* height);
 
 float BenchMoveMul(void);
 float BenchStaminaMul(void);
 float BenchSprintCostMul(void);
 float BenchBatteryCapMul(void);
+float BenchFlashDrainMul(void);
 float BenchLightRangeMul(void);
 float BenchSanityAdd(void);
-float BenchHealMul(void);
+float BenchFearDamageMul(void);
+float BenchHealMul(void); /* RECOVER (10): safe-room recovery x1.50. */
+float BenchWalkNoiseMul(void);
+float BenchWrenchCooldownMul(void);
 float BenchKnockExtra(void);
 float BenchKnockStunMul(void);
 int BenchKnockCharges(void);
 int BenchShock(void);
-void BenchRefundRun(void);
+
+/* Persistent skill-tree sensory effects; independent of bench purchases. */
+int BenchHearing(void);
+int BenchInnerEye(void);
+int BenchPremonition(void);
+
+#define BENCH_NODE_WX 260.0f
+#define BENCH_NODE_WY 130.0f
+extern float treeVX, treeVY, treeVK;
+extern int treeDragging;
+float BenchNodeWorldX(int id);
+float BenchNodeWorldY(int id);
+void BenchFocusNode(int id);
+void BenchDragStart(int mx, int my);
+void BenchDragMove(int mx, int my);
+void BenchDragEnd(void);
+void BenchZoomAt(float factor, int mx, int my);
+void BenchResetView(void);
+void BenchPanBy(float dxScreen, float dyScreen);
+
 #endif

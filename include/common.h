@@ -39,6 +39,9 @@
  */#ifndef CANITY_COMMON_H
 #define CANITY_COMMON_H
 
+/* Current source sets provide src/diagnostics.c even without main.c. */
+#define CANITY_SHARED_DIAGNOSTICS 1
+
 /* ==================================================================
  * 2026-11-06（网页版移植）：**系统头仍然只有本文件这一个入口**
  * ------------------------------------------------------------------
@@ -86,6 +89,7 @@ typedef struct { LONG x, y; } POINT;
 #define VK_LBUTTON   0x01
 #define VK_RBUTTON   0x02
 #define VK_MBUTTON   0x04
+#define VK_BACK      0x08
 #define VK_TAB       0x09
 #define VK_RETURN    0x0D
 #define VK_SHIFT     0x10
@@ -100,6 +104,7 @@ typedef struct { LONG x, y; } POINT;
 #define VK_DOWN      0x28
 #define VK_NUMPAD0   0x60
 #define VK_NUMPAD9   0x69
+#define VK_F5        0x74
 #define VK_F9        0x78
 #define VK_F11       0x7A
 #define VK_LSHIFT    0xA0
@@ -113,13 +118,14 @@ typedef struct { LONG x, y; } POINT;
 #include <mmsystem.h>
 #endif
 #include <math.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 35         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_NUM 36         /* 整数版本，进存档做记录 */
 /* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
    置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
    置 0 = 回到旧的战斗版本。 */
@@ -153,7 +159,7 @@ typedef struct { LONG x, y; } POINT;
  * 用户原话：「你给每一层都加一个特殊房间上限，不然特殊房间太多了」。
  * 房间太多会把地图切碎，出口也容易落进房间里只剩一条路。
  * ================================================================ */
-#define MAX_THEME_ROOMS_PER_FLOOR 2
+#define MAX_THEME_ROOMS_PER_FLOOR 1
 #endif
 #endif
 #endif
@@ -161,7 +167,7 @@ typedef struct { LONG x, y; } POINT;
 
 /* v2.4.2：双端稳定性补丁 —— 旧档迁移 / 运行段隔离 / 相位与舱门 /
    网页动作绑定与存档导出。存档结构**未变**（仍是 v34）。 */
-#define CANITY_VERSION_STR "2.4.2-beta"
+#define CANITY_VERSION_STR "2.4.2 RC"
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -199,6 +205,7 @@ typedef enum {
  * 注意：worldMap / explored 都是存档字段，**尺寸变了就是布局变了**。
  * 必须同时提供 24->36 的迁移（见 save.c 的 LoadLegacyBlob）。
  * ================================================================ */
+/* Gameplay and save storage both use the intended 36x36 layout. */
 #define MAP_WIDTH 36
 #define MAP_HEIGHT 36
 #define TEX_WIDTH  128   /* v2.0：64→128，2x2 块从 25px 降到 12px */
@@ -463,9 +470,10 @@ typedef struct {
  * ================================================================ */
 #define MON_HUNTER_MAX 3
 extern Monster monHunters[MON_HUNTER_MAX];
-#define monster  monHunters[0]
-#define monster2 monHunters[1]
-#define monster3 monHunters[2]
+/* Named slots are pointers, not global token macros: member/local names remain safe. */
+static inline Monster* Hunter0(void) { return &monHunters[0]; }
+static inline Monster* Hunter1(void) { return &monHunters[1]; }
+static inline Monster* Hunter2(void) { return &monHunters[2]; }
 
 
 /* v1.16 烟幕云：落到地面后持续一段时间，双向遮蔽 */
@@ -881,10 +889,12 @@ extern int eventBonus;       /* 本局累计的事件加分 */
    列 = 静（噪声的时与地）· 筹（风险与经济）· 锋（伤害交付方式）· 途（整局形状）
    前 4 行每列 4 个（3 个普通 + 1 个分支 keystone），第 5 行 = 4 个跨支 keystone。
    设计红线：每个节点必须能一句话说出「玩法怎么变」，不许卖常驻百分比。 */
-#define SKILL_COUNT 41   /* 2026-11-08：34 → 37（+3 掠夺者流派）*/
+#define SKILL_COUNT 51
+#define SKILL_INTERNAL_ID 40
+#define SKILL_PLAYER_COUNT 50   /* Includes ORIGIN; excludes the stable developer slot. */
 #define KEYSTONE_COUNT 8              /* 4 个分支 keystone + 4 个跨支 */
 #define SKILL_POINTS_FOR_KEYSTONE 5   /* 分支投入门槛（每列上限 7 点） */
-#define SKILL_TOTAL_COST 199700   /* +3 反击者（2600+3200+4500=10300）*/   /* 2026-11-08：+3 掠夺者（2600+3200+4500=10300）*/   /* 2026-11-06（A-2）：整体 ×1.3 抵消局内金币 +40%。按现表实算 = 160000。
+#define SKILL_TOTAL_COST 222200   /* +3 反击者（2600+3200+4500=10300）*/   /* 2026-11-08：+3 掠夺者（2600+3200+4500=10300）*/   /* 2026-11-06（A-2）：整体 ×1.3 抵消局内金币 +40%。按现表实算 = 160000。
                                     原来写 278,500，比实际多 104,000 → SkillsSelfTest 必然失败，
                                     而那个返回值又被 ui.c 的 (void)r 丢掉了，护栏装了没插电。 */
 #define SKILL_TOTAL_CORES 4   /* v6：按现表重算 */          /* 满树核心 */
@@ -937,7 +947,10 @@ enum {
     SK_COUNTER_FREE,   /* 37 挣脱：挣脱窗口 ×1.5 */
     SK_COUNTER_BACK,   /* 38 以牙还牙：受伤后 3 秒 +30% 移速 */
     SK_COUNTER_KILL    /* 39 反杀（王冠）：被抓住的瞬间反杀一次（每局 1 次） */,
-    SK_GEN_SELFTEST   /* 生成器写入 */
+    SK_GEN_SELFTEST = SKILL_INTERNAL_ID,  /* Stable internal slot 40; never player-facing. */
+    SK_COUNTER_COMPOSE = 41, SK_COUNTER_REPOSITION,
+    SK_COUNTER_OPENING, SK_COUNTER_FEINT,
+    SK_HUSH_ECHO=45, SK_BACKUP_SPARK, SK_EXIT_MEMORY, SK_HIDE_RECOVERY, SK_ECHO_MAPPING, SK_SILENT_CRANK,
 };
 
 #define META_COST 3.0f          /* 代谢：1 理智 = 3.0 电量（2.0 已验证会崩） */

@@ -32,6 +32,7 @@ void UiCornerMarks(int x0, int y0, int x1, int y1);
 void UiSectionRule(int cx, int y, int w);
 void UiFooterRule(int x0, int x1, int y);
 void UiRowSel(int x0, int y0, int x1, int y1, float alpha);
+int MainMenuLegacySelection(void);
 void DrawPageTabs(void);
 void ShopBackButtonRect(int* x0, int* y0, int* x1, int* y1);
 void DrawCalibBar(int bx, int by, int barW, int barH);
@@ -74,4 +75,16 @@ void UiDrawMenuPages(void);
 /* 定义在 ui.c（RenderFrame 与改造树都用），拆出去后需要跨文件可见 */
 void DrawCalibBar(int bx, int by, int barW, int barH);
 
+
+/* Shared contract, declared by the owning subsystem. */
+void UiSectionRuleSpan(int x0, int x1, int y);
+
+void SafehouseCardRect(int row,RECT* rect);
+int SafehouseCardAt(int x,int y);
+void BankSliderRect(int slider,RECT* rect);
+int BankSliderAt(int x,int y);
+void BankSetSliderFromPointer(int slider,int x);
+void BankAdjustSlider(int slider,int delta);
+void BankBackRect(RECT* rect);
+void ShopRefreshButtonRect(RECT* rect);
 #endif /* CANITY_UI_MENU_H */
