@@ -110,4 +110,6 @@ void SpawnShards(float x, float y, float vx, float vy, float charge);
 
 extern int g_shardTint;
 
+void AddHitFlash(float amount);
+
 #endif

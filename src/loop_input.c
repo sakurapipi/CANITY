@@ -12,3 +12,9 @@ void ClearKeyEdges(void) {
 int IsKeyBindItem(const SettingItem* it) {
     return it->kind == SET_LIST && BindActionOfItem(it) >= 0;
 }
+
+int SettingsRowCount(void) {
+    if (settingsPage == SETPAGE_ROOT || settingsPage == SETPAGE_BINDDIR) return 3 + 1;  /* 三个分类 + Back */
+    int tmp[SETTING_COUNT];
+    return PageItems(tmp) + 1;              /* 若干项 + Back */
+}

@@ -86,4 +86,6 @@ extern int tutorialGuideOn;
 
 int IsKeyBindItem(const SettingItem* it);
 
+int SettingsRowCount(void);
+
 #endif

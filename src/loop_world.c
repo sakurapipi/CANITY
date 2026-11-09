@@ -17,3 +17,28 @@ float GoldExitAt(int level)    { return (30.0f + 6.0f * (float)level) * EndlessD
 int PlayerAtExit(void) {
     return (breakerOpen && Dist2(posX, posY, exitX, exitY) < EXIT_ENTER_R2 * EXIT_ENTER_R2);
 }
+
+float EndlessDepthBonus(int level) {
+    if (level <= 24) return 1.0f;
+    float b = 1.0f + 0.15f * (float)(level - 24);
+    return b;
+}
+
+int ShotBlocked(float x, float y) {
+    int cx = (int)floorf(x), cy = (int)floorf(y);
+    if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return 1;
+    return worldMap[cy][cx] ? 1 : 0;
+}
+
+float ExtractDepthMul(int level) {
+    float m = 1.0f + 0.05f * (float)(level - 1);
+    if (m > 2.0f) m = 2.0f;
+    if (m < 1.0f) m = 1.0f;
+    return m;
+}
+
+int UpgradeCost(int kind) {
+    int lvl = UpgradeLevel(kind);
+    if (lvl >= UPG_MAX) return -1;
+    return 30 + lvl * 45;      /* 30 / 75 / 120 */
+}

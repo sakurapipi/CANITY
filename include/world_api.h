@@ -95,4 +95,6 @@ extern int mapHeld;
 
 int PlayerAtExit(void);
 
+float ExtractDepthMul(int level);
+
 #endif

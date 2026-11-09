@@ -324,10 +324,6 @@ void AddShake(float seconds, float mag) {
     if (seconds > shakeTime) { shakeTime = seconds; shakeDur = seconds; shakeMag = mag; }
     else if (mag > shakeMag) shakeMag = mag;
 }
-void AddHitFlash(float amount) {
-    hitFlash += amount;
-    if (hitFlash > 1.0f) hitFlash = 1.0f;
-}
 float bobPhase = 0.0f;   /* v2.1：手持模型走路摆动相位 */
 int   slashDmg = 999;
 float slashMaxDist = 14.0f;   /* v2.0：法术吃武器射程/配件 */          /* 光束伤害：剑气固定秒杀，符印用武器表 */
@@ -1147,11 +1143,6 @@ int PageItems(int* out) {
     return n;
 }
 
-int SettingsRowCount(void) {
-    if (settingsPage == SETPAGE_ROOT || settingsPage == SETPAGE_BINDDIR) return 3 + 1;  /* 三个分类 + Back */
-    int tmp[SETTING_COUNT];
-    return PageItems(tmp) + 1;              /* 若干项 + Back */
-}
 
 /* 玩家碰撞半径：贴墙时留出半个身位，避免半个身子钻进墙里 */
 #define PLAYER_RADIUS 0.24f
@@ -1229,11 +1220,6 @@ int Blocked(float x, float y) {
    这里改成取所在格子的中心来判断，边界行为稳定。 */
 
 /* ==================== 道具 · 投掷 ==================== */
-int ShotBlocked(float x, float y) {
-    int cx = (int)floorf(x), cy = (int)floorf(y);
-    if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return 1;
-    return worldMap[cy][cx] ? 1 : 0;
-}
 int SpotClear(float x, float y, float minD, int selfKind, int selfIdx) {
     float m2 = minD * minD;
     for (int i = 0; i < containerCount; i++) {
@@ -3231,12 +3217,6 @@ float GoldSearchAt(int level)  {
 /* v6 **深度倍数** —— 撤离时按当前层算。
    第 1 层 1.00，第 24 层 2.00（上限 2.0）。
    越往下撤离越值钱，这是「贪」的诱惑。 */
-float ExtractDepthMul(int level) {
-    float m = 1.0f + 0.05f * (float)(level - 1);
-    if (m > 2.0f) m = 2.0f;
-    if (m < 1.0f) m = 1.0f;
-    return m;
-}
 
 /* v3.4 **无尽模式深度加成**（方案 v5 §4.3）——
    24 层之后每层额外 +15% 金币，线性叠加不封顶。
@@ -3272,11 +3252,6 @@ float MonsterThreatScore(void) {
 /* v8: 强度档位已搬到 src/economy.c（GoldTier / GoldTierMul / GoldHearMul / GoldSpeedMul） */
 
 
-float EndlessDepthBonus(int level) {
-    if (level <= 24) return 1.0f;
-    float b = 1.0f + 0.15f * (float)(level - 24);
-    return b;
-}
 
 
 /* ==================== 玩家 · 理智/体力 ==================== */
@@ -3319,11 +3294,6 @@ const char* UpgradeName(int kind) {
     }
 }
 
-int UpgradeCost(int kind) {
-    int lvl = UpgradeLevel(kind);
-    if (lvl >= UPG_MAX) return -1;
-    return 30 + lvl * 45;      /* 30 / 75 / 120 */
-}
 
 
 
