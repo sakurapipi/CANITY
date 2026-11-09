@@ -79,6 +79,38 @@ static char* read_file(const char* path) {
     return text;
 }
 
+/* Source contracts span the loop implementation after the architecture split.
+ * Each file is required; missing a module still fails through read_file().
+ * These remain source checks, not proof of runtime behavior.
+ */
+static char* read_loop_sources(void) {
+    static const char* paths[] = {
+        "src/game.c", "src/loop_level.c", "src/loop_tutorial.c",
+        "src/loop_calibration.c", "src/loop_wrench.c", "src/loop_rewards.c",
+        "src/loop_player.c", "src/loop_player_tick.c", "src/loop_world.c",
+        "src/loop_items.c", "src/loop_interaction.c", "src/loop_input.c",
+        "src/loop_particles.c", "src/loop_present.c", "src/loop_settings.c",
+        "src/loop_rng.c"
+    };
+    char* result = (char*)malloc(1);
+    size_t length = 0;
+    if (!result) fail("out of memory");
+    result[0] = '\0';
+    for (unsigned i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i) {
+        char* part = read_file(paths[i]);
+        size_t size = strlen(part);
+        char* next = (char*)realloc(result, length + size + 2);
+        if (!next) { free(part); free(result); fail("out of memory"); }
+        result = next;
+        memcpy(result + length, part, size);
+        length += size;
+        result[length++] = '\n';
+        result[length] = '\0';
+        free(part);
+    }
+    return result;
+}
+
 static int contains(const char* text, const char* needle) {
     return strstr(text, needle) != NULL;
 }
@@ -138,16 +170,16 @@ static void test_no_unwired_api(void) {
     /* 这些函数定义在某个模块里，但**必须**在游戏主循环/UI 里被调用 */
     static const struct { const char* fn; const char* where; } must[] = {
         /* 每日任务：修正与限制 */
-        { "DailyMonsterSpeedMul",    "src/game.c" },
-        { "DailyBatteryDrainMul",    "src/game.c" },
-        { "DailyGoldMul",            "src/game.c" },
-        { "DailyNoiseMul",           "src/game.c" },
-        { "DailyForbidSprint",       "src/game.c" },
+        { "DailyMonsterSpeedMul",    "src/loop_level.c" },
+        { "DailyBatteryDrainMul",    "src/loop_level.c" },
+        { "DailyGoldMul",            "src/loop_level.c" },
+        { "DailyNoiseMul",           "src/loop_level.c" },
+        { "DailyForbidSprint",       "src/loop_tutorial.c" },
         { "DailyForbidLight",        "src/game.c" },
         { "DailySecondSpawnOffset",  "src/entity.c" },
         { "DailyGoldTierBonus",      "src/economy.c" },   /* 强度档在 economy.c */
         { "DailyForbidHide",         "src/game.c" },
-        { "DailyForbidWrench",       "src/game.c" },
+        { "DailyForbidWrench",       "src/loop_wrench.c" },
         { "DailyForbidMonsterMap",   "src/ui.c" },
         /* 每日任务本身 */
         { "DailyTick",               "src/game.c" },
@@ -170,14 +202,17 @@ static void test_no_unwired_api(void) {
         { "CampaignNoiseAlertMul",    "src/entity.c" },
         { "CampaignNoGiveUp",         "src/entity.c" },
         { "CampaignWardenImmediate",  "src/warden.c" },
-        { "CampaignExitDistNow",      "src/game.c" },
+        { "CampaignExitDistNow",      "src/loop_level.c" },
         /* v6 第 24 轮：出口必须真的按配电箱坐标算 */
-        { "FindFarthestFromCell",    "src/game.c" },
+        { "FindFarthestFromCell",    "src/loop_level.c" },
         /* v6 round 35: bench capstone B (added round 10, never wired) */
-        { "BenchBullRush",           "src/game.c" },
-        { "BenchBurst",              "src/game.c" },
+        { "BenchBullRush",           "src/loop_player_tick.c" },
+        { "BenchBurst",              "src/loop_player_tick.c" },
         { "BenchLure",               "src/throwing.c" },
-        { "BenchRecover",            "src/game.c" },
+        /* 2026-11-09：原指向 game.c 的局部 extern（重构后已移除）。
+           **注意：bench.c 里它是 `{ return 0; }` 空实现** —— 这条断言
+           只保证"名字在"，不保证"真的接线"，别把它当功能验证。 */
+        { "BenchRecover",            "src/bench.c" },
         /* v6 round 36: THREAT 5th effect + daily modifier display */
         { "ThreatCooldownDelta",     "src/entity.c" },
         { "DailyModTextEn",          "src/game.c" },
@@ -187,7 +222,7 @@ static void test_no_unwired_api(void) {
         { "MusicProcSetScene",       "src/music.c" },
         { "MusicProcSetGain",        "src/music.c" },
         /* v6 round 37: the whole in-run skill draft was unreachable */
-        { "OpenSkillPick",           "src/game.c" },
+        { "OpenSkillPick",           "src/loop_rewards.c" },
         /* v6 round 41: daily progress is now shown in the HUD */
         { "DailyCurrent",            "src/ui.c" },
         { "CampaignTierMul",          "src/economy.c" },
@@ -257,7 +292,7 @@ static void test_no_dead_monster_hp(void) {
 
     /* 玩偶的耐久是**真的**，不能被顺手删掉 */
     {
-        char* g = read_file("src/game.c");
+        char* g = read_loop_sources();
         strip_comments(g);
         check(contains(g, "decoysArr[i].hp"), 
               "CONTRACT: the decoy doll's durability is real data and must stay");
@@ -339,7 +374,7 @@ static void test_room_template_internal_connectivity(void) {
 }
 
 static void test_hidespot_gap_contract(void) {
-    char* g = read_file("src/game.c");
+    char* g = read_loop_sources();
     strip_comments(g);
 
     check(contains(g, "HIDESPOT_MIN_GAP2"),
@@ -355,7 +390,7 @@ static void test_hidespot_gap_contract(void) {
 }
 
 static void test_tutorial_and_keystone_contract(void) {
-    char* src = read_file("src/game.c");
+    char* src = read_loop_sources();
     strip_comments(src);
 
     /* ---- P1-2：tutorialKnocked 必须真的被置 1（原来只有清零） ---- */
@@ -382,7 +417,7 @@ static void test_tutorial_and_keystone_contract(void) {
 
     /* ---- P1-1：SK_SALVAGE 不得再出现在"禁灯"判定里 ---- */
     {
-        char* g = read_file("src/game.c");
+        char* g = read_loop_sources();
         strip_comments(g);
         check(!contains(g, "!(DailyForbidLight() || HasKeystone(SK_SALVAGE))"),
               "CONTRACT: SK_SALVAGE must no longer disable the flashlight permanently");
@@ -402,7 +437,7 @@ static void test_wallet_single_source(void) {
         "src/upgrade_run.c", "src/money.c", "src/collector.c", "src/ui.c"
     };
     for (unsigned i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
-        const char* t = read_file(files[i]);
+        const char* t = (strcmp(files[i], "src/game.c") == 0 ? read_loop_sources() : read_file(files[i]));
         if (!t) continue;
         char* buf = (char*)malloc(strlen(t) + 1);
         if (buf) {
@@ -424,7 +459,7 @@ static void test_steam_zone(void) {
         "src/save.c", "src/audio.c"
     };
     for (unsigned i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
-        const char* t = read_file(files[i]);
+        const char* t = (strcmp(files[i], "src/game.c") == 0 ? read_loop_sources() : read_file(files[i]));
         if (!t) continue;
         check(!contains(t, "SteamAPI_"), "SteamAPI_ used outside steam zone");
         free((void*)t);
@@ -450,12 +485,12 @@ static void test_input_contract(void) {
         }
     }
     {
-        const char* g = read_file("src/game.c");
+        const char* g = read_loop_sources();
         check(g != NULL, "game.c not readable");
         if (g) {
-            check(contains(g, "IsActionDown(ACT_CANCEL_CHARGE)"),
+            check(contains(g, "ActionIsDown(ACT_CANCEL_CHARGE)"),
                   "attack reads the wrong action");
-            check(contains(g, "IsActionDown(ACT_THROW)"),
+            check(contains(g, "ActionIsDown(ACT_THROW)"),
                   "throw reads the wrong action");
             free((void*)g);
         }
@@ -480,7 +515,7 @@ static void test_hide_contract(void) {
     check(!hide_candidate_clear(map, 20.5f, 20.5f, 20.5f, 20.5f), "exit hide spot accepted");
 
     {
-        const char* game = read_file("src/game.c");
+        const char* game = read_loop_sources();
         const char* entity = read_file("src/entity.c");
         check(count_contains(game, "Dist2(hx2, hy2, exitX, exitY) < 6.0f") >= 2,
               "hide-spot exit guard missing from one generation pass");
@@ -516,7 +551,7 @@ static void test_tune_geometry(void) {
 }
 
 static void test_stable_visuals_and_input(void) {
-    const char* game = read_file("src/game.c");
+    const char* game = read_loop_sources();
     const char* ui = read_file("src/ui.c");
     const char* render = read_file("src/render.c");
     /* v3.3：合并上游后，锁盘的按键守卫改成 lockIgnoreVK ——
@@ -548,7 +583,7 @@ static void test_stable_visuals_and_input(void) {
 static void test_save_persist_contract(void) {
     const char* saveh = read_file("include/save.h");
     const char* savec = read_file("src/save.c");
-    const char* game  = read_file("src/game.c");
+    const char* game  = read_loop_sources();
     const char* gameh = read_file("include/game.h");
     const char* uic   = read_file("src/ui.c");
     /* 第 2 轮：主菜单整簇搬到 domain/ui/ui_menu.c，菜单相关断言要看新文件 */
@@ -678,7 +713,7 @@ static void test_save_persist_contract(void) {
  *   · 小地图耗电可被局内强化降低：10 / 8 / 6 / 4 每秒
  * ================================================================== */
 static void test_map_drain_contract(void) {
-    const char* game = read_file("src/game.c");
+    const char* game = read_loop_sources();
     const char* upg  = read_file("src/upgrade_run.c");
     const char* upgh = read_file("include/upgrade_run.h");
 
@@ -710,7 +745,7 @@ static void test_map_drain_contract(void) {
 static void test_lock_types_contract(void) {
     const char* lk  = read_file("src/lockbox.c");
     const char* lkh = read_file("include/lockbox.h");
-    const char* gm  = read_file("src/game.c");
+    const char* gm  = read_loop_sources();
 
     check(contains(lkh, "LOCK_TYPE_OVERLOAD = 4"), "overload lock type missing");
     check(contains(lkh, "LOCK_TYPE_SAW      = 5"), "saw lock type missing");
@@ -756,7 +791,7 @@ static void test_lock_types_contract(void) {
  *   ④ 空壳：离场必须留下可翻的战利品，否则"冒险"没有回报
  * ================================================================== */
 static void test_mimic_contract(void) {
-    const char* gm  = read_file("src/game.c");
+    const char* gm  = read_loop_sources();
     const char* mc  = read_file("src/mimic.c");
     const char* mh  = read_file("include/mimic.h");
     const char* bs = read_file("src/content/content_monsters.c");
@@ -1110,7 +1145,7 @@ static void test_save_container_contract(void) {
 
 static void test_mode_leak_contract(void) {
     const char* savec = read_file("src/save.c");
-    const char* game  = read_file("src/game.c");
+    const char* game  = read_loop_sources();
 
     check(contains(savec, "ResetRunModeFlags();"),
           "ContinueRun must reset stale mode flags before loading");
@@ -1136,7 +1171,7 @@ static void test_mode_leak_contract(void) {
  *   ② 保险丝「先塞未上锁、再塞锁箱」—— 锁箱占比高时也必须放得下
  * ================================================================== */
 static void test_lockbox_contract(void) {
-    const char* game = read_file("src/game.c");
+    const char* game = read_loop_sources();
     check(contains(game, "static int LockboxPctForFloor(int lv)"),
           "per-floor lockbox ratio function missing");
     check(contains(game, "#define LOCKBOX_PCT_CAP         70"),

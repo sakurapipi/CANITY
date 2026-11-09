@@ -6,15 +6,16 @@
 #define CANITY_PLAYER_API_H
 
 #include "common.h"
+#include "calibration.h"
+#include "wrench.h"
+#include "item_effects.h"
 
 extern int qteHint;
 extern float flashTime;
 extern float healFlash;
-extern int flares, bottles;
-extern int echoBolts;
-extern int decoys;
-extern int throwSelected;
 extern int hideSpotCount;
+extern int hideRepairCount;
+extern int knockCountRun;
 extern int hiddenIn;
 extern int hideSpotNear;
 extern float crankTimer;
@@ -40,8 +41,6 @@ extern float weaponAtkCharge;
 extern float decoySelfTimer;
 extern float smokeDim;
 int PlayerInSmoke(void);
-extern int bricks, acids, smokeBombs;
-extern int firePots, gluePots, mirrors;
 extern int g_dmgIgnoreArmor;
 int ApplyDamage(Monster* m, int base, int type, float sx, float sy);
 extern int lastHitDamage;
@@ -54,7 +53,7 @@ float SanityMax(void);
 float StaminaMax(void);
 extern float energy;
 int EnergyMax(void);
-extern int calibActive, calibAttempts, calibResult;
+extern int calibActive, calibResult;
 extern float calibPos, calibZoneC, calibCooldown, calibResultTimer;
 void CalibStart(void);
 void CalibLock(void);
@@ -68,6 +67,10 @@ extern int crankTimeTotal;
 extern int tookDamage;
 
 extern float ghostStillT;
+extern float secondWindTimer, vanishTimer, vanishHold, pawnCd, retaliateT;
+extern int vanished, lastResortUsed, counterKillUsed;
+extern int sprintedAnyFloor;
+extern float lowSanitySeconds;
 extern int holdingNow;
 extern float stepTimer;
 extern float wrenchHitFlashT;
@@ -84,14 +87,15 @@ extern float modSpeedMul;
 
 
 
-/* 原 game.c 的 static 状态（第 21 轮提升为模块可见） */
-extern unsigned wrenchHitMask;
-extern int wrenchPrev;
-extern int wrenchInit;
-extern int wrenchArmed;
-
 float BatteryDrainRate(void);
 
 float SafeHealRate(void);
+
+/* Inventory declarations are forwarded through item_effects.h. */
+
+
+/* Shared player effect/escape state. */
+extern int runSpotted, catchBreakUsed, playDeadUsed, ultUsed;
+extern float ultTimer, hideBlockTimer;
 
 #endif
