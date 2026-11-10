@@ -27,8 +27,8 @@ def main():
     parser.add_argument('--output', type=Path, default=Path.home()/'Desktop'/'GAME')
     parser.add_argument('--include-web', action='store_true')
     parser.add_argument('--single-exe', action='store_true',help='MP3 resources are already embedded in this Windows build')
-    parser.add_argument('--label', default='CANITY_2.4.2_完整运行包')
-    parser.add_argument('--notes', type=Path, default=Path('docs/RELEASE-v2.4.2.md'))
+    parser.add_argument('--label', default='CANITY_2.4.3_完整运行包')
+    parser.add_argument('--notes', type=Path, default=Path('docs/RELEASE-v2.4.3.md'))
     parser.add_argument("--acceptance-report", type=Path)
     parser.add_argument("--source-commit", default=os.environ.get("GITHUB_SHA"))
     args = parser.parse_args()
@@ -116,7 +116,7 @@ def main():
     if args.single_exe:
         strip=Path(compiler).resolve().parent/'strip.exe' if compiler else None
         if strip and strip.is_file():subprocess.run([str(strip),'--strip-unneeded',str(folder/'canity.exe')],check=True)
-        (folder/'运行说明.txt').write_text('CANITY 2.4.2：直接双击canity.exe，无需BAT或DAT。音乐嵌入EXE，首次运行写入用户缓存。默认存档位于%LOCALAPPDATA%/CANITY/saves，尊重CANITY_DATA_DIR。验证范围以随包报告为准。',encoding='utf-8-sig')
+        (folder/'运行说明.txt').write_text('CANITY 2.4.3：直接双击canity.exe，无需BAT或DAT。音乐嵌入EXE，首次运行写入用户缓存。默认存档位于%LOCALAPPDATA%/CANITY/saves，尊重CANITY_DATA_DIR。验证范围以随包报告为准。',encoding='utf-8-sig')
     source_hashes = {}
     for directory in ('src', 'include', 'tools', 'tests', 'l10n', 'third_party'):
         for path in sorted((ROOT/directory).rglob('*')):

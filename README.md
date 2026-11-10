@@ -1,4 +1,4 @@
-> **2.4.2 正式版**：修复训练营经济隔离、旧档迁移与多档位切换、钱袋续存、手机摇杆和扳手输入、后台暂停与音频切换。Windows 为内嵌 MP3 的直接运行 EXE。详见 [正式版更新说明](docs/RELEASE-v2.4.2.md)。
+> **2.4.3 正式版**：关闭桌面鼠标和手机触屏的上下转视角，镜头固定水平，保留左右转向。详见 [更新说明](docs/RELEASE-v2.4.3.md)。
 
 # CANITY
 
@@ -6,11 +6,11 @@
 
 一款以探索、声音、光线与资源取舍为核心的第一人称像素恐怖逃生游戏，使用 C99 编写。
 
-**当前源码版本：2.4.2 · 存档格式：v45 · 地图：36×36 · 容器槽：12。**
+**当前源码版本：2.4.3 · 存档格式：v45 · 地图：36×36 · 容器槽：12。**
 
 Windows 桌面版与 WebAssembly 网页版共用游戏规则。射线投射、纹理采样、深度遮挡与后处理由 CPU 软件渲染完成，无需 OpenGL 或 DirectX 图形接口。怪物造型与场景贴图使用程序化生成；配乐随包提供 MP3，另有内置合成回退。
 
-- [下载已发布版本](https://github.com/sakurapipi/CANITY/releases)（选择 v2.4.2 正式版，附件与标签由同一工作流构建）
+- [下载已发布版本](https://github.com/sakurapipi/CANITY/releases)（选择 v2.4.3 正式版，附件与标签由同一工作流构建）
 - [查看自动构建与验证](https://github.com/sakurapipi/CANITY/actions/workflows/ci.yml)
 - [2.4.2 修复范围与兼容说明](docs/RELEASE-v2.4.2.md)
 - [直接在线游玩](https://sakurapipi.github.io/CANITY/)

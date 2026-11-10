@@ -53,7 +53,7 @@ def main():
             multi('touchStart',[left,m]);page.wait_for_timeout(180);multi('touchEnd',[m]);page.wait_for_function('Module._CanityWebInputState(0)===0');page.wait_for_timeout(200)
             check('map round trip restores still-held joystick',page.evaluate('Module._CanityProbeGameKey(87)&1'))
             before=state(page,6);multi('touchStart',[left,(13,550,270)]);multi('touchMove',[left,(13,550,340)]);page.wait_for_timeout(180)
-            check('touch look changes vertical pitch',state(page,6)!=before)
+            check('touch look keeps the camera horizontal',state(page,6)==before==0)
             multi('touchEnd',[(13,550,340)]);page.wait_for_timeout(120);check('look release preserves independent movement',page.evaluate('Module._CanityProbeGameKey(87)&1'))
             multi('touchEnd',[]);page.wait_for_timeout(180);check('joystick release clears movement',not page.evaluate('Module._CanityProbeGameKey(87)&1'))
             box=page.locator('[data-act="DODGE"]').bounding_box();check('escape button is visible',box is not None)

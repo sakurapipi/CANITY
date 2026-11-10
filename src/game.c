@@ -592,12 +592,9 @@ void ForceCursor(int visible) {
  * 现在 Win32 的 WndProc 与网页后端都调这一个函数，行为完全一致。
  * ================================================================== */
 void CanityMouseLook(int dx, int dyv) {
-    if(dyv!=0){
-        /* Render3D already uses true pitch projection; the old input gate was stale. */
-        if(!isfinite(pitchRatio))pitchRatio=0;
-        pitchRatio=fmaxf(-1,fminf(1,pitchRatio-(float)dyv*.003f*mouseSens));
-        uiDirty=1;
-    }
+    /* Horizontal-only camera: ignore vertical mouse/touch input. */
+    (void)dyv;
+    pitchRatio = 0.0f;
     if (dx != 0) {
         float rot = (float)(dx * MOUSE_BASE_SENS * mouseSens);
         float oldDirX = dirX;

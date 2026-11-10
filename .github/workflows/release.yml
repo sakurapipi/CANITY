@@ -86,7 +86,7 @@ jobs:
         run: |
           $ver = (Select-String -Path include/common.h -Pattern 'CANITY_VERSION_STR\s+"([^"]+)"').Matches[0].Groups[1].Value
           $name = "CANITY_v${ver}_win64"
-          python -X utf8 tools/package_playable.py --output stage --label $name --notes docs/RELEASE-v2.4.2.md --acceptance-report work/codex-build/validation-summary.json --source-commit $env:GITHUB_SHA --single-exe
+          python -X utf8 tools/package_playable.py --output stage --label $name --notes docs/RELEASE-v${ver}.md --acceptance-report work/codex-build/validation-summary.json --source-commit $env:GITHUB_SHA --single-exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $folder = (Get-Content work/latest_playable_path.txt -Raw).Trim()
           $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { 'v' + $ver.Replace(' ', '-') }
@@ -214,7 +214,7 @@ jobs:
             assets/CANITY_v*_web_single.html
             assets/build-manifest.json
           generate_release_notes: false
-          body_path: docs/RELEASE-v2.4.2.md
+          body_path: docs/RELEASE-${{ github.ref_name }}.md
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

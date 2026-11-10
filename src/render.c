@@ -151,20 +151,17 @@ static int noiseReady = 0;
 
 unsigned int floorBaseA = 0x00151515u, floorBaseB = 0x00202020u;
 int themeId = 0;
-/* v1.12：视角上下 = 地平线偏移（y-shear，Doom 的做法）。
-   范围 ±35% 屏高，单位是渲染像素。 */
-float pitchRatio = 0.0f;   /* -1..1，映射到 ±0.45 rad ≈ ±26° */
-int horizon = 0;           /* 兼容旧代码：真俯仰不再用它平移 */
-static float camPitch = 0.0f;
+/* Keep the camera level on every platform, including after resume/reset. */
+float pitchRatio = 0.0f; /* Compatibility state; vertical look is disabled. */
+int horizon = 0;
 static float pitchCos = 1.0f, pitchSin = 0.0f;
 static int   focal = 600;  /* 焦距 = 渲染高度（与原 lineHeight 一致） */
 
-/* v1.13 真俯仰：把相机在竖直方向真的转过去，
-   墙的上下沿、精灵、地板/天花板都按旋转后的视锥重新投影。 */
+/* Preserve the existing projection with a permanently horizontal camera. */
 void UpdatePitch(void) {
-    camPitch = pitchRatio * 0.45f;
-    pitchCos = cosf(camPitch);
-    pitchSin = sinf(camPitch);
+    pitchRatio = 0.0f;
+    pitchCos = 1.0f;
+    pitchSin = 0.0f;
     focal = renderH;
     horizon = 0;
 }

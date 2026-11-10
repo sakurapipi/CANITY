@@ -216,9 +216,10 @@ static void test_stable_rhythm_gold_cap(void){
     trainingMode=training;currentLevel=level;RunEconomyReset();
 }
 void TestSuite_update(void) {
-    float savedPitch=pitchRatio;pitchRatio=0;CanityMouseLook(0,60);
-    CHECK(pitchRatio<0 && pitchRatio>=-1,"vertical input reaches true pitch projection");
+    float savedPitch=pitchRatio;pitchRatio=.5f;CanityMouseLook(0,60);
+    CHECK(pitchRatio==0,"vertical input resets to a level camera");
     pitchRatio=savedPitch;UpdatePitch();
+    CHECK(pitchRatio==0,"render projection cannot retain vertical tilt");
     test_stable_rhythm_gold_cap();
     test_shared_map_release_and_tree_drag();
     test_invalid_action_and_key_indices();
