@@ -190,6 +190,9 @@ jobs:
             first=1
             for f in assets/*; do
               name=$(basename "$f")
+              # The output file exists before this loop because of redirection;
+              # it cannot contain a checksum of its own unfinished contents.
+              [ "$name" = "build-manifest.json" ] && continue
               size=$(stat -c %s "$f")
               sum=$(sha256sum "$f" | cut -d' ' -f1)
               [ $first -eq 1 ] || echo ","
