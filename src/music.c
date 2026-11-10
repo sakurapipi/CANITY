@@ -28,7 +28,9 @@ static void localStop(void* context) {
 }
 static int localPlay(void* context,const char* track,int loop) {
     (void)context;localStop(NULL);
-    if(track && track[0] && !strcmp(track,loadedPcmTracks[currentScene]) && MusicPcmSelect((int)currentScene)) {errorText[0]=0;return 1;}
+    if(track && track[0] && MusicPcmLoad((int)currentScene,track) && MusicPcmSelect((int)currentScene)) {
+        strcpy(loadedPcmTracks[currentScene],track);errorText[0]=0;return 1;
+    }
     if(!track || !track[0]) {MusicProcSetScene((int)currentScene);return 1;}
     wchar_t path[MAX_PATH*3],command[MAX_PATH*3+80];
     if(strchr(track,'"') || !MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,track,-1,path,(int)(sizeof(path)/sizeof(path[0])))) {
@@ -98,7 +100,7 @@ int MusicSetTrack(MusicScene scene,const char* path) {
     if(!ready)MusicInit();
     if(scene<0 || scene>=MUSIC_SCENE_COUNT || !path || strlen(path)>=sizeof(tracks[0])) return 0;
     strcpy(tracks[scene],path);
-    if(MusicPcmLoad((int)scene,path))strcpy(loadedPcmTracks[scene],path);
+    /* Decode only the active scene, not the complete album at startup. */
     if(scene==currentScene) {lastGain=-1;return active()->api.play(active()->context,path,1);}
     return 1;
 }
@@ -158,9 +160,9 @@ void MusicLoadGameTracks(void) {
     int found=0;
     for(int i=0;i<MUSIC_SCENE_COUNT;++i) {
         wchar_t path[MAX_PATH*3+80];char utf8[MAX_PATH*3];
-        _snwprintf(path,sizeof(path)/sizeof(path[0]),L"%lsmusic\\%ls.wav",base,names[i]);
+        _snwprintf(path,sizeof(path)/sizeof(path[0]),L"%lsmusic\\%ls.mp3",base,names[i]);
         if(GetFileAttributesW(path)==INVALID_FILE_ATTRIBUTES)
-            _snwprintf(path,sizeof(path)/sizeof(path[0]),L"%lsmusic\\%ls.mp3",base,names[i]);
+            _snwprintf(path,sizeof(path)/sizeof(path[0]),L"%lsmusic\\%ls.wav",base,names[i]);
         if(GetFileAttributesW(path)==INVALID_FILE_ATTRIBUTES)continue;
         if(WideCharToMultiByte(CP_UTF8,0,path,-1,utf8,sizeof(utf8),NULL,NULL)) {
             if(MusicSetTrack((MusicScene)i,utf8))found++;

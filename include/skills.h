@@ -117,7 +117,7 @@ float SkillExecuteMul(int hp, int maxHp);
 
 int   SkillCartoUnlock(void);
 int   SkillShortcutAvailable(void);
-int   SkillLastResortOneshot(void);
+/* SECOND WIND grants sprint grace; the retired revival hook is removed. */
 int   SkillTypeWorkRank(void);
 int   SkillRhythmActive(int hitCounter);            /* 是否持有某个 keystone */
 

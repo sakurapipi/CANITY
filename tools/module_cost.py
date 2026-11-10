@@ -128,7 +128,7 @@ def main():
                r.get('test', 0), r['extern'], r['cost'], flag))
     print('')
     print('  预算 %d 行；超预算 %d 个域' % (args.budget, over))
-    print('  注：game.c 9,557 行不在表里 —— 它就是要被拆掉的那一个。')
+    print('  注：game.c 为调度入口；本表按当前模块统计，不再引用历史行数。')
     return 1 if over else 0
 
 

@@ -51,6 +51,7 @@ extern char g_savePath[MAX_PATH];
 /* ---- 存档分区后端（src/save/save_backend.c）----
    全工程**唯一**允许碰 canity*.sav 的地方。 */
 int   SaveBackendWrite(const char* path, const void* data, size_t n); /* 0 = 成功 */
+int SaveBackendPreserveVersion(const char* path,int version); /* 0 only after a recoverable original exists */
 long  SaveBackendRead(const char* path, void* buf, size_t cap);       /* 字节数 / -1 */
 void  SaveBackendUpload(const char* path);                            /* 交给 Steam 专区 */
 void  SaveBackendSyncAll(void);                                       /* 云 <-> 本地 */

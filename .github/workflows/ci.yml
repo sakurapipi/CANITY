@@ -115,3 +115,13 @@ jobs:
             exit 1
           }
           "canity_verify.exe = {0:N0} bytes" -f $exe.Length
+
+      - name: Preserve all validation domain logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-domain-diagnostics
+          path: |
+            work/codex-build/validation-summary.json
+            work/codex-build/validation-*.log
+          if-no-files-found: warn

@@ -5,7 +5,11 @@
 #include "loop_api.h"
 #include "economy.h"
 #include "threat.h"
-int MonsterMinimumFloor(int kind){return kind>=0 && kind<SPAWN_KIND_COUNT?1:INT_MAX;}
+int MonsterMinimumFloor(int kind){
+    static const int minimum[SPAWN_KIND_COUNT]={1,1,2,1,2,1,2};
+    return kind>=0 && kind<SPAWN_KIND_COUNT?minimum[kind]:INT_MAX;
+}
+float MonsterMovementCap(void){return fminf(THREAT_SPEED_HARD_CAP,MOVE_SPEED*.97f);}
 int MonsterFloorChance(int kind,int level) {
     if(!MonsterEligible(kind,level))return 0;
     if(kind==SPAWN_COLLECTOR){int chance=14+level*7;return chance>90?90:chance;}
@@ -22,9 +26,9 @@ float HunterMoveSpeed(int index,int level,float modifier,float threat) {
     if(!isfinite(modifier) || modifier<.1f)modifier=1;
     if(!isfinite(threat) || threat<0)threat=0;
     float base=1.30f+fminf(.35f,(level-1)*.035f)+fminf(.12f,threat*.006f);
-    float cap=index==2?2.25f:1.85f;
+    float cap=MonsterMovementCap()/(index==2?1:1.26f);
     float speed=base*modifier*(index==2?1.26f:1.0f);
-    /* Below unmodified walking speed (2.5), even with the HUNTED modifier. */
+    /* Final caps remain below base walking speed, including HUNTED. */
     return fminf(cap,speed);
 }
 int MonsterChaseActive(void) {
@@ -34,7 +38,7 @@ int MonsterChaseActive(void) {
 }
 
 int MonsterEligible(int kind,int level){
-    if(kind<0 || kind>=SPAWN_KIND_COUNT || level<1)return 0;
+    if(kind<0 || kind>=SPAWN_KIND_COUNT || level<MonsterMinimumFloor(kind))return 0;
     if(kind==SPAWN_HUNTER || kind==SPAWN_COLLECTOR || kind==SPAWN_SCAVENGER)return 1;
     if(level==1 && kind!=SPAWN_LIGHT)return 0;
     float strength=GoldTier()+ThreatValue()*.65f+fmaxf(0,level-1)*.85f;

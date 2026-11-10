@@ -12,19 +12,27 @@
 /* Only the read-only chase query needs these engine-owned actor arrays. */
 Monster monHunters[MON_HUNTER_MAX];
 Monster lightBeasts[LIGHTBEAST_MAX];
+int isEndlessRun=0;
+int GoldTier(void){return 0;}
+float ThreatValue(void){return 0;}
+
 #define EXPECT(condition) do { if(!(condition)){fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#condition);return 1;} } while(0)
 int main(void) {
     for(int level=1;level<=100;level++){
         float slow=HunterMoveSpeed(0,level,1,18),fast=HunterMoveSpeed(2,level,1,18);
         EXPECT(fast>slow*1.15f);
-        EXPECT(HunterMoveSpeed(2,level,2,18)<=2.25f);
+        EXPECT(HunterMoveSpeed(2,level,2,18)<MOVE_SPEED);
         EXPECT(HunterSpawnDelay(level)>=22);
         if(level>1)EXPECT(HunterSpawnDelay(level)<=HunterSpawnDelay(level-1));
     }
     EXPECT(MonsterFloorChance(SPAWN_LIGHT,1)==0);
-    EXPECT(MonsterFloorChance(SPAWN_MIMIC,2)>0);
-    EXPECT(MonsterFloorChance(SPAWN_COLLECTOR,2)>=60);
+    EXPECT(MonsterFloorChance(SPAWN_MIMIC,2)==0);
+    EXPECT(MonsterFloorChance(SPAWN_MIMIC,8)>0);
+    EXPECT(MonsterFloorChance(SPAWN_COLLECTOR,2)==28);
+    EXPECT(MonsterFloorChance(SPAWN_COLLECTOR,12)==90);
     EXPECT(HunterMoveSpeed(0,1,1,0)<1.4f);
+    EXPECT(MonsterMinimumFloor(SPAWN_SPIDER)==2);
+    EXPECT(MonsterMinimumFloor(SPAWN_WARDEN)==2);
     PerceptionState clear=PerceptionEvaluate(.81f,123),low=PerceptionEvaluate(.19f,123);
     EXPECT(clear.grain==0 && clear.flicker==1 && clear.distortion==0);
     EXPECT(low.grain>clear.grain && low.grain<=PERCEPTION_GRAIN_MAX);

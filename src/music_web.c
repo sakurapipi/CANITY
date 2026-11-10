@@ -58,8 +58,18 @@ EM_JS(void,js_music_init,(void),{
         var names=['menu','explore','chase','safe','victory','defeat'];
         if(m.builtin){fallback();return;}
         if(m.buffers[scene]){start(m.buffers[scene]);return;}
-        var path=m.paths[scene]||'music/'+names[scene]+'.wav';
-        if(!m.loading[scene])m.loading[scene]=fetch(path).then(function(r){if(!r.ok)throw new Error('music unavailable');return r.arrayBuffer();}).then(function(b){return ctx.decodeAudioData(b);}).then(function(b){m.buffers[scene]=b;return b;});
+        var path=m.paths[scene]||(globalThis.CANITY_MUSIC_TRACKS && globalThis.CANITY_MUSIC_TRACKS[scene])||'music/'+names[scene]+'.mp3';
+        if(!m.loading[scene]){
+            function decode(url){return fetch(url).then(function(r){if(!r.ok)throw new Error('music unavailable');return r.arrayBuffer();}).then(function(b){return ctx.decodeAudioData(b);});}
+            m.loading[scene]=decode(path).catch(function(e){
+                if(!m.paths[scene] && path.endsWith('.mp3'))return decode('music/'+names[scene]+'.wav');
+                throw e;
+            }).then(function(buffer){
+                /* Keep the active scene; avoid retaining the whole decoded album. */
+                m.buffers={};if(m.scene===scene)m.buffers[scene]=buffer;
+                delete m.loading[scene];return buffer;
+            }).catch(function(e){delete m.loading[scene];throw e;});
+        }
         m.loading[scene].then(start).catch(fallback);
     };
     Module._musicPlay(0,0);
@@ -111,7 +121,7 @@ void MusicSetMasterVolume(float volume){webMaster=isfinite(volume)?fmaxf(0,fminf
 void MusicSetPaused(int paused){webPaused=!!paused;if(!paused && WebCustomActive() && webCustom[webProvider].pause)webCustom[webProvider].pause(webContexts[webProvider],0);}
 void MusicDuck(float seconds,float gain){if(seconds<=0)return;if(webDuckTime<=0 || gain<webDuck)webDuck=fmaxf(0,gain);if(seconds>webDuckTime)webDuckTime=seconds;}
 void MusicNotify(MusicEvent event){MusicDuck(event==MUSIC_EVENT_GATE?2:1.5f,event==MUSIC_EVENT_CAUGHT?.15f:.35f);}
-void MusicTick(float dt){if(!(dt>=0))return;webDuckTime=fmaxf(0,webDuckTime-dt);if(webDuckTime<=0)webDuck=1;float target=webPaused?0:webMaster*webDuck;webGain+=(target-webGain)*fminf(1,dt*4);if(WebCustomActive()){MusicProvider* p=&webCustom[webProvider];if(p->gain)p->gain(webContexts[webProvider],webGain);if(p->tick)p->tick(webContexts[webProvider],dt);if(webPaused && webGain<.0002f && p->pause)p->pause(webContexts[webProvider],1);}else js_music_tick(webGain,RoomThemeSanityRatio(sanity/fmaxf(1,SanityMax())),webPaused);}
+void MusicTick(float dt){js_music_init();if(!(dt>=0))return;webDuckTime=fmaxf(0,webDuckTime-dt);if(webDuckTime<=0)webDuck=1;float target=webPaused?0:webMaster*webDuck;webGain+=(target-webGain)*fminf(1,dt*4);if(WebCustomActive()){MusicProvider* p=&webCustom[webProvider];if(p->gain)p->gain(webContexts[webProvider],webGain);if(p->tick)p->tick(webContexts[webProvider],dt);if(webPaused && webGain<.0002f && p->pause)p->pause(webContexts[webProvider],1);}else js_music_tick(webGain,RoomThemeSanityRatio(sanity/fmaxf(1,SanityMax())),webPaused);}
 void MusicSeekSeconds(float seconds){if(seconds>=0 && !WebCustomActive())js_music_seek(seconds);}
 float MusicEffectiveGain(void){return webGain;}
 MusicScene MusicCurrentScene(void){return webScene;}

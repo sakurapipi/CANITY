@@ -58,6 +58,10 @@ extern void CloseSkillPick(void);
 extern void GenerateLevel(void);
 extern void SkillResetView(void);
 int checks=0;
+void StartFreshTestRun(void){
+    StartGame();
+    if(LoopRunReplacementPending())LoopResolveRunReplacement(1);
+}
 void clear_meta(void) { memset(skillRank,0,sizeof(int)*SKILL_COUNT);skillRank[SK_ORIGIN]=1; }
 void daily_case(int goal,int target) {
     int a[15]={0};a[0]=goal;a[1]=target;a[5]=(int)DailySeedToday();DailyLoadFrom(a);

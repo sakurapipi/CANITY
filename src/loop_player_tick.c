@@ -27,123 +27,71 @@
 
 static int secondWindUsed = 0;
 float secondWindTimer = 0.0f;   /* v3.0 二次呼吸：体力归零后的宽限秒数 */
-int lastResortUsed = 0;   /* v2.2 LAST RESORT：本局是否已用掉免死 */    /* v2.0 SHORTCUT：本局是否已用过跳层 */
 float ghostStillT = 0.0f;
 float pawnCd = 0.0f;
 float retaliateT = 0.0f;
 int   counterKillUsed = 0;
 
-int PlayerTickVitals(float dt, int inSafe) {
-    if(calibActive)return 1;
-    if (hiddenIn >= 0 && !calibActive) {
-        float regen = HIDE_BATTERY_REGEN * (flashlightOn ? 0.5f : 1.0f);
-        battery += regen * dt;
-        if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
+/* A drain multiplier must never turn resource consumption into generation. */
+static float PositiveDrainFactor(float value){return isfinite(value) && value>0?value:1;}
+
+int PlayerTickVitals(float dt,int inSafe){
+    if(!(dt>0) || !isfinite(dt) || calibActive)return 1;
+    if(!isfinite(sanity))sanity=SanityMax();
+    if(!isfinite(battery))battery=0;
+    float drain=SanityDrainRate()*PositiveDrainFactor(SkillCalmMul())*
+        PositiveDrainFactor(modSanityMul)*(1+fmaxf(0,FxStrength(FX_DRAIN))*1.5f)*
+        PositiveDrainFactor(RelicSanityMul())*PositiveDrainFactor(ColdBloodMul())*
+        PositiveDrainFactor(BenchSanityDrainMul());
+    if(hiddenIn<0 && Hunter0()->active && Hunter0()->state==1){
+        float range=flashlightOn?MONSTER_SIGHT:MONSTER_SIGHT_DARK;
+        if(Dist2(posX,posY,Hunter0()->x,Hunter0()->y)<range*range)drain+=SEEN_SANITY_EXTRA;
     }
-
-    /* 理智流失：随层数增长（v1.8），代谢 keystone 把它换成电量消耗 */
-    float drainMul = 1.0f + FxStrength(FX_DRAIN) * 1.5f;
-    float drain = SanityDrainRate() * SkillCalmMul() * modSanityMul * drainMul * RelicSanityMul();
-    /* v3.0：**被追捕者盯上时理智额外流失** ——
-       这给「断开视线」一个具体理由，而藏身是最快的断开方式。
-       藏着时不算被盯上（hiddenIn >= 0 直接跳过）。 */
-        /* v3.0：冷血（局内 COLD BLOOD）—— 理智流失 -20% */
-    drain *= ColdBloodMul()*BenchSanityDrainMul();
-    if (hiddenIn < 0 && Hunter0()->active && Hunter0()->state == 1) {
-        float sdx = posX - Hunter0()->x, sdy = posY - Hunter0()->y;
-        float sightNow = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
-        if (sdx * sdx + sdy * sdy < sightNow * sightNow) drain += SEEN_SANITY_EXTRA;
+    int composed=SkillOwned(SK_COUNTER_COMPOSE) && isfinite(retaliateT) && retaliateT>0 && retaliateT<=10;
+    if(!inSafe && hiddenIn<0 && !composed){
+        float ghostMul=SkillGhostBreathRank()>0 && ghostStillT>2 && ghostStillT<=22?.5f:1;
+        float siphonMul=SkillPwrSiphonActive() && !flashlightOn && battery<BatteryMax()*.25f?SkillPwrSiphonSanityMul():1;
+        float loss=fmaxf(SanityDrainRate()*.05f,drain)*PositiveDrainFactor(siphonMul)*DiffSanityDrainMul()*ghostMul*dt;
+        if(HasKeystone(SK_METAB)){
+            /* Partial conversion, not permanent immunity while a generator is running. */
+            float converted=loss*.5f,available=fmaxf(0,battery)/META_COST;
+            float paid=fminf(converted,available);
+            battery=fmaxf(0,battery-paid*META_COST);
+            loss=loss-converted+(converted-paid)*META_STARVE_MUL;
+        }
+        CalibAccumulateDrain(loss);sanity-=loss;
     }
-    if(SkillOwned(SK_COUNTER_COMPOSE) && retaliateT>0.0f)drain=0.0f;
-    if (HasKeystone(SK_METAB)) {
-        battery -= drain * META_COST * dt;
-        if (battery <= 0.0f) {          /* 断电：理智开始双倍流失 */
-            battery = 0.0f;
-            CalibAccumulateDrain(drain * META_STARVE_MUL * DiffSanityDrainMul() * dt);
-            sanity -= drain * META_STARVE_MUL * DiffSanityDrainMul() * dt;
-        }
-    } else {
-        float siphonSan = 1.0f;
-        if (SkillPwrSiphonActive() && battery < (float)BatteryMax() * 0.25f)
-            siphonSan = SkillPwrSiphonSanityMul();
-        /* v2.2：LAST RESORT —— 理智归零时免死一次，回 15 点并给 4 秒。
-           这个 keystone 之前是纯空函数（1200 金币 + 2 核心买了个寂寞）。 */
-        if (!lastResortUsed && SkillLastResortOneshot()) {
-            lastResortUsed = 1;
-            sanity = 15.0f;
-            pickupMsg = "LAST RESORT";
-            pickupMsgTimer = 2.0f;
-            uiDirty = 1;
-            return 0;
-        }
-        /* ==================================================================
-         * 第 8 轮「典当」：理智低于 30% 时自动花 200×层数 金 换 20 理智。
-         * 做成自动而不是按键：这个游戏已经有 8 个交互键，再加一个没人记得住；
-         * 而"钱换命"这件事应该在玩家快撑不住时自己发生。
-         * 30 秒冷却，避免一口气把银行花光。
-         * ================================================================ */
-        {
-
-
-            if (SkillRaiderPawnOwned() && pawnCd <= 0.0f &&
-                sanity < 30.0f && WalletCanPayBank(200 * (currentLevel > 0 ? currentLevel : 1))) {
-                int cost = 200 * (currentLevel > 0 ? currentLevel : 1);
-                if (WalletSpendBank(cost)) {
-                    sanity += 20.0f;
-                    if (sanity > SanityMax()) sanity = SanityMax();
-                    pawnCd = 30.0f;
-                    PlaySfx(SFX_PICKUP, 0.5f);
-                    pickupMsg = (g_lang == LANG_ZH) ? "典当：金币换理智" : "PAWNED GOLD FOR SANITY";
-                    pickupMsgTimer = 1.6f;
-                }
-            }
-        }
-        /* v2.5：安全屋里不流失 —— 这是"安全"二字的承诺 */
-        /* 第 2 轮：难度改的是"恐惧增长"，不是血量公式 */
-        /* 第 7 轮「呼吸同步」：站着不动时恐惧增长减半，
-           最长 20 秒（否则就是无限理智的神节点）。 */
-        {
-
-            float ghostMul = 1.0f;
-            if (SkillGhostBreathRank() > 0 && ghostStillT > 2.0f && ghostStillT <= 22.0f)
-                ghostMul = 0.5f;
-            if (!inSafe) {
-                CalibAccumulateDrain(drain * siphonSan * DiffSanityDrainMul() * ghostMul * dt);
-                sanity -= drain * siphonSan * DiffSanityDrainMul() * ghostMul * dt;
-            }
+    if(SkillRaiderPawnOwned() && pawnCd<=0 && sanity<30){
+        int cost=200*(currentLevel>0?currentLevel:1);
+        if(WalletSpendBank(cost)){
+            sanity=fminf(SanityMax(),sanity+20);pawnCd=30;PlaySfx(SFX_PICKUP,.5f);
+            pickupMsg=Tr("PAWNED GOLD FOR SANITY","典当：金币换理智");pickupMsgTimer=1.6f;
         }
     }
-    /* v3.3：躲进垃圾桶后缓慢回理智；净恢复约 1.5/秒 */
-    if (hiddenIn >= 0 && !calibActive) {
-        sanity += HIDE_SANITY_REGEN * dt;
-        if (sanity > SanityMax()) sanity = SanityMax();
+    if(hiddenIn>=0){
+        if(!flashlightOn)battery=fminf((float)BatteryMax(),battery+HIDE_BATTERY_REGEN*dt);
+        sanity=fminf(SanityMax(),sanity+HIDE_SANITY_REGEN*dt);
     }
-    lowSanitySeconds += (sanity <= 1.0f) ? dt : 0.0f;   /* v2.2：LAST BREATH */
-    /* v2.4.98：撤离面板开着的时候不许判死 ——
-       你已经在"要不要走"这一步了，此时被后面的怪撞死是 bug 不是难度。 */
-    {
-
-        if (exitChoiceOpen && sanity < 1.0f) sanity = 1.0f;
-    }
-
+    lowSanitySeconds+=(sanity<=1)?dt:0;
+    if(exitChoiceOpen && sanity<1)sanity=1;
+    battery=fmaxf(0,fminf((float)BatteryMax(),battery));
+    sanity=fminf(SanityMax(),sanity);
     return 1;
 }
 
-void PlayerTickBattery(float dt) {
-    if(calibActive)return;
-    if (SkillPwrSiphonActive()) {
-        float cap25 = (float)BatteryMax() * 0.25f;
-        if (battery < cap25) {
-            battery += (float)SkillPwrSiphonAdd() * dt;
-            if (battery > cap25) battery = cap25;
-        }
+void PlayerTickBattery(float dt){
+    if(!(dt>0) || !isfinite(dt) || calibActive)return;
+    if(!isfinite(battery))battery=0;
+    if(!flashlightOn && hiddenIn<0 && SkillPwrSiphonActive()){
+        float threshold=BatteryMax()*.25f;
+        if(battery<threshold)battery=fminf(threshold,battery+SkillPwrSiphonAdd()*dt);
     }
-
-    if (flashlightOn) {
-        if(!CampaignFlashlightLocked()) battery -= BatteryDrainRate() * RunBatteryDrainMul() * SkillGhostStepDrainMul() * dt;
-        if (battery <= 0.0f) { battery = 0.0f; flashlightOn = CampaignFlashlightLocked() ? 1 : 0; }
+    if(flashlightOn && !CampaignFlashlightLocked()){
+        float rate=BatteryDrainRate()*PositiveDrainFactor(RunBatteryDrainMul())*PositiveDrainFactor(SkillGhostStepDrainMul());
+        battery-=rate*dt;
     }
-
+    battery=fmaxf(0,fminf((float)BatteryMax(),battery));
+    if(battery<=0)flashlightOn=CampaignFlashlightLocked()?1:0;
 }
 
 void PlayerResetSprintGrace(void) {

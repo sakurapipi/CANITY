@@ -68,7 +68,7 @@ extern int tookDamage;
 
 extern float ghostStillT;
 extern float secondWindTimer, pawnCd, retaliateT;
-extern int lastResortUsed, counterKillUsed;
+extern int counterKillUsed;
 extern int sprintedAnyFloor;
 extern float lowSanitySeconds;
 extern int holdingNow;

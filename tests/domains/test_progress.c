@@ -52,7 +52,7 @@ static void test_double_reward_rounds(void) {
     extern int skillPickRound, skillPickTotal;
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
     currentLevel = 6;                 /* 6 % 3 == 0 且 6 % 2 == 0 */
     GenerateLevel();
     { extern void RewardScheduleForLevel(int); RewardScheduleForLevel(6); }
@@ -89,7 +89,7 @@ static void test_shop_full_bag_no_charge(void) {
     (void)0; int priceNow = 0;
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     /* 直接把售价表改成"照明棒"，然后把它塞满 */
     ShopOpen(1);
@@ -265,12 +265,12 @@ static void test_trees_shop(void) {
 }
 
 static void test_runs_and_layout(void) {
-    clear_meta();bankGold=0;bankCarryPct=0;StartGame();
+    clear_meta();bankGold=0;bankCarryPct=0;StartFreshTestRun();
     finish_floor();CHECK(currentLevel==2 && currentState==STATE_SKILL_PICK && pickMode==0,"skill selection reachable on floor two");CloseSkillPick();
     finish_floor();CHECK(currentLevel==3 && currentState==STATE_SKILL_PICK && pickMode==1,"relic selection reachable on floor three");CloseSkillPick();
     while(currentLevel<6) {finish_floor();while(currentState==STATE_SKILL_PICK)CloseSkillPick();}
     /* A separate transition checks both selections before closing either. */
-    StartGame();currentLevel=5;GenerateLevel();finish_floor();
+    StartFreshTestRun();currentLevel=5;GenerateLevel();finish_floor();
     CHECK(currentLevel==6 && pickMode==1,"floor six first offers a relic");CloseSkillPick();
     CHECK(currentState==STATE_SKILL_PICK && pickMode==0,"floor six also offers the skill");CloseSkillPick();
     StartCampaign(0);int stages[8]={0,1,1,2,3,3,3,4};
@@ -320,7 +320,7 @@ static void test_music(void) {
 }
 
 static void test_wrench(void) {
-    clear_meta();bankGold=0;bankCarryPct=0;StartGame();dailyMode=0;
+    clear_meta();bankGold=0;bankCarryPct=0;StartFreshTestRun();dailyMode=0;
     Hunter0()->active=lightBeast.active=1;
     Hunter0()->x=lightBeast.x=posX+0.4f;Hunter0()->y=lightBeast.y=posY;
     int before=knockCountRun;WrenchStartSwing(1.0f);
@@ -358,7 +358,7 @@ static void test_wrench(void) {
      * 扳手必须也能击退第 2、3 只听声鬼
      * （2026-11-03：原来 targets[] 里只有 {&monster, &lightBeast}）
      * ================================================================== */
-    clear_meta();bankGold=0;bankCarryPct=0;StartGame();dailyMode=0;
+    clear_meta();bankGold=0;bankCarryPct=0;StartFreshTestRun();dailyMode=0;
     monHunters[0].active = monHunters[1].active = monHunters[2].active = 1;
     lightBeast.active = 0;
     for (int i = 0; i < MON_HUNTER_MAX; ++i) {
@@ -371,7 +371,7 @@ static void test_wrench(void) {
     for (int i = 0; i < 12; ++i) WrenchTick(0.04f);
     CHECK(knockCountRun == before + 3, "a wrench swing knocks back all three hunters");
 
-    carryGold=1000;CHECK(RunUpgTryBuy(0)==0,"run upgrade can be purchased");StartGame();
+    carryGold=1000;CHECK(RunUpgTryBuy(0)==0,"run upgrade can be purchased");StartFreshTestRun();
     CHECK(RunUpgLevel(0)==0,"run upgrades clear on a new run");
 }
 
@@ -954,8 +954,16 @@ static void test_triangular_paths_and_run_wallet(void) {
           "raider path points southwest");
     CHECK(SkillNodeX(SK_COUNTER_KILL)>SkillNodeX(SK_ORIGIN) && SkillNodeY(SK_COUNTER_KILL)>SkillNodeY(SK_ORIGIN),
           "counter path points southeast");
-    CHECK(skillDefs[SK_COUNTER_FREE].prereq==SK_SLIP,
-          "counter progression does not require buying the ghost crown");
+    {
+        int id=SK_COUNTER_FREE,steps=0;
+        while(id!=SK_ORIGIN && id>=0 && steps++<SKILL_COUNT){
+            CHECK(!skillDefs[id].isKeystone,"entry to the counter branch must not require another crown");
+            int pre=skillDefs[id].prereq;
+            CHECK(pre>=0 && pre<SKILL_COUNT && pre!=id,"counter ancestors must form a legal acyclic chain");
+            id=pre;
+        }
+        CHECK(id==SK_ORIGIN && steps<SKILL_COUNT,"counter branch has a complete path to the origin");
+    }
     BenchResetRun(); ThreatReset(); bankGold=12345; carryGold=benchNodes[BENCH_ENDURANCE].cost;
     float quoted=BenchThreatCostOf(BENCH_ENDURANCE);
     CHECK(BenchTryBuy(BENCH_ENDURANCE)==1,"a first run node can be bought with run gold alone");

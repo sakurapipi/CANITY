@@ -1288,13 +1288,8 @@ void ActivateMenuItem(void) {
             LoopQueueStart(START_ENDLESS, 0);
             StartGame();
         } else if (sel == ixNew) {
-            /* v2.7：普通 New Run 必须清掉两个模式标记 */
-            isEndlessRun = 0;
-            trainingMode = 0;
-            dailyMode = 0;
-            campaignMode = 0;
-            DeleteSave();
-            /* 2026-11-08：武器光标已删 */
+            /* Queue first. Never clear saves/mode flags before human confirmation. */
+            LoopQueueStart(START_NORMAL,0);
             StartGame();
         } else if (sel == ixHub) {
             /* v2.8：HUB = 技能树，一进来光标就在第一个节点上 */

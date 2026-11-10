@@ -90,7 +90,7 @@ void CalibTick(float dt) {
     if(!calibActive)return;
     if(currentLevel!=level || (stationSession?currentState!=STATE_SAFEHOUSE:(!trainingMode && hiddenIn<0))){Finish(2);return;}
     if(hiddenIn>=0){
-        battery=fminf((float)BatteryMax(),battery+HIDE_BATTERY_REGEN*(flashlightOn?.5f:1)*dt);
+        if(!flashlightOn)battery=fminf((float)BatteryMax(),battery+HIDE_BATTERY_REGEN*dt);
         sanity=fminf(SanityMax(),sanity+HIDE_SANITY_REGEN*dt);
     }
     elapsed+=dt;calibPos=elapsed/40.0f;

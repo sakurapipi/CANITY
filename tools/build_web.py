@@ -15,6 +15,8 @@
 """
 from pathlib import Path
 import os
+import base64
+import json
 import shutil
 import subprocess
 import sys
@@ -129,8 +131,23 @@ def main(argv):
         print('构建失败（退出码 %d）' % p.returncode, file=sys.stderr)
         return p.returncode
 
+    if single:
+        tracks={}
+        for i,name in enumerate(('menu','explore','chase','safe','victory','defeat')):
+            mp3=ROOT/'music'/(name+'.mp3')
+            if not mp3.is_file():raise SystemExit('Missing standalone music: '+str(mp3))
+            tracks[i]='data:audio/mpeg;base64,'+base64.b64encode(mp3.read_bytes()).decode('ascii')
+        html=DIST/'standalone.html'
+        content=html.read_text(encoding='utf-8')
+        content=content.replace('<script','<script>globalThis.CANITY_MUSIC_TRACKS='+json.dumps(tracks,separators=(',',':'))+';</script><script',1)
+        html.write_text(content,encoding='utf-8')
+
     if (ROOT / 'music').is_dir():
-        shutil.copytree(ROOT / 'music', DIST / 'music', dirs_exist_ok=True)
+        shutil.copytree(ROOT / 'music', DIST / 'music', dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns('*.wav'))
+        # Remove only superseded generated distribution audio, not authoring masters.
+        for old_wave in (DIST / 'music').glob('*.wav'):
+            if old_wave.with_suffix('.mp3').is_file(): old_wave.unlink()
 
     # Emscripten 会把 shell 里 {{{ SCRIPT }}} 之外的东西保留，但下载链接是写死的，
     # 这里做一次产出清点，方便直接看结果。

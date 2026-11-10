@@ -29,7 +29,11 @@ int FlashlightUseAllowed(void) {
     return !DailyForbidLight();
 }
 
-float BatteryDrainRate(void) { return BATTERY_DRAIN * SkillEcoMul() * RelicBatteryMul() * modBatteryMul * BenchFlashDrainMul() * RunUpgFlashMul(); }   /* v2.7 省电 */
+float BatteryDrainRate(void) {
+    float eventMul=isfinite(modBatteryMul) && modBatteryMul>0?modBatteryMul:1;
+    float rate=BATTERY_DRAIN*SkillEcoMul()*RelicBatteryMul()*eventMul*BenchFlashDrainMul()*RunUpgFlashMul();
+    return isfinite(rate)?fmaxf(BATTERY_DRAIN*.05f,rate):BATTERY_DRAIN;
+}   /* v2.7 省电 */
 
 int EnergyMax(void) { return (int)ENERGY_MAX; }
 

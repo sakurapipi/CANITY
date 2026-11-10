@@ -1393,6 +1393,10 @@ static int ReadSettingsCandidate(LoadedSaveInfo* info) {
 
 static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
     int originalVersion=g_save.version;
+    if((originalVersion>=25 && originalVersion<=30) || (originalVersion>=33 && originalVersion<SAVE_VERSION)){
+        int error=SaveBackendPreserveVersion(info->usedPath,originalVersion);
+        if(error){g_saveState=2;g_saveError=error;s_saveReadOnly=1;return 0;}
+    }
     /* v24（2.3.3 及更早）的布局和现在不同：成就 40→32、技能树 20→26、
        还删了 pendingShards。只在版本号和文件长度都精确匹配时迁移，
        对不上就继续走“归档不解释”的安全路径。 */
@@ -1428,16 +1432,7 @@ static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
          * ================================================================ */
         unsigned char* raw = (unsigned char*)malloc(sizeof(SaveBlob) + 4096);
         int migrated = 0;
-        /* 2026-11-07（B1）：迁移前先在盘上留一份原件。
-           迁移是"读旧布局 -> 写成新布局"，一旦哪里算错，玩家进度就没了；
-           留一份 .v<旧版本>.bak 才能人工回滚。已存在就不覆盖。 */
-        if (info->usedPath[0]) {
-            char bk[MAX_PATH + 24];
-            snprintf(bk, sizeof(bk), "%s.v%d.bak", info->usedPath, g_save.version);
-            { FILE* probe = fopen(bk, "rb");
-              if (probe) fclose(probe);
-              else if (!PlatCopyPath(info->usedPath, bk)) { /* 备份失败不阻断，下面仍会拒绝写入 */ } }
-        }
+        /* Original bytes were preserved before entering this migration. */
         if (raw && info->usedPath[0]) {
             long rn = ExtractLegacyPayload(info->usedPath, raw, (long)sizeof(SaveBlob) + 4096, NULL);
             if (rn > 0) {
@@ -1501,7 +1496,7 @@ static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
         g_save.version = SAVE_VERSION;
     }
     /* v38 appends only mimic knowledge; the zero-filled tail preserves v37 reads. */
-    if(g_save.version>=37 && g_save.version<=43){g_save.resIndex=RES_AUTO;g_save.scale=0;}
+    /* Valid user display choices survive migration; normal validation clamps invalid values. */
     if (g_save.version == 37 || g_save.version == 38 || g_save.version == 39 || g_save.version == 40 || g_save.version == 41 || g_save.version == 42 || g_save.version == 43) g_save.version = SAVE_VERSION;
     if(originalVersion>=25 && originalVersion<40){
         g_save.archivedJumperKnowledge[0]=(g_save.seenMonsters>>2)&1;
@@ -1916,6 +1911,60 @@ static void RestoreRunEquipment(void) {
     isEndlessRun = g_save.isEndlessRunSaved;  /* 恢复无尽模式标记 */
 }
 
+/* Repair only invalid loaded positions. Preserve IDs, contents and intact hiding places. */
+static int LoadedFloorCell(int x,int y){
+    return x>0 && y>0 && x<MAP_WIDTH-1 && y<MAP_HEIGHT-1 && !worldMap[y][x] && !PropBlocksAt(x,y);
+}
+static int LoadedHidePosition(float x,float y){
+    if(!isfinite(x) || !isfinite(y) || x<1 || y<1 || x>=MAP_WIDTH-1 || y>=MAP_HEIGHT-1)return 0;
+    if(!LoadedFloorCell((int)x,(int)y) || Blocked(x,y))return 0;
+    /* A closet silhouette needs more room than the player's center point. */
+    const float edge=.43f;
+    return !worldMap[(int)(y-edge)][(int)(x-edge)] && !worldMap[(int)(y-edge)][(int)(x+edge)] &&
+           !worldMap[(int)(y+edge)][(int)(x-edge)] && !worldMap[(int)(y+edge)][(int)(x+edge)];
+}
+static void RestoreUsableHideSpots(void){
+    hideSpotNear=-1;
+    if(!isfinite(posX) || !isfinite(posY) || posX<1 || posY<1 || posX>=MAP_WIDTH-1 || posY>=MAP_HEIGHT-1 ||
+       Blocked(posX,posY) || !LoadedFloorCell((int)posX,(int)posY)){
+        float best=1e30f,bx=posX,by=posY;
+        float ox=isfinite(posX)?posX:1.5f,oy=isfinite(posY)?posY:1.5f;
+        for(int y=1;y<MAP_HEIGHT-1;y++)for(int x=1;x<MAP_WIDTH-1;x++)if(LoadedFloorCell(x,y)){
+            float d=Dist2(x+.5f,y+.5f,ox,oy);if(d<best){best=d;bx=x+.5f;by=y+.5f;}
+        }
+        if(best<1e29f){posX=bx;posY=by;}
+    }
+    unsigned char seen[MAP_HEIGHT][MAP_WIDTH]={{0}};int queue[MAP_WIDTH*MAP_HEIGHT],head=0,tail=0;
+    int px=(int)posX,py=(int)posY;
+    if(LoadedFloorCell(px,py)){seen[py][px]=1;queue[tail++]=py*MAP_WIDTH+px;}
+    const int dx[4]={1,-1,0,0},dy[4]={0,0,1,-1};
+    while(head<tail){int cell=queue[head++],x=cell%MAP_WIDTH,y=cell/MAP_WIDTH;
+        for(int d=0;d<4;d++){int nx=x+dx[d],ny=y+dy[d];if(LoadedFloorCell(nx,ny) && !seen[ny][nx]){seen[ny][nx]=1;queue[tail++]=ny*MAP_WIDTH+nx;}}
+    }
+    for(int i=0;i<hideSpotCount;i++){
+        HideSpot* h=&hideSpots[i];if(!h->active)continue;
+        if(h->kind<0 || h->kind>2)h->kind=0;
+        h->broken=h->broken?1:0;
+        int valid=LoadedHidePosition(h->x,h->y);
+        if(valid)valid=seen[(int)h->y][(int)h->x];
+        if(valid)continue;
+        float best=1e30f,bx=0,by=0,ox=isfinite(h->x)?h->x:posX,oy=isfinite(h->y)?h->y:posY;
+        for(int y=1;y<MAP_HEIGHT-1;y++)for(int x=1;x<MAP_WIDTH-1;x++)if(seen[y][x]){
+            float tx=x+.5f,ty=y+.5f;
+            if(!LoadedHidePosition(tx,ty) || Dist2(tx,ty,exitX,exitY)<4 || (breaker.active && Dist2(tx,ty,breaker.x,breaker.y)<2))continue;
+            int clash=0;
+            for(int j=0;j<containerCount;j++)if(containers[j].active && Dist2(tx,ty,containers[j].x,containers[j].y)<1)clash=1;
+            for(int j=0;j<hideSpotCount;j++)if(i!=j && hideSpots[j].active && isfinite(hideSpots[j].x) && isfinite(hideSpots[j].y) && Dist2(tx,ty,hideSpots[j].x,hideSpots[j].y)<4)clash=1;
+            if(clash)continue;
+            float distance=Dist2(tx,ty,ox,oy);if(distance<best){best=distance;bx=tx;by=ty;}
+        }
+        if(best<1e29f){h->x=bx;h->y=by;}else h->active=0;
+    }
+    if(hiddenIn<0 || hiddenIn>=hideSpotCount || !hideSpots[hiddenIn].active || hideSpots[hiddenIn].broken)hiddenIn=-1;
+    else {posX=hideSpots[hiddenIn].x;posY=hideSpots[hiddenIn].y;}
+    playerInSafe=hiddenIn>=0;holdTimer=0;hoverKind=0;hoverIndex=-1;
+}
+
 static void ResumeRestoredRun(void) {
     /* 读档不重掷跳脸虫：本关不会突然蹦出来。
        触发器留成 -1，等下一层进关时再掷。 */
@@ -2070,6 +2119,7 @@ void ContinueRun(void) {
         else if (CampaignFlashlightLocked()) flashlightOn = 1;
     }
     RestoreRunGeometry();
+    RestoreUsableHideSpots();
     RestoreRunInventory();
     RestoreRunEquipment();
     roomTheme.spent=g_save.roomEventSpent?1:0;

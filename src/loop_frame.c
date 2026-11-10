@@ -148,7 +148,7 @@ static int UpdatePreflight(float dt) {
     if(calibActive && (currentState==STATE_PLAYING || currentState==STATE_SAFEHOUSE)){
         CalibTick(dt);CalibHandleInput(0);return 0;
     }
-    if(currentState==STATE_SAFEHOUSE){ShopTickCooldown(dt);CalibTick(dt);}
+    if(currentState==STATE_SAFEHOUSE){ShopTickCooldown(dt);CalibTick(dt);if(pickupMsgTimer>0)pickupMsgTimer=fmaxf(0,pickupMsgTimer-dt);}
     if(calibActive && currentState==STATE_SAFEHOUSE)return 0;
     TickFrameBegin();   /* 第 4 轮：每帧复位 tick 顺序守卫 */
     {  playerMoveSpeedNow = 0.0f; }   /* v8: 守门人判断「在动/冲刺」用 */

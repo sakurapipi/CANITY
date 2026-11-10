@@ -68,6 +68,11 @@ void HatchTick(float dt) {
         if (h->animT >= HATCH_OPEN_SECONDS) {
             /* ---- AD-27：动画播完的**这一帧**才结算效果 ---- */
             h->animT = HATCH_OPEN_SECONDS;
+            /* Resources/target may change during the opening animation. A failed
+               commit must remain retryable, never consume the single-use door. */
+            if(!HatchGateCheck(i,NULL,0)){
+                HatchSetState(i,HATCH_SEALED);h->animT=0;continue;
+            }
             HatchSetState(i, HATCH_OPEN);
             HatchFireEffect(i);
             HatchSetState(i, HATCH_FIRED);

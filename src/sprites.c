@@ -2205,84 +2205,119 @@ typedef struct PropBakeContext {
     float baseY;
 } PropBakeContext;
 
+/* Shared construction keeps closed/open/locked cases visibly the same object. */
+static void BakeSupplyCase(const PropBakeContext* bake,int opened,int locked){
+    float c=bake->c,y=bake->baseY;
+    float side[]={c+42,y-70,c+53,y-80,c+53,y-9,c+42,y};
+    cvPolyGrad(side,4,0x004D5359u,0x00151A20u,1);
+    float body[]={c-48,y-70,c+42,y-70,c+42,y,c-48,y};
+    cvPolyGrad(body,4,0x007E7259u,0x00302C27u,1);
+    cvBevel(c-48,y-70,c+42,y,3,.4f);
+    for(int i=0;i<5;i++){
+        float x=c-36+i*16;
+        cvLine(x,y-60,x,y-9,4,0x00252D34u,.75f);
+        cvLine(x-1,y-59,x-1,y-10,1,0x00B0A58Cu,.45f);
+    }
+    float lid[]={c-48,y-70,c-38,y-82,c+53,y-82,c+42,y-70};
+    cvPolyGrad(lid,4,0x009D9380u,0x00454C50u,1);
+    if(opened){
+        float raised[]={c-48,y-74,c-43,y-129,c+41,y-124,c+42,y-74};
+        cvPolyGrad(raised,4,0x007C7568u,0x002E353Cu,1);
+        cvRecess(c-38,y-117,c+32,y-84,2,2,.55f);
+        float cavity[]={c-41,y-70,c-32,y-80,c+42,y-80,c+35,y-65};
+        cvPoly(cavity,4,0x0007090Cu,1);
+        cvLine(c-40,y-69,c+35,y-65,2,0x00B8B4A4u,.75f);
+        cvLine(c-28,y-78,c+29,y-74,2,0x0020272Eu,.8f);
+    }
+    for(int sideIndex=0;sideIndex<2;sideIndex++){
+        float x=sideIndex?c+35:c-41;
+        cvLine(x,y-66,x,y-6,5,0x00454F59u,1);
+        cvLine(x-2,y-65,x-2,y-7,1,0x00C0CCD3u,.6f);
+        for(int row=0;row<2;row++){
+            float ry=row?y-11:y-61;
+            cvEllipse(x,ry,2,2,0x00171D23u,1);
+            cvLine(x-1,ry-1,x+1,ry-1,1,0x00D1DBDFu,.8f);
+        }
+    }
+    cvRecess(c-16,y-44,c+13,y-28,2,2,.6f);
+    cvLine(c-11,y-40,c+8,y-40,3,0x009CA6ACu,.9f);
+    cvLine(c-11,y-40,c-11,y-34,2,0x00606B74u,1);
+    cvLine(c+8,y-40,c+8,y-34,2,0x00606B74u,1);
+    if(locked){
+        cvEllipse(c-1,y-60,7,8,0x00B6BCC1u,1);
+        cvEllipse(c-1,y-60,4,5,0x00212A32u,1);
+        float lock[]={c-10,y-60,c+8,y-60,c+8,y-43,c-10,y-43};
+        cvPolyGrad(lock,4,0x00E2BD69u,0x007C552Bu,1);
+        cvEllipse(c-1,y-53,2,2,0x00251D17u,1);
+        cvLine(c-1,y-52,c-1,y-48,2,0x00251D17u,1);
+    }
+    for(int i=0;i<14;i++){
+        float x=c-32+(i*19%64),yy=y-15-(i*13%43);
+        cvLine(x,yy,x+3,yy-1,.6f,0x00D6CBB3u,.22f);
+    }
+    cvLine(c-45,y-2,c+40,y-2,3,0x00070A0Du,.7f);
+}
+
+static void BakeIndustrialBreaker(const PropBakeContext* bake,int powered){
+    float c=bake->c,y=bake->baseY;
+    float side[]={c+30,y-126,c+40,y-117,c+40,y-4,c+30,y};
+    cvPolyGrad(side,4,0x0048525Bu,0x00121920u,1);
+    float body[]={c-34,y-126,c+30,y-126,c+30,y,c-34,y};
+    cvPolyGrad(body,4,0x00838F95u,0x002B353Eu,1);
+    cvBevel(c-34,y-126,c+30,y,3,.5f);
+    cvRecess(c-27,y-117,c+22,y-12,3,2,.5f);
+    for(int i=0;i<3;i++){
+        float x=c-19+i*13;
+        cvLine(x,y-127,x,y-143,5,0x003D454Du,1);
+        cvEllipse(x,y-142,5,3,0x00A8A59Bu,1);
+        cvLine(x,y-146,x+(i-1)*8,y-154,2,0x00232A31u,1);
+        float fuse[]={x-4,y-91,x+4,y-91,x+4,y-68,x-4,y-68};
+        cvPolyGrad(fuse,4,0x00A5B3B4u,0x004D626Bu,.9f);
+        cvLine(x,y-86,x,y-74,2,powered?0x0089C7ADu:0x0050544Eu,.85f);
+    }
+    cvLine(c-24,y-102,c+17,y-102,4,0x00161E25u,1);
+    cvLine(c-23,y-103,c+16,y-103,1,powered?0x0076C9B6u:0x00C38B49u,.9f);
+    for(int i=0;i<5;i++)cvLine(c-21,y-51+i*5,c-2,y-51+i*5,2,0x00101820u,.9f);
+    cvEllipse(c+12,y-42,7,7,0x00121A23u,1);
+    float tipX=c+40,tipY=powered?y-34:y-64;
+    cvLine(c+12,y-42,tipX,tipY,5,0x00464F59u,1);
+    cvLine(c+12,y-43,tipX,tipY-1,1.4f,0x00C6CED0u,.8f);
+    cvEllipse(tipX,tipY,5,6,powered?0x003E7B70u:0x00943D31u,1);
+    float label[]={c-22,y-27,c-5,y-27,c-5,y-15,c-22,y-15};
+    cvPoly(label,4,0x00B8A771u,.8f);
+    cvLine(c-18,y-24,c-12,y-18,2,0x00372F23u,1);
+    cvLine(c-12,y-18,c-10,y-23,1,0x00372F23u,1);
+    for(int i=0;i<4;i++)cvEllipse(c+(i&1?25:-29),y-(i<2?120:7),1.7f,1.7f,0x00D2D8D7u,.8f);
+}
+
+static void BakeEvacuationDoor(const PropBakeContext* bake,int powered){
+    float c=bake->c,y=bake->baseY;
+    float frame[]={c-46,y,c-46,y-164,c-37,y-174,c+37,y-174,c+46,y-164,c+46,y};
+    cvPolyGrad(frame,6,0x00868F92u,0x00232B33u,1);
+    cvRecess(c-38,y-160,c+38,y-6,4,3,.65f);
+    float inside[]={c-33,y-154,c+33,y-154,c+33,y-7,c-33,y-7};
+    cvPolyGrad(inside,4,0x000F1923u,0x0005070Bu,1);
+    float gap=powered?12:1;
+    for(int side=0;side<2;side++){
+        float x0=side?c+gap:c-32,x1=side?c+32:c-gap;
+        float panel[]={x0,y-152,x1,y-152,x1,y-9,x0,y-9};
+        cvPolyGrad(panel,4,0x005A6973u,0x00232C35u,1);
+        cvBevel(x0,y-152,x1,y-9,2,.4f);
+        for(int r=0;r<3;r++)cvRecess(x0+4,y-141+r*43,x1-4,y-110+r*43,1,2,.4f);
+        cvLine(side?x0+2:x1-2,y-145,side?x0+2:x1-2,y-14,1.4f,powered?0x0086BCBFu:0x007F9299u,.85f);
+        if(!powered)cvLine(x0+2,y-68,x1-2,y-68,5,0x00908769u,1);
+    }
+    cvLine(c-26,y-165,c+26,y-165,4,powered?0x007BD6B6u:0x00A64632u,.95f);
+    cvLine(c-37,y-3,c+37,y-3,4,0x00858E91u,1);
+    for(int i=0;i<4;i++){
+        float x=i&1?c+41:c-41,yy=i<2?y-150:y-17;
+        cvEllipse(x,yy,2,2,0x00C0C8C8u,.85f);
+    }
+}
+
 /* Variant: kind == 0 */
 static void BakePropCrate(const PropBakeContext* bake) {
-    float c = bake->c; (void)c;
-    float baseY = bake->baseY; (void)baseY;
-    (void)bake;
-    {
-            /* 箱子（2026-11-06 按 art_direction.h 重做） */
-        /* ==================================================================
-         * 用户截图：「箱子边框都露出来了……这些东西你都没有按照审美代码。」
-         *
-         * 旧版的问题，逐条对照 art_direction.h 的装饰物件法则：
-         *   ① 整圈 cvPoly 纯黑描边 → 一缩放就成了一圈粗黑框。
-         *      法则要的是**边缘光**（左上 1px 提亮）+ 阴影侧压暗，
-         *      不是把剪影整圈描黑。
-         *   ② 只有 3 条横线 → 法则 ② 明说"3 段像贴纸，5 段才有体积"。
-         *   ③ 铁角画成**通高竖条** → 从正面看就是两根灰框，不是包角。
-         *      包角应该是四条短 L，且和木板之间留 1px 负空间（法则 ④）。
-         *   ④ 木板与地面相接处没有 AO（法则 ③），所以箱子像浮着。
-         * ================================================================== */
-        float bx0 = c - 46, bx1 = c + 46;
-        float by0 = baseY - 92, by1 = baseY;
-
-        /* ---- ① 体块：5 段明暗 ---- */
-        float body[8] = { bx0, by0, bx1, by0, bx1, by1, bx0, by1 };
-        cvPolyGrad(body, 4, 0x008A6038u, 0x00322012u, 1.0f);
-        for (int k = 1; k <= 4; k++) {
-            float y = by0 + (by1 - by0) * (float)k / 5.0f;
-            /* 分段缝：很淡的一道，不能抢描边的活 */
-            cvLine(bx0 + 2, y, bx1 - 2, y, 1.0f, 0x00000000u, 0.12f);
-            cvLine(bx0 + 2, y + 1, bx1 - 2, y + 1, 1.0f, 0x00B08454u, 0.10f);
-        }
-
-        /* ---- ② 边缘光：左上提亮 1px（暗场里把剪影剥出来） ---- */
-        cvLine(bx0, by0, bx1, by0, 2.0f, 0x00C69C6Au, 0.90f);
-        cvLine(bx0, by0, bx0, by1, 2.0f, 0x009A7850u, 0.65f);
-
-        /* ---- ③ 阴影侧：右下压暗（替代整圈黑描边） ---- */
-        cvLine(bx1, by0, bx1, by1, 2.0f, 0x00000000u, 0.55f);
-        cvLine(bx0, by1, bx1, by1, 2.0f, 0x00000000u, 0.65f);
-
-        /* ---- ④ 铁角：四角短 L，和木板之间留 1px 负空间 ---- */
-        {
-            const float bl = 16.0f;      /* 包角边长 */
-            const float th = 5.0f;       /* 包角厚度 */
-            unsigned int ironHi = 0x00A8A090u;
-            unsigned int ironMid = 0x00605A52u;
-            unsigned int gapCol = 0x00000000u;
-
-            for (int q = 0; q < 4; q++) {
-                int right = (q & 1);
-                int bottom = (q >> 1) & 1;
-                float x = right ? (bx1 - bl) : bx0;
-                float y = bottom ? (by1 - bl) : by0;
-
-                /* 负空间：包角与木板之间的一道暗缝（法则 ④） */
-                cvLine(right ? (x - 1) : (x + bl + 1), y, right ? (x - 1) : (x + bl + 1), y + bl,
-                       1.0f, gapCol, 0.45f);
-
-                /* 水平臂 */
-                cvLine(x, y, x + bl, y, th, ironMid, 1.0f);
-                cvLine(x, y - 1, x + bl, y - 1, 1.5f, ironHi, 0.55f);
-                /* 垂直臂 */
-                cvLine(x, y, x, y + bl, th, ironMid, 1.0f);
-                if (!right) cvLine(x - 1, y, x - 1, y + bl, 1.5f, ironHi, 0.5f);
-                /* 螺丝：一个小亮点，包角才读作"加固件" */
-                cvEllipse(x + (right ? -6.0f : 6.0f), y + (bottom ? -6.0f : 6.0f),
-                          1.8f, 1.8f, 0x00D8D0C0u, 0.85f);
-            }
-        }
-
-        /* ---- ⑤ AO：木板与地面相接处压暗（法则 ③） ---- */
-        cvLine(bx0, by1 - 2, bx1, by1 - 2, 4.0f, 0x00000000u, 0.30f);
-
-        /* ---- ⑥ 木纹：稀疏竖条，不做过密噪点 ---- */
-        cvSpeckle((int)c, (int)(baseY - 46), 38, 22, 0x00301808u, 0.28f);
-
-    
-    }
+    BakeSupplyCase(bake,0,0);
 }
 
 /* Variant: kind == 14 */
@@ -2437,130 +2472,22 @@ static void BakePropBeaconHand(const PropBakeContext* bake) {
 
 /* Variant: kind == 1 */
 static void BakePropBreaker(const PropBakeContext* bake) {
-    float c = bake->c; (void)c;
-    float baseY = bake->baseY; (void)baseY;
-    (void)bake;
-    {
-     /* 配电箱（v2.4.7 重新建模） */
-        /* 按 art_direction.h 重设计：
-             地标 ① 顶部两根**瓷瓶 + 垂下的导线**（剪影上凸出柜体上沿）
-             地标 ② 右侧伸出的**闸刀拉杆 + 红球手柄**（剪影上唯一的斜出物）
-             特征 ③ 面板内凹 + 散热格栅
-           填黑测试：一个竖柜 + 顶上两个柱 + 右边一根斜杆 —— 一眼是配电箱。
-           旧版只有「方柜 + 警示条 + 圆按钮」，填黑就是一个方块。 */
-
-        /* ---- ① 柜体（比旧版窄一点、高一点，显得是立式机柜） ---- */
-        float b[8] = { c - 30, baseY - 116, c + 30, baseY - 116, c + 30, baseY, c - 30, baseY };
-        cvPoly(b, 4, 0x000A0C10u, 1.0f);
-        float b2[8] = { c - 25, baseY - 110, c + 25, baseY - 110, c + 25, baseY - 4, c - 25, baseY - 4 };
-        cvPolyGrad(b2, 4, 0x00606870u, 0x00181E24u, 1.0f);
-
-        /* ---- ② 顶部瓷瓶（地标①）---- */
-        cvLine(c - 14, baseY - 116, c - 14, baseY - 138, 5.0f, 0x00404850u, 1.0f);
-        cvEllipse(c - 14, baseY - 136, 7.0f, 5.5f, 0x00A0A8B0u, 1.0f);
-        cvEllipse(c - 14, baseY - 131, 9.0f, 3.5f, 0x00889098u, 0.95f);
-        cvLine(c + 14, baseY - 116, c + 14, baseY - 138, 5.0f, 0x00404850u, 1.0f);
-        cvEllipse(c + 14, baseY - 136, 7.0f, 5.5f, 0x00A0A8B0u, 1.0f);
-        cvEllipse(c + 14, baseY - 131, 9.0f, 3.5f, 0x00889098u, 0.95f);
-
-        /* ---- ③ 垂下的导线（接着瓷瓶往外弯，剪影更宽）---- */
-        cvLine(c - 14, baseY - 141, c - 27, baseY - 152, 2.5f, 0x00302A20u, 1.0f);
-        cvLine(c + 14, baseY - 141, c + 29, baseY - 147, 2.5f, 0x00302A20u, 1.0f);
-
-        /* ---- ④ 面板内凹 + 一道横向分型线 ---- */
-        cvRecess(c - 20, baseY - 104, c + 20, baseY - 14, 3.0f, 2.0f, 0.34f);
-        cvLine(c - 20, baseY - 58, c + 20, baseY - 58, 2.0f, 0x00000000u, 0.35f);
-
-        /* ---- ⑤ 闸刀拉杆（地标②）：从右侧斜着伸出来，红球手柄 ---- */
-        cvLine(c + 20, baseY - 52, c + 38, baseY - 72, 5.0f, 0x00505A62u, 1.0f);
-        cvLine(c + 20, baseY - 52, c + 38, baseY - 72, 2.0f, 0x00A8B4C0u, 0.6f);
-        cvEllipse(c + 39, baseY - 74, 5.5f, 5.5f, 0x00801810u, 1.0f);
-        cvEllipse(c + 39, baseY - 75, 3.0f, 3.0f, 0x00E03818u, 0.95f);
-
-        /* ---- ⑥ 散热格栅（左下）---- */
-        for (int i = 0; i < 4; i++)
-            cvLine(c - 18, baseY - 46 + (float)i * 7, c - 5, baseY - 46 + (float)i * 7,
-                   2.0f, 0x00000000u, 0.42f);
-
-        /* ---- ⑦ 状态灯（面板上，两颗：电源 + 告警）---- */
-        cvEllipse(c + 3, baseY - 90, 6.0f, 6.0f, 0x00201A12u, 1.0f);
-        cvEllipse(c + 3, baseY - 91, 3.2f, 3.2f, 0x00FFB030u, 0.95f);   /* 电源：琥珀 */
-        cvEllipse(c + 3, baseY - 76, 4.5f, 4.5f, 0x00201A12u, 1.0f);
-        cvEllipse(c + 3, baseY - 77, 2.2f, 2.2f, 0x00FF4020u, 0.9f);    /* 告警：红 */
-
-        /* ---- ⑧ 斜角（体积感）---- */
-        cvBevel(c - 25, baseY - 110, c + 25, baseY - 4, 3.0f, 0.42f);
-    
-    }
+    BakeIndustrialBreaker(bake,0);
 }
 
 /* Variant: kind == 2 */
 static void BakePropExit(const PropBakeContext* bake) {
-    float c = bake->c; (void)c;
-    float baseY = bake->baseY; (void)baseY;
-    (void)bake;
-    {
-     /* 出口：门框 + 光 */
-        float b[8] = { c - 40, baseY - 150, c + 40, baseY - 150, c + 40, baseY, c - 40, baseY };
-        cvPoly(b, 4, 0x000A0C10u, 1.0f);
-        float b2[8] = { c - 33, baseY - 142, c + 33, baseY - 142, c + 33, baseY - 4, c - 33, baseY - 4 };
-        cvPolyGrad(b2, 4, 0x00C0E8FFu, 0x00306080u, 1.0f);
-        cvGlow(c, baseY - 70, 60.0f, 0x0060C0FFu, 0.35f);
-    
-    }
+    BakeEvacuationDoor(bake,0);
 }
 
 /* Variant: kind == 4 */
 static void BakePropOpenCrate(const PropBakeContext* bake) {
-    float c = bake->c; (void)c;
-    float baseY = bake->baseY; (void)baseY;
-    (void)bake;
-    {
-     /* 翻过的空箱：盖子掀开、里面发黑 */
-        float base[8] = { c - 44, baseY - 58, c + 44, baseY - 58, c + 44, baseY, c - 44, baseY };
-        cvPoly(base, 4, 0x000A0806u, 1.0f);
-        float inner[8] = { c - 38, baseY - 52, c + 38, baseY - 52, c + 38, baseY - 5, c - 38, baseY - 5 };
-        cvPolyGrad(inner, 4, 0x00402C18u, 0x00140E08u, 1.0f);
-        /* 箱口：一条深色横带，读作“空的” */
-        float hole[8] = { c - 34, baseY - 55, c + 34, baseY - 55, c + 30, baseY - 40, c - 30, baseY - 40 };
-        cvPoly(hole, 4, 0x00060404u, 1.0f);
-        /* 掀起的盖子：向后上方斜 */
-        float lid[8] = { c - 48, baseY - 56, c - 42, baseY - 104, c + 38, baseY - 112, c + 46, baseY - 60 };
-        cvPoly(lid, 4, 0x00120C08u, 1.0f);
-        float lid2[8] = { c - 42, baseY - 60, c - 36, baseY - 98, c + 34, baseY - 105, c + 40, baseY - 64 };
-        cvPolyGrad(lid2, 4, 0x00906A40u, 0x00302014u, 1.0f);
-        cvLine(c - 44, baseY - 58, c + 44, baseY - 58, 3.0f, 0x00201810u, 0.9f);
-    
-    }
+    BakeSupplyCase(bake,1,0);
 }
 
 /* Variant: kind == 5 */
 static void BakePropLockedCrate(const PropBakeContext* bake) {
-    float c = bake->c; (void)c;
-    float baseY = bake->baseY; (void)baseY;
-    (void)bake;
-    {
-     /* 未解锁的箱子：普通木箱 + 正面金锁 */
-        float b[8] = { c - 46, baseY - 96, c + 46, baseY - 96, c + 46, baseY, c - 46, baseY };
-        cvPoly(b, 4, 0x000A0806u, 1.0f);
-        float b2[8] = { c - 40, baseY - 90, c + 40, baseY - 90, c + 40, baseY - 4, c - 40, baseY - 4 };
-        cvPolyGrad(b2, 4, 0x00906A40u, 0x00402C18u, 1.0f);
-        for (int i = 0; i < 3; i++)
-            cvLine(c - 40, baseY - 74 + (float)i * 26, c + 40, baseY - 74 + (float)i * 26, 3.0f, 0x00301C0Cu, 0.8f);
-        cvLine(c - 40, baseY - 90, c - 40, baseY - 4, 8.0f, 0x00605848u, 1.0f);
-        cvLine(c + 40, baseY - 90, c + 40, baseY - 4, 8.0f, 0x00605848u, 1.0f);
-        /* v2.4.6 斜角（和普通箱子同一套光照，保持家族一致） */
-        cvBevel(c - 40, baseY - 90, c + 40, baseY - 4, 3.0f, 0.42f);
-        /* 锁体 + 锁梁 */
-        float lock[8] = { c - 18, baseY - 58, c + 18, baseY - 58, c + 18, baseY - 22, c - 18, baseY - 22 };
-        cvPoly(lock, 4, 0x006A4E10u, 1.0f);
-        cvPoly(lock, 4, 0x00C8A030u, 0.65f);
-        cvLine(c - 10, baseY - 58, c - 10, baseY - 72, 4.0f, 0x00E0C050u, 1.0f);
-        cvLine(c + 10, baseY - 58, c + 10, baseY - 72, 4.0f, 0x00E0C050u, 1.0f);
-        cvLine(c - 10, baseY - 72, c + 10, baseY - 72, 4.0f, 0x00E0C050u, 1.0f);
-        cvEllipse(c, baseY - 40, 4.0f, 5.0f, 0x00201808u, 1.0f);
-    
-    }
+    BakeSupplyCase(bake,0,1);
 }
 
 /* Variant: kind == 7 */
@@ -2771,13 +2698,17 @@ static void BakePropSceneFixture(const PropBakeContext* bake) {
 }
 
 static void BakeProp(int id, int kind) {
-    g_canvasScale=(kind==16 || kind==7)?SPR_CREATURE_SCALE:1;
+    g_canvasScale=(kind==16 || kind==7 || kind==0 || kind==1 || kind==2 || kind==4 || kind==5 || kind==17 || kind==18)?SPR_CREATURE_SCALE:1;
     cvClear();
     float c = CANVAS_W * 0.5f;
     float baseY = 244.0f;
     PropBakeContext bake = { c, baseY };
     if (kind == 0) {
         BakePropCrate(&bake);
+    } else if (kind == 17) {
+        BakeIndustrialBreaker(&bake,1);
+    } else if (kind == 18) {
+        BakeEvacuationDoor(&bake,1);
     } else if (kind == 14) {
         BakePropBeaconGround(&bake);
     } else if (kind == 16) {
@@ -2965,6 +2896,8 @@ void SpritesInit(void) {
     BakeProp(SPR_PROP_CRATE, 0);
     BakeProp(SPR_PROP_BREAKER, 1);
     BakeProp(SPR_PROP_EXIT, 2);
+    BakeProp(SPR_PROP_BREAKER_ON, 17);
+    BakeProp(SPR_PROP_EXIT_OPEN, 18);
     BakeProp(SPR_PROP_SAFE, 3);
     BakeProp(SPR_PROP_CRATE_OPEN, 4);
     BakeProp(SPR_PROP_CRATE_LOCKED, 5);

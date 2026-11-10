@@ -71,17 +71,23 @@ jobs:
           python -X utf8 tools/build_validate.py
           cp canity_verify.exe canity.exe
 
+      - name: Preserve validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-validation-diagnostics
+          path: |
+            work/codex-build/validation-summary.json
+            work/codex-build/validation-*.log
+          if-no-files-found: warn
+
       - name: Package Windows ZIP
         shell: pwsh
         run: |
           $ver = (Select-String -Path include/common.h -Pattern 'CANITY_VERSION_STR\s+"([^"]+)"').Matches[0].Groups[1].Value
           $name = "CANITY_v${ver}_win64"
-          New-Item -ItemType Directory -Path "stage/$name" -Force | Out-Null
-          Copy-Item canity.exe "stage/$name/canity.exe"
-          $readme = Get-Content docs/package_readme.txt -Raw -Encoding UTF8
-          Set-Content -Path "stage/$name/第一次运行请看.txt" -Value ($readme -replace '%VER%', $ver) -Encoding UTF8
-          Copy-Item docs/解除锁定.bat "stage/$name/解除锁定.bat"
-          Compress-Archive -Path "stage/$name" -DestinationPath "stage/$name.zip"
+          python -X utf8 tools/package_playable.py --output stage --label $name --notes docs/package_readme.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -119,7 +125,9 @@ jobs:
           echo "VER=$VER" >> "$GITHUB_ENV"
           mkdir -p stage
           cp web/dist/index.html web/dist/index.js web/dist/index.wasm stage/
-          (cd stage && zip -q "CANITY_v${VER}_web.zip" index.html index.js index.wasm)
+          cp -R web/dist/music stage/music
+          cp LICENSE l10n/OFL-NotoSansSC.txt stage/
+          (cd stage && zip -qr "CANITY_v${VER}_web.zip" index.html index.js index.wasm music LICENSE OFL-NotoSansSC.txt)
           cp web/dist/standalone.html "stage/CANITY_v${VER}_web_single.html"
           ls -l stage/
 
@@ -132,6 +140,9 @@ jobs:
             web/dist/index.html
             web/dist/index.js
             web/dist/index.wasm
+            web/dist/music/
+            LICENSE
+            l10n/OFL-NotoSansSC.txt
             emcc-version.txt
           if-no-files-found: error
 
@@ -236,6 +247,9 @@ jobs:
           set -e
           mkdir -p pagesroot
           cp webout/web/dist/index.html webout/web/dist/index.js webout/web/dist/index.wasm pagesroot/
+          cp -R webout/web/dist/music pagesroot/music
+          cp webout/LICENSE pagesroot/LICENSE
+          cp webout/l10n/OFL-NotoSansSC.txt pagesroot/OFL-NotoSansSC.txt
           ls -l pagesroot/
 
       - uses: actions/upload-pages-artifact@v3

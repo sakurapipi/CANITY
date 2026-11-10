@@ -442,7 +442,7 @@ static const TrEntry kTrTable[] = {
     { "SURVIVOR", "幸存者" },
     { "Safe heal +25%, sanity drain -10%", "安全屋回智 +25%，理智流失 -10%" },
     { "Sanity 0 saves you once (4s)", "理智归零时免死一次" },
-    { "Sanity loss burns battery (1:3)", "理智流失转为耗电（1:3）" },
+    { "50% of passive sanity loss burns battery (1:3); remainder still drains sanity", "一半自然理智损失转为耗电（1:3），另一半仍扣理智" },
     { "Save Slot", "存档槽" },
     { "Search 120 containers in a single run", "一局内搜索 120 个箱子" },
     { "Search 60 containers in a single run", "一局内搜索 60 个箱子" },
@@ -716,4 +716,5 @@ static const TrEntry kTrTable[] = {
     { "CLEAN BREAK", "利落脱身" },
     { "READ THE OPENING", "看准破绽" },
     { "FALSE OPENING", "佯攻诱敌" },
+    { "Battery cap +25/rank; light OFF below 25%: regen 2-4/s, sanity drain +20%", "电量上限每级+25；关灯且电量低于25%时每秒回2至4，理智流失+20%" },
 };

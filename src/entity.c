@@ -126,7 +126,7 @@ float staminaIdle = 0.0f;        /* 停止冲刺后的恢复延迟 */
 /* ------------------------------------------------------------------ */
 
 /* 怪物速度随层数线性上升，但**永远慢于玩家走速 MOVE_SPEED**。
-   玩家走 2.5，怪最快 2.40 —— 你永远跑得掉，但「跑掉」的代价越来越大：
+   玩家基础走速 2.0，怪最快 2.40 —— 你永远跑得掉，但「跑掉」的代价越来越大：
    走路完全静音，而翻找箱子会发出半径 8 的噪声，怪跑得快意味着
    「搜箱子」在深层更危险。压迫感来自空间被压缩，不是来自时间被砍短。
 
@@ -141,7 +141,7 @@ static float MonsterSpeedFor(int level, float base, float modMul) {
     if (speed > MONSTER_SPEED_MAX) speed = MONSTER_SPEED_MAX;
     /* Threat affects the result and its cap, instead of raising a cap after clipping. */
     speed = speed * modMul + ThreatValue() * 0.008f;
-    float cap = ThreatSpeedCap();
+    float cap = fminf(ThreatSpeedCap(),MonsterMovementCap());
     if (speed > cap) speed = cap;
     return speed;
 }
@@ -1107,7 +1107,9 @@ static int HunterUpdateState(Monster* M, float dt) {
     if (!M->active) return 0;
     /* v1.8：玩家进安全屋 → 怪物立刻丢目标 */
     if (playerInSafe && M->state != 0) { M->state = 0; M->pathLen = 0; M->pathIdx = 0; }
-    if (M->hitCooldown > 0.0f) M->hitCooldown -= dt;
+    if(!isfinite(M->hitCooldown) || M->hitCooldown<0)M->hitCooldown=0;
+    if(!isfinite(M->stun) || M->stun<0)M->stun=0;
+    if (M->hitCooldown > 0.0f) M->hitCooldown = fmaxf(0,M->hitCooldown-dt);
     if (M->growlTimer > 0.0f) M->growlTimer -= dt;
 
     /* 硬直：被玻璃瓶砸中后短暂不能动，也不能抓人 */
@@ -1245,12 +1247,24 @@ static void HunterFollowPath(Monster* M, float dt) {
     }
 
 
+    if(M->state==1 && M->pathIdx>=M->pathLen && hiddenIn<0 && !playerInSafe && ultTimer<=0 &&
+       Dist2(M->x,M->y,posX,posY)<4 && HasLOS(M->x,M->y,posX,posY)){
+        float dx=posX-M->x,dy=posY-M->y,d=sqrtf(dx*dx+dy*dy);
+        if(d>.04f){float step=fminf(d,M->speed*dt*GoldSpeedMul()*(InGlue(M->x,M->y)?GLUE_MONSTER_MUL:1));
+            float nx=M->x+dx/d*step,ny=M->y+dy/d*step;
+            if(!Blocked(nx,ny)){M->x=nx;M->y=ny;}
+            else if(!Blocked(nx,M->y))M->x=nx;
+            else if(!Blocked(M->x,ny))M->y=ny;
+        }
+    }
 }
 
 static int HunterResolveContact(Monster* M, float dt) {
     (void)dt;
     /* 靠近时发出低吼（也是给玩家的听觉提示） */
+    if(!M->active || hiddenIn>=0 || playerInSafe || M->stun>0)return 1;
     float pd2 = Dist2(M->x, M->y, posX, posY);
+    if(pd2<MONSTER_CATCH_R*MONSTER_CATCH_R && !HasLOS(M->x,M->y,posX,posY))return 1;
     if (pd2 < 36.0f && M->growlTimer <= 0.0f) {
         M->growlTimer = 2.6f;
         if (!monsterMuted) PlaySfx(SFX_SCREAM, pd2 < 9.0f ? 0.55f : 0.28f);
@@ -1414,7 +1428,7 @@ static void UpdateOneHunter(Monster* M, float dt) {
 /* 三个入口都是薄壳 —— 逻辑只有一份（UpdateOneHunter）。
    原来 UpdateMonster / UpdateMonster2 是 96% 相同的两份拷贝，
    第二只漏了冷却、漏了「永不放弃」，都是复制粘贴带出来的。 */
-void UpdateMonster (float dt) { if(s_hunterSpawnT<HunterSpawnDelay(currentLevel))return;UpdateOneHunter(&monHunters[0], dt); }
+void UpdateMonster (float dt) { UpdateOneHunter(&monHunters[0], dt); }
 void UpdateMonster2(float dt) { UpdateOneHunter(&monHunters[1], dt); }
 void UpdateMonster3(float dt) { UpdateOneHunter(&monHunters[2], dt); }
 

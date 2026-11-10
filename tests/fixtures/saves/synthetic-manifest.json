@@ -1,0 +1,65 @@
+{
+  "generator": "tests/fixtures/gen_prefix_contracts.c",
+  "fixtures": [
+    {
+      "path": "synthetic_v35.sav",
+      "bytes": 12432,
+      "sha256": "1c02ac3fa63e419f7b33a7749f49903af7254337e1ab5a19afd6d0a978e8afd3",
+      "kind": "synthetic append-only layout contract; not historical serializer output"
+    },
+    {
+      "path": "synthetic_v36.sav",
+      "bytes": 12436,
+      "sha256": "5006ea38be4e5ee24b26abd766741a8dd94a6f9257b35ca2850a7f28a0ec0ad2",
+      "kind": "synthetic append-only layout contract; not historical serializer output"
+    },
+    {
+      "path": "synthetic_v37.sav",
+      "bytes": 12484,
+      "sha256": "62d0bc15622bcf3cb9e530c909a00b0d9e1e844ddab94df4212f120d6d7d3ff8",
+      "kind": "synthetic append-only layout contract; not historical serializer output"
+    },
+    {
+      "path": "synthetic_v38.sav",
+      "bytes": 12496,
+      "sha256": "dab4b2bb025287ca285d58e15ae14c1d7490afa3f5e05176783387bc8b92869f",
+      "kind": "synthetic append-only layout contract; not historical serializer output"
+    },
+    {
+      "path": "synthetic_v39.sav",
+      "bytes": 12516,
+      "sha256": "03e7ea6f3a3588d945021c07c134a7648266ab2b804e3259a065a0316d90273e",
+      "kind": "synthetic append-only layout contract; not historical serializer output"
+    },
+    {
+      "path": "synthetic_v40.sav",
+      "bytes": 12576,
+      "sha256": "6a2c8f01bdeeaafd54a9ae71adb824af39ba39d9933d1898ed27cbdcd8267dd0",
+      "kind": "synthetic append-only layout contract; not historical serializer output"
+    },
+    {
+      "path": "synthetic_v41.sav",
+      "bytes": 12584,
+      "sha256": "b1938a841810e84a43430c13e7332321317c2d7143d4089ab91555f49c46c300",
+      "kind": "synthetic append-only layout contract; not historical serializer output"
+    },
+    {
+      "path": "synthetic_v42.sav",
+      "bytes": 12616,
+      "sha256": "1a398bf830ce36116c5e99de5ce91c3739809a628f7c6e29b662298c369dfc9b",
+      "kind": "synthetic append-only layout contract; not historical serializer output"
+    },
+    {
+      "path": "synthetic_v43.sav",
+      "bytes": 18444,
+      "sha256": "9427061a8acdfe50c4677fd9a39a0ada05299dcf40a3813f6bb40bdbc5dc4b69",
+      "kind": "synthetic append-only layout contract; not historical serializer output"
+    },
+    {
+      "path": "synthetic_v44.sav",
+      "bytes": 18456,
+      "sha256": "23a9a5b164c81efb379da4f8385e8e63afb4740c3f330bbed8b5721c9d0d1577",
+      "kind": "synthetic append-only layout contract; not historical serializer output"
+    }
+  ]
+}

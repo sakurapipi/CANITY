@@ -4,6 +4,8 @@
  * 入口：TestSuite_hatch()
  */
 #include "../test_common.h"
+#include "room_theme.h"
+#include "collapse.h"
 
 static void test_hatch_no_duplicate_kind_per_floor(void) {
     extern int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId);
@@ -15,7 +17,7 @@ static void test_hatch_no_duplicate_kind_per_floor(void) {
     int second;
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     /* 找一个能把门放下的主题（房间号 0..6 里总有一个能映射） */
     theme = -1;
@@ -176,163 +178,58 @@ static void test_hatch_screenshot(void) {
     }
 }
 
-static void test_all_hatch_effects(void) {
-    extern Hatch hatches[MAX_HATCHES];
-    extern int hatchCount;
-    extern float hatchLightsT, hatchGoldMulT, hatchBloodT, hatchSpeedT;
-    extern int collapsedLevel;
+static void hatch_effect_scene(int kind){
+    clear_meta();BenchResetRun();trainingMode=0;dailyMode=0;collapsedLevel=0;
+    for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)
+        worldMap[y][x]=(x==0 || y==0 || x==MAP_WIDTH-1 || y==MAP_HEIGHT-1);
+    roomPropCount=0;posX=3.5f;posY=3.5f;sanity=60;battery=150;stamina=100;carryGold=500;
+    flares=2;bottles=smokeBombs=gluePots=echoBolts=0;
+    memset(monHunters,0,sizeof(monHunters));
+    monHunters[0].active=1;monHunters[0].x=7.5f;monHunters[0].y=3.5f;
+    RoomThemeSetMadness(0);RoomThemeLoadEvent(-1,0);HatchReset();
+    HatchAdd(2.5f,2.5f,kind,kind);
+}
+static void fire_test_hatch(void){
+    CHECK(HatchGateCheck(0,NULL,0),"effect fixture supplies current gate requirements");
+    HatchSetState(0,HATCH_OPENING);HatchTick(HATCH_OPEN_SECONDS+.02f);
+    CHECK(hatches[0].state==HATCH_FIRED,"approved hatch completes its single-use transition");
+}
+static void test_all_hatch_effects(void){
+    int kind=-1;float time=0;
+    hatch_effect_scene(HATCH_BOILER);int rerolls=CollapseRerollCount();
+    fire_test_hatch();RoomThemeSaveEvent(&kind,&time);
+    CHECK(battery==130 && kind==0 && time==45,"echo exchange pays 20 battery for a 45-second event");
+    CHECK(CollapseRerollCount()==rerolls,"echo exchange does not secretly reroll the floor");
 
-    clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
-    currentLevel = 1;
-    GenerateLevel();          /* 需要一张真实地图（拆墙、崩塌都要用） */
+    hatch_effect_scene(HATCH_STORAGE);fire_test_hatch();RoomThemeSaveEvent(&kind,&time);
+    CHECK(carryGold==400 && kind==1 && time==75,"debt window pays 100 gold for its 75-second effect");
+    CHECK(fabsf(RoomThemeLootMul()-1.35f)<.001f && fabsf(RoomThemeNoiseMul()-1.25f)<.001f,"debt window applies its declared reward and risk");
 
-    /* ---- ① 供电室：全灯清雾 ---- */
-    {
-        HatchReset();
-        HatchAdd(2.5f, 2.5f, HATCH_POWER, 4);
-        hatchLightsT = 0.0f;
-        battery = 150.0f; fusesHeld = 0;
-        float batBefore = battery;
-        HatchSetState(0, HATCH_OPENING);
-        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
-        CHECK(hatches[0].state == HATCH_FIRED, "POWER hatch must fire");
-        CHECK(hatchLightsT > 19.0f && hatchLightsT < 21.0f,
-              "POWER must turn the lights on for ~20 seconds");
-        CHECK(battery < batBefore, "POWER must spend battery when no fuses are held");
-    }
+    hatch_effect_scene(HATCH_POWER);fire_test_hatch();
+    CHECK(battery==125 && hatchLightsT>34 && hatchLightsT<=35,"lumen overload pays 25 battery and lasts 35 seconds");
+    CHECK(explored[3][3],"lumen overload reveals walkable routes");
 
-    /* ---- ② 地狱：血祭（金 + 理智 + 加速）---- */
-    {
-        HatchReset();
-        HatchAdd(2.5f, 2.5f, HATCH_HELL, 2);
-        hatchSpeedT = 0.0f;
-        carryGold = 500; sanity = 60.0f;
-        HatchSetState(0, HATCH_OPENING);
-        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
-        CHECK(hatches[0].state == HATCH_FIRED, "HELL hatch must fire");
-        CHECK(carryGold == 400, "HELL must burn exactly 100 gold");
-        CHECK(sanity > 44.0f && sanity < 46.0f, "HELL must cost 15 sanity");
-        CHECK(hatchSpeedT > 29.0f && hatchSpeedT < 31.0f,
-              "HELL must grant a ~30 second speed window");
-    }
+    hatch_effect_scene(HATCH_WARD);sanity=20;fire_test_hatch();
+    CHECK(sanity==55 && battery==130,"ward trades 20 battery for 35 sanity");
+    hatch_effect_scene(HATCH_WARD);sanity=80;battery=20;fire_test_hatch();
+    CHECK(sanity==60 && battery==70,"ward can trade 20 sanity for 50 battery");
 
-    /* ---- ③ 病房：包扎（理智 + 体力 + 血迹）---- */
-    {
-        HatchReset();
-        HatchAdd(2.5f, 2.5f, HATCH_WARD, 3);
-        hatchBloodT = 0.0f;
-        sanity = 20.0f; stamina = 0.0f;
-        HatchSetState(0, HATCH_OPENING);
-        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
-        CHECK(hatches[0].state == HATCH_FIRED, "WARD hatch must fire");
-        CHECK(sanity > 59.0f, "WARD must restore ~40 sanity");
-        CHECK(stamina > 1.0f, "WARD must refill stamina");
-        CHECK(hatchBloodT > 59.0f && hatchBloodT < 61.0f,
-              "WARD must leave a 60 second blood trail");
-    }
+    hatch_effect_scene(HATCH_BRICK);fire_test_hatch();
+    CHECK(posX==7.5f && posY==3.5f && monHunters[0].x==3.5f && monHunters[0].y==3.5f,"return switch swaps actual player and hunter positions");
+    CHECK(stamina==60 && monHunters[0].stun>=2.5f,"return switch pays 40 stamina and staggers the swapped hunter");
 
-    /* ---- ④ 仓储室：开仓（付钱 + 家具回满 + 金币倍率）---- */
-    {
-        extern RoomProp roomProps[MAX_ROOM_PROPS];
-        extern int roomPropCount;
-        HatchReset();
-        HatchAdd(2.5f, 2.5f, HATCH_STORAGE, 1);
-        hatchGoldMulT = 0.0f;
-        carryGold = 500;
-        /* 造一件搜空的家具，看它会不会被回满 */
-        roomProps[0].active = 1;
-        roomProps[0].kind = ROOMPROP_SHELF;
-        roomProps[0].searchLeft = 0;
-        roomProps[0].searched = 7;
-        if (roomPropCount < 1) roomPropCount = 1;
+    hatch_effect_scene(HATCH_HELL);fire_test_hatch();
+    CHECK(carryGold==400 && RoomThemeMadness(),"madness covenant pays 100 gold and persists in the run");
+    CHECK(RoomThemeSanityRatio(1)<=.12f && RoomThemeLootMul()>=1.25f && RoomThemeNoiseMul()>=1.35f,"madness covenant exposes pollution/reward/noise tradeoff");
 
-        HatchSetState(0, HATCH_OPENING);
-        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
-        CHECK(hatches[0].state == HATCH_FIRED, "STORAGE hatch must fire");
-        CHECK(carryGold == 500 - HATCH_STORAGE_COST,
-              "STORAGE must cost exactly HATCH_STORAGE_COST gold");
-        CHECK(roomProps[0].searchLeft == 3,
-              "STORAGE must refill the shelf's three searches");
-        CHECK(hatchGoldMulT > 59.0f && hatchGoldMulT < 61.0f,
-              "STORAGE must grant a 60 second gold boost");
-    }
+    hatch_effect_scene(HATCH_FLESH);fire_test_hatch();RoomThemeSaveEvent(&kind,&time);
+    CHECK(flares==1 && monHunters[0].stun>=20 && kind==6 && time==20,"borrowed time consumes one throwable for 20-second hunter stasis");
 
-    /* ---- ⑤ 血肉洞窟：喂食（消耗投掷物 + 全图僵直）---- */
-    {
-        extern Monster monHunters[MON_HUNTER_MAX];
-        HatchReset();
-        HatchAdd(2.5f, 2.5f, HATCH_FLESH, 6);
-        flares = 2; bottles = 0; smokeBombs = 0; gluePots = 0; echoBolts = 0;
-        monHunters[0].active = 1;
-        monHunters[0].stun = 0.0f;
-        HatchSetState(0, HATCH_OPENING);
-        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
-        CHECK(hatches[0].state == HATCH_FIRED, "FLESH hatch must fire");
-        CHECK(flares == 1, "FLESH must consume exactly one throwable");
-        CHECK(monHunters[0].stun > 19.0f,
-              "FLESH must freeze every hunter for ~20 seconds");
-    }
-
-    /* ---- ⑥ 砖墙：拆墙（墙的数量必须变少）---- */
-    {
-        extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
-        /* ================================================================
-         * **显式布置**，不依赖生成出来的地图。
-         * 上一版靠"地图中间一定有墙"，多生成一只追光怪改变了随机序列，
-         * 中间恰好没有可砸的墙 —— 测试就红了。
-         * 这种"依赖具体地图"的断言是脆的：它测的不是逻辑，是地形。
-         * ================================================================ */
-        int hx = MAP_WIDTH / 2, hy = MAP_HEIGHT / 2;
-        /* 门所在格与"墙/墙后空地"三格，手工摆好 */
-        int savedCell[3];
-        savedCell[0] = worldMap[hy][hx];
-        savedCell[1] = worldMap[hy][hx + 1];
-        savedCell[2] = worldMap[hy][hx + 2];
-        worldMap[hy][hx] = 0;          /* 门站得住 */
-        worldMap[hy][hx + 1] = 1;      /* 要砸的墙 */
-        worldMap[hy][hx + 2] = 0;      /* 墙后是空地（否则不该砸） */
-
-        HatchReset();
-        HatchAdd((float)hx + 0.5f, (float)hy + 0.5f, HATCH_BRICK, 0);
-        stamina = 100.0f;
-        HatchSetState(0, HATCH_OPENING);
-        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
-        CHECK(hatches[0].state == HATCH_FIRED, "BRICK hatch must fire");
-
-        CHECK(worldMap[hy][hx + 1] == 0,
-              "BRICK must carve the wall that has open space behind it");
-        CHECK(worldMap[hy][hx + 2] == 0,
-              "BRICK must not fill anything in");
-        CHECK(stamina < 76.0f, "BRICK must cost stamina");
-
-        /* 还原地形，别污染后面的用例 */
-        worldMap[hy][hx] = savedCell[0];
-        worldMap[hy][hx + 1] = savedCell[1];
-        worldMap[hy][hx + 2] = savedCell[2];
-    }
-
-    /* ---- ⑦ 锅炉房：崩塌（走黑屏流程，计次 +1）---- */
-    {
-        extern int CollapseRerollCount(void);
-        extern void CollapseBegin(void);
-        extern int CollapseTick(float);
-        int before = CollapseRerollCount();
-        HatchReset();
-        HatchAdd(2.5f, 2.5f, HATCH_BOILER, 5);
-        HatchSetState(0, HATCH_OPENING);
-        HatchTick(HATCH_OPEN_SECONDS + 0.02f);
-        CHECK(hatches[0].state == HATCH_FIRED, "BOILER hatch must fire");
-        /* 效果只是"开始崩塌"，真正的重掷在黑屏流程里 */
-        CollapseTick(0.5f);
-        CollapseTick(0.5f);
-        CHECK(CollapseRerollCount() == before + 1,
-              "BOILER must start the collapse reroll");
-        CollapseTick(2.0f);          /* 走完，清掉黑屏 */
-        collapsedLevel = 0;
-    }
-
-    HatchReset();
+    hatch_effect_scene(HATCH_POWER);HatchSetState(0,HATCH_OPENING);battery=0;
+    HatchTick(HATCH_OPEN_SECONDS+.02f);
+    CHECK(hatches[0].state==HATCH_SEALED && HatchUsedMask()==0,"lost resources during opening do not burn a single-use room event");
+    battery=150;fire_test_hatch();
+    HatchReset();RoomThemeSetMadness(0);RoomThemeLoadEvent(-1,0);
 }
 
 static void test_hatch_end_to_end(void) {
@@ -342,7 +239,7 @@ static void test_hatch_end_to_end(void) {
     extern int collapsedLevel;
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     /* ---- ① 生成到一层真的有门 ---- */
     int found = 0;
@@ -365,6 +262,13 @@ static void test_hatch_end_to_end(void) {
      * ================================================================ */
     sanity = 45.0f;
     stamina = 100.0f; flares = 5; bottles = 5;
+    for(int y=1;y<MAP_HEIGHT-1;y++)for(int x=1;x<MAP_WIDTH-1;x++){
+        float d=Dist2(posX,posY,x+.5f,y+.5f);
+        if(d>=4 && d<=100 && !Blocked(x+.5f,y+.5f)){
+            monHunters[0].active=1;monHunters[0].x=x+.5f;monHunters[0].y=y+.5f;
+            y=MAP_HEIGHT;x=MAP_WIDTH;
+        }
+    }
     /* ================================================================
      * 锅炉房的门槛是「本房家具**全部搜空** + 1 根保险丝」——
      * 只给资源是不够的，还得真的把家具搜空。
@@ -392,7 +296,7 @@ static void test_hatch_end_to_end(void) {
 
     /* ---- ③ 资源清零时，门槛必须真的挡人（并且给出原因） ---- */
     carryGold = 0; fusesHeld = 0; battery = 0.0f;
-    sanity = 100.0f; stamina = 0.0f; flares = 0; bottles = 0;
+    sanity = 0.0f; stamina = 0.0f; flares = bottles = smokeBombs = gluePots = echoBolts = 0;
     {
         int blocked = 0;
         for (int i = 0; i < hatchCount; i++) {
@@ -408,6 +312,7 @@ static void test_hatch_end_to_end(void) {
 
     /* ---- ④ 开门 → 动画 → 效果结算 ---- */
     {
+        carryGold=99999;battery=150;sanity=45;stamina=100;flares=5;
         int idx = 0;
         int kindBefore = hatches[idx].kind;
         int goldBefore = carryGold;

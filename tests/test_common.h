@@ -18,6 +18,7 @@
 #include "map_validator.h"
 #include "hatch.h"
 #include "game.h"
+#include "loop_api.h"
 #include "entity.h"
 #include "skills.h"
 #include "bench.h"
@@ -57,6 +58,7 @@ extern void SkillResetView(void);
 
 /* 断言计数：定义在 test_runtime.c，所有测试文件共用同一份 */
 extern int checks;
+void StartFreshTestRun(void);
 
 #define CHECK(c,m) do { ++checks; if(!(c)) { fprintf(stderr,"FAIL: %s (line %d)\n",m,__LINE__);exit(1); } } while(0)
 
@@ -71,7 +73,7 @@ void mask32(int sprId, unsigned char out[32][32]);
 /* 假音频后端（音乐测试用）：从 test_runtime.c 搬到共享头，
  * 让 tests/domains/test_progress.c 也能用 */
 typedef struct {int plays,stops,pauses,scenes,ticks;float gain;} FakeMusic;
-static int fake_play(void* p,const char* track,int loop){(void)track;(void)loop;((FakeMusic*)p)->plays++;return 1;}
+static inline int fake_play(void* p,const char* track,int loop){(void)track;(void)loop;((FakeMusic*)p)->plays++;return 1;}
 
 static inline void fake_stop(void* p){((FakeMusic*)p)->stops++;}
 static inline void fake_pause(void* p,int pause){((FakeMusic*)p)->pauses=pause;}

@@ -4,6 +4,13 @@
 #include "music.h"
 #include "music_proc.h"
 
+/* Bundled CC0 decoder; no codec installation or external player is required. */
+#define MINIMP3_ONLY_MP3
+#define MINIMP3_NO_STDIO
+#define MINIMP3_IMPLEMENTATION
+#include "../third_party/minimp3/minimp3_ex.h"
+static SRWLOCK pcmCacheLock=SRWLOCK_INIT;
+
 typedef struct { short* samples; int frames; } PcmTrack;
 static PcmTrack pcmTracks[MUSIC_SCENE_COUNT];
 static volatile LONG requestedScene=-1, requestedGain=0, requestedMood=1000;
@@ -16,8 +23,7 @@ static uint32_t noiseState=179531u;
 static unsigned pcmU16(const unsigned char* p) { return p[0]|((unsigned)p[1]<<8); }
 static unsigned pcmU32(const unsigned char* p) { return pcmU16(p)|(pcmU16(p+2)<<16); }
 
-int MusicPcmLoad(int scene,const char* path) {
-    if(scene<0 || scene>=MUSIC_SCENE_COUNT || !path || pcmTracks[scene].samples) return 0;
+static int LoadWave(const char* path,PcmTrack* output) {
     wchar_t wide[MAX_PATH*3];
     if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,path,-1,wide,MAX_PATH*3)) return 0;
     FILE* file=_wfopen(wide,L"rb"); if(!file)return 0;
@@ -46,17 +52,60 @@ int MusicPcmLoad(int scene,const char* path) {
         int b=(int16_t)pcmU16(raw+(i*2+1)*4+c*2);
         samples[i*2+c]=(short)((a+b)/2);
     }
-    free(raw);pcmTracks[scene].samples=samples;pcmTracks[scene].frames=frames;return 1;
+    free(raw);output->samples=samples;output->frames=frames;return 1;
+}
+
+static int LoadMp3(const char* path,PcmTrack* output){
+    wchar_t wide[MAX_PATH*3];
+    if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,path,-1,wide,MAX_PATH*3))return 0;
+    FILE* f=_wfopen(wide,L"rb");if(!f)return 0;
+    if(fseek(f,0,SEEK_END)){fclose(f);return 0;}
+    long size=ftell(f);
+    if(size<=0 || size>32*1024*1024 || fseek(f,0,SEEK_SET)){fclose(f);return 0;}
+    unsigned char* input=malloc((size_t)size);if(!input){fclose(f);return 0;}
+    int readOk=fread(input,1,(size_t)size,f)==(size_t)size;fclose(f);
+    mp3dec_t decoder;mp3dec_file_info_t decoded;memset(&decoded,0,sizeof(decoded));
+    int result=readOk?mp3dec_load_buf(&decoder,input,(size_t)size,&decoded,NULL,NULL):-1;free(input);
+    if(result || !decoded.buffer || decoded.hz!=44100 || decoded.channels<1 || decoded.channels>2 ||
+       decoded.samples<4 || decoded.samples>(size_t)44100*2*180){free(decoded.buffer);return 0;}
+    size_t frames=decoded.samples/(size_t)decoded.channels/2;
+    short* samples=malloc(frames*2*sizeof(short));if(!samples){free(decoded.buffer);return 0;}
+    for(size_t i=0;i<frames;i++)for(int c=0;c<2;c++){
+        int channel=decoded.channels==1?0:c;
+        samples[i*2+c]=(short)(((int)decoded.buffer[(i*2)*decoded.channels+channel]+decoded.buffer[(i*2+1)*decoded.channels+channel])/2);
+    }
+    free(decoded.buffer);output->samples=samples;output->frames=(int)frames;return 1;
+}
+
+int MusicPcmLoad(int scene,const char* path){
+    if(scene<0 || scene>=MUSIC_SCENE_COUNT || !path)return 0;
+    AcquireSRWLockShared(&pcmCacheLock);int exists=pcmTracks[scene].samples!=NULL;ReleaseSRWLockShared(&pcmCacheLock);
+    if(exists)return 1;
+    PcmTrack decoded={0};const char* ext=strrchr(path,'.');
+    int ok=ext && !_stricmp(ext,".mp3")?LoadMp3(path,&decoded):LoadWave(path,&decoded);
+    if(!ok)return 0;
+    AcquireSRWLockExclusive(&pcmCacheLock);
+    if(!pcmTracks[scene].samples){pcmTracks[scene]=decoded;decoded.samples=NULL;}
+    /* Retain only requested/playing buffers plus this next scene. A callback never
+       waits for decoding or observes a buffer being retired by the main thread. */
+    int requested=(int)InterlockedCompareExchange(&requestedScene,0,0);
+    for(int i=0;i<MUSIC_SCENE_COUNT;i++)if(i!=scene && i!=requested && i!=playingScene){
+        free(pcmTracks[i].samples);pcmTracks[i].samples=NULL;pcmTracks[i].frames=0;
+    }
+    ReleaseSRWLockExclusive(&pcmCacheLock);free(decoded.samples);return 1;
 }
 
 int MusicPcmSelect(int scene) {
+    AcquireSRWLockShared(&pcmCacheLock);
     int available=scene>=0 && scene<MUSIC_SCENE_COUNT && pcmTracks[scene].samples;
-    InterlockedExchange(&requestedScene,available?scene:-1);return available;
+    InterlockedExchange(&requestedScene,available?scene:-1);
+    ReleaseSRWLockShared(&pcmCacheLock);return available;
 }
 void MusicPcmGain(float gain) {if(!(gain>=0))gain=0;if(gain>1)gain=1;InterlockedExchange(&requestedGain,(LONG)(gain*1000));}
 void MusicPcmMood(float ratio) {if(!(ratio>=0))ratio=0;if(ratio>1)ratio=1;InterlockedExchange(&requestedMood,(LONG)(ratio*1000));}
 void MusicPcmSeek(int sample44100) {if(sample44100>=0)InterlockedExchange(&requestedSeek,sample44100/2);}
 void MusicPcmMix(float* left,float* right,int count) {
+    if(!TryAcquireSRWLockExclusive(&pcmCacheLock))return;
     int target=(int)InterlockedCompareExchange(&requestedScene,0,0);
     int seek=(int)InterlockedExchange(&requestedSeek,-1);
     float gain=(float)InterlockedCompareExchange(&requestedGain,0,0)*.001f;
@@ -67,9 +116,10 @@ void MusicPcmMix(float* left,float* right,int count) {
         busGain+=(desired-busGain)*.002f;
         if(playingScene!=target && busGain<.0001f) {
             playingScene=target;cursor=0;filterL=filterR=0;busGain=0;
-            if(seek>=0 && playingScene>=0)cursor=seek%pcmTracks[playingScene].frames;
+            if(seek>=0 && playingScene>=0 && pcmTracks[playingScene].frames>0)cursor=seek%pcmTracks[playingScene].frames;
         }
         if(playingScene<0 || (gain<=0 && busGain<.0001f))continue;
+        if(playingScene>=MUSIC_SCENE_COUNT || !pcmTracks[playingScene].samples || pcmTracks[playingScene].frames<2)continue;
         if(seekPending>=0){
             seekFade-=1.0f/128;
             if(seekFade<=0){cursor=seekPending%pcmTracks[playingScene].frames;seekPending=-1;seekFade=0;}
@@ -87,8 +137,13 @@ void MusicPcmMix(float* left,float* right,int count) {
         cursor+=1.0+stress*.0012*sin(detunePhase);
         while(cursor>=p->frames)cursor-=p->frames;
     }
+    ReleaseSRWLockExclusive(&pcmCacheLock);
 }
-int MusicPcmAvailable(int scene){return scene>=0 && scene<MUSIC_SCENE_COUNT && pcmTracks[scene].samples!=NULL;}
+int MusicPcmAvailable(int scene){
+    AcquireSRWLockShared(&pcmCacheLock);int yes=scene>=0 && scene<MUSIC_SCENE_COUNT && pcmTracks[scene].samples!=NULL;
+    ReleaseSRWLockShared(&pcmCacheLock);return yes;
+}
+
 void MusicBusProcess(float* left,float* right,int count) {
     float mood=(float)InterlockedCompareExchange(&requestedMood,0,0)*.001f;
     float gain=(float)InterlockedCompareExchange(&requestedGain,0,0)*.001f;

@@ -37,10 +37,10 @@ const SkillDef skillDefs[] = {
     {"GHOST STEP",   "Silent footsteps while light is off", 0, 3, {1300,2600,3900}, 0, 1, 0},
     {"HUSH PULSE",   "G: suppress footsteps 85% for 4s; 8 battery, 24s cooldown", 0, 1, {4500,0,0},  1, 2, 0},
     /* ---- 列 1：筹（风险与经济） ---- */
-    {"SIPHON",       "Battery cap +25/rank; below 25%: regen 2-4/s, sanity drain +20%",                          1, 3, {1300,2600,3900},       0, 25, 0},   /* v3.0 退役 */
+    {"SIPHON",       "Battery cap +25/rank; light OFF below 25%: regen 2-4/s, sanity drain +20%",                          1, 3, {1300,2600,3900},       0, 25, 0},   /* v3.0 退役 */
     {"CRANK WALK",   "Crank while walking (move -40%, noise x2)", 1, 3, {1300,2600,3900}, 0, 4, 0},
     {"REST",         "Safe-room recovery +25% base rate per rank",                          1, 3, {1300,2600,3900},       0, 5, 0},   /* v3.0 退役 */
-    {"METABOLISM",   "Sanity loss burns battery (1:3)",    1, 1, {4500,0,0}, 0, 6, 0},
+    {"METABOLISM",   "50% of passive sanity loss burns battery (1:3); remainder still drains sanity",    1, 1, {4500,0,0}, 0, 6, 0},
     /* ---- 列 2：隐（藏匿与脱身） ----
        v3.0：整列重做。原来 4 个节点全是伤害（HEAVY HAND / STAGGER /
        TYPE WORK / RELOAD RHYTHM），无战斗后完全无效。
@@ -99,7 +99,7 @@ const SkillDef skillDefs[] = {
      {4500,0,0}, 0, 35, 1},
     /* ---- 2026-11-08（第 9 轮）：反击者流派 COUNTER ---- */
     {"BREAK FREE", "Struggle window is 1.5x wider when grabbed", 2, 1,
-     {2600,0,0}, 0, 11, 0},
+     {2600,0,0}, 0, SK_SLIP, 0},
     {"RETALIATE", "After taking a hit: +30% move speed for 3s", 2, 1,
      {3200,0,0}, 0, 37, 0},
     {"COUNTERKILL", "Once per run: repel the scavenger when it grabs you", 2, 1,
@@ -434,10 +434,10 @@ float SkillEcoMul(void) {
     /* 2026-11-06：省电 -10%/级 -> -12%/级。
        手电上限涨到 150 之后，每 1% 的绝对值也变大了，
        这里只补一点点，避免夜行者那条 -25% 叠加后过于强势。 */
-    return (1.0f-0.12f*(float)skillRank[SK_GHOSTSTEP])*(SkillOwned(SK_NIGHTWALKER)?0.75f:1.0f);
+    return fmaxf(.40f,1.0f-0.12f*(float)SkillClampRank(SK_GHOSTSTEP,skillRank[SK_GHOSTSTEP]))*(SkillOwned(SK_NIGHTWALKER)?0.75f:1.0f);
 }
 float SkillCalmMul(void) {                  /* REST       -10%/级 */
-    return 1.0f - 0.10f * (float)skillRank[SK_REST];
+    return fmaxf(.50f,1.0f - 0.10f * (float)SkillClampRank(SK_REST,skillRank[SK_REST]));
 }
 
 /* 「全满级」成就：keystone 不参与（全局只能持有一个） */
@@ -455,7 +455,7 @@ int SkillsAllMaxed(void) {
 /* POWER SIPHON：电量低于 25% 时自动涓流回电，代价是理智流失加快 */
 int SkillPwrSiphonAdd(void) {
     if (skillRank[SK_BATTERY] <= 0) return 0;
-    return 1 + skillRank[SK_BATTERY];          /* 2 / 3 点每秒 */
+    return 1 + SkillClampRank(SK_BATTERY,skillRank[SK_BATTERY]);          /* 2 / 3 点每秒 */
 }
 int SkillPwrSiphonActive(void) {
     return skillRank[SK_BATTERY] > 0;
@@ -672,9 +672,7 @@ int SkillShortcutAvailable(void) {
 }
 
 /* LAST RESORT：理智归零时免死一次 */
-int SkillLastResortOneshot(void) { /* STUB: Legacy sanity one-shot recovery hook is not implemented; do not claim this effect is active. */
-    return 0;
-}
+
 
 /* TYPE WORK：武器伤害类型（0 = 不启用，1..3 = 砍/钝/金币） */
 int SkillTypeWorkRank(void) {

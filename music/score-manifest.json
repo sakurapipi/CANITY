@@ -9,7 +9,9 @@
       "wav_sha256": "f2beffcce1db90835b0a64d0b9a4e2fd9a0a985d80d8a5b1330b37e7b296fabf",
       "rms_dbfs": -17.059,
       "peak_dbfs": -1.0,
-      "notes": 94
+      "notes": 94,
+      "mp3_sha256": "ec2d1cad842921824cfc8caa3052b7f71b02b40c6a66f546936cad59f53abce5",
+      "mp3_bytes": 1281087
     },
     "explore": {
       "bpm": 80,
@@ -17,7 +19,9 @@
       "wav_sha256": "9a1e70870a4b2078700a5403dc0e2f52a4b8f18c8b0d545237a926529e0186e3",
       "rms_dbfs": -17.596,
       "peak_dbfs": -1.0,
-      "notes": 88
+      "notes": 88,
+      "mp3_sha256": "ce1415d53fa24edcff9c45f7044a4633975de2afc0a532a99919cf8a4492d9ed",
+      "mp3_bytes": 1153192
     },
     "chase": {
       "bpm": 120,
@@ -25,7 +29,9 @@
       "wav_sha256": "f6894a90e801708de03865769c71bd5aa676cb3896c9b0b95869b9dfd475afba",
       "rms_dbfs": -17.0,
       "peak_dbfs": -2.796,
-      "notes": 108
+      "notes": 108,
+      "mp3_sha256": "12709db6cb994e6fe3c6341ebc44971a2087fa933e35d4e76863fdc5d1c304e2",
+      "mp3_bytes": 1281087
     },
     "safe": {
       "bpm": 64,
@@ -33,7 +39,9 @@
       "wav_sha256": "db5d04c6dbbde76349b62deb7367abc1fd7293ddbdc0740b1f1ddeb60f14954b",
       "rms_dbfs": -17.0,
       "peak_dbfs": -3.849,
-      "notes": 86
+      "notes": 86,
+      "mp3_sha256": "972da60754d359cb39df54aa786f59e086d3fa324fc18f6338edd2ebd8383b1a",
+      "mp3_bytes": 1201257
     },
     "victory": {
       "bpm": 80,
@@ -41,7 +49,9 @@
       "wav_sha256": "c2bd24eee82659e4d9c78a46fe9891209f704cc8bd272662d8eff655eccdef21",
       "rms_dbfs": -17.0,
       "peak_dbfs": -1.631,
-      "notes": 80
+      "notes": 80,
+      "mp3_sha256": "0cbeaa0e3e1ec4b796bace0db88741946251873e1f3a989b27f8c2aa660a9a88",
+      "mp3_bytes": 1153192
     },
     "defeat": {
       "bpm": 60,
@@ -49,7 +59,10 @@
       "wav_sha256": "5f86d3b5641d67d9912d45203ebb4bde05a4111e0229a55d141557943d340e05",
       "rms_dbfs": -17.0,
       "peak_dbfs": -2.74,
-      "notes": 102
+      "notes": 102,
+      "mp3_sha256": "51b26c315d13a363ee1381ae710dbfda22bcc48f9bedc22e0fa6f247ddb9a2a9",
+      "mp3_bytes": 1281087
     }
-  }
+  },
+  "distribution_format": "mp3 / 44100 Hz stereo / 128 kbps"
 }

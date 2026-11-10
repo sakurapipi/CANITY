@@ -24,7 +24,7 @@ extern int trainingMode;
 
 /* 进局内：Update() 只在 STATE_PLAYING 时跑逻辑 */
 static void enter_playing(void) {
-    StartGame();
+    StartFreshTestRun();
     currentState = STATE_PLAYING;
     trainingMode = 0;
 }

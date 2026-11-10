@@ -4,6 +4,7 @@
  * 入口：TestSuite_actors()
  */
 #include "../test_common.h"
+#include "monster_rules.h"
 
 static void test_jumper_removed_spider_takes_over(void) {
     extern float jumperTrigger;
@@ -12,7 +13,7 @@ static void test_jumper_removed_spider_takes_over(void) {
     extern int   SpiderSpawnNearPlayer(void);
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     /* ---- ① 再也不会出现跳脸怪 ---- */
     for (int lv = 1; lv <= 15; lv++) {
@@ -37,7 +38,7 @@ static void test_spider_spawn_curve(void) {
     extern float SpiderRespawnCd(void);
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     /* 起始层之前一次都不出 */
     for (int lv = 1; lv < SPIDER_MIN_LEVEL; lv++) {
@@ -51,8 +52,7 @@ static void test_spider_spawn_curve(void) {
         int levels[4] = { SPIDER_MIN_LEVEL, 6, 10, 14 };
         for (int k = 0; k < 4; k++) {
             int lv = levels[k];
-            int expect = SPIDER_APPEAR_BASE + (lv - SPIDER_MIN_LEVEL) * SPIDER_APPEAR_STEP;
-            if (expect > SPIDER_APPEAR_CAP) expect = SPIDER_APPEAR_CAP;
+            int expect=MonsterFloorChance(SPAWN_SPIDER,lv);
 
             int hits = 0, tries = 400;
             for (int i = 0; i < tries; i++) {
@@ -63,7 +63,7 @@ static void test_spider_spawn_curve(void) {
             int lo = expect - 10, hi = expect + 10;
             if (lo < 0) lo = 0;
             CHECK(hits * 100 / tries >= lo && hits * 100 / tries <= hi,
-                  "the spider spawn rate must follow the depth curve (+5% per floor, capped)");
+                  "spider sampling follows the current eligibility and content-policy chance");
         }
     }
 
@@ -81,7 +81,7 @@ static void test_spider_dispel_cooldown(void) {
     extern float posX, posY;
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
     currentLevel = 6;
     GenerateLevel();
 
@@ -167,7 +167,7 @@ static void test_spider_bind_no_damage(void) {
     extern float posX, posY;
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
     currentLevel = 5;
     GenerateLevel();
 
@@ -257,7 +257,7 @@ static void test_floor_change_clears_field_state(void) {
     extern void  ThrowItem(int, float);
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
     RunSkillsReset();
     for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
 
@@ -406,7 +406,7 @@ static void test_two_light_beasts(void) {
     extern Monster lightBeasts[LIGHTBEAST_MAX];
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     CHECK(lightBeasts[0].active == 1, "the first light beast must spawn");
     CHECK(lightBeasts[1].active == 1, "the SECOND light beast must spawn too");
@@ -434,7 +434,7 @@ static void test_two_light_beasts(void) {
 }
 
 static void test_three_hunters(void) {
-    clear_meta();bankGold=0;StartGame();dailyMode=0;trainingMode=0;
+    clear_meta();bankGold=0;StartFreshTestRun();dailyMode=0;trainingMode=0;
     currentState=STATE_PLAYING;
 
     extern void TestSummonAllHunters(void);
@@ -564,7 +564,7 @@ static void test_hunter_models(void) {
 }
 
 static void test_floor_resets_hunters(void) {
-    clear_meta();bankGold=0;StartGame();dailyMode=0;trainingMode=0;
+    clear_meta();bankGold=0;StartFreshTestRun();dailyMode=0;trainingMode=0;
     currentState=STATE_PLAYING;
 
     extern Monster monHunters[MON_HUNTER_MAX];

@@ -18,7 +18,7 @@ static void test_flare_heal_budget(void) {
     extern void  ThrowItem(int, float);
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
     currentLevel = 1;
     GenerateLevel();
 

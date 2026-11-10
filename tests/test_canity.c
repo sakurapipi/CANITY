@@ -14,6 +14,7 @@
  */
 
 #include "../include/common.h"
+#include "../include/save.h"
 #include "../include/steam_ach.h"
 /* 2026-11-05：存档分区的容器契约。这个头是纯类型/常量、无系统依赖，
    所以 test_canity 能直接链 src/save/save_container.c 做**真单元测试**
@@ -120,17 +121,38 @@ static int contains(const char* text, const char* needle) {
 /* 2026-11-09：忽略空白与换行的子串匹配。
    重构时常把 `a[i-30]=b[i]` 写成 `a[id-30] = rank`，
    功能没变但字面匹配会假红 —— 这类断言用这个函数。 */
-static int contains_tight(const char* text, const char* needle) {
-    char a[65536], b[512];
-    size_t j = 0;
-    for (size_t i = 0; text[i] && j < sizeof(a) - 1; i++)
-        if (!isspace((unsigned char)text[i])) a[j++] = text[i];
-    a[j] = 0;
-    j = 0;
-    for (size_t i = 0; needle[i] && j < sizeof(b) - 1; i++)
-        if (!isspace((unsigned char)needle[i])) b[j++] = needle[i];
-    b[j] = 0;
-    return strstr(a, b) != NULL;
+/* Search complete sources without fixed-size normalization buffers. */
+static int contains_tight(const char* text,const char* needle){
+    if(!text || !needle)return 0;
+    while(isspace((unsigned char)*needle))needle++;
+    if(!*needle)return 1;
+    for(const char* start=text;*start;start++){
+        if(isspace((unsigned char)*start))continue;
+        const char* hay=start;const char* pat=needle;
+        for(;;){
+            while(isspace((unsigned char)*hay))hay++;
+            while(isspace((unsigned char)*pat))pat++;
+            if(!*pat)return 1;
+            if(!*hay || *hay!=*pat)break;
+            hay++;pat++;
+        }
+    }
+    return 0;
+}
+
+static void test_complete_tight_search(void){
+    size_t prefix=400000;char* text=malloc(prefix+1024);char* needle=malloc(1024);
+    if(!text || !needle){free(text);free(needle);fail("normalization regression allocation");return;}
+    memset(text,'x',prefix);memset(needle,'q',700);needle[700]=0;
+    memcpy(text+prefix," a \n b \t c ",12);text[prefix+12]=0;
+    check(contains_tight(text,"abc"),"tight search reaches beyond 400KB");
+    check(!contains_tight(text,"abd"),"tight search rejects an absent suffix");
+    memcpy(text+prefix,needle,701);
+    check(contains_tight(text,needle),"tight search does not truncate long needles");
+    needle[699]='z';
+    check(!contains_tight(text,needle),"long needles differing after 512 characters stay distinct");
+    check(contains_tight(text," \t\n"),"an all-whitespace needle matches empty text");
+    free(text);free(needle);
 }
 
 static int count_contains(const char* text, const char* needle) {
@@ -192,7 +214,7 @@ static void test_no_unwired_api(void) {
         { "DailyBatteryDrainMul",    "src/loop_level.c" },
         { "DailyGoldMul",            "src/loop_level.c" },
         { "DailyNoiseMul",           "src/loop_level.c" },
-        { "DailyForbidSprint",       "src/loop_tutorial.c" },
+        { "DailyForbidSprint",       "src/daily.c" },
         { "DailyForbidLight",        "src/loop_player.c" },   /* 重构后调用点搬到这里 */
         { "DailySecondSpawnOffset",  "src/entity.c" },
         { "DailyGoldTierBonus",      "src/economy.c" },   /* 强度档在 economy.c */
@@ -210,7 +232,7 @@ static void test_no_unwired_api(void) {
         { "ThreatReset",             "src/loop_start.c" },
         { "ThreatAddForTier",        "src/bench.c" },
         /* 战绩 / 图鉴 */
-        { "BestiaryMarkEscaped",     "src/entity.c" },
+        { "BestiaryMarkEscaped",     "src/run_economy.c" },
         { "BestiaryMarkCaught",      "src/entity.c" },
         { "BestiaryDanger",          "src/domain/ui/ui_menu.c" },   /* 第 2 轮：图鉴页随菜单搬走 */
         /* 每日修正上一条遥测 */
@@ -411,18 +433,31 @@ static void test_tutorial_and_keystone_contract(void) {
     /* ---- P1-2：tutorialKnocked 必须真的被置 1（原来只有清零） ---- */
     check(count_contains(src, "tutorialKnocked = 1") >= 1,
           "CONTRACT: tutorialKnocked must be set somewhere, otherwise TUT_KNOCK can never advance");
-    check(contains(src, "tutorialKnocked || tutorialThrown"),
-          "CONTRACT: TUT_KNOCK must also accept a throw as fallback (training may lack the DECOY keystone)");
-
-    /* ---- P1-3：教程提示不能写反 ---- */
-    check(contains(src, "\"THROW  -  HOLD %s\", VkName(g_bindings[ACT_THROW])"),
-          "CONTRACT: TUT_THROW must hint the real throw action");
-    check(!contains(src, "\"THROW  -  HOLD %s\", VkName(g_bindings[ACT_CANCEL_CHARGE])"),
-          "CONTRACT: TUT_THROW must not hint the cancel-charge action");
-
-    /* ---- P1-4：训练场必须无条件开放 G 键 ---- */
-    check(contains(src, "HasKeystone(SK_DECOY) || trainingMode"),
-          "CONTRACT: training mode must open the decoy key without the keystone");
+    check(contains_tight(src,"caseTUT_KNOCK:done=(completedActions&(1u<<TUTOR_WRENCH))!=0;"),
+          "CONTRACT: wrench lesson advances only from its real wrench action");
+    {
+        char* wrench=read_file("src/loop_wrench.c");strip_comments(wrench);
+        check(contains(wrench,"TutorialRecordAction(TUTOR_WRENCH)"),
+              "CONTRACT: the real wrench handler records the lesson action");
+        free(wrench);
+    }
+    /* Lesson wording may change language; its action binding must not drift. */
+    {
+        char* tutorial=read_file("src/loop_tutorial.c");strip_comments(tutorial);
+        char* hint=strstr(tutorial,"const char* TutorialHint(void)");
+        char* lesson=hint?strstr(hint,"case TUT_THROW:"):NULL;
+        char* end=lesson?strstr(lesson,"case TUT_BEACON:"):NULL;
+        check(lesson && end,"CONTRACT: current throw lesson has a dedicated hint");
+        if(lesson && end){
+            char previous=*end;*end=0;
+            check(contains_tight(lesson,"VkName(g_bindings[ACT_THROW])"),"CONTRACT: throw lesson names the actual throw binding");
+            check(!contains(lesson,"g_bindings[ACT_CANCEL_CHARGE]"),"CONTRACT: throw hint must not substitute cancel-charge binding");
+            *end=previous;
+        }
+        free(tutorial);
+    }
+    check(contains_tight(src,"(SkillOwned(SK_DECOY)||trainingMode)"),
+          "CONTRACT: training temporarily exposes the current Hush ability without buying it");
 
     /* ---- P1-4：会被外部条件卡死的那两步必须有超时兜底 ---- */
     check(contains(src, "TUTORIAL_STEP_TIMEOUT"),
@@ -579,8 +614,12 @@ static void test_stable_visuals_and_input(void) {
      现在反过来检查：那段不透明黑边不该再回来。 */
     check(!contains(ui, "int bandT = winH * 37 / 100;"),
           "hide mask bands came back (user asked to remove it)");
-    check(contains(render, "int frameSeed = 17;"),
-          "low-sanity vignette still uses animated full-screen noise");
+    check(contains(render,"GenerateVignette(void)") && contains(render,"vignetteMask"),
+          "low-sanity rendering keeps its precomputed edge mask");
+    check(contains(render,"RenderPostBand(int y0,int y1)") &&
+          contains(render,"perception.grain") && contains(render,"perception.seed") &&
+          contains_tight(render,"noise=noise*1664525u+1013904223u;"),
+          "low-sanity rendering retains bounded seeded dynamic grain rather than requiring an obsolete variable name");
     free((void*)game);
     free((void*)ui);
     free((void*)render);
@@ -638,7 +677,9 @@ static void test_save_persist_contract(void) {
         free(throwc);
     }
 
-    check(contains(saveh, "SAVE_VERSION 39"), "save format must be v39 with v37/v38 migration");
+    check(SAVE_VERSION>=44,"save format must include the complete v44 state prefix");
+    check(contains_tight(savec,"g_save.version==37") && contains_tight(savec,"g_save.version==43"),
+          "supported v37-v43 saves retain explicit migration into the current format");
     /* v37（2026-11-08 第 7 轮）：幽灵流派 4 个节点的等级必须能存。
        注意：**不能**把中间的 extraSkillRanks[4] 改大 —— 那会让后面所有
        字段偏移，老档全错位。只能是末尾追加。 */
@@ -1208,6 +1249,7 @@ static void test_lockbox_contract(void) {
 }
 
 int main(void) {
+    test_complete_tight_search();
     test_room_template_contract();
     test_tutorial_and_keystone_contract();
     test_room_template_internal_connectivity();

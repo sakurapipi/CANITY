@@ -24,6 +24,7 @@ def include_digest(root):
     paths = list((root / 'include').rglob('*.h'))
     paths += list((root / 'include').rglob('*.inc'))
     paths += list((root / 'src').rglob('*.inc'))
+    paths += list((root / 'third_party').rglob('*.h'))
     return inputs_digest(root, paths)
 
 

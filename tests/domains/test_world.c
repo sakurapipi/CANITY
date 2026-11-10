@@ -4,6 +4,7 @@
  * 入口：TestSuite_world()
  */
 #include "../test_common.h"
+#include "monster_rules.h"
 #include "cell_meta.h"
 
 static void test_global_balance_invariants(void) {
@@ -17,14 +18,13 @@ static void test_global_balance_invariants(void) {
 
     /* ---- ① ② 怪物速度夹在走速与冲刺之间 ---- */
     {
-        float walk   = MOVE_SPEED;                    /* 2.0 */
-        float sprint = MOVE_SPEED * SPRINT_MULT;      /* 3.0 */
-        CHECK(MONSTER_SPEED_FINAL_MAX < sprint,
-              "monster top speed must stay BELOW the player's sprint, or escape is impossible");
-        CHECK(MONSTER_SPEED_FINAL_MAX > walk,
-              "monster top speed must stay ABOVE the player's walk, or nothing is threatening");
-        CHECK(LIGHTBEAST_SPEED_BASE < MONSTER_SPEED_FINAL_MAX,
-              "the light beast must not be faster than the final clamp");
+        CHECK(MonsterMovementCap()<MOVE_SPEED,"chase cap remains below base walking speed");
+        for(int floor=1;floor<=100;floor++){
+            float slow=HunterMoveSpeed(0,floor,2,THREAT_MAX);
+            float fast=HunterMoveSpeed(2,floor,2,THREAT_MAX);
+            CHECK(slow>0 && fast>slow*1.15f,"third hunter is distinctly faster");
+            CHECK(fast<=THREAT_SPEED_HARD_CAP && fast<MOVE_SPEED,"all modifiers respect the final speed cap");
+        }
     }
 
     /* ---- ③ 手电续航区间 ---- */
@@ -79,15 +79,15 @@ static void test_global_balance_invariants(void) {
             }
             prev = p;
         }
-        CHECK(first >= 250 && first <= 340,
-              "at floor 1 the beacon must cost about 30% of 1000 gold");
-        CHECK(prev >= 760 && prev <= 840,
-              "by the deep floors the beacon must cap near 80% of 1000 gold");
+        CHECK(first == 50,
+              "at floor 1 the beacon costs exactly 5% of 1000 gold");
+        CHECK(prev == 50,
+              "deep floors preserve the same 5% price");
 
         currentLevel = 1;
         carryGold = 0;
-        CHECK(ShopPriceAt(8) >= 100,
-              "with no gold the beacon must still cost a real floor price");
+        CHECK(ShopPriceAt(8) == 1,
+              "with no gold the beacon has a nonzero one-gold quote");
     }
 
     /* ---- ⑦ ⑧ 扳手冷却的两个边界 ---- */
@@ -127,7 +127,7 @@ static void test_theme_depth_bands(void) {
     extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     int checkedFloors = 0;
     for (int lv = 1; lv <= 12; lv++) {
@@ -159,7 +159,7 @@ static void test_rooms_stay_sealed(void) {
     extern int worldMap[MAP_HEIGHT][MAP_WIDTH];
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     int sealedFloors = 0, roomsSeen = 0;
     /* 2026-11-06（AD-64）：**自己固定种子**。
@@ -230,7 +230,7 @@ static void test_theme_room_label(void) {
     /* ---- ② 站在房间里能读出主题 ---- */
     {
         clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-        StartGame();
+        StartFreshTestRun();
         int found = 0;
         for (int lv = 1; lv <= 8 && !found; lv++) {
             currentLevel = lv;
@@ -271,7 +271,7 @@ static void test_room_budget_and_exit(void) {
             CHECK(ThemeRoomBudgetForLevel(lv, 0) <= MAX_THEME_ROOMS_PER_FLOOR,
                   "no floor may exceed MAX_THEME_ROOMS_PER_FLOOR theme rooms");
         CHECK(ThemeRoomBudgetForLevel(1, 0) == 1, "floor 1 gets a single room");
-        CHECK(ThemeRoomBudgetForLevel(9, 0) == 2, "deep floors get two");
+        CHECK(ThemeRoomBudgetForLevel(9, 0) == 1, "one authored theme room is budgeted per floor");
     }
 
     /* ---- ③ 出口不能落在房间内部（否则到出口只剩一条路） ---- */
@@ -298,7 +298,7 @@ static void test_room_wall_flags(void) {
     extern int CellIsRoomWall(int, int, int*, int*, int*);
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     int found = 0;
     for (int attempt = 0; attempt < 20 && !found; attempt++) {
@@ -355,7 +355,7 @@ static void test_mote_neutral(void) {
     extern int   Blocked(float, float);
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
     currentLevel = 3;
     GenerateLevel();
 
@@ -1142,7 +1142,7 @@ static void test_rng_engines_are_deterministic_and_distinct(void) {
 
 static void test_new_save_records_rng_version(void) {
     extern const SaveBlob* SaveTestBlob(void);
-    clear_meta(); StartGame();
+    clear_meta(); StartFreshTestRun();
     runInProgress = 1;
     SaveGame();
     {

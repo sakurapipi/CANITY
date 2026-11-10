@@ -107,7 +107,7 @@ static void test_tick_marks_hold_in_a_real_frame(void) {
     /* 为什么必须跑真帧：TickMark 的违规是在**调用顺序**上积累的，
        只手工按声明顺序调一遍等于自己出题自己答（第一次做有牙验证时
        把 game.c 的两条标记对调，测试居然还是绿的 —— 就是因为没跑帧）。 */
-    StartGame();
+    StartFreshTestRun();
     currentState = STATE_PLAYING;
     TickFrameBegin();
     Update(0.016f);

@@ -2117,7 +2117,7 @@ static void DrawHudVitalsAndStatus(int effDetail) {
            保留两条，因为它们分别对应一个**具体动作**：
 
              WARDEN BLOCKS EXIT      留 —— 出口被堵，要么等 25 秒，要么绕开
-             SCAVENGER RIFLING ...   留 —— 你的箱子正在被吃掉，赶紧回去
+             清道夫不再拆箱，不显示拆箱提示。
         */
         {
 
@@ -2126,8 +2126,6 @@ static void DrawHudVitalsAndStatus(int effDetail) {
 
             if (WardenActive() && WardenBlocking()) {
                 st = Tr("WARDEN BLOCKS EXIT", "守门人堵住了出口"); stc = 0x00FF6050u;
-            } else if (ScavengerRifling()) {
-                st = Tr("SCAVENGER RIFLING YOUR CRATES", "清道夫在翻你的箱子"); stc = 0x00FFB040u;
             }
             if (st) {
                 int sw = TextWidthWin(st);
@@ -3304,19 +3302,38 @@ static void DrawSaveStatusBanner(void) {
      · 躲藏中：**下移到观察缝下方**，并加半透明底，
                避免和缝里的画面抢注意力
 */
+static const char* actionErrorMessage=NULL;
+static double actionErrorUntil=0;
+void UiShowActionError(const char* message){
+    actionErrorMessage=message;actionErrorUntil=PlatNow()+4;
+}
+
 void DrawPickupToast(void) {
+    if(actionErrorMessage && PlatNow()<actionErrorUntil &&
+       (currentState==STATE_PLAYING || currentState==STATE_SAFEHOUSE)){
+        int width=DrawTextSmallWidth(actionErrorMessage),x=(winW-width)/2,y=UIS(90);
+        BlendRectWin(x-UIS(8),y-UIS(4),x+width+UIS(8),y+FONT_H+UIS(7),UI_BG_PANEL,.95f);
+        DrawTextSmallWin(x,y,actionErrorMessage,0x00FF7060u);return;
+    }
 
 
 
 
-    if (!pickupMsg || pickupMsgTimer <= 0.0f || MonsterChaseActive()) return;
+    if (!pickupMsg || pickupMsgTimer <= 0.0f) return;
+    if(currentState==STATE_PLAYING && MonsterChaseActive())return;
 
     /* ===== v2.4.52 **只在游玩中显示** =====
        用户截图：暂停菜单上浮着一行 "AT THE EXIT: LEAVE, OR GO DEEPER."
        —— 那是上一帧的事件提示，因为 toast 画在帧末（所有图层之上），
        暂停菜单先画、toast 后画，于是压在菜单上。
        现在非游玩状态直接不画。 */
-    if (currentState != STATE_PLAYING) return;   /* currentState 是本文件已有的全局 */
+    if (currentState != STATE_PLAYING && currentState != STATE_SAFEHOUSE) return;
+    if(currentState==STATE_SAFEHOUSE){
+        int width=DrawTextSmallWidth(pickupMsg);
+        int x=(winW-width)/2,y=UIS(82);
+        BlendRectWin(x-UIS(8),y-UIS(4),x+width+UIS(8),y+FONT_H+UIS(7),UI_BG_PANEL,.94f);
+        DrawTextSmallWin(x,y,pickupMsg,UI_ACCENT);return;
+    }
 
     /* ===== v2.4.53 **模态面板打开时不画 toast** =====
        用户截图：出口二选一面板上，toast 的 "AT THE EXIT: LEAVE, OR GO DEEPER."

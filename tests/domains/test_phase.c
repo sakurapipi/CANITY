@@ -9,22 +9,28 @@ static void test_phase_beacon_one_use(void) {
     extern int phaseOwned, phaseCharges, phasePlaced, phaseBeacons;
     extern int PhaseTryPlace(void), PhaseTryTeleport(void);
 
-    clear_meta(); StartGame();
+    clear_meta(); StartFreshTestRun();
     phaseBeacons = 1;
     phaseOwned = 1;
     phaseCharges = 1;
     phasePlaced = 0;
 
     /* 站在一个确定可站的位置，然后原地放锚 */
-    posX = 12.5f; posY = 9.5f;
+    int count=0;float px[2]={0},py[2]={0};
+    for(int y=1;y<MAP_HEIGHT-1 && count<2;y++)for(int x=1;x<MAP_WIDTH-1 && count<2;x++)
+        if(!worldMap[y][x] && !Blocked(x+.5f,y+.5f) && !PropBlocksAt(x,y)){
+            px[count]=x+.5f;py[count]=y+.5f;count++;
+        }
+    CHECK(count==2,"phase fixture needs two valid floor positions");
+    posX=px[0];posY=py[0];
     CHECK(PhaseTryPlace(), "phase: place succeeds with a charge left");
     CHECK(phasePlaced == 1, "phase: beacon is on the map");
     CHECK(phaseCharges == 1, "phase: placing does not consume the charge");
 
     /* 走到别处再传回来 */
-    posX = 9.5f; posY = 9.5f;
+    posX=px[1];posY=py[1];
     CHECK(PhaseTryTeleport(), "phase: teleport succeeds once");
-    CHECK(fabsf(posX - 12.5f) < 0.05f && fabsf(posY - 9.5f) < 0.05f,
+    CHECK(fabsf(posX-px[0])<.05f && fabsf(posY-py[0])<.05f,
                                 "phase: player lands on the beacon");
     CHECK(phasePlaced == 0, "phase: the beacon is consumed");
     CHECK(phaseCharges == 0, "phase: the charge is spent");
@@ -42,7 +48,7 @@ static void test_phase_landing_near_wall(void) {
     extern int Blocked(float, float);
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     /* 随便找一格墙，把落点放在它所在的格子里（这就是撞墙的情形） */
     int wx = 0, wy = 0, found = 0;
@@ -110,7 +116,7 @@ static void test_beacon_cleared_between_floors(void) {
     extern float posX, posY;
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     PhaseGive();
     CHECK(phaseOwned == 1 && phaseCharges == 1, "device granted (one use)");
@@ -136,27 +142,27 @@ static void test_phase_price(void) {
 
     /* ==================================================================
      * 2026-11-06 修正后的契约：**随层数递增的百分比**
-     *   第 1 层 30%，每层 +5%，第 11 层起封顶 80%，下限 120 金
+     *   当前用户规则：所有层数均为携带金币的5%，向上取整，最低1金
      * 固定 70% 的旧契约太狠（用户实测："价格过于昂贵"）。
      * ================================================================ */
     carryGold = 1000;
 
     currentLevel = 1;
-    CHECK(ShopPriceAt(8) == 300, "floor 1 must cost 30% of 1000 gold");
+    CHECK(ShopPriceAt(8) == 50, "beacon costs 5% of carried gold");
 
     currentLevel = 5;
-    CHECK(ShopPriceAt(8) == 500, "floor 5 must cost 50% of 1000 gold");
+    CHECK(ShopPriceAt(8) == 50, "depth does not alter the 5% beacon quote");
 
     currentLevel = 11;
-    CHECK(ShopPriceAt(8) == 800, "floor 11 must hit the 80% cap");
+    CHECK(ShopPriceAt(8) == 50, "deep floors retain the 5% beacon quote");
 
     currentLevel = 30;
-    CHECK(ShopPriceAt(8) == 800, "the cap must hold on deep floors");
+    CHECK(ShopPriceAt(8) == 50, "the percentage stays fixed on deep floors");
 
     /* 下限：身上没钱时仍有一个真实价格，不是 0 也不至于买不起到离谱 */
     currentLevel = 1;
     carryGold = 0;
-    CHECK(ShopPriceAt(8) == 120, "with no gold the beacon keeps a 120 floor");
+    CHECK(ShopPriceAt(8) == 1, "an empty wallet still receives a nonzero one-gold quote");
 
     carryGold = savedGold;
     currentLevel = savedLevel;
@@ -171,7 +177,7 @@ static void test_phase_beacon(void) {
     extern int   Blocked(float, float);
 
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
-    StartGame();
+    StartFreshTestRun();
 
     /* ==================================================================
      * **不要写死坐标**。

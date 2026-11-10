@@ -469,12 +469,12 @@ static void DrawCrateSprite(int i) {
     if (c->mimicHost) return;
     if (c->searched) {
         /* 翻过：盖子掀开、里面黑 */
-        DrawBakedProp(SPR_PROP_CRATE_OPEN, c->x, c->y, 0.0f, 0.34f, 0.55f);
+        DrawBakedPropArt(SPR_PROP_CRATE_OPEN, c->x, c->y, 0.0f, 0.48f, 0.75f);
     } else if (c->locked) {
         /* 未解锁：正常木箱 + 金锁 */
-        DrawBakedProp(SPR_PROP_CRATE_LOCKED, c->x, c->y, 0.0f, 0.42f, 1.0f);
+        DrawBakedPropArt(SPR_PROP_CRATE_LOCKED, c->x, c->y, 0.0f, 0.34f, 1.0f);
     } else {
-        DrawBakedProp(SPR_PROP_CRATE, c->x, c->y, 0.0f, 0.42f, 1.0f);
+        DrawBakedPropArt(SPR_PROP_CRATE, c->x, c->y, 0.0f, 0.34f, 1.0f);
     }
 }
 
@@ -509,7 +509,7 @@ static void DrawHideSpotSprite(int i) {
 static void DrawBreakerSprite(void) {
     if (!breaker.active) return;
     float k = breakerOpen ? 1.15f : 0.95f;
-    DrawBakedProp(SPR_PROP_BREAKER, breaker.x, breaker.y, 0.0f, 0.52f, k);
+    DrawBakedPropArt(breakerOpen?SPR_PROP_BREAKER_ON:SPR_PROP_BREAKER, breaker.x, breaker.y, 0.0f, 0.58f, k);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2081,80 +2081,13 @@ static void DrawFlowerSprite(void) {
    地标仍然是「门上方那道竖向光柱」，只有出口有。
 */
 static void DrawExitBeamSprite(void) {
-    float halfH = breakerOpen ? 1.05f : 0.72f;
-    SpriteBox s = ProjectSprite(exitX, exitY, 0.0f, halfH);
-    if (!s.ok) return;
-    if (s.ty < 0.55f) return;
-
-    int w = s.x1 - s.x0, h = s.y1 - s.y0;
-    if (w < 3 || h < 3) return;
-
-    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, w / 3, s.ty);
-
-    float light = SpriteShade(s.ty, 0.12f) * ArtPropLight(exitX, exitY);
-
-    /* 呼吸脉冲：通电时让远处注意到「那边在动」 */
-    float pulse = 1.0f;
-    if (breakerOpen) {
-
-        pulse = 0.82f + 0.18f * sinf(gameTime * 2.4f);
-    }
-
-    for (int x = s.x0; x < s.x1; x++) {
-        if (x < 0 || x >= renderW) continue;
-        if (s.ty >= zBuffer[x]) continue;
-        float u = (float)(x - s.x0) / (float)w;
-
-        for (int y = s.y0; y < s.y1; y++) {
-            if (y < 0 || y >= renderH) continue;
-            float v = (float)(y - s.y0) / (float)h;
-
-            /* ---- 外框范围：四角切掉，像嵌在墙里 ---- */
-            if (u < 0.06f || u > 0.94f || v < 0.04f) continue;
-
-            /* ---- 门缝：上窄下宽（近大远小） ---- */
-            float gapW = (breakerOpen ? 0.26f : 0.055f) * (0.72f + 0.28f * v);
-            float du = (u - 0.5f) * 2.0f;
-            int isGap = (du > -gapW && du < gapW);
-
-            unsigned int c;
-            float k;
-
-            if (isGap) {
-                /* 门缝内部：通电亮青，断电几乎全黑 */
-                c = breakerOpen ? ART_EXIT_GAP_ON : ART_EXIT_GAP_OFF;
-                k = light * (breakerOpen ? pulse : 0.5f);
-                /* 缝的深处更暗（往里看是黑的） */
-                k *= 0.55f + 0.45f * fabsf(du) / (gapW > 0.001f ? gapW : 0.001f);
-            } else {
-                /* ---- 门框：斜角 + 内凹两层光照 ---- */
-                float lit = ArtBevelK(u, v, 0.045f, 0.55f)
-                          * ArtRecessK(u, v, 0.10f, 0.42f);
-
-                /* 三段材质：外框暗灰 / 内板中灰 / 靠缝的受光边更亮 */
-                float distToGap = fabsf(du) - gapW;
-                if (distToGap < 0.10f) {
-                    c = ART_GREY_HOT;                 /* 被门缝的光照亮的内边 */
-                } else if (u > 0.14f && u < 0.86f) {
-                    c = ART_GREY_LIT;                 /* 内凹门板 */
-                } else {
-                    c = ART_GREY_BODY;                /* 外框 */
-                }
-                k = light * lit;
-
-                /* 通电时，门缝的光会往外溢出一圈 */
-                if (breakerOpen && distToGap < 0.26f) {
-                    float spill = 1.0f - distToGap / 0.26f;
-                    k *= 1.0f + spill * 0.55f * pulse;
-                }
-
-                /* 竖向拉丝纹理：每 5 像素一条极淡的暗线，给出表面质感 */
-                if (((y - s.y0) % 5) == 0) k *= 0.93f;
-            }
-
-            pixels[(size_t)y * renderW + x] = ArtScale(c, k);
-        }
-    }
+    SpriteBox s = ProjectSprite(exitX, exitY, 0.0f, 1.0f);
+    if (!s.ok || s.ty < 0.55f) return;
+    int w=s.x1-s.x0,h=s.y1-s.y0;
+    if(w<3 || h<3)return;
+    DrawBakedPropArt(breakerOpen?SPR_PROP_EXIT_OPEN:SPR_PROP_EXIT,exitX,exitY,0,1.0f,1);
+    float light=SpriteShade(s.ty,0.12f)*ArtPropLight(exitX,exitY);
+    float pulse=breakerOpen?.82f+.18f*sinf(gameTime*2.4f):1;
 
     /* ---- 光柱：地标。有序抖动让它像像素画的光，不是模糊渐变 ---- */
     if (breakerOpen) {

@@ -18,8 +18,7 @@
  *  · **持续重新锁定**：每 1.0 秒把目标改成玩家当前位置（躲着就锁藏身点）
  *  · **卡死检测**：2 秒内位移 < 0.25 格 → 判定卡住 → 直接绕到玩家附近重生
  *  · **寿命上限**：60 秒还没干成事就自己走（绝不永久站着）
- *  · **到达后的行为明确**：躲着 → 拉柜门；没躲 → 翻箱 3 秒 → 走；
- *    没箱子可翻 → 原地翻找 2 秒 → 走（有动作，不是站着）
+ *  · 到达后：躲着则检查藏身点；未躲则继续追玩家。不会操作任何箱子。
  *  · **可以重来**：走掉之后 25 秒冷却，冷却完 hideStreak 归零，可再次触发
  */
 #include "state.h"
@@ -137,8 +136,8 @@ typedef struct {
     int   grabSpot;        /* 正在拉的那个柜子下标（-1 = 没有）。
                             * 第 1 轮（2026-11-08）：必须记下来 —— 否则玩家在预警里
                             * 出柜，hiddenIn 变 -1 就查不到是哪个柜子被拽了。 */
-    float eatT;            /* 正在吃箱子的进度 */
-    int   eating;          /* 正在吃的箱子下标，-1 = 没在吃 */
+    float eatT;            /* Retired crate timer; kept zero. */
+    int   eating;          /* Retired crate target; always -1. */
     float stepAcc;     /* v2.4.92 脚步累计距离 */
     float life;            /* 剩余寿命 */
     float retarget;        /* 距离下次重新锁定 */
@@ -153,7 +152,7 @@ static float scavCooldown = 0.0f;   /* 走掉之后的冷却 */
 /* Live state queries. SpeedNow exposes the shared movement tuning constant. */
 int   ScavengerActive(void)   { return scavenger.active; }
 float ScavengerSpeedNow(void) { return SCAV_SPEED; }
-int   ScavengerRifling(void) { return scavenger.eating >= 0; }
+int   ScavengerRifling(void) { /* FIXED_RESULT: Crate rifling is retired; legacy callers always receive false. */ return 0; }
 float ScavengerX(void)       { return scavenger.x; }
 float ScavengerY(void)       { return scavenger.y; }
 float ScavengerWarnT(void)   { return scavenger.warnT; }
@@ -553,7 +552,7 @@ static int ScavengerPreflight(float dt) {
     return 1;
 }
 
-static int ScavengerEncounter(float dt, float d) {
+static int ScavengerEncounter(float d) {
     /* ===== v2.4.29 **玩家跑出柜子后被逮到** =====
        条件：玩家不在藏身点里，且清道夫贴到 0.85 格内。
        惩罚：30% 减速 120 秒 + 理智按 25→50 随层成长。
@@ -630,57 +629,9 @@ static int ScavengerEncounter(float dt, float d) {
             return 0;
         }
 
-        /* (b) 玩家没躲 → 翻箱。安全规则：只吃 content == 0（空箱），
-               保险丝 / 电池一律不动，宁可不吃也不能让玩家卡关。 */
-        if (scavenger.eating < 0 && scavenger.searchT <= 0.0f) {
-
-
-            int best = -1;
-            float bestD = 1e9f;
-            for (int ci = 0; ci < containerCount; ci++) {
-                if (!containers[ci].active) continue;
-                if (containers[ci].searched) continue;
-                if (containers[ci].content != 0) continue;
-                float cdx = containers[ci].x - scavenger.x;
-                float cdy = containers[ci].y - scavenger.y;
-                float cd2 = cdx * cdx + cdy * cdy;
-                if (cd2 > 36.0f) continue;               /* 6 格内 */
-                if (cd2 < bestD) { bestD = cd2; best = ci; }
-            }
-            if (best >= 0) {
-                scavenger.eating = best;
-                scavenger.eatT = 0.0f;
-                (void)0; /* Enemy encounter narration removed. */
-                (void)0; /* No encounter-toast timer. */
-            } else {
-                /* 没箱子可翻 → 原地翻找 2 秒再走（有动作，不是傻站着） */
-                scavenger.searchT = SCAV_SEARCH_TIME;
-                (void)0; /* Enemy encounter narration removed. */
-                (void)0; /* No encounter-toast timer. */
-            }
-        }
-
-        /* (c) 原地翻找计时 */
-        if (scavenger.searchT > 0.0f) {
-            scavenger.searchT -= dt;
-            if (scavenger.searchT <= 0.0f) { scavengerLeave(); }
-            return 0;
-        }
-
-        /* (d) 吃箱子 */
-        if (scavenger.eating >= 0) {
-            scavenger.eatT += dt;
-            if (scavenger.eatT >= SCAV_EAT_TIME) {
-
-                int ci = scavenger.eating;
-                if (ci >= 0 && ci < MAX_CONTAINERS && containers[ci].active &&
-                    containers[ci].content == 0) {
-                    containers[ci].searched = 1;
-                }
-                PlaySfx(SFX_GLASS, 0.5f);
-                scavengerLeave();
-            }
-        }
+        /* The scavenger hunts campers, never consumes or searches loot containers. */
+        scavenger.eating=-1;scavenger.eatT=0;scavenger.searchT=0;
+        retargetToPlayer();
         return 0;
     }
 
@@ -747,7 +698,7 @@ void UpdateScavenger(float dt) {
     float dx = scavenger.tx - scavenger.x, dy = scavenger.ty - scavenger.y;
     float d = sqrtf(dx * dx + dy * dy);
 
-    if (!ScavengerEncounter(dt, d)) return;
+    if (!ScavengerEncounter(d)) return;
     ScavengerMove(dt);
 }
 

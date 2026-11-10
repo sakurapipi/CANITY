@@ -66,7 +66,7 @@ static void test_legacy_fixture_one(const char* file, int oldVer, int wantPayloa
 static void test_save_v34_items(void) {
     extern int echoBolts, decoys, phaseBeacons, jumperSpawnedRun;
 
-    clear_meta(); StartGame();
+    clear_meta(); StartFreshTestRun();
     echoBolts = 3; decoys = 2; phaseBeacons = 4; jumperSpawnedRun = 3;
     runInProgress = 1;
     SaveGame();
@@ -94,12 +94,12 @@ static void test_training_items_do_not_leak(void) {
        所以这里手工把库存摆成 5，再走一次普通开局。 */
     clear_meta();
     phaseBeacons = 5;
-    StartGame();
+    StartFreshTestRun();
     CHECK(phaseBeacons == 0, "training: stock must not leak into a normal run");
 
     /* 再来一次，确认不是偶发（上一局残留也不允许带） */
     phaseBeacons = 3;
-    StartGame();
+    StartFreshTestRun();
     CHECK(phaseBeacons == 0, "training: a second normal start also resets the stock");
 }
 
@@ -109,7 +109,7 @@ static void test_menu_save_keeps_run(void) {
     int hudBefore;
 
     clear_meta();
-    StartGame();
+    StartFreshTestRun();
 
     /* ① 造一个"正在进行"的局面，并记下特征值 */
     currentLevel = 5;
@@ -269,7 +269,7 @@ static void test_v33_save_is_accepted(void) {
     extern int echoBolts, decoys, phaseBeacons, jumperSpawnedRun;
     extern const char* SavePathForSlot(int, int, char*, size_t);
 
-    clear_meta(); StartGame();
+    clear_meta(); StartFreshTestRun();
     runInProgress = 1;
     SaveGame();                       /* 先把目录和路径建出来 */
     CHECK(g_saveState == 1, "prerequisite save written");
@@ -343,7 +343,7 @@ static void test_v33_save_is_accepted(void) {
 
 static void test_wallet_save(void) {
     clear_meta();bankGold=1000;bankHistMax=1000;bankCarryPct=5;
-    StartGame();CHECK(bankGold==750 && carryGold==250 && carryAtRunStart==250,"opening withdrawal stays in the player's pocket");
+    StartFreshTestRun();CHECK(bankGold==750 && carryGold==250 && carryAtRunStart==250,"opening withdrawal stays in the player's pocket");
     carryGold=350;WalletSettle(1,100);CHECK(bankGold==1125,"settlement returns principal plus multiplied profit once");
     carryGold=101;WalletSettle(0,0);CHECK(bankGold==1160,"death returns exactly rounded 35 percent");
     CHECK(carryGold==0 && carryAtRunStart==0,"settlement cannot be paid a second time");
@@ -672,7 +672,7 @@ static void test_difficulty_roundtrips_through_save(void) {
     extern const SaveBlob* SaveTestBlob(void);
     int saved = difficulty;
 
-    clear_meta(); StartGame();
+    clear_meta(); StartFreshTestRun();
     runInProgress = 1;
     difficulty = DIFF_HARD;
     SaveGame();
@@ -692,7 +692,7 @@ static void test_difficulty_roundtrips_through_save(void) {
 }
 
 static void test_continue_rejects_invalid_exit_and_facing(void) {
-    clear_meta(); StartGame();
+    clear_meta(); StartFreshTestRun();
     runInProgress = 1;
     SaveTestClearReadOnly();
     exitX = -1000.0f; exitY = NAN;
@@ -713,7 +713,7 @@ static void test_continue_rejects_invalid_exit_and_facing(void) {
 }
 
 static void test_saving_preserves_live_skill_ranks(void) {
-    clear_meta(); StartGame(); SaveTestClearReadOnly();
+    clear_meta(); StartFreshTestRun(); SaveTestClearReadOnly();
     runInProgress = 1;
     int expected[SKILL_COUNT];
     for (int id = 0; id < SKILL_COUNT; id++) {
@@ -728,7 +728,8 @@ static void test_saving_preserves_live_skill_ranks(void) {
         if(!SkillIsPlayerFacing(id))continue;
         int stored = id < 26 ? blob->skillRank[id] :
                      id < 30 ? blob->extraSkillRanks[id-26] :
-                     id < 41 ? blob->archetypeRanks[id-30] : blob->metaExpansionRanks[id-41];
+                     id < 41 ? blob->archetypeRanks[id-30] :
+                     id < 45 ? blob->metaExpansionRanks[id-41] : blob->commonSkillRanks[id-45];
         CHECK(stored == expected[id], "every player skill persists to its stable storage region");
     }
     memset(skillRank, 0, sizeof(skillRank));
@@ -737,8 +738,8 @@ static void test_saving_preserves_live_skill_ranks(void) {
           "all player skills, including archetypes, survive a save/continue roundtrip");
 }
 
-static void test_v37_prefix_is_migrated_to_v38(void) {
-    clear_meta(); StartGame(); SaveTestClearReadOnly();
+static void test_v37_prefix_is_migrated_to_current(void) {
+    clear_meta(); StartFreshTestRun(); SaveTestClearReadOnly();
     runInProgress = 1;
     SaveGame();
     SaveBlob legacy = *SaveTestBlob();
@@ -767,9 +768,38 @@ static void test_v37_prefix_is_migrated_to_v38(void) {
           "missing mimic extension defaults to zero, never reads adjacent settings bytes");
 }
 
+/* Checked-in synthetic prefix files exercise every supported append-only version.
+ * They are independent bytes, not generated from SaveBlob while tests run. */
+static void test_append_only_migration_contract_files(void){
+    for(int version=35;version<=43;version++){
+        char source[128],target[MAX_PATH],backup[MAX_PATH+32];
+        snprintf(source,sizeof(source),"tests/fixtures/saves/synthetic_v%d.sav",version);
+        SavePathForSlot(0,0,target,sizeof(target));
+        CHECK(fixture_copy(source,target),"synthetic migration contract exists");
+        SaveTestClearReadOnly();g_saveSlot=0;trainingMode=0;runInProgress=0;currentState=STATE_MAIN_MENU;
+        CHECK(LoadSettings(),"each v35-v43 prefix migrates with progress intact");
+        const SaveBlob* blob=SaveTestBlob();
+        CHECK(blob->version==SAVE_VERSION && blob->level==3,"migration promotes version without losing level");
+        CHECK(blob->resIndex==1 && blob->scale==1,"migration preserves explicit display choices");
+        CHECK(fabsf(blob->musicVolume-.65f)<.0001f,"migration preserves independent music volume");
+        snprintf(backup,sizeof(backup),"%s.v%d.bak",target,version);
+        unsigned char old[65536],copy[65536];
+        long n=SaveBackendRead(source,old,sizeof(old)),m=SaveBackendRead(backup,copy,sizeof(copy));
+        CHECK(n>0 && n==m && !memcmp(old,copy,(size_t)n),"migration retains byte-identical original backup");
+        if(version<40)CHECK(blob->commonSkillRanks[0]==0,"missing newer ranks default to zero");
+        SaveGame();
+        CHECK(g_saveState==1,"migrated progress can be saved in the new format");
+        CHECK(LoadSettings(),"migrated save can be loaded again");
+        CHECK(SaveTestBlob()->resIndex==1 && SaveTestBlob()->scale==1,"display choices survive a second round trip");
+    }
+    CHECK(SaveBackendPreserveVersion("tests/fixtures/saves/does-not-exist.sav",37)!=0,
+          "a missing original cannot be reported as backed up");
+}
+
 void TestSuite_save(void) {
+    test_append_only_migration_contract_files();
     test_saving_preserves_live_skill_ranks();
-    test_v37_prefix_is_migrated_to_v38();
+    test_v37_prefix_is_migrated_to_current();
     test_continue_rejects_invalid_exit_and_facing();
     test_save_v34_items();
     test_training_items_do_not_leak();

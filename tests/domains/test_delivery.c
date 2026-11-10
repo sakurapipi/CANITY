@@ -1,4 +1,5 @@
 #include "../test_common.h"
+static void test_training_supplies_do_not_leak_into_normal_run(void);
 #include "loop_api.h"
 #include "loop_private.h"
 #include "plat.h"
@@ -16,6 +17,7 @@ static void image(const char* path){
     for(int i=0;i<renderW*renderH;i++){unsigned c=pixels[i];unsigned char p[3]={(unsigned char)(c>>16),(unsigned char)(c>>8),(unsigned char)c};fwrite(p,1,3,f);}fclose(f);
 }
 void TestSuite_delivery(void){
+    test_training_supplies_do_not_leak_into_normal_run();
     winW=800;winH=600;renderScaleIndex=0;InitPixels();SpritesInit();CHECK(SpritesReady(),"all sprite assets initialize");
     int ids[]={SPR_MON_HUNTER,SPR_MON_HUNTER2,SPR_MON_HUNTER3,SPR_MON_LIGHT,SPR_MON_LEECH,SPR_MON_SHADE,SPR_MON_SPIDER,SPR_MON_WARDEN_CHASE,SPR_MON_MIMIC,SPR_MON_PARASITE,SPR_PROP_SPIDER,SPR_PROP_CRATE_MIMIC};
     for(unsigned n=0;n<sizeof(ids)/sizeof(ids[0]);n++){
@@ -55,8 +57,21 @@ void TestSuite_delivery(void){
     LoopResolveRunReplacement(0);CHECK(currentState==STATE_MAIN_MENU && SaveHasPendingRun(),"cancel preserves progress");
 }
 
+static void test_training_supplies_do_not_leak_into_normal_run(void){
+    LoopQueueStart(START_TRAINING,0);StartFreshTestRun();
+    Update(.02f);
+    CHECK(trainingMode && flares==99,"free training intentionally provides practice supplies");
+    LoopQueueStart(START_NORMAL,0);StartFreshTestRun();
+    CHECK(!trainingMode && !guideMode && !dailyMode && !campaignMode,"normal new run clears every practice/mode flag");
+    CHECK(flares<99 && bottles<99 && smokeBombs<99,"practice supplies do not become normal-run inventory");
+}
+
 void TestSuite_existing_save(void){
-    const char* source=getenv("CANITY_EXISTING_SAVE");CHECK(source && source[0],"user-save probe requires an explicit copied source");
+    const char* source=getenv("CANITY_EXISTING_SAVE");
+    if(!source || !source[0]){
+        source="tests/fixtures/saves/synthetic_v44.sav";
+        puts("EXISTING SAVE INPUT: synthetic v44 contract fixture, not a private player save");
+    }
     char target[MAX_PATH];SavePathForSlot(0,0,target,sizeof(target));
     CHECK(fixture_copy(source,target),"user-save probe copies into isolated test data");
     int pending=LoadSettings();

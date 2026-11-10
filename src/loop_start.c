@@ -234,7 +234,6 @@ static void InitializeRunScene(void) {
     WeaponResetRun();               /* v2.0：武器冷却/蓄力 */
     RelicResetRun();                /* v2.0：遗物只在本局有效 */
     SafeLevelReset();               /* v2.2：每局重置安全屋的休息/充电标记 */
-    lastResortUsed = 0;
     shortcutUsed = 0;
     modSanityMul = modSpeedMul = modBatteryMul = modShardMul = 1.0f;   /* v2.0 修复 */
     modNoiseMul = 1.0f;
@@ -304,7 +303,7 @@ void StartGame(void) {
     playDeadUsed = 0;   /* v3.0 假死每局重置 */
     /* v3.0：这几个也必须在开局清零，否则上一局用过之后新局直接失效 */
     CalibResetRun();
-    lastResortUsed = 0;
+    pawnCd=0;retaliateT=0;ghostStillT=0;
     PlayerResetSprintGrace();
     LoopClearInputEdges();
     LoopCancelTransientInput();

@@ -197,7 +197,7 @@ def check_game_h_is_private(bad):
                 continue
             src = io.open(p, encoding='utf-8', errors='replace').read()
             for i, ln in enumerate(src.split('\n'), 1):
-                if '#include "game.h"' in ln:
+                if re.search(r'#\s*include\s*[<\"]game\.h[>\"]', ln):
                     bad.append((rel, i, '#include "game.h"（请改用 *_api.h）'))
     return bad
 
@@ -206,9 +206,9 @@ def main():
     bad = []
     for p in iter_files():
         name = os.path.basename(p)
-        if name in ALLOW:
-            continue
         rel = os.path.relpath(p, ROOT)
+        if rel.replace('\\','/') == 'include/common.h':
+            continue
         # 平台层文件豁免（见 ALLOW_DIRS 的说明）
         if any(os.path.normpath(rel).startswith(os.path.normpath(d) + os.sep) for d in ALLOW_DIRS):
             continue

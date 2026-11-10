@@ -490,7 +490,7 @@ void CanityMouseClick(int mx, int my) {
             }
         }
         int id = BenchNodeAt(mx,my);
-        if (id >= 0) { shopNodeSel=id; BenchDragEnd(); uiDirty=1; }
+        if (id >= 0) { shopNodeSel=id; BenchDragEnd(); ShopActivate(); uiDirty=1; }
         return;
     }
     /* 技能树的 + / - 缩放按钮优先命中（点它们不该去选节点） */
@@ -1208,7 +1208,10 @@ int CanityKeyDown(int vk, int repeat) {
         return 0;
     }
     if(currentState==STATE_PLAYING && vk=='B' && !repeat && !guideMode) {
-        if(!trainingMode){SaveGame();if(g_saveState==2)return 0;}
+        if(!trainingMode){SaveGame();if(g_saveState==2){
+            pickupMsg=Tr("COULD NOT SAVE: GUIDE NOT OPENED. CHECK SAVE LOCATION.","无法保存：未进入引导层，请检查存档位置。");
+            pickupMsgTimer=4;UiShowActionError(pickupMsg);PlaySfx(SFX_CRANK,.45f);uiDirty=1;return 0;
+        }}
         LoopClearInputEdges();LoopCancelTransientInput();
         LoopQueueStart(START_GUIDE,0);StartGame();return 0;
     }
@@ -1539,6 +1542,9 @@ static LRESULT WindowLeftDown(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                         return 0;
                     }
                 }
+                if(shopPage==SHP_TREE && BenchBuyButtonAt(mx0,my0)) {
+                    BenchDragEnd();CanityMouseClick(mx0,my0);return 0;
+                }
                 /* 空白处按住 → 开始拖拽画布（v2.9，和思维导图一致） */
                 if (shopPage == SHP_TREE) {
                     BenchDragStart(mx0, my0);
@@ -1547,7 +1553,7 @@ static LRESULT WindowLeftDown(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 if (shopPage == SHP_TREE) {
                     int id = BenchNodeAt(mx0,my0);
                     if (id >= 0) {
-                        BenchDragEnd(); shopNodeSel = id; uiDirty = 1; return 0;
+                        BenchDragEnd(); shopNodeSel = id; ShopActivate(); uiDirty = 1; return 0;
                     }
                 }
             }

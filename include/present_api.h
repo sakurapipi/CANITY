@@ -126,4 +126,5 @@ void SkillDragEnd(void);
 int  SkillIsDragging(void);
 void SkillResetView(void);
 
+void UiShowActionError(const char* message);
 #endif

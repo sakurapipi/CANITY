@@ -443,7 +443,7 @@ SUPPLIES REFRESHED	补给已刷新	tr
 SURVIVOR	幸存者	table
 Safe heal +25%, sanity drain -10%	安全屋回智 +25%，理智流失 -10%	table
 Sanity 0 saves you once (4s)	理智归零时免死一次	table
-Sanity loss burns battery (1:3)	理智流失转为耗电（1:3）	table
+50% of passive sanity loss burns battery (1:3); remainder still drains sanity	一半自然理智损失转为耗电（1:3），另一半仍扣理智	table
 Save Slot	存档槽	table
 Search 120 containers in a single run	一局内搜索 120 个箱子	table
 Search 60 containers in a single run	一局内搜索 60 个箱子	table
@@ -717,3 +717,5 @@ COMPOSURE WINDOW	镇定窗口	blue-ui
 CLEAN BREAK	利落脱身	blue-ui
 READ THE OPENING	看准破绽	blue-ui
 FALSE OPENING	佯攻诱敌	blue-ui
+
+Battery cap +25/rank; light OFF below 25%: regen 2-4/s, sanity drain +20%	电量上限每级+25；关灯且电量低于25%时每秒回2至4，理智流失+20%	table

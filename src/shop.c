@@ -901,7 +901,7 @@ const char* ShopServiceStatus(int row) {
     if(row==4){
         if(calibCooldown>0){snprintf(text,sizeof(text),Tr("COOLDOWN %ds / FREE","冷却 %d秒 / 免费"),(int)ceilf(calibCooldown));return text;}
         if(!MusicCanCalibrate())return Tr("WAITING FOR SCORE / AUDIO OUTPUT","等待谱面音乐或音频输出");
-        return Tr("QWER / 40s / UP TO +10 SANITY","QWER四键 / 40秒 / 最多恢复10理智");
+        return Tr("QWER / 40s / COMBO RESTORES SANITY + BATTERY","QWER四键 / 40秒 / 连击恢复理智与电量");
     }
     if(row<3 && ShopServiceGain(row)<=.01f)return Tr("RESOURCE FULL / NO RECOVERY NEEDED","资源已满 / 暂不需要恢复");
     if(row==3) {

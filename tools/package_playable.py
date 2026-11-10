@@ -24,10 +24,10 @@ SCENES = ('menu', 'explore', 'chase', 'safe', 'victory', 'defeat')
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=Path.home()/'Desktop')
+    parser.add_argument('--output', type=Path, default=Path.home()/'Desktop'/'GAME')
     parser.add_argument('--include-web', action='store_true')
     parser.add_argument('--label', default='CANITY_2.4.2RC_完整运行包')
-    parser.add_argument('--notes', type=Path, default=Path('docs/2.4.2RC_怪物高清材质与微动态_20261110.md'))
+    parser.add_argument('--notes', type=Path, default=Path('docs/2.4.2RC_审计整改_20261110.md'))
     parser.add_argument("--acceptance-report", type=Path)
     args = parser.parse_args()
     acceptance = json.loads(args.acceptance_report.read_text(encoding="utf-8")) if args.acceptance_report else None
@@ -43,11 +43,11 @@ def main():
         if profile.get('sources', {}).get(key) != file_digest(source):
             raise SystemExit('源码已改变，请先重新编译再打包：'+key)
     needed = [ROOT/'music'/(scene+suffix)
-              for scene in SCENES for suffix in ('.wav', '.chart.json')]
+              for scene in SCENES for suffix in ('.mp3', '.chart.json')]
     needed += [ROOT/'music/score-manifest.json']
     for path in needed:
         if not path.is_file():
-            raise SystemExit('缺少运行资源，请先运行 compose_score.py：'+str(path))
+            raise SystemExit('缺少运行资源，请先生成配乐并运行 tools/encode_music_mp3.py：'+str(path))
     web_files = [ROOT/'web/dist'/name for name in ('index.html', 'index.js', 'index.wasm')]
     if args.include_web and not all(path.is_file() for path in web_files):
         raise SystemExit('缺少网页构建，请先运行 build_web.py。')
@@ -64,11 +64,11 @@ def main():
     if args.include_web:
         for path in web_files:
             shutil.copy2(path, folder/path.name)
-    for relative in ('LICENSE', 'l10n/OFL-NotoSansSC.txt', str(args.notes), 'docs/标准化创作工作流.md'):
+    for relative in ('LICENSE', 'l10n/OFL-NotoSansSC.txt', str(args.notes), 'docs/标准化创作工作流.md', 'third_party/minimp3/minimp3-LICENSE.txt'):
         source = ROOT/relative
         if source.is_file():
             shutil.copy2(source, folder/source.name)
-    compiler = os.environ.get('CANITY_GCC') or shutil.which('gcc')
+    compiler = os.environ.get('CANITY_GCC') or profile.get('configuration', {}).get('compiler', {}).get('path') or shutil.which('gcc')
     runtime = []
     if compiler:
         compiler_bin = Path(compiler).resolve().parent
@@ -93,16 +93,17 @@ def main():
                 pending.extend(re.findall(r'DLL Name:\s*(\S+)', result.stdout))
     launcher = ('@echo off\r\nsetlocal\r\ncd /d "%~dp0"\r\n'
                 'if not exist "saves" mkdir "saves"\r\n'
-                'set "CANITY_DATA_DIR=%~dp0saves"\r\n'
+                'if not defined CANITY_DATA_DIR set "CANITY_DATA_DIR=%~dp0saves"\r\n'
+                'if not exist "%CANITY_DATA_DIR%" mkdir "%CANITY_DATA_DIR%"\r\n'
                 'if not defined CANITY_MUSIC set "CANITY_MUSIC=files"\r\n'
                 'start "" /wait "%~dp0canity.exe"\r\nendlocal\r\n')
     (folder/'开始游戏.bat').write_bytes(launcher.encode('ascii'))
-    (folder/'运行说明.txt').write_text('CANITY 2.4.2 RC — 怪物高清材质与微动态\n\nWindows：双击“开始游戏.bat”。ZIP请先完整解压，保持程序、DLL与music文件夹完整。\n桌面“CANITY 最新运行版”快捷方式已指向本轮包。\n\n本轮升级所有现有怪物的高清烘焙、材质细节和微动作，增加独立偷电寄生体外观，\n修复镜像朝向粗糙采样，分离守门人与偷钱怪贴图，并降低关闭手电后的环境亮度。\n微动作只改变渲染，不改变AI、碰撞和怪物伤害规则。\n\n详细改动见本目录随包说明文件。版本仍为2.4.2 RC，存档格式仍为v44。\n存档位于本包saves目录；沿用旧进度前请先备份，再复制旧saves。\n保留36×36地图、12容器槽与64世界精灵容量。\n\n操作：先藏身再T打开商店；空格/K启动校准，QWER演奏，ESC取消。\n技能树滚轮缩放，鼠标选择节点后购买。三选一支持直接点击卡片。\n\n网页/手机：须一并部署index.html、index.js、index.wasm及music。\n电脑本地在本目录启动 python -m http.server 8080，打开 http://127.0.0.1:8080/ 。\n手机与电脑同一网络时访问 http://电脑局域网地址:8080/，需允许网络连接，推荐横屏。\n手机是触控网页版，不是APK。Windows启动无需Python。\n\n本轮仅编译和打包；没有运行游戏或验收，也没有提交、推送。\n', encoding='utf-8-sig')
+    (folder/'运行说明.txt').write_text('CANITY 2.4.2 RC — 验收链、迁移与交互反馈整改\n\nWindows：完整解压后双击“开始游戏.bat”。保留DLL与music目录。\n本轮修复静态检查截断、分域验收流程、迁移备份与显示设置、技能前置、商店和引导反馈及发布资源遗漏。\n详细内容见随包修改说明。保留36×36地图、12容器槽、64世界精灵容量及v44存档格式。\n存档位于saves目录，沿用旧进度前请备份。\n\n网页及手机触控版：部署index.html、index.js、index.wasm和music到HTTP网站。\n手机推荐横屏；这是触控网页版，不是APK。\n\n本轮仅修改代码、编译和打包；未启动游戏、未运行测试或验收、未提交或推送。\n先前验收记录仅代表旧代码，不能作为本轮通过证据。\n',encoding='utf-8-sig')
     if acceptance:
         shutil.copy2(args.acceptance_report,folder/'验收摘要.json')
         (folder/'运行说明.txt').write_text('CANITY 2.4.2 RC — 全局验收整理版\n\n双击“开始游戏.bat”，ZIP先完整解压。\n本轮已实际运行验证；总体NO-GO，完整回归尚未全绿。\n最新专项、原生输入、浏览器及存档迁移通过；旧回归失败详见随包全局验收报告。\n存档位于saves；沿用旧进度前先备份。\n网页需以HTTP服务运行，不能只双击HTML。\n没有提交或推送。\n',encoding='utf-8-sig')
     source_hashes = {}
-    for directory in ('src', 'include', 'tools', 'tests', 'l10n'):
+    for directory in ('src', 'include', 'tools', 'tests', 'l10n', 'third_party'):
         for path in sorted((ROOT/directory).rglob('*')):
             if path.is_file() and path.suffix in ('.c', '.h', '.inc', '.py', '.tsv', '.json'):
                 source_hashes[path.relative_to(ROOT).as_posix()] = file_digest(path)
