@@ -191,7 +191,27 @@ static void test_hide_status_has_no_blank_band(void) {
     CHECK(HideStatusBand(10.0f) >= 0, "the old 8-12 gap must be covered by a band");
 }
 
+
+#include "ui_theme.h"
+#include "render.h"
+#include "loop_api.h"
+static void test_pause_has_no_dream_overflow(void){
+    GameState state=currentState,previous=prevState;
+    if(!pixels)InitPixels();
+    size_t bytes=(size_t)renderW*renderH*sizeof(*pixels);
+    unsigned int* original=malloc(bytes);
+    CHECK(original!=NULL,"pause visual regression snapshot allocated");
+    if(!original)return;
+    memcpy(original,pixels,bytes);
+    currentState=STATE_PAUSED;UiDreamFrame();
+    CHECK(!memcmp(original,pixels,bytes),"pause cannot receive stray dream eye pixels");
+    currentState=STATE_SETTINGS;prevState=STATE_PAUSED;UiDreamFrame();
+    CHECK(!memcmp(original,pixels,bytes),"paused settings cannot receive stray dream eye pixels");
+    currentState=state;prevState=previous;free(original);
+}
+
 void TestSuite_ui(void) {
+    test_pause_has_no_dream_overflow();
     test_ach_geo_stays_inside_window();
     test_ach_geo_shrinks_rows_on_short_windows();
     test_clamp_row_text_never_overflows();

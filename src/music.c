@@ -157,10 +157,13 @@ void MusicLoadGameTracks(void) {
     wchar_t base[MAX_PATH*3];DWORD n=GetModuleFileNameW(NULL,base,(DWORD)(sizeof(base)/sizeof(base[0])));
     if(!n || n>=sizeof(base)/sizeof(base[0])){MusicUseProvider(MUSIC_BUILTIN);return;}
     wchar_t* slash=wcsrchr(base,L'\\');if(!slash){MusicUseProvider(MUSIC_BUILTIN);return;}slash[1]=0;
+    const wchar_t* bundled=_wgetenv(L"CANITY_AUDIO_DIR");
     int found=0;
     for(int i=0;i<MUSIC_SCENE_COUNT;++i) {
         wchar_t path[MAX_PATH*3+80];char utf8[MAX_PATH*3];
         _snwprintf(path,sizeof(path)/sizeof(path[0]),L"%lsmusic\\%ls.mp3",base,names[i]);
+        if(bundled && *bundled)
+            _snwprintf(path,sizeof(path)/sizeof(path[0]),L"%ls\\%ls.mp3",bundled,names[i]);
         if(GetFileAttributesW(path)==INVALID_FILE_ATTRIBUTES)
             _snwprintf(path,sizeof(path)/sizeof(path[0]),L"%lsmusic\\%ls.wav",base,names[i]);
         if(GetFileAttributesW(path)==INVALID_FILE_ATTRIBUTES)continue;

@@ -26,6 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=Path.home()/'Desktop'/'GAME')
     parser.add_argument('--include-web', action='store_true')
+    parser.add_argument('--single-exe', action='store_true',help='MP3 resources are already embedded in this Windows build')
     parser.add_argument('--label', default='CANITY_2.4.2RC_完整运行包')
     parser.add_argument('--notes', type=Path, default=Path('docs/2.4.2RC_审计整改_20261110.md'))
     parser.add_argument("--acceptance-report", type=Path)
@@ -67,9 +68,10 @@ def main():
     folder.mkdir(parents=True, exist_ok=False)
     shutil.copy2(binary, folder/'canity.exe')
     music = folder/'music'
-    music.mkdir()
-    for path in needed:
-        shutil.copy2(path, music/path.name)
+    if not args.single_exe:
+        music.mkdir()
+        for path in needed:
+            shutil.copy2(path, music/path.name)
     if args.include_web:
         for path in web_files:
             shutil.copy2(path, folder/path.name)
@@ -106,11 +108,15 @@ def main():
                 'if not exist "%CANITY_DATA_DIR%" mkdir "%CANITY_DATA_DIR%"\r\n'
                 'if not defined CANITY_MUSIC set "CANITY_MUSIC=files"\r\n'
                 'start "" /wait "%~dp0canity.exe"\r\nendlocal\r\n')
-    (folder/'开始游戏.bat').write_bytes(launcher.encode('ascii'))
+    if not args.single_exe:(folder/'开始游戏.bat').write_bytes(launcher.encode('ascii'))
     (folder/'运行说明.txt').write_text('CANITY 2.4.2 RC — 验收链、迁移与交互反馈整改\n\nWindows：完整解压后双击“开始游戏.bat”。保留DLL与music目录。\n本轮修复静态检查截断、分域验收流程、迁移备份与显示设置、技能前置、商店和引导反馈及发布资源遗漏。\n详细内容见随包修改说明。保留36×36地图、12容器槽、64世界精灵容量及v44存档格式。\n存档位于saves目录，沿用旧进度前请备份。\n\n网页及手机触控版：部署index.html、index.js、index.wasm和music到HTTP网站。\n手机推荐横屏；这是触控网页版，不是APK。\n\n本轮仅修改代码、编译和打包；未启动游戏、未运行测试或验收、未提交或推送。\n先前验收记录仅代表旧代码，不能作为本轮通过证据。\n',encoding='utf-8-sig')
     if acceptance:
         shutil.copy2(args.acceptance_report,folder/'验收摘要.json')
         (folder/'运行说明.txt').write_text('CANITY — 本轮验证运行包\n\n完整解压后双击“开始游戏.bat”。\n本轮实际验证结果见验收摘要.json；自动化通过不等于所有Windows真机或实体手机场景已验收。\n存档默认位于saves，预先设置CANITY_DATA_DIR时使用指定目录。\n详细变更见随包交接说明。\n',encoding='utf-8-sig')
+    if args.single_exe:
+        strip=Path(compiler).resolve().parent/'strip.exe' if compiler else None
+        if strip and strip.is_file():subprocess.run([str(strip),'--strip-unneeded',str(folder/'canity.exe')],check=True)
+        (folder/'运行说明.txt').write_text('CANITY RC4：直接双击canity.exe，无需BAT或DAT。音乐嵌入EXE，首次运行写入用户缓存。默认存档位于%LOCALAPPDATA%/CANITY/saves，尊重CANITY_DATA_DIR。验证范围以随包报告为准。',encoding='utf-8-sig')
     source_hashes = {}
     for directory in ('src', 'include', 'tools', 'tests', 'l10n', 'third_party'):
         for path in sorted((ROOT/directory).rglob('*')):
@@ -127,7 +133,7 @@ def main():
                 'game_version':game_version, 'handoff':args.notes.name,
                 'map_size':[36,36], 'container_slots':12, 'sprite_capacity':64,
                 'source_tree_sha256':hashlib.sha256(canonical).hexdigest(),
-                'exe_sha256':file_digest(binary), 'runtime_dlls':runtime,
+                'exe_sha256':file_digest(folder/'canity.exe'), 'runtime_dlls':runtime,
                 'windows_compiled':True, 'web_included':args.include_web,
                 'web_sha256':{p.name:file_digest(p) for p in web_files} if args.include_web else {},
                 'game_launched':bool(acceptance and acceptance.get('native_window_run')), 'acceptance_tests_run':bool(acceptance),

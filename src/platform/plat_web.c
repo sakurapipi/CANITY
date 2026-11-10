@@ -121,10 +121,11 @@ EM_JS(void, js_plat_init, (void), {
         }, false);
 
         cv.addEventListener('click', function () {
-            if (Module.requestLock && cv.requestPointerLock) cv.requestPointerLock();
+            if (Module.requestLock && Module._safePointerLock) Module._safePointerLock();
         }, false);
         document.addEventListener('pointerlockchange', function () {
             Module._locked = (document.pointerLockElement === cv);
+            cv.style.cursor = Module._locked ? 'none' : 'default';
         }, false);
         /* 指针锁定期间 canvas 上收不到事件时，由 document 兜底 */
         document.addEventListener('mousemove', function (e) {
@@ -136,8 +137,13 @@ EM_JS(void, js_plat_init, (void), {
         }, false);
 
         function measure() {
-            Module._cw = cv.clientWidth | 0;
-            Module._ch = cv.clientHeight | 0;
+            var w=cv.clientWidth|0,h=cv.clientHeight|0;
+            if(w<2 || h<2)return; // Keep last good size during fullscreen transitions.
+            var coarse=navigator.maxTouchPoints>0;
+            var cap=coarse?1280*720:1920*1080;
+            var scale=Math.min(1,Math.sqrt(cap/(w*h)));
+            Module._cw=Math.max(160,Math.round(w*scale));
+            Module._ch=Math.max(120,Math.round(h*scale));
         }
         window.addEventListener('resize', measure, false);
         measure();
@@ -189,12 +195,11 @@ EM_JS(void, js_take_mouse, (int* dx, int* dy), {
 
 EM_JS(void, js_set_lock, (int on), {
     Module.requestLock = !!on;
-    if (on && Module.canvas && Module.canvas.requestPointerLock) {
-        Module.canvas.requestPointerLock();
-    } else if (!on && document.exitPointerLock) {
-        document.exitPointerLock();
+    /* Lock is requested only by a real click, never from the animation loop. */
+    if (!on && document.pointerLockElement && document.exitPointerLock) {
+        try { document.exitPointerLock(); } catch (ignored) {}
     }
-    if (Module.canvas) Module.canvas.style.cursor = on ? 'none' : 'default';
+    if (Module.canvas) Module.canvas.style.cursor = on && Module._locked ? 'none' : 'default';
 });
 
 /* 取一次待处理的鼠标移动（没有就返回 0） */
@@ -464,7 +469,7 @@ void PlatMouseDelta(int* dx, int* dy) {
 void PlatShowCursor(int visible) {
     emscripten_run_script(visible ?
         "if(Module.canvas)Module.canvas.style.cursor='default';" :
-        "if(Module.canvas)Module.canvas.style.cursor='none';");
+        "if(Module.canvas)Module.canvas.style.cursor=Module._locked?'none':'default';");
 }
 
 void PlatSetCursorLock(int on) { js_set_lock(on); }

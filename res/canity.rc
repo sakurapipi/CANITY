@@ -17,8 +17,8 @@
 1 ICON "canity.ico"
 
 1 VERSIONINFO
-  FILEVERSION     2,4,2,0
-  PRODUCTVERSION  2,4,2,0
+  FILEVERSION     2,4,2,4
+  PRODUCTVERSION  2,4,2,4
   FILEOS          0x40004L   /* VOS_NT_WINDOWS32 */
   FILETYPE        0x1L       /* VFT_APP */
   BEGIN
@@ -28,11 +28,11 @@
       BEGIN
         VALUE "CompanyName",      "Canity"
         VALUE "FileDescription",  "Canity - raycasting horror game"
-        VALUE "FileVersion",      "2.4.2.0"
+        VALUE "FileVersion",      "2.4.2-RC4"
         VALUE "InternalName",     "canity"
         VALUE "OriginalFilename", "canity.exe"
         VALUE "ProductName",      "Canity"
-        VALUE "ProductVersion",   "2.4.2.0"
+        VALUE "ProductVersion",   "2.4.2-RC4"
         VALUE "LegalCopyright",   "MIT License"
       END
     END
@@ -44,3 +44,11 @@
 
 /* 第三个参数 24 = RT_MANIFEST，ID 必须是 1 才会被当成进程清单 */
 1 24 "canity.manifest"
+
+/* RC4: compressed audio travels inside the executable, no sidecar DAT. */
+3000 RCDATA "../music/menu.mp3"
+3001 RCDATA "../music/explore.mp3"
+3002 RCDATA "../music/chase.mp3"
+3003 RCDATA "../music/safe.mp3"
+3004 RCDATA "../music/victory.mp3"
+3005 RCDATA "../music/defeat.mp3"

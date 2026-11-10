@@ -81,8 +81,43 @@ LONG WINAPI CanityCrashHandler(EXCEPTION_POINTERS* ep) {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+/* Embedded MP3s are materialized atomically into the user's cache. Saves use a
+ * different directory, and an externally supplied data directory is respected. */
+static int PrepareBundledMusic(void) {
+    wchar_t base[MAX_PATH], cache[MAX_PATH], path[MAX_PATH], temp[MAX_PATH];
+    static const wchar_t* names[]={L"menu",L"explore",L"chase",L"safe",L"victory",L"defeat"};
+    DWORD n=GetEnvironmentVariableW(L"LOCALAPPDATA",base,MAX_PATH);
+    if(!n || n>MAX_PATH-90)return 0;
+    _snwprintf(cache,MAX_PATH,L"%ls\\CANITY",base);CreateDirectoryW(cache,NULL);
+    if(!GetEnvironmentVariableW(L"CANITY_DATA_DIR",path,MAX_PATH)) {
+        _snwprintf(path,MAX_PATH,L"%ls\\saves",cache);CreateDirectoryW(path,NULL);
+        SetEnvironmentVariableW(L"CANITY_DATA_DIR",path);
+        /* CRT getenv uses its own environment snapshot. */
+        _wputenv_s(L"CANITY_DATA_DIR",path);
+    }
+    _snwprintf(cache,MAX_PATH,L"%ls\\CANITY\\audio-2.4.2-RC4",base);CreateDirectoryW(cache,NULL);
+    for(int i=0;i<6;i++) {
+        HRSRC res=FindResourceW(NULL,MAKEINTRESOURCEW(3000+i),MAKEINTRESOURCEW(10));
+        if(!res)return 0;
+        DWORD size=SizeofResource(NULL,res),written=0;
+        const void* data=LockResource(LoadResource(NULL,res));if(!data || !size)return 0;
+        _snwprintf(path,MAX_PATH,L"%ls\\%ls.mp3",cache,names[i]);
+        _snwprintf(temp,MAX_PATH,L"%ls\\%ls-%lu.tmp",cache,names[i],GetCurrentProcessId());
+        HANDLE f=CreateFileW(temp,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+        if(f==INVALID_HANDLE_VALUE)return 0;
+        int ok=WriteFile(f,data,size,&written,NULL) && written==size;
+        CloseHandle(f);
+        if(!ok || !MoveFileExW(temp,path,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)) {
+            DeleteFileW(temp);return 0;
+        }
+    }
+    _wputenv_s(L"CANITY_AUDIO_DIR",cache);return 1;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     SetUnhandledExceptionFilter(CanityCrashHandler);
+    /* Failure leaves the existing built-in music fallback available. */
+    PrepareBundledMusic();
 
     /* v1.8：声明 DPI 感知。
        不声明的话，125%/150% 缩放的笔记本上 Windows 会把窗口"虚拟放大"，

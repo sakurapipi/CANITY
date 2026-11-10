@@ -14,6 +14,10 @@
 #include "music.h"
 #include "monster_rules.h"
 #include "calibration.h"
+#include "lockbox.h"
+#include "shop.h"
+#include "bench.h"
+#include "wrench.h"
 #include "sprites.h"
 #include "plat.h"
 #include "loop_api.h"
@@ -44,6 +48,9 @@ static double s_accum = 0.0;
 static double s_prev = 0.0;
 static int    s_booted = 0;
 
+EM_JS(int, js_menu_command, (void), {
+    return Module._menuQueue && Module._menuQueue.length ? Module._menuQueue.shift() : 0;
+});
 static void WebFrame(void) {
     double now = PlatNow();
     double dt = now - s_prev;
@@ -78,10 +85,12 @@ static void WebFrame(void) {
      * InitPixels 内部会走 PlatAcquireTarget，指针会自动更新。
      * ================================================================ */
     {
-        static int lastW = -1, lastH = -1;
+        static int lastW = -1, lastH = -1, pendingW=0,pendingH=0;
+        static double resizeAt=0;
         int cw = 0, ch = 0;
         PlatWindowSize(&cw, &ch);
-        if (cw != lastW || ch != lastH) {
+        if(cw!=pendingW || ch!=pendingH){pendingW=cw;pendingH=ch;resizeAt=now;}
+        if ((cw != lastW || ch != lastH) && (lastW<0 || now-resizeAt>=.18)) {
             lastW = cw;
             lastH = ch;
 
@@ -102,6 +111,8 @@ static void WebFrame(void) {
 
 
     CanityProbeSampleKeys();
+    /* One queued command per frame survives fast taps and submenu transitions. */
+    { int command=js_menu_command();if(command)CanityKeyDown(command,0); }
 
 
 
@@ -121,7 +132,7 @@ static void WebFrame(void) {
      * ================================================================ */
     {
         static int s_lockWanted = -1;   /* currentState 在 game.h 里已有正确类型 */
-        int want = (currentState == STATE_PLAYING) ? 1 : 0;
+        int want = (currentState == STATE_PLAYING && !calibActive && !lockActive && !(isMapOpen && mapFullScreen)) ? 1 : 0;
         if (want != s_lockWanted) {
             PlatSetCursorLock(want);
             s_lockWanted = want;
@@ -132,7 +143,7 @@ static void WebFrame(void) {
         int mdx = 0, mdy = 0;
         PlatMouseDelta(&mdx, &mdy);
         /* 局内就转，不要求 Pointer Lock 已生效（见上面那段注释） */
-        if ((mdx || mdy) && currentState == STATE_PLAYING) {
+        if ((mdx || mdy) && currentState == STATE_PLAYING && !calibActive && !lockActive) {
             CanityMouseLook(mdx, mdy);
         }
     }
@@ -166,6 +177,7 @@ static void WebFrame(void) {
         for (int vk = 1; vk < 256; vk++) {
             int down = PlatKeyDown(vk);
             if (down && !prevKey[vk]) CanityKeyDown(vk, 0);
+            if (!down && prevKey[vk]) CanityKeyUp(vk);
             prevKey[vk] = down;
         }
     }
@@ -252,7 +264,7 @@ static const ActionNameRow kActionNames[] = {
     { "MENU_CONFIRM", ACT_MENU_CONFIRM },
     { "MENU_CANCEL",  ACT_MENU_CANCEL },
     { "DODGE",        ACT_DODGE },
-    { "SWING",        ACT_SWING },
+    { "SWING",        ACT_CANCEL_CHARGE },
     { "DECOY",        ACT_DECOY },
     { "PHASE_TELE",   ACT_PHASE_TELE },
     { "SELECT_1",     ACT_SELECT_1 },
@@ -381,6 +393,7 @@ int main(void) {
 
     InitAchievements();
     hasSave = LoadSettings();
+    if(dynamicRes)pixelBudget=emscripten_run_script_int("(navigator.maxTouchPoints>0 ? 360000 : 540000)");
     InitAudio();
     MusicInit();
     MusicLoadGameTracks();
@@ -467,5 +480,22 @@ int main(void) {
     return 0;
 }
 
-EMSCRIPTEN_KEEPALIVE int CanityUiFlags(void){return (currentState==STATE_PLAYING?1:0)|(calibActive?2:0)|(hiddenIn>=0?4:0);}
+EMSCRIPTEN_KEEPALIVE int CanityUiFlags(void){return (currentState==STATE_PLAYING && !calibActive && !lockActive && !(isMapOpen && mapFullScreen)?1:0)|(calibActive?2:0)|(hiddenIn>=0?4:0)|((currentState==STATE_HUB || (currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE))?8:0);}
+EMSCRIPTEN_KEEPALIVE void CanityWebPointer(int phase,int x,int y){
+    if(phase==0)CanityPointerDown(x,y);else if(phase==1)CanityPointerMove(x,y);else if(phase==2)CanityPointerUp(x,y);else CanityPointerCancel();
+}
+EMSCRIPTEN_KEEPALIVE void CanityWebZoom(int direction){CanityTreeZoom(direction);}
 EMSCRIPTEN_KEEPALIVE int CanityUiAccent(void){return (int)UiThemeColor(0);}
+
+/* Read-only input diagnostics for browser regressions; no gameplay mutation. */
+EMSCRIPTEN_KEEPALIVE int CanityWebInputState(int field){
+    switch(field){
+    case 0:return isMapOpen | (mapFullScreen?2:0);
+    case 1:return (int)(wrenchCharge*1000);
+    case 2:return wrenchSwingT>0;
+    case 3:return SkillViewZoom();
+    case 4:return (int)(treeVK*1000);
+    case 5:return SkillIsDragging() || treeDragging;
+    default:return -1;
+    }
+}

@@ -14,6 +14,7 @@ int MonsterFloorChance(int kind,int level) {
     if(!MonsterEligible(kind,level))return 0;
     if(kind==SPAWN_COLLECTOR){int chance=14+level*7;return chance>90?90:chance;}
     if(kind==SPAWN_SCAVENGER)return 100; /* Trigger/time policy decides when. */
+    if(kind==SPAWN_SPIDER){int chance=55+(level-2)*6+GoldTier()*2+(int)ThreatValue();return chance>85?85:chance;}
     static const int initial[SPAWN_KIND_COUNT]={100,65,32,65,25,100,100};
     int chance=initial[kind]+GoldTier()*2+(int)ThreatValue();return chance>100?100:chance;
 }

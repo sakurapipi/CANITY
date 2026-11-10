@@ -45,7 +45,7 @@ enum {
  * ================================================================ */
 #define SPIDER_APPEAR_BASE    20     /* 起始层的出现率（百分比） */
 #define SPIDER_APPEAR_STEP    5      /* 每深一层 +5% */
-#define SPIDER_APPEAR_CAP     60     /* 上限 */
+#define SPIDER_APPEAR_CAP     85     /* 上限 */
 #define SPIDER_AIM_TIME       0.8f   /* 前摇（用户要求 0.7~1.0） */
 #define SPIDER_RANGE          7.0f   /* 射程（格）；保留视线、前摇和躲避窗口 */
 #define SPIDER_COOLDOWN_TIME  8.0f

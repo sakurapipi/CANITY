@@ -170,7 +170,43 @@ static void test_sprint_grace_rearms_and_resets(void) {
     PlayerResetSprintGrace();
 }
 
+
+#include "present_api.h"
+#include "loop_api.h"
+#include "shop.h"
+#include "bench.h"
+#include "lockbox.h"
+#include "world_api.h"
+#include "monster_rules.h"
+static void test_shared_map_release_and_tree_drag(void){
+    GameState state=currentState;int page=shopPage,oldOpen=isMapOpen,oldFull=mapFullScreen;
+    int oldLock=lockActive;lockActive=0;
+    currentState=STATE_PLAYING;isMapOpen=0;mapFullScreen=0;
+    CanityKeyDown(VK_TAB,0);
+    CHECK(isMapOpen && !mapFullScreen,"TAB down opens the hold map");
+    CanityKeyUp(VK_TAB);
+    CHECK(!isMapOpen && !mapFullScreen,"shared TAB release closes the hold map");
+    isMapOpen=1;mapFullScreen=1;CanityKeyUp(VK_TAB);
+    CHECK(isMapOpen && mapFullScreen,"unrelated TAB release preserves a toggle map");
+    currentState=STATE_SAFEHOUSE;shopPage=SHP_TREE;
+    float vx=treeVX,vy=treeVY,vk=treeVK;int wallet=carryGold;
+    treeVK=.5f;
+    CanityPointerDown(400,200);CanityPointerMove(470,230);CanityPointerUp(470,230);
+    CHECK(fabsf(treeVX-vx-70)<.01f && fabsf(treeVY-vy-30)<.01f,"shared pointer pans the run tree in both axes");
+    CHECK(carryGold==wallet,"panning must never purchase a node");
+    CanityTreeZoom(1);CHECK(treeVK>.5f,"run tree plus button zooms in");
+    CanityTreeZoom(-1);CHECK(fabsf(treeVK-.5f)<.001f,"run tree minus reverses zoom");
+    CanityPointerDown(400,200);CanityPointerMove(440,200);CanityPointerCancel();
+    CHECK(!treeDragging,"touch cancellation releases tree dragging");
+    treeVX=vx;treeVY=vy;treeVK=vk;
+    currentState=state;shopPage=page;isMapOpen=oldOpen;mapFullScreen=oldFull;lockActive=oldLock;
+    CHECK(MonsterFloorChance(SPAWN_SPIDER,1)==0,"higher spider rate cannot bypass first-floor gate");
+    int chance=MonsterFloorChance(SPAWN_SPIDER,10);
+    CHECK(chance>=70 && chance<=85,"deep-floor spider chance increases with an 85 percent cap");
+}
+
 void TestSuite_update(void) {
+    test_shared_map_release_and_tree_drag();
     test_invalid_action_and_key_indices();
     test_session_input_cancellation();
     test_sprint_grace_rearms_and_resets();

@@ -6,6 +6,8 @@
 #include "state.h"
 #include "threat.h"
 #include "loop_api.h"
+#include "player_api.h"
+#include "render.h"
 unsigned int UiThemeColor(int role) {
     int live=currentState==STATE_PLAYING || currentState==STATE_SAFEHOUSE || currentState==STATE_PAUSED || currentState==STATE_SKILL_PICK;
     float pressure=live?GoldTier()+ThreatValue()*.45f:BankPreviewTier()+bankRiskPlan*2;
@@ -57,3 +59,36 @@ void UiCorrodeRect(int x0,int y0,int x1,int y1){
     }
 }
 
+
+/* Original weirdcore collage: photocopied eye cutouts, misregistered red/cyan
+ * ink, torn paper and registration marks. No full-screen strobe or text mask. */
+void UiDreamFrame(void) {
+    if(currentState==STATE_PAUSED || (currentState==STATE_SETTINGS && prevState==STATE_PAUSED))return;
+    if(winW<160 || winH<120)return;
+    int live=currentState==STATE_PLAYING;
+    float ratio=live?sanity/fmaxf(1.0f,SanityMax()):.55f;
+    float stress=live?fmaxf(0,(.62f-ratio)/.62f):.16f;
+    if(live && (!vignetteOn || stress<=0))return;
+    int w=UIS(45),h=UIS(19),pad=UIS(9);
+    if(w>winW/10)w=winW/10;
+    if(h>winH/16)h=winH/16;
+    int drift=(int)(sinf((float)g_timeSec*.34f)*UIS(3));
+    for(int side=0;side<2;side++) {
+        int cx=side?winW-pad-w:pad+w,cy=winH/3+side*winH/5+drift;
+        float alpha=live?.12f+stress*.24f:.15f;
+        for(int y=-h;y<=h;y++) {
+            int half=(int)(w*(1.0f-fabsf((float)y)/fmaxf(1,h)));
+            BlendRectWin(cx-half,cy+y,cx+half+1,cy+y+1,0xDAD8CC,alpha);
+            if(abs(y)<h/2) {
+                int iris=h/2-abs(y)/2;
+                BlendRectWin(cx-iris+2,cy+y,cx+iris+2,cy+y+1,0x181A22,alpha+.15f);
+                BlendRectWin(cx-1,cy+y,cx+2,cy+y+1,0x900F1B,alpha);
+            }
+        }
+        for(int i=0;i<7;i++) {
+            int x=side?winW-pad-UIS(2+i%3):pad+UIS(i%3);
+            int y=winH/5+i*winH/13;
+            BlendRectWin(x,y,x+UIS(2),y+UIS(8+i%4),i%2?0xBC1827:0x87BDD0,.12f+stress*.25f);
+        }
+    }
+}

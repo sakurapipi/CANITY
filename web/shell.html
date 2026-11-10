@@ -160,6 +160,16 @@
     #btns { grid-template-columns: repeat(2, clamp(44px, 10vw, 60px)); gap: 8px; }
     #btns button { width: clamp(44px, 10vw, 60px); height: clamp(44px, 15vh, 60px); }
   }
+
+  #menuNav {display:none;position:fixed;bottom:calc(6px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);z-index:19;gap:4px}
+  body.touchmenu #menuNav {display:flex}
+  #menuNav button,#screenTools button {background:#101d2deb;color:#e6f4ff;border:1px solid #7bacc8;border-radius:5px;min-width:40px;min-height:40px;font-size:17px;touch-action:none}
+  #screenTools {pointer-events:auto;position:fixed;top:calc(3px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:100}
+  #screenTools button {min-height:28px;font-size:12px;padding:3px 12px;opacity:.75}
+  #canvas {cursor:default}
+  @media (prefers-reduced-motion:reduce) {#boot {transition:none}}
+#treeZoom{display:none;position:fixed;right:clamp(155px,25vw,290px);top:calc(8px + env(safe-area-inset-top,0px));z-index:21;gap:8px}
+#treeZoom button{width:44px;height:40px;background:#102432eF;color:#e6f5ff;border:1px solid #7bc9e8;border-radius:5px;font-size:25px;touch-action:none}
 </style>
 </head>
 <body>
@@ -209,6 +219,11 @@
          style="display:none">
 </div>
 
+<div id="screenTools"><button id="fullscreenBtn" type="button">全屏 / 窗口</button></div>
+<div id="treeZoom" aria-label="技能树缩放"><button data-tree-zoom="1">+</button><button data-tree-zoom="-1">−</button></div>
+<div id="menuNav" aria-label="菜单导航">
+<button data-menu-key="27">返回</button><button data-menu-key="37">←</button><button data-menu-key="38">↑</button><button data-menu-key="40">↓</button><button data-menu-key="39">→</button><button data-menu-key="13">确认</button>
+</div>
 <script>
   var Module = {
     canvas: document.getElementById('canvas'),
@@ -365,10 +380,10 @@
       var el = document.documentElement;
       var req = el.requestFullscreen || el.webkitRequestFullscreen;
       if (req) {
-        try { req.call(el); } catch (e) { /* iOS 上可能直接拒绝 */ }
+        try { var promise=req.call(el);if(promise && promise.catch)promise.catch(function(){}); } catch (e) { /* Unsupported: retain windowed play. */ }
       }
       if (screen.orientation && screen.orientation.lock) {
-        screen.orientation.lock('landscape').catch(function () {});
+        try { var lock=screen.orientation.lock('landscape');if(lock && lock.catch)lock.catch(function(){}); } catch(ignored) {}
       }
       setTimeout(update, 400);
     }
@@ -559,9 +574,10 @@
 
     /* UTF8ToString 需要 C 侧分配；用 Module._malloc/_free 走一遍 */
     function allocUTF8(str) {
-      var n = lengthBytesUTF8(str) + 1;
+      var n = str.length + 1; // Action identifiers are ASCII, no optional runtime helper.
       var p = Module._malloc(n);
-      stringToUTF8(str, p, n);
+      for(var i=0;i<str.length;i++)Module.HEAPU8[p+i]=str.charCodeAt(i);
+      Module.HEAPU8[p+str.length]=0;
       Module.__lastStrPtr = p;
       return p;
     }
@@ -571,45 +587,32 @@
 
     /* 绑定在 C 侧是运行期状态（可能还没加载完），所以延迟解析：
        第一次触摸时再问，问到就缓存。 */
-    Array.prototype.forEach.call(document.querySelectorAll('#btns button, #btns2 button'), function (b) {
-      var name = b.getAttribute('data-act');
-      if (!name) return;
-
-      function vkOf() {
-        /* 只缓存**成功**的解析结果。失败（Module 还没就绪 / 动作名写错）
-           每次重试，避免第一次触摸太早把按钮永久钉死成不可用。 */
-        if (b.__vk === undefined || b.__vk < 0) {
-          var v = resolveAct(b);
-          if (v >= 0) b.__vk = v;
-          return v;
-        }
-        return b.__vk;
+    Array.prototype.forEach.call(document.querySelectorAll('#btns button, #btns2 button'), function(b){
+      if(!b.getAttribute('data-act'))return;
+      var heldVk=-1;
+      function press(e){
+        e.preventDefault();e.stopPropagation();
+        var vk=resolveAct(b);if(vk<0 || heldVk>=0)return;
+        heldVk=vk;key(vk,1);
+        if(e.pointerId!==undefined && b.setPointerCapture){try{b.setPointerCapture(e.pointerId);}catch(ignored){}}
       }
-
-      b.addEventListener('touchstart', function (e) {
-        var vk = vkOf();
-        if (vk < 0) return;
-        key(vk, 1);
-        e.preventDefault();
-      }, { passive: false });
-      b.addEventListener('touchend', function (e) {
-        var vk = vkOf();
-        if (vk >= 0) key(vk, 0);
-        e.preventDefault();
-      }, { passive: false });
-      b.addEventListener('touchcancel', function () {
-        var vk = vkOf();
-        if (vk >= 0) key(vk, 0);
-      }, false);
-      /* 桌面浏览器用鼠标也能点（调试方便） */
-      b.addEventListener('mousedown', function (e) {
-        var vk = vkOf();
-        if (vk >= 0) key(vk, 1);
-      });
-      b.addEventListener('mouseup', function (e) {
-        var vk = vkOf();
-        if (vk >= 0) key(vk, 0);
-      });
+      function release(e){
+        if(e)e.preventDefault();if(heldVk<0)return;
+        var vk=heldVk;heldVk=-1;
+        key(vk,0);
+        if(b.getAttribute('data-act')==='SWING'){
+          clearTimeout(Module['_kt'+vk]);Module._held[vk]=0;Module._keys[vk]=0;
+          if(Module._keyPulses)Module._keyPulses[vk]=0;
+        }
+      }
+      if(window.PointerEvent){
+        b.addEventListener('pointerdown',press);
+        ['pointerup','pointercancel','lostpointercapture'].forEach(function(type){b.addEventListener(type,release);});
+      }else{
+        b.addEventListener('touchstart',press,{passive:false});b.addEventListener('touchend',release,{passive:false});b.addEventListener('touchcancel',release,{passive:false});
+        b.addEventListener('mousedown',press);b.addEventListener('mouseup',release);
+      }
+      window.addEventListener('blur',release);document.addEventListener('visibilitychange',function(){if(document.hidden)release();});
     });
 
   })();
@@ -665,8 +668,84 @@
                         (e.filename ? ' @' + e.filename.split('/').pop() + ':' + e.lineno : ''));
   });
   window.addEventListener('unhandledrejection', function (e) {
+    if(e.reason && /^(NotAllowedError|NotSupportedError|AbortError|SecurityError)$/.test(e.reason.name)){console.warn(e.reason);return;}
     window.__canityFail('PROMISE: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
   });
+
+
+  // RC4: optional browser capabilities must never abort the Wasm runtime.
+  (function(){
+    var cv=Module.canvas,active=null,start=null;
+    Module._menuQueue=[];
+    Module._safePointerLock=function(){
+      if(navigator.maxTouchPoints>0 || !Module.requestLock || !cv.requestPointerLock)return;
+      try {var p=cv.requestPointerLock();if(p && p.catch)p.catch(function(){});}catch(ignored){}
+    };
+    function interactive(){return Module._CanityUiFlags && !(Module._CanityUiFlags()&1);}
+    function clearInput(){
+      if(Module._keys)Module._keys.fill(0);
+      if(Module._keyPulses)Module._keyPulses.fill(0);
+      Module._mouseDX=0;Module._mouseDY=0;Module._touchLook=false;
+      Module._menuQueue.length=0;active=null;
+      if(Module._CanityWebPointer)Module._CanityWebPointer(3,0,0);
+    }
+    document.querySelectorAll('[data-menu-key]').forEach(function(b){
+      b.addEventListener(window.PointerEvent?'pointerdown':'touchstart',function(e){
+        e.preventDefault();e.stopPropagation();
+        if(interactive() && Module._menuQueue.length<32)Module._menuQueue.push(Number(b.getAttribute('data-menu-key')));
+      });
+    });
+    // Shared C pointer state delays purchases until release, so dragging never buys.
+    function point(e){return Module._toRender?Module._toRender(e):null;}
+    function route(phase,e){var p=point(e);if(p && Module._CanityWebPointer)Module._CanityWebPointer(phase,p.x|0,p.y|0);}
+    cv.addEventListener('pointerdown',function(e){
+      if(e.pointerType==='mouse' || !interactive() || active!==null)return;
+      e.preventDefault();active=e.pointerId;route(0,e);
+      try{cv.setPointerCapture(e.pointerId);}catch(ignored){}
+    },{passive:false});
+    cv.addEventListener('pointermove',function(e){if(e.pointerId===active){e.preventDefault();route(1,e);}},{passive:false});
+    cv.addEventListener('pointerup',function(e){if(e.pointerId===active){e.preventDefault();route(2,e);active=null;}},{passive:false});
+    cv.addEventListener('pointercancel',function(e){if(e.pointerId===active){active=null;if(Module._CanityWebPointer)Module._CanityWebPointer(3,0,0);}});
+    if(!window.PointerEvent){
+      cv.addEventListener('touchstart',function(e){if(!interactive() || active!==null || !e.changedTouches.length)return;e.preventDefault();active=e.changedTouches[0].identifier;route(0,e.changedTouches[0]);},{passive:false});
+      cv.addEventListener('touchmove',function(e){if(active===null)return;for(var i=0;i<e.touches.length;i++)if(e.touches[i].identifier===active){e.preventDefault();route(1,e.touches[i]);}},{passive:false});
+      cv.addEventListener('touchend',function(e){for(var i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===active){e.preventDefault();route(2,e.changedTouches[i]);active=null;}},{passive:false});
+      cv.addEventListener('touchcancel',clearInput);
+    }
+    window.addEventListener('blur',clearInput);document.addEventListener('visibilitychange',function(){if(document.hidden)clearInput();});
+    var fullscreen=document.getElementById('fullscreenBtn');
+    function fullElement(){return document.fullscreenElement || document.webkitFullscreenElement || document.webkitCurrentFullScreenElement;}
+    function fullLabel(){fullscreen.textContent=fullElement()?'退出全屏':'进入全屏';}
+    fullLabel();
+    function done(){clearInput();fullLabel();if(Module._measure)Module._measure();}
+    fullscreen.addEventListener('click',function(){
+      var doc=document,host=document.documentElement;
+      try {
+        var action=fullElement()?(doc.exitFullscreen || doc.webkitExitFullscreen):(host.requestFullscreen || host.webkitRequestFullscreen);
+        var receiver=fullElement()?doc:host;
+        if(!action){fullscreen.textContent='请用浏览器全屏';return;}
+        var result=action.call(receiver);
+        if(result && result.then)result.then(done,function(){fullscreen.textContent='不支持全屏，可窗口游玩';done();});else done();
+      }catch(ignored){fullscreen.textContent='窗口模式';done();}
+    });
+    document.addEventListener('keydown',function(e){if(e.key==='Escape' && fullElement()){try{var f=document.exitFullscreen || document.webkitExitFullscreen;var p=f && f.call(document);if(p && p.catch)p.catch(function(){});}catch(ignored){} }});
+    document.addEventListener('fullscreenchange',done);document.addEventListener('webkitfullscreenchange',done);
+    document.querySelectorAll('[data-tree-zoom]').forEach(function(b){b.addEventListener(window.PointerEvent?'pointerdown':'touchstart',function(e){e.preventDefault();e.stopPropagation();if(Module._CanityWebZoom)Module._CanityWebZoom(Number(b.getAttribute('data-tree-zoom')));});});
+    var previous=-1;
+    setInterval(function(){
+      if(!Module._CanityUiFlags)return;
+      var flags=Module._CanityUiFlags();
+      document.getElementById('treeZoom').style.display=(flags&8)?'flex':'none';
+      if(previous!==flags){
+        clearInput();previous=flags;
+        if(!(flags&1)){
+          Module.requestLock=false;
+          if(document.pointerLockElement && document.exitPointerLock){try{document.exitPointerLock();}catch(ignored){}}
+          cv.style.cursor='default';
+        }
+      }
+    },80);
+  })();
 
   // 进度条：Emscripten 的 download 进度靠 XHR 包装，这里给个粗粒度回退
   (function () {

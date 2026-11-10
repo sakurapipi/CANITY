@@ -94,6 +94,7 @@ res_o = root / 'res' / 'canity_res.o'
 rc = root / 'res' / 'canity.rc'
 resource_inputs = [p for p in (root / 'res').rglob('*')
                    if p.is_file() and p.suffix.lower() in {'.rc', '.h', '.ico', '.manifest', '.bmp', '.png'}]
+resource_inputs += sorted((root/'music').glob('*.mp3'))  # RC4 embeds these in PE resources.
 resources = dict(compiler=tool_identity(WINDRES), inputs=inputs_digest(root, resource_inputs))
 if not res_o.exists() or previous.get('resources') != resources:
     resources_ok=run([WINDRES, rc, '-O', 'coff', '-o', res_o],label='resources')

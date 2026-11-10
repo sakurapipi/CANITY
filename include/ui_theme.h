@@ -95,5 +95,6 @@ void UiFooterRule(int x0, int x1, int y);
 void UiCornerMarks(int x0, int y0, int x1, int y1);
 
 void UiDecayFrame(void);
+void UiDreamFrame(void);
 void UiCorrodeRect(int x0,int y0,int x1,int y1);
 #endif

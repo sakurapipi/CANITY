@@ -3315,6 +3315,11 @@ static void RenderPostBand(int y0,int y1) {
             int speck=(int)((((int)(noise>>24)-128)/128.0f)*perception.grain);
             float blood=vignetteOn?(stress*edge*.52f+crisis*(.10f+beat*.12f)):0;
             float vein=((x+veinOffset+128)%57<2 && (noise&128))?crisis*edge*.6f:0;
+            if(vignetteOn && stress>.12f && edge>.48f){
+                /* Red/cyan ink separation on the border; preserve central navigation. */
+                int ink=((x/11+y/23)%7==0)?(int)(stress*14):0;
+                r+=ink;b+=ink/3;g-=ink/2;
+            }
             float shade=1-edge*dark/256.0f;
             r=(int)(r*shade*(1-blood)+145*blood-45*vein)+speck;
             g=(int)(g*shade*(1-blood*.9f)-32*vein)+speck;

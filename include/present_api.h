@@ -14,6 +14,14 @@ extern HWND g_hwnd;
 int CanityKeyDown(int vk, int repeat);
 void CanityMouseMove(int mx, int my);
 void CanityMouseClick(int mx, int my);
+void CanityKeyUp(int vk);
+void CanityPointerDown(int x,int y);
+void CanityPointerMove(int x,int y);
+void CanityPointerUp(int x,int y);
+void CanityPointerCancel(void);
+void CanityTreeZoom(int direction);
+int SkillViewZoom(void);
+
 void CanityMouseRelease(void);
 int BankSelectedControl(void);
 void CanityMouseWheel(int delta, int mx, int my);

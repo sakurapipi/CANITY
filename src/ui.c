@@ -3413,7 +3413,7 @@ static void RenderFrameScene(void) {
         /* v2.1：相机抖动（偏移玩家位置再还原，所有投影自动跟着抖） */
         /* Feedback must not push the render camera through walls. */
         Render3D();
-        if (currentState == STATE_PLAYING && isMapOpen) RenderMap();
+        if (currentState == STATE_PLAYING && isMapOpen && mapFullScreen) RenderMap();
         /* 跳脸虫：屏幕空间 overlay，盖在场景之上、HUD 之下 */
         /* Floor transitions no longer overwrite the frame with white. */
 
@@ -3501,6 +3501,7 @@ static void RenderFrameMenus(void) {
         int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
         if(currentState!=STATE_PAUSED && !(currentState==STATE_SETTINGS && prevState==STATE_PAUSED))
             BlendRectWin(0,0,winW,winH,UI_BG_PANEL,1.0f);
+        UiDreamFrame(); /* Collage belongs above the menu backdrop, below labels. */
         UiDrawMenuPages();   /* Menu composition has one shared entry point. */
         if (popupOpen) {
             DrawPopupPanel();
@@ -3776,9 +3777,11 @@ void RenderFrame(void) {
     if(previousState!=(int)currentState){if(pixels)memset(pixels,0,(size_t)renderW*renderH*sizeof(*pixels));previousState=(int)currentState;uiDirty=1;}
     UiLayoutBegin();
     RenderFrameScene();
+    if(currentState==STATE_PLAYING)UiDreamFrame();
     RenderFrameMenus();
     UiDecayFrame();
     RenderFrameOcclusion();
+    if(currentState==STATE_PLAYING && isMapOpen && !mapFullScreen)RenderMap();
     DrawTutorialPanel();
     RenderFrameCalibration();
     DrawRunReplacement();

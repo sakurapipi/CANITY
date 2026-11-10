@@ -86,13 +86,16 @@ jobs:
         run: |
           $ver = (Select-String -Path include/common.h -Pattern 'CANITY_VERSION_STR\s+"([^"]+)"').Matches[0].Groups[1].Value
           $name = "CANITY_v${ver}_win64"
-          python -X utf8 tools/package_playable.py --output stage --label $name --notes docs/package_readme.txt
+          python -X utf8 tools/package_playable.py --output stage --label $name --notes docs/2.4.2-RC4_交付说明.md --acceptance-report work/codex-build/validation-summary.json --source-commit $env:GITHUB_SHA --single-exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $folder = (Get-Content work/latest_playable_path.txt -Raw).Trim()
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { 'v' + $ver.Replace(' ', '-') }
+          Copy-Item -LiteralPath ($folder + '.zip') -Destination (Join-Path stage ("CANITY_" + $tag + "_win64.zip"))
 
       - uses: actions/upload-artifact@v4
         with:
           name: canity-windows
-          path: stage/*.zip
+          path: stage/CANITY_v*_win64.zip
           if-no-files-found: error
 
   # ------------------------------------------------------------------
@@ -122,6 +125,8 @@ jobs:
         run: |
           set -e
           VER=$(grep -oP 'CANITY_VERSION_STR\s+"\K[^"]+' include/common.h)
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then VER="${GITHUB_REF_NAME#v}"; fi
+          VER="${VER// /-}"
           echo "VER=$VER" >> "$GITHUB_ENV"
           mkdir -p stage
           cp web/dist/index.html web/dist/index.js web/dist/index.wasm stage/

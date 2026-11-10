@@ -1,10 +1,12 @@
+> **2.4.2 RC4**：修复网页地图松键、全屏退出、手机蓄力扳手和技能树拖动，新增缩放按钮，调整蜘蛛出场率与精神污染层级。Windows提供内嵌MP3的直接运行EXE。详见 [RC4更新与验证说明](docs/RELEASE-v2.4.2-rc4.md)。
+
 # CANITY
 
 [![CI](https://github.com/sakurapipi/CANITY/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sakurapipi/CANITY/actions/workflows/ci.yml)
 
 一款以探索、声音、光线与资源取舍为核心的第一人称像素恐怖逃生游戏，使用 C99 编写。
 
-**当前源码版本：2.4.2 RC · 存档格式：v44 · 地图：36×36 · 容器槽：12。**
+**当前源码版本：2.4.2-RC4 · 存档格式：v44 · 地图：36×36 · 容器槽：12。**
 
 Windows 桌面版与 WebAssembly 网页版共用游戏规则。射线投射、纹理采样、深度遮挡与后处理由 CPU 软件渲染完成，无需 OpenGL 或 DirectX 图形接口。怪物造型与场景贴图使用程序化生成；配乐随包提供 MP3，另有内置合成回退。
 
@@ -16,11 +18,13 @@ Windows 桌面版与 WebAssembly 网页版共用游戏规则。射线投射、�
 
 ### Windows
 
-完整解压运行包，双击 **开始游戏.bat**。请保留 `music/`、许可证及包内其他运行文件；不要只拷贝 `canity.exe`。
+RC4 Windows包完整解压后，双击 **canity.exe**，无需 BAT 或 DAT。MP3音乐已嵌入程序，首次运行会缓存到用户目录；请保留随包许可证。
 
-启动脚本在未指定 `CANITY_DATA_DIR` 时使用运行目录中的 `saves/`，已设置该变量时保留用户指定位置。升级前请备份自己的存档，不要用测试目录覆盖玩家数据。
+RC4单EXE在未指定 `CANITY_DATA_DIR` 时使用 `%LOCALAPPDATA%/CANITY/saves/`，已设置该变量时保留用户指定位置。旧版便携包的 `saves/` 不会自动被覆盖。升级前请备份自己的存档，不要用测试目录覆盖玩家数据。
 
 ### 网页与手机
+
+Tab小地图按住打开、松开关闭；M切换大地图。全屏可用顶部“进入全屏／退出全屏”按钮往返，浏览器支持时也可按Esc退出。手机扳手按住蓄力、松开挥击；两棵技能树支持触摸平移与加减缩放。
 
 普通网页包包含 `index.html`、`index.js`、`index.wasm` 和音乐资源。请通过 HTTP 服务打开：
 
@@ -117,7 +121,13 @@ python -X utf8 tools/package_web_mobile.py
 
 `--include-web` 要求网页构建已存在。运行包记录源码、资源和验证摘要；报告与当前验证输入不匹配时拒绝套用。生成安装包不等于已经完成真实桌面或手机验收。
 
-## 验证记录与边界
+## RC4 验证记录
+
+本轮完整C99编译与15个隔离运行域通过，新增Tab松开、树拖动不误购、缩放、蜘蛛门槛及暂停眼睛绘制回归。Edge实际浏览器自动专项 **17项通过、页面错误0项**，包括五次全屏往返及移动触摸蓄力／松手挥击。手机测试使用浏览器模拟，尚不等同所有实体机型验收。
+
+Web恢复O3优化并为自动画质选择稳定的浏览器像素预算。同机960×540样例场景由59.0 FPS到59.7 FPS；此结果不保证低端手机相同表现。运行包附源码及文件哈希，最终远端状态请查看上方CI和Releases。
+
+## 历史验证记录与边界
 
 2026-11-10 的代码修复提交 [`7d93407`](https://github.com/sakurapipi/CANITY/commit/7d9340734bc637114c8bd425bbd926b215cf3bab) 已通过 [GitHub CI](https://github.com/sakurapipi/CANITY/actions/runs/42751975812)。对应本地完整验证为 **26 个阶段通过、0 失败**，包含 **15 个隔离运行域、17,047 条运行期检查**，并完成 Windows、普通网页及单文件网页构建。
 

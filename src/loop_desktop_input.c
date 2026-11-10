@@ -383,6 +383,49 @@ void CanityMouseWheel(int delta, int mx, int my) {
  * 那是玩家在浏览器里最先用到鼠标的地方。游戏内的视角仍走
  * CanityMouseLook（指针锁定后的相对位移），那条路是独立的。
  * ================================================================== */
+/* Shared release path: browser keyup must not depend on Win32 messages. */
+void CanityKeyUp(int vk) {
+    if(vk==VK_TAB && mapHeld){mapHeld=0;isMapOpen=0;mapFullScreen=0;uiDirty=1;}
+    if(vk==lockIgnoreVK)lockIgnoreVK=0;
+    if(vk>=0 && vk<256)keys[vk]=0;
+}
+static int pointerActive=0,pointerDragged=0,pointerX=0,pointerY=0;
+static GameState pointerState;
+static int pointerPage=0;
+void CanityPointerCancel(void) {
+    pointerActive=0;pointerDragged=0;
+    if(SkillIsDragging())SkillDragEnd();
+    if(treeDragging)BenchDragEnd();
+}
+void CanityPointerDown(int x,int y) {
+    CanityPointerCancel();pointerActive=1;pointerX=x;pointerY=y;
+    pointerState=currentState;pointerPage=shopPage;
+}
+void CanityPointerMove(int x,int y) {
+    if(!pointerActive){CanityMouseMove(x,y);return;}
+    if(currentState!=pointerState || (currentState==STATE_SAFEHOUSE && shopPage!=pointerPage)){CanityPointerCancel();return;}
+    int tree=currentState==STATE_HUB || (currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE);
+    if(tree && (pointerDragged || abs(x-pointerX)+abs(y-pointerY)>UIS(6))) {
+        if(!pointerDragged){
+            if(currentState==STATE_HUB)SkillDragStart(pointerX,pointerY);else BenchDragStart(pointerX,pointerY);
+            pointerDragged=1;
+        }
+        if(currentState==STATE_HUB)SkillDragMove(x,y);else BenchDragMove(x,y);
+    }else CanityMouseMove(x,y);
+}
+void CanityPointerUp(int x,int y) {
+    if(!pointerActive)return;
+    CanityPointerMove(x,y);
+    int click=pointerActive && !pointerDragged;
+    CanityPointerCancel();if(click)CanityMouseClick(x,y);
+}
+void CanityTreeZoom(int direction) {
+    if(!direction)return;
+    float factor=direction>0?1.25f:.8f;
+    if(currentState==STATE_HUB)SkillZoomAt(factor,winW/2,winH/2);
+    else if(currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE)BenchZoomAt(factor,winW*2/3,winH*2/5);
+}
+
 void CanityMouseMove(int mx, int my) {
     if(LoopRunReplacementPending())return;
     /* 入参已是渲染(=逻辑)空间，见 HitTestMenu 的契约 */
@@ -1730,12 +1773,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9)
                 wParam = (WPARAM)('0' + (wParam - VK_NUMPAD0));
             /* v2.5：松开 TAB 立刻关掉小地图（按住才看） */
-            if (wParam == VK_TAB && mapHeld) {
-                mapHeld = 0;
-                isMapOpen = 0;
-                mapFullScreen = 0;
-                MapCursorRefresh();
-            }
+            CanityKeyUp((int)wParam);
+            if(wParam==VK_TAB)MapCursorRefresh();
 
             if (wParam < 256) keys[wParam] = 0;
             return 0;
