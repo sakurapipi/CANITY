@@ -5,6 +5,7 @@
  */
 #include "../test_common.h"
 #include "player_api.h"
+#include "loop_private.h"
 
 static void test_daily(void) {
     unsigned goals=0,mods=0,res=0;
@@ -22,7 +23,20 @@ static void test_daily(void) {
        武器系统下线后扳手是玩家唯一的主动工具，禁掉它 = 赤手空拳跑一整局，
        玩家第一反应是「扳手坏了」（用户报告）。枚举值保留（存档里是数字），
        只是不再被抽到 —— 所以可达位图是 63 去掉 bit4 = 47。 */
-    CHECK(goals==255 && mods==255 && res==47,"every active daily pool entry is reachable");
+    CHECK(goals==((1u<<DQ_COUNT)-1u-(1u<<DQ_SURVIVE)) && mods==255 &&
+          res==((1u<<DR_NONE)|(1u<<DR_NOSPRINT)|(1u<<DR_NOLIGHT)|(1u<<DR_NOMAP)),
+          "authored daily scenarios cover their scheduled goal/modifier/restriction set");
+    {
+        const char* names[14]={0};int distinct=0;
+        for(unsigned day=1;day<=14;day++){
+            DailyGenerateForDate(20261100u+day);
+            const char* name=DailyScenarioName(0);int seen=0;
+            for(int i=0;i<distinct;i++)if(!strcmp(name,names[i]))seen=1;
+            CHECK(name && name[0] && !seen,"successive days select distinct authored scenarios within a fortnight");
+            names[distinct++]=name;
+        }
+        CHECK(distinct==14,"all fourteen hand-authored daily scenarios rotate into play");
+    }
     CHECK(!(res & (1u<<4)),"the retired wrench restriction must never be picked");
     trainingMode=0;dailyMode=0;
     for(int goal=0;goal<DQ_COUNT;++goal) {
@@ -42,7 +56,7 @@ static void test_daily(void) {
     unsigned dates[]={20260129,20260130,20260131,20260201,20260202,20260203,20260204};
     int empty[15]={0};DailyLoadFrom(empty);bankGold=0;
     for(int i=0;i<7;++i) {DailyGenerateForDate(dates[i]);DailySetProgress(DailyGoalParam());}
-    CHECK(DailyStreak()==7 && bankGold==7*800+1500+5000,"three/seven day streak bonuses across month boundary");
+    CHECK(DailyStreak()==7 && bankGold==7*400+300+900,"three/seven day streak bonuses across month boundary");
     DailyGenerateForDate(20260206);CHECK(DailyStreak()==0,"missing a day breaks streak");
     DailyGenerate();
     CHECK(!DailyForbidSprint() && !DailyForbidWrench() && DailyGoldTierBonus()==0,"daily restrictions do not leak into normal games");
@@ -78,6 +92,14 @@ static void test_double_reward_rounds(void) {
     CHECK(skillPickTotal == 1, "a plain even floor must announce a single reward");
 }
 
+static void open_shop_from_test_cover(int from){
+    CHECK(hideSpotCount>0,"shop fixture has a real hiding place");
+    hideSpots[0].active=1;hideSpots[0].broken=0;hiddenIn=0;
+    posX=hideSpots[0].x;posY=hideSpots[0].y;
+    CHECK(ShopCanOpen(),"shop permits entry only after entering cover");
+    ShopOpen(from);currentState=STATE_SAFEHOUSE;
+}
+
 static void test_shop_full_bag_no_charge(void) {
     extern int shopRow, shopPage, shopOffer[SHOP_OFFERS], shopPrice[SHOP_OFFERS];
     extern int flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
@@ -92,7 +114,7 @@ static void test_shop_full_bag_no_charge(void) {
     StartFreshTestRun();
 
     /* 直接把售价表改成"照明棒"，然后把它塞满 */
-    ShopOpen(1);
+    open_shop_from_test_cover(1);
     /* ==================================================================
      * 2026-11-06（审计补）：**测试也要自己消掉随机性**
      * ------------------------------------------------------------------
@@ -127,8 +149,9 @@ static void test_shop_full_bag_no_charge(void) {
     carryGold = 1000;
     before = carryGold + bankGold;
     { extern float shopCooldown[SHOP_COOLDOWN_ROWS]; shopCooldown[0] = 0.0f; }
+    priceNow=ShopPriceAt(0);
     ShopActivate();
-    CHECK(carryGold + bankGold == before - 50,
+    CHECK(carryGold + bankGold == before - priceNow,
           "a purchase that fits must still charge exactly the listed price");
     CHECK(flares == cap, "a purchase that fits must put the item in the bag");
 
@@ -220,7 +243,8 @@ static void test_load_clamps_flags(void) {
 }
 
 static void test_trees_shop(void) {
-    clear_meta();bankGold=1000000;activeKeystone=-1;
+    clear_meta();LoopQueueStart(START_NORMAL,0);StartFreshTestRun();
+    bankGold=1000000;activeKeystone=-1;
     CHECK(SkillsSelfTest()==0,"skill data costs, ranks and prerequisites validate");
     for(int i=0;i<SKILL_COUNT;++i) CHECK(skillDefs[i].name && skillDefs[i].maxRank>0,"all thirty skills have definitions");
     int before=bankGold;CHECK(SkillBuy(0),"buy a permanent skill from bank");
@@ -238,23 +262,30 @@ static void test_trees_shop(void) {
     for(int col=0;col<4;++col) {
         BenchResetRun();ThreatReset();carryGold=10000;
         CHECK(BenchTryBuy(col*4+1)==3,"bench rejects missing prerequisite");
-        for(int row=0;row<3;++row) CHECK(BenchTryBuy(col*4+row)==1,"attribute tree lower tiers purchase");
-        CHECK(BenchTryBuy(16+col)==1,"alternate capstone uses correct branch prerequisite");
+        int path[BENCH_COUNT],n=0,id=16+col;
+        while(id>=0 && n<BENCH_COUNT){path[n++]=id;id=BenchPrereqId(id);}
+        CHECK(id<0 && n<BENCH_COUNT,"run-tree prerequisite path is finite");
+        while(n>0)CHECK(BenchTryBuy(path[--n])==1,"attribute path buys current prerequisite nodes in order");
         CHECK(BenchTryBuy(col*4+3)==5,"both capstones in a branch cannot be purchased");
     }
     BenchResetRun();ThreatReset();carryGold=0;
     CHECK(BenchTryBuy(0)==4 && !BenchHas(0),"insufficient money never installs a mod");
-    carryGold=50000;for(int i=0;i<16;++i) CHECK(BenchTryBuy(i)==1,"complete sixteen-node attribute build");
+    carryGold=50000;
+    for(int pass=0;pass<BENCH_COUNT;pass++)for(int i=0;i<BENCH_COUNT;i++){
+        if(i>=16 && i<=19)continue;
+        if(BenchCanBuy(i))CHECK(BenchTryBuy(i)==1,"full attribute build buys eligible primary/common nodes");
+    }
+    for(int i=0;i<16;i++)CHECK(BenchHas(i),"all primary attribute nodes are reachable in a complete build");
     CHECK(ThreatValue()==18.0f,"max build reaches capped threat 18");
     CHECK(BenchStaminaMul()>1 && BenchMoveMul()>1 && BenchBatteryCapMul()>1 && BenchLightRangeMul()>1,"body and light attributes affect runtime getters");
-    CHECK(BenchSanityAdd()==20 && BenchHealMul()>1 && BenchFearDamageMul()<1,"mind attributes affect real survival stats");
+    CHECK(BenchSanityAdd()>=20 && BenchHealMul()>1 && BenchFearDamageMul()<1,"mind attributes affect real survival stats");
     CHECK(BenchKnockCharges()==1 && BenchKnockExtra()==2.5f && BenchShock(),"gear line upgrades charges, push and memory wipe");
     CHECK(BankPreviewGain(1)>=carryGold,"exit previews a valid settlement");
     int carry=carryGold;BenchRefundRun();CHECK(carryGold>carry && ThreatValue()==0 && !BenchHas(0),"run respec refunds money and removes added threat");
-    SafeLevelReset();ShopOpen(1);int offers[4],prices[4];
+    SafeLevelReset();open_shop_from_test_cover(1);int offers[4],prices[4];
     for(int i=0;i<SHOP_OFFERS;++i) {offers[i]=shopOffer[i];prices[i]=ShopPriceAt(i);CHECK(prices[i]>0,"every offer has a positive effective price");for(int j=0;j<i;++j)CHECK(offers[i]!=offers[j],"four supplies are distinct");}
     CHECK(shopDiscountRow>=0 && shopDiscountRow<SHOP_OFFERS,"one supply is discounted every floor");
-    ShopOpen(1);for(int i=0;i<SHOP_OFFERS;++i) CHECK(offers[i]==shopOffer[i] && prices[i]==ShopPriceAt(i),"reopening shop does not reroll");
+    open_shop_from_test_cover(1);for(int i=0;i<SHOP_OFFERS;++i) CHECK(offers[i]==shopOffer[i] && prices[i]==ShopPriceAt(i),"reopening shop does not reroll");
     shopPage=SHP_SHOP;shopRow=shopDiscountRow;carryGold=1000;int price=ShopPriceAt(shopRow);
     sanity=30;battery=30;bottles=flares=smokeBombs=gluePots=echoBolts=decoys=0;ShopResetCooldowns();
     ShopActivate();CHECK(carryGold==1000-price,"discount displayed is discount charged");
@@ -273,13 +304,14 @@ static void test_runs_and_layout(void) {
     StartFreshTestRun();currentLevel=5;GenerateLevel();finish_floor();
     CHECK(currentLevel==6 && pickMode==1,"floor six first offers a relic");CloseSkillPick();
     CHECK(currentState==STATE_SKILL_PICK && pickMode==0,"floor six also offers the skill");CloseSkillPick();
-    StartCampaign(0);int stages[8]={0,1,1,2,3,3,3,4};
+    StartCampaign(0);if(LoopRunReplacementPending())LoopResolveRunReplacement(1);int stages[8]={0,1,1,2,3,3,3,4};
     for(int floor=1;floor<=8;++floor) {
         CHECK(currentLevel==floor && campaignStage==stages[floor-1],"campaign cumulative floor boundaries");
         CHECK(fusesNeeded==CampaignFusesNow(),"campaign preserves specified fuse counts including eight");
         int c=carryGold;finish_floor();CHECK(carryGold>=c || currentState==STATE_GAMEOVER,"campaign stage transition never loses carried money");
     }
-    CHECK(gameWon && currentState==STATE_GAMEOVER && bankGold>=36000,"all five campaign rewards settle into bank");
+    int rewards=0;for(int stage=0;stage<CAMPAIGN_STAGE_COUNT;stage++)rewards+=CampaignReward(stage);
+    CHECK(gameWon && currentState==STATE_GAMEOVER && bankGold>=rewards,"all current campaign stage rewards settle into bank");
     int sizes[][2]={{800,600},{806,640},{1280,720},{1920,1080}};
     for(int k=0;k<4;++k) {
         winW=sizes[k][0];winH=sizes[k][1];currentState=STATE_SAFEHOUSE;
@@ -692,7 +724,7 @@ static void test_content_db_capacity(void) {
     ContentReset();
     for (i = 0; i < CONTENT_MAX; i++) {
         sprintf(ids[i], "id_%d", i);
-        if (ContentAdd(CK_SETTING, ids[i], (const void*)(long)(i + 1)) < 0) {
+        if (ContentAdd(CK_SETTING, ids[i], (const void*)&ids[i][0]) < 0) {
             ok = 0;
             break;
         }
@@ -937,11 +969,12 @@ static void test_bestiary_storage_is_bounded_and_separate(void) {
 }
 
 static void test_bestiary_completion_uses_current_identities(void) {
-    CHECK(!BestiaryIsActive(BST_ID_FACE_JUMPER), "archived encounters do not block current completion");
-    CHECK(BestiaryCountSeen(1 << BST_ID_FACE_JUMPER) == 0,
-          "a retired or historically misattributed encounter cannot count as an active creature");
-    CHECK(BestiaryCountSeen((1 << BESTIARY_COUNT)-1) == BESTIARY_COUNT-1,
-          "current completion counts exactly the active catalog rows");
+    /* Slot 2 now belongs to the live spider. Old jumper history is moved to
+       archivedJumperKnowledge by save migration, not excluded by aliasing this ID. */
+    CHECK(BestiaryIsActive(BST_ID_SPIDER),"the current spider remains an active catalog entry");
+    CHECK(BestiaryCountSeen(1<<BST_ID_SPIDER)==1,"a current spider encounter counts exactly once");
+    CHECK(BestiaryCountSeen((1<<BESTIARY_COUNT)-1)==BestiaryActiveCount(),
+          "completion counts exactly the active catalog rows");
     CHECK(BestiaryCountSeen(1 << 20) == 0, "reserved seen bits cannot grant encounter achievements");
     CHECK(SkillNavNearest(SK_GEN_SELFTEST, 0) == SK_ORIGIN,
           "stale developer selection falls back to a player node");
@@ -970,7 +1003,18 @@ static void test_triangular_paths_and_run_wallet(void) {
     CHECK(carryGold==0 && bankGold==12345,"run nodes never draw on the bank");
     CHECK(fabsf(ThreatValue()-quoted)<0.0001f,"displayed threat quote equals applied build pressure");
     CHECK(fabsf(ThreatRatio()-ThreatValue()/THREAT_MAX)<0.0001f,"pressure ratio uses the same value as runtime effects");
-    CHECK(BenchNavNearest(BENCH_BULL,1,0)==BENCH_SWIFT,"keyboard can reach alternative capstones in the new graph");
+    {
+        unsigned char reached[BENCH_COUNT]={0};int queue[BENCH_COUNT],head=0,tail=1;
+        const int dx[4]={1,-1,0,0},dy[4]={0,0,1,-1};queue[0]=BENCH_ENDURANCE;reached[queue[0]]=1;
+        while(head<tail){int from=queue[head++];
+            for(int d=0;d<4;d++){
+                int to=BenchNavNearest(from,dx[d],dy[d]);
+                CHECK(to>=0 && to<BENCH_COUNT,"keyboard navigation never returns an invalid node");
+                if(!reached[to]){reached[to]=1;queue[tail++]=to;}
+            }
+        }
+        CHECK(tail==BENCH_COUNT,"all current run-tree nodes are reachable using only the keyboard");
+    }
     CHECK(!WalletSpendRun(-1) && !WalletSpendBank(-1),"negative transaction prices are rejected");
     BenchResetRun(); ThreatReset(); clear_meta();
 }

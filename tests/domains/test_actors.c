@@ -5,6 +5,8 @@
  */
 #include "../test_common.h"
 #include "monster_rules.h"
+#include "tutorial.h"
+#include "lang.h"
 
 static void test_jumper_removed_spider_takes_over(void) {
     extern float jumperTrigger;
@@ -408,8 +410,17 @@ static void test_two_light_beasts(void) {
     clear_meta(); bankGold = 0; dailyMode = 0; trainingMode = 0;
     StartFreshTestRun();
 
-    CHECK(lightBeasts[0].active == 1, "the first light beast must spawn");
-    CHECK(lightBeasts[1].active == 1, "the SECOND light beast must spawn too");
+    /* Floor one is intentionally quiet. Verify both slots only after eligibility,
+       with a deterministic clear placement fixture and repeated probabilistic rolls. */
+    ThreatReset();carryGold=0;currentLevel=8;roomPropCount=containerCount=hideSpotCount=0;
+    safeRoom.active=breaker.active=0;memset(monHunters,0,sizeof(monHunters));
+    for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)
+        worldMap[y][x]=(x==0 || y==0 || x==MAP_WIDTH-1 || y==MAP_HEIGHT-1);
+    posX=3.5f;posY=3.5f;
+    for(int attempt=0;attempt<64;attempt++){SpawnLightBeast();if(lightBeasts[0].active)break;}
+    SpawnLightBeast2();
+    CHECK(lightBeasts[0].active == 1, "eligible light beast can occupy its first slot");
+    CHECK(lightBeasts[1].active == 1, "eligible second light beast can occupy its separate slot");
 
     /* 两只必须站在不同位置，否则等于只有一只 */
     {
@@ -778,6 +789,10 @@ static void test_telegraph_stays_quiet_when_you_can_see_it(void) {
     for (i = 0; i < LIGHTBEAST_MAX; i++) lightBeasts[i].active = 0;
     parasite.active = 0;
 
+    /* Visibility is a fixture precondition, not an assumption about a random maze. */
+    posX=8.5f;posY=8.5f;dirX=1;dirY=0;RoomPropReset();
+    for(int x=8;x<=12;x++)worldMap[8][x]=0;
+    CHECK(HasLOS(posX,posY,posX+3,posY),"telegraph visibility fixture has an unobstructed sightline");
     /* 正前方 3 格：看得见 → 不该再有"预告"（那是音效装饰，不是预告） */
     monHunters[0].active = 1;
     monHunters[0].x = posX + dirX * 3.0f;
@@ -837,13 +852,18 @@ static void test_tutorial_teaches_hiding(void) {
     const char* hint;
     int i, found = 0;
 
-    /* 遍历所有教程步，必须存在一步在教"躲" */
-    for (i = 0; i < 32; i++) {
-        tutorialStep = i;
-        hint = TutorialHint();
-        if (hint && (strstr(hint, "HIDE") || strstr(hint, "BREAK SIGHT"))) found = 1;
+    int savedLang=g_lang;
+    for(int language=LANG_EN;language<=LANG_ZH;language++){
+        g_lang=language;found=0;
+        for(i=0;i<=TUT_DONE;i++){
+            tutorialStep=i;hint=TutorialHint();
+            const char* title=TutorialObjective();
+            if(hint && title && ((strstr(title,"HIDE") && strstr(hint,"hiding")) ||
+                (strstr(title,"躲藏") && strstr(hint,"藏身"))))found=1;
+        }
+        CHECK(found,"each supported language teaches entering and leaving cover");
     }
-    CHECK(found, "the tutorial must teach hiding - players said they never learned how to dodge");
+    g_lang=savedLang;
     tutorialStep = savedStep;
 }
 

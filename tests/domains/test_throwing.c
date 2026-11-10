@@ -13,7 +13,7 @@ static void test_flare_heal_budget(void) {
     extern void  RunSkillTake(int);
     extern void  RunSkillsReset(void);
     extern int   relicOwned[RELIC_COUNT];
-    extern float sanity, posX, posY;
+    extern float sanity;
     extern float SanityMax(void);
     extern void  ThrowItem(int, float);
 
@@ -63,10 +63,8 @@ static void test_flare_heal_budget(void) {
 
     /* ---- 每根灯 8 秒窗口：把时间推过去就不再回 ---- */
     {
-        float s0 = sanity;
         for (int i = 0; i < 100; i++) FlareHealTick(0.02f);  /* 再 2 秒 */
         sanity = SanityMax() * 0.2f;                        /* 压低再测窗口 */
-        s0 = sanity;
         /* thrown[].life 已经消耗了一些；这里直接把预算跑完来验证封顶 */
         FlareHealReset();
         for (int i = 0; i < 4000; i++) {

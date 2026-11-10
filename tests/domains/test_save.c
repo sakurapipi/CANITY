@@ -115,7 +115,9 @@ static void test_menu_save_keeps_run(void) {
     currentLevel = 5;
     sanity  = 42.0f;
     battery = 33.0f;
-    posX = 7.25f; posY = 11.75f; dirX = 0.6f; dirY = 0.8f;
+    float expectedX=posX,expectedY=posY;
+    CHECK(!Blocked(expectedX,expectedY),"menu-save starts at a valid player position");
+    dirX = 0.6f; dirY = 0.8f;
     flares = 3;
     /* 注意 CLAMP_ITEM_RARE 上限是 4、CLAMP_ITEM 是 8，
        测试值必须落在合法区间，否则读回时被夹取是**正确行为**。 */
@@ -146,7 +148,7 @@ static void test_menu_save_keeps_run(void) {
 
     CHECK(currentLevel == 5,          "menu-save: level survives a menu save");
     CHECK(fabsf(sanity - 42.0f) < 0.5f,   "menu-save: sanity survives a menu save");
-    CHECK(fabsf(posX - 7.25f) < 0.05f && fabsf(posY - 11.75f) < 0.05f,
+    CHECK(fabsf(posX-expectedX)<.05f && fabsf(posY-expectedY)<.05f,
                                       "menu-save: position survives a menu save");
     CHECK(flares == 3,                "menu-save: flares survive a menu save");
     CHECK(echoBolts == 4,             "menu-save: echo bolts survive a menu save");
@@ -497,7 +499,7 @@ static void test_save_unknown_chunk_roundtrip(void) {
         0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
     };
 
-    static unsigned char buf[16384];   /* SaveBlob 约 6.5 KB，留足 */
+    static unsigned char buf[sizeof(SaveBlob)+sizeof(SaveEnvelope)+sizeof(SaveChunkDesc)*2+sizeof(unknown)+256];
     SaveChunkDesc d[2];
     const void* body[2];
     d[0].id = SC_LEGACY29; d[0].schema = 1; d[0].size = (unsigned)sizeof(blob);

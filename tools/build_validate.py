@@ -43,7 +43,7 @@ WINDRES = tool('CANITY_WINDRES', 'windres')
 # 唯一的源文件清单来源：CI 与 Release 都读它，避免三边命令漂移。
 sys.path.insert(0, str(root / 'tools'))
 from build_sources import game_sources, test_canity_sources  # noqa: E402
-from build_cache import file_digest, inputs_digest, include_digest, tool_identity, read_profile, write_profile  # noqa: E402
+from build_cache import file_digest, inputs_digest, include_digest, tool_identity, read_profile, write_profile, validation_digest  # noqa: E402
 
 cache = root / 'work' / 'codex-build'
 cache.mkdir(parents=True, exist_ok=True)
@@ -80,7 +80,7 @@ def run(cmd,env=None,label=None,timeout=300):
 
 def finish():
     report=dict(passed=all(item['returncode']==0 for item in results),build_only=args.build_only,acceptance_tests_run=not args.build_only,
-                source_inputs_sha256=inputs_digest(root,sources),include_sha256=include_digest(root),stages=results)
+                source_inputs_sha256=inputs_digest(root,sources),include_sha256=include_digest(root),validation_inputs_sha256=validation_digest(root),stages=results)
     (cache/'validation-summary.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
     print(('BUILD SUMMARY' if args.build_only else 'VALIDATION SUMMARY')+': %d passed / %d failed'%(sum(r['returncode']==0 for r in results),sum(r['returncode']!=0 for r in results)))
     raise SystemExit(0 if report['passed'] else 1)

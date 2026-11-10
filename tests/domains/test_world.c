@@ -5,6 +5,8 @@
  */
 #include "../test_common.h"
 #include "monster_rules.h"
+#include "room_theme.h"
+#include "room_template.h"
 #include "cell_meta.h"
 
 static void test_global_balance_invariants(void) {
@@ -135,11 +137,10 @@ static void test_theme_depth_bands(void) {
         GenerateLevel();
         checkedFloors++;
 
-        int allowed[7] = { 0 };
-        if (lv <= 3)      { allowed[0] = allowed[1] = 1; }
-        else if (lv <= 6) { allowed[4] = allowed[3] = 1; }
-        else if (lv <= 9) { allowed[5] = allowed[2] = 1; }
-        else              { allowed[6] = allowed[5] = 1; }
+        int allowed[7]={0};RoomTemplate selected;
+        CHECK(RoomTemplateRotate(RoomThemeTemplateForFloor(lv),0,&selected),"floor selects a valid authored room template");
+        CHECK(selected.themeId>=0 && selected.themeId<7,"selected template owns a valid theme");
+        allowed[selected.themeId]=1;
 
         int bad = 0;
         for (int y = 1; y < MAP_HEIGHT - 1; y++)
@@ -251,7 +252,6 @@ static void test_theme_room_label(void) {
 }
 
 static void test_room_budget_and_exit(void) {
-    extern int roomCount;
     extern float exitX, exitY;
     extern CellMeta cellMeta[MAP_HEIGHT][MAP_WIDTH];
 
@@ -440,13 +440,12 @@ static void test_draft_structure(void) {
         tries++;
         CHECK(a != b && b != c && a != c, "the three offers must be distinct");
         {
-            int nd = 0, no = 0, nu = 0;
+            int nd = 0, nu = 0;
             int ids[3] = { a, b, c };
             for (int k = 0; k < 3; k++) {
                 BuildTag t = BuildTagOfSkill(ids[k]);
                 if (t == BUILD_NONE) nu++;
                 else if (t == BUILD_SPEED) nd++;
-                else no++;
             }
             /* 成型后：主流派至少 1 张、通用至少 1 张 */
             if (nd >= 1 && nu >= 1) okStruct++;
@@ -469,7 +468,6 @@ static void test_draft_structure(void) {
 }
 
 static void test_build_tags(void) {
-    extern unsigned int runSkillMask;
     extern int relicOwned[RELIC_COUNT];
     extern void RunSkillsReset(void);
     extern BuildTag BuildTagOfSkill(int);
@@ -595,16 +593,15 @@ static void test_theme_rooms_placement(void) {
        那不是 bug，是测试的夹具不真实。 */
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++)
-            worldMap[y][x] = (y % 2 == 1 && y > 0 && y < MAP_HEIGHT - 1 &&
-                               x > 0 && x < MAP_WIDTH - 1) ? 0 : 1;
+            worldMap[y][x]=(y>0 && y<MAP_HEIGHT-1 && x>0 && x<MAP_WIDTH-1)?0:1;
 
-    exitX = 20.5f; exitY = 20.5f;
+    exitX=MAP_WIDTH-2.5f;exitY=MAP_HEIGHT-2.5f;currentLevel=1;
     CellMetaReset();
 
     srand(12345u);
     int placed = GenerateThemeRooms(2);
 
-    CHECK(placed >= 1, "at least one theme room must be placed on an empty 24x24 map");
+    CHECK(placed >= 1, "a current theme room can be placed on a connected 36x36 fixture");
     CHECK(placed <= 2, "GenerateThemeRooms must not exceed the requested count");
     CHECK(RoomCount() == placed, "RoomCount must match what was actually placed");
 
@@ -771,14 +768,14 @@ static void test_room_props(void) {
 
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++)
-            worldMap[y][x] = (y % 2 == 1 && y > 0 && y < MAP_HEIGHT - 1 &&
-                              x > 0 && x < MAP_WIDTH - 1) ? 0 : 1;
-    exitX = 20.5f; exitY = 20.5f;
+            worldMap[y][x]=(y>0 && y<MAP_HEIGHT-1 && x>0 && x<MAP_WIDTH-1)?0:1;
+    exitX=MAP_WIDTH-2.5f;exitY=MAP_HEIGHT-2.5f;currentLevel=1;
     CellMetaReset();
 
     srand(777u);
     int placed = GenerateThemeRooms(2);
 
+    CHECK(placed>0,"connected furniture fixture must place its themed room");
     if (placed > 0) {
         CHECK(roomPropCount > 0, "a level with rooms must also have room furniture");
 
@@ -801,9 +798,7 @@ static void test_room_props(void) {
         int kindOk = 1;
         for (int i = 0; i < roomPropCount; i++) {
             if (!roomProps[i].active) continue;
-            if (roomProps[i].kind != ROOMPROP_SHELF &&
-                roomProps[i].kind != ROOMPROP_CONSOLE &&
-                roomProps[i].kind != ROOMPROP_CRATES) kindOk = 0;   /* C：木箱堆 */
+            if(roomProps[i].kind<ROOMPROP_SHELF || roomProps[i].kind>ROOMPROP_THEME_LAST)kindOk=0;   /* C：木箱堆 */
         }
         CHECK(kindOk, "every room prop must have a known kind");
     }
@@ -820,7 +815,7 @@ static void test_room_props(void) {
         for (int i = 0; i < roomPropCount; i++) {
             if (!roomProps[i].active) continue;
             int k = roomProps[i].kind;
-            int want = (k == ROOMPROP_SHELF) ? 3 : 2;
+            int want=k>=ROOMPROP_THEME_FIRST || k==ROOMPROP_CRATES?1:k==ROOMPROP_SHELF?3:2;
             if (roomProps[i].searchLeft != want) bad++;
             if (roomProps[i].searchLeft <= 0) zero++;
         }
@@ -853,16 +848,16 @@ static void test_room_props(void) {
               "most props must sit in corners (otherwise they cut the aisle in half)");
     }
 
-    /* C：房间不能只有货架一种东西 —— 木箱堆必须真的出现过 */
+    /* Current theme-specific furnishing replaces the old mandatory crate/shelf pair. */
     {
-        int sawCrates = 0, sawOther = 0;
-        for (int i = 0; i < roomPropCount; i++) {
-            if (!roomProps[i].active) continue;
-            if (roomProps[i].kind == ROOMPROP_CRATES) sawCrates = 1;
-            else sawOther = 1;
+        static const int themed[7]={5,4,7,6,2,8,9};int checked=0;
+        for(int i=0;i<roomPropCount;i++)if(roomProps[i].active){
+            int x=(int)roomProps[i].x,y=(int)roomProps[i].y;
+            int theme=cellMeta[y][x].themeId;
+            CHECK(theme>=0 && theme<7 && roomProps[i].kind==themed[theme],
+                  "furniture belongs to the actual room theme instead of mandatory generic crates");checked++;
         }
-        CHECK(sawCrates, "rooms must contain crate stacks, not only shelves");
-        CHECK(sawOther, "rooms must still contain their feature furniture");
+        CHECK(checked>0,"theme furnishing has real active objects");
     }
 
     /* 再生成一次，家具表必须被清空重来，不能累加 */

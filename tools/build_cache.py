@@ -56,3 +56,13 @@ def write_profile(path, profile):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def validation_digest(root):
+    """Bind evidence to code, tests, validation tools and workflows, not build outputs."""
+    root=Path(root);paths=[]
+    for directory in ('src','include','tests','tools','l10n','third_party','.github'):
+        for path in (root/directory).rglob('*'):
+            if path.is_file() and '__pycache__' not in path.parts and path.suffix.lower() in {'.c','.h','.inc','.py','.json','.tsv','.yml','.yaml','.sav'}:
+                paths.append(path)
+    return inputs_digest(root,paths)

@@ -16,7 +16,7 @@ import subprocess
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from build_sources import game_sources
-from build_cache import file_digest, include_digest
+from build_cache import file_digest, include_digest, validation_digest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENES = ('menu', 'explore', 'chase', 'safe', 'victory', 'defeat')
@@ -29,8 +29,17 @@ def main():
     parser.add_argument('--label', default='CANITY_2.4.2RC_完整运行包')
     parser.add_argument('--notes', type=Path, default=Path('docs/2.4.2RC_审计整改_20261110.md'))
     parser.add_argument("--acceptance-report", type=Path)
+    parser.add_argument("--source-commit", default=os.environ.get("GITHUB_SHA"))
     args = parser.parse_args()
+    if args.source_commit and not re.fullmatch(r"[0-9a-fA-F]{40}",args.source_commit):
+        raise SystemExit("source commit must be a complete Git SHA")
     acceptance = json.loads(args.acceptance_report.read_text(encoding="utf-8")) if args.acceptance_report else None
+    if acceptance and acceptance.get('validation_inputs_sha256'):
+        if acceptance['validation_inputs_sha256'] != validation_digest(ROOT):
+            raise SystemExit('验证报告与当前源码、测试或工作流不匹配，请重新验证。')
+        if acceptance.get('build_only') or not acceptance.get('passed'):
+            raise SystemExit('不能把仅编译或失败报告作为通过验收证据。')
+        acceptance['verdict']='AUTOMATED_PASS; desktop acceptance not implied'
     binary = ROOT/'canity_verify.exe'
     profile_file = ROOT/'work/codex-build/compile-profile.json'
     if not binary.is_file() or not profile_file.is_file():
@@ -101,7 +110,7 @@ def main():
     (folder/'运行说明.txt').write_text('CANITY 2.4.2 RC — 验收链、迁移与交互反馈整改\n\nWindows：完整解压后双击“开始游戏.bat”。保留DLL与music目录。\n本轮修复静态检查截断、分域验收流程、迁移备份与显示设置、技能前置、商店和引导反馈及发布资源遗漏。\n详细内容见随包修改说明。保留36×36地图、12容器槽、64世界精灵容量及v44存档格式。\n存档位于saves目录，沿用旧进度前请备份。\n\n网页及手机触控版：部署index.html、index.js、index.wasm和music到HTTP网站。\n手机推荐横屏；这是触控网页版，不是APK。\n\n本轮仅修改代码、编译和打包；未启动游戏、未运行测试或验收、未提交或推送。\n先前验收记录仅代表旧代码，不能作为本轮通过证据。\n',encoding='utf-8-sig')
     if acceptance:
         shutil.copy2(args.acceptance_report,folder/'验收摘要.json')
-        (folder/'运行说明.txt').write_text('CANITY 2.4.2 RC — 全局验收整理版\n\n双击“开始游戏.bat”，ZIP先完整解压。\n本轮已实际运行验证；总体NO-GO，完整回归尚未全绿。\n最新专项、原生输入、浏览器及存档迁移通过；旧回归失败详见随包全局验收报告。\n存档位于saves；沿用旧进度前先备份。\n网页需以HTTP服务运行，不能只双击HTML。\n没有提交或推送。\n',encoding='utf-8-sig')
+        (folder/'运行说明.txt').write_text('CANITY — 本轮验证运行包\n\n完整解压后双击“开始游戏.bat”。\n本轮实际验证结果见验收摘要.json；自动化通过不等于所有Windows真机或实体手机场景已验收。\n存档默认位于saves，预先设置CANITY_DATA_DIR时使用指定目录。\n详细变更见随包交接说明。\n',encoding='utf-8-sig')
     source_hashes = {}
     for directory in ('src', 'include', 'tools', 'tests', 'l10n', 'third_party'):
         for path in sorted((ROOT/directory).rglob('*')):
@@ -113,7 +122,8 @@ def main():
     save_version = int(re.search(r'^#define\s+SAVE_VERSION\s+(\d+)', save_header, re.M)[1])
     game_version = re.search(r'^#define\s+CANITY_VERSION_STR\s+"([^"]+)"', version_header, re.M)[1]
     manifest = {'built_at':datetime.now().isoformat(timespec='seconds'),
-                'source':'local working tree; no commit or push', 'save_version':save_version,
+                'source':('commit '+args.source_commit) if args.source_commit else 'local working tree; no commit attached',
+                'source_git_commit':args.source_commit, 'save_version':save_version,
                 'game_version':game_version, 'handoff':args.notes.name,
                 'map_size':[36,36], 'container_slots':12, 'sprite_capacity':64,
                 'source_tree_sha256':hashlib.sha256(canonical).hexdigest(),
