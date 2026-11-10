@@ -36,7 +36,7 @@ int   counterKillUsed = 0;
 static float PositiveDrainFactor(float value){return isfinite(value) && value>0?value:1;}
 
 int PlayerTickVitals(float dt,int inSafe){
-    if(!(dt>0) || !isfinite(dt) || calibActive)return 1;
+    if(!(dt>0) || !isfinite(dt) || calibActive || trainingMode)return 1;
     if(!isfinite(sanity))sanity=SanityMax();
     if(!isfinite(battery))battery=0;
     float drain=SanityDrainRate()*PositiveDrainFactor(SkillCalmMul())*
@@ -80,7 +80,7 @@ int PlayerTickVitals(float dt,int inSafe){
 }
 
 void PlayerTickBattery(float dt){
-    if(!(dt>0) || !isfinite(dt) || calibActive)return;
+    if(!(dt>0) || !isfinite(dt) || calibActive || trainingMode)return;
     if(!isfinite(battery))battery=0;
     if(!flashlightOn && hiddenIn<0 && SkillPwrSiphonActive()){
         float threshold=BatteryMax()*.25f;

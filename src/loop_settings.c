@@ -183,6 +183,12 @@ void ApplySetting(int item, int value) {
        以前没做判断，靠调用方保证只传列表项；现在显式拦下来。 */
     if (settings[item].kind != SET_LIST || !settings[item].value) return;
     if (value < 0 || value >= settings[item].count) return;
+    if(settings[item].value==&g_saveSlot){
+        if(!SaveSelectSlot(value)){
+            pickupMsg=Tr("RETURN TO MENU OR CHECK SAVE SLOT","请返回主菜单或检查存档");pickupMsgTimer=3;uiDirty=1;return;
+        }
+        uiDirty=1;return;
+    }
     /* 按键绑定项存的是 VK 码（从 optKeyVKs 映射），其它列表项存下标 */
     int act = BindActionOfItem(&settings[item]);
     if (act >= 0) {

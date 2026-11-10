@@ -55,7 +55,7 @@ float GoldHearMul(void);           /* 听觉半径倍数 */
 float GoldSpeedMul(void);          /* 恒为 1.0，保留给旧调用点 */
 
 /* 钱袋（v7） */
-#define MAX_MONEYBAG 3
+
 extern int   moneyDropOpen;        /* 滑条是否展开 */
 extern int   moneyDropPct;         /* 10~100，每档 10 */
 float MoneyBagX(int i);

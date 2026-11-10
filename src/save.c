@@ -5,6 +5,7 @@
  */
 #include "common.h"
 #include "run_economy.h"
+#include "player_tick.h"
 #include "wallet.h"
 #include "room_theme.h"
 #include "hush.h"
@@ -78,15 +79,7 @@ const char* SavePathForSlot(int i, int slot, char* buf, size_t n) {
 }
 
 /* v2.0：写盘前把旧档复制成 .bak */
-static void BackupSave(void) {
-    char p[MAX_PATH];
-    SavePathCand(0, p, sizeof(p));
-    if (!p[0]) return;
-    /* v3.0：缓冲区要留后缀的位置，否则满路径时后缀被截断 */
-    char b[MAX_PATH + 16];
-    snprintf(b, sizeof(b), "%s.bak", p);
-    PlatCopyPath(p, b);
-}
+
 
 static const char* SavePathCandSlot(int i, int slot, char* buf, size_t n) {
     buf[0] = 0;
@@ -531,6 +524,39 @@ static long ReadSaveFile(const char* path, SaveBlob* out) {
     return ret;
 }
 
+static int SavePathValid(const char* path){
+    size_t cap=sizeof(SaveBlob)+sizeof(SaveEnvelope)+65536;
+    unsigned char* raw=malloc(cap);if(!raw)return 0;
+    long n=ReadWholeFile(path,raw,cap);int ok=0;
+    if(n>=8){
+        const void* blob=raw;int length=(int)n;unsigned magic=0;memcpy(&magic,raw,4);
+        if(magic==SAVE_ENVELOPE_MAGIC && n>(long)sizeof(SaveEnvelope)){
+            SaveEnvelope envelope;memcpy(&envelope,raw,sizeof(envelope));
+            const void* data=NULL;int size=0;
+            if(SaveEnvelopeValid(&envelope,raw+sizeof(envelope),(int)n-(int)sizeof(envelope)) &&
+               SaveContainerFind(raw+sizeof(envelope),(int)n-(int)sizeof(envelope),SC_LEGACY29,&data,&size)){
+                blob=data;length=size;
+                int count=SaveContainerCount(raw+sizeof(envelope),(int)n-(int)sizeof(envelope));
+                unsigned short ids[SAVE_CARRY_MAX];
+                if(count<1 || count>SAVE_CARRY_MAX)length=0;
+                else for(int i=0;i<count;i++){
+                    SaveChunkDesc desc;const void* chunk=NULL;
+                    if(!SaveContainerAt(raw+sizeof(envelope),(int)n-(int)sizeof(envelope),i,&desc,&chunk)){length=0;break;}
+                    for(int j=0;j<i;j++)if(ids[j]==desc.id)length=0;
+                    ids[i]=desc.id;
+                }
+            }else length=0;
+        }
+        if(length>=1024){int version;memcpy(&magic,blob,4);memcpy(&version,(const char*)blob+4,4);ok=magic==SAVE_MAGIC && version>=25 && version<=SAVE_VERSION;}
+    }
+    free(raw);return ok;
+}
+static void BackupSavePath(const char* path){
+    if(!SavePathValid(path))return;
+    char backup[MAX_PATH+16];snprintf(backup,sizeof(backup),"%s.bak",path);
+    PlatCopyPath(path,backup);
+}
+
 /* ==================================================================
  * 2026-11-06（R12）：测试钩子 —— 原样转发到真实的 static 实现。
  * 存在意义：让 test_runtime 能用**真正的**捕获/重建逻辑做往返测试，
@@ -610,6 +636,7 @@ static void SaveSettingsOnly(void) {
         /* v2.4-alpha R10：走唯一序列化出口，容量按未知块动态算 */
         unsigned char* wbuf = NULL;
         int wn = SaveFileBytes(&tmp, &wbuf);
+        if(wn>0)BackupSavePath(p);
         int wok = (wn > 0) && WriteWholeFile(p, wbuf, (size_t)wn) == 0;
         if (wbuf) { free(wbuf); wbuf = NULL; }
         if (wok) {
@@ -694,6 +721,10 @@ static void CaptureSaveWorld(void) {
     g_save.hatchCountV43=hatchCount;memcpy(g_save.hatchesV43,hatches,sizeof(hatches));
     RoomThemeSaveEvent(&g_save.roomEventKindV43,&g_save.roomEventTimeV43);
     CollectorSaveRun(g_save.collectorRunV44);
+    MoneyBagsSave(&g_save.moneyBagPositionsV45[0][0],g_save.moneyBagAmountsV45);
+    g_save.collectorBountyV45=CollectorActive()?CollectorBounty():0;
+    g_save.collectorPositionV45[0]=CollectorX();g_save.collectorPositionV45[1]=CollectorY();
+    g_save.counterKillUsedV45=counterKillUsed?1:0;
     g_save.benchOwnedV42=benchOwned;ShopCaptureServices(g_save.serviceUsesV42);
     RunEconomyCapture(&g_save.rewardFloorV42,&g_save.escapeRewardMaskV42,&g_save.rhythmGoldV42);
     g_save.hideSpotSaveCount = hideSpotCount;
@@ -790,7 +821,6 @@ static void CaptureSaveProgress(void) {
         g_save.achProgress[i] = g_achievements[i].progress;
     }
 
-    BackupSave();     /* v2.0：写坏之前先留一份 .bak */
     /* v9：投掷物 / 待上缴金币 / 局内技能，以前完全没存 */
     g_save.bricks = bricks;
     g_save.acids = acids;
@@ -886,6 +916,7 @@ static void WriteSaveCandidates(void) {
         int wn2 = SaveFileBytes(&g_save, &wbuf2);
         int err;
         if (wn2 > 0) {
+            BackupSavePath(p);
             err = WriteWholeFile(p, wbuf2, (size_t)wn2);
         } else {
             err = SAVE_ERR_CAPACITY;
@@ -1058,11 +1089,7 @@ static void RestoreBankFromSave(void) {
     bankCarryPct = rawPct;
     bankRiskPlan=g_save.bankRiskPlanPlus1>=1 && g_save.bankRiskPlanPlus1<=4?g_save.bankRiskPlanPlus1-1:1;
 
-    /* 三个字段全是 0 → 这份存档根本没有银行段（老档），把 0..3 换算成 21 档 */
-    if (rawGold == 0 && rawHist == 0 && rawPct >= 0 && rawPct <= 3) {
-        static const int oldMap[4] = { 5, 10, 15, 20 };
-        bankCarryPct = oldMap[rawPct];
-    }
+    /* Supported profiles store an explicit carry choice: zero means zero. */
     if (bankCarryPct < 0) bankCarryPct = 0;
     if (bankCarryPct >= BANK_CARRY_STEPS) bankCarryPct = BANK_CARRY_STEPS - 1;
     if (bankHistMax < bankGold) bankHistMax = bankGold;
@@ -1309,91 +1336,29 @@ typedef struct {
     char usedPath[MAX_PATH];
 } LoadedSaveInfo;
 
+static int forcedSaveSlot=-1;
 static int ReadSettingsCandidate(LoadedSaveInfo* info) {
-    char p[MAX_PATH];
-    memset(&g_save, 0, sizeof(g_save));
-    /* 先定位最近使用的存档槽，再按槽读文件 */
-    FindNewestSaveSlot();
-    /* 按文件的**实际字节数**读，比 sizeof(SaveBlob) 短的就是老存档 */
-    long fs = -1;
-    /* P0-1：老档的 Container 布局不同（v28 及更早是 32 字节，
-       现在是 40），必须在**原始字节**上重排。
-       所以记住是哪个文件读成功的，迁移时再读一次它的原始字节。 */
-    info->usedPath[0] = 0;
-    for (int i = 0; i < SAVE_CAND_COUNT && fs < 0; i++) {
-        const char* cand = SavePathCand(i, p, sizeof(p));
-        fs = ReadSaveFile(cand, &g_save);
-        if (fs > 0) { snprintf(info->usedPath, sizeof(info->usedPath), "%s", cand); }
-        if (fs <= 0) {
-            /* v2.2：主档读不出来就试 .bak —— 原来只写不读，等于白备份 */
-            char bak[MAX_PATH];
-            snprintf(bak, sizeof(bak), "%s.bak", cand);
-            fs = ReadSaveFile(bak, &g_save);
-            if (fs > 0) { snprintf(info->usedPath, sizeof(info->usedPath), "%s", bak); }
+    char p[MAX_PATH],best[MAX_PATH]={0};double newest=-1;
+    memset(&g_save,0,sizeof(g_save));
+    if(forcedSaveSlot>=0)g_saveSlot=forcedSaveSlot;else FindNewestSaveSlot();
+    for(int i=0;i<SAVE_CAND_COUNT;i++){
+        SavePathCand(i,p,sizeof(p));
+        for(int backup=0;backup<2;backup++){
+            char path[MAX_PATH];if(backup){if(strlen(p)+4>=sizeof(path))continue;snprintf(path,sizeof(path),"%s.bak",p);}else snprintf(path,sizeof(path),"%s",p);
+            if(!SavePathValid(path))continue;
+            double time=PathWriteTime(path);
+            if(!best[0] || time>newest){newest=time;snprintf(best,sizeof(best),"%s",path);}
         }
     }
-    if (fs <= 0) {
-        /* v8：第一次运行按系统语言选中文 —— 中文 Windows 上不用先去设置里找开关。 */
-        if (PlatSystemLanguageZh()) g_lang = LANG_ZH;
-        return 0;
-    }
-    info->fileSize = (size_t)fs;
-    size_t want = (info->fileSize < sizeof(g_save)) ? info->fileSize : sizeof(g_save);
-    size_t got = want;
-    /* v3.0：**magic 不对要换下一个候选** ——
-       原来直接 return 0，于是「路径 0 有个损坏文件」会把
-       「路径 1 有个好文件」整个挡住（验证报告 BUG7）。 */
-    if (!got || g_save.magic != SAVE_MAGIC) {
-        for (int i = 1; i < SAVE_CAND_COUNT; i++) {
-            const char* c2 = SavePathCand(i, p, sizeof(p));
-            long f2 = ReadSaveFile(c2, &g_save);
-            if (f2 > 0 && g_save.magic == SAVE_MAGIC) {
-                fs = f2; snprintf(info->usedPath, sizeof(info->usedPath), "%s", c2); break;
-            }
-            char b2[MAX_PATH];
-            snprintf(b2, sizeof(b2), "%s.bak", c2);
-            f2 = ReadSaveFile(b2, &g_save);
-            if (f2 > 0 && g_save.magic == SAVE_MAGIC) {
-                fs = f2; snprintf(info->usedPath, sizeof(info->usedPath), "%s", b2); break;
-            }
-        }
-        if (g_save.magic != SAVE_MAGIC) return 0;
-        info->fileSize = (size_t)fs;
-    }
-
-    /* 存档**格式**版本：接受 v4 / v5（老结构）与 v6（当前结构）。
-       老存档按文件长度就能认出来 —— 新增字段永远追加在结构末尾，
-       老文件的字节数正好少一块。这里**不**做「版本不符就整份丢弃」：
-       键位与显示偏好丢了没有意义，而丢弃整份存档会让玩家进度全没。 */
-    /* 1.8.0 是测试版：只认当前格式，旧存档直接丢弃（已确认可接受）。 */
-    /* v2.0：v13 → v14 迁移。
-       技能树从 15 节点变 20 节点，skillRank 是定长数组 → 结构体尺寸变了。
-       策略：技能等级全清、把已投入的金币和核心按旧价退回，其余进度原样保留。
-       旧价：普通节点 {100,500,900}、keystone 2000 + 1 核、跨支 1400 + 2 核。 */
-    /* v2.2 修复：v13→v14 的"迁移"是错的 —— 它把 v13 的文件字节
-       原地当成 v14 的 SaveBlob 解释，而 v14 的 skillRank[15]→[20]
-       多出 20 字节，导致 skillRank 之后的所有字段整体错位 5 个 int：
-       成就被清零、核心被读成随机值、武器熟练度串到别的字段。
-
-       真正安全的做法：不认识的版本**不解释**，把旧档改名归档，
-       当作"没有存档"处理。玩家的数据一定还在盘上，可以回滚，
-       而不是被一个错误的迁移静默毁掉。 */
-    /* 读进来的字节可能比当前结构短：先把尾部清零，后面才能安全地按
-       “缺字段取默认值”处理。 */
-    info->hasMusicField = (info->fileSize >= offsetof(SaveBlob, musicVolume) + sizeof(float));
-    /* v28 字段：v27 及更早的存档不包含它们，读档时按「字段是否完整在文件里」判断，
-       缺字段时取默认值（Dynamic Res 默认开、未通关）。 */
-    info->hasDynamicResField = (info->fileSize >= offsetof(SaveBlob, dynamicRes) + sizeof(int));
-    info->hasGameClearedField = (info->fileSize >= offsetof(SaveBlob, gameClearedSave) + sizeof(int));
-    if (info->fileSize < sizeof(g_save))
-        memset((char*)&g_save + info->fileSize, 0, sizeof(g_save) - info->fileSize);
-
+    if(!best[0]){if(PlatSystemLanguageZh())g_lang=LANG_ZH;return 0;}
+    long size=ReadSaveFile(best,&g_save);if(size<=0)return 0;
+    info->fileSize=(size_t)size;snprintf(info->usedPath,sizeof(info->usedPath),"%s",best);
     return 1;
 }
 
 static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
     int originalVersion=g_save.version;
-    if((originalVersion>=25 && originalVersion<=30) || (originalVersion>=33 && originalVersion<SAVE_VERSION)){
+    if((originalVersion>=25 && originalVersion<=30) || (originalVersion>=31 && originalVersion<SAVE_VERSION)){
         int error=SaveBackendPreserveVersion(info->usedPath,originalVersion);
         if(error){g_saveState=2;g_saveError=error;s_saveReadOnly=1;return 0;}
     }
@@ -1421,8 +1386,10 @@ static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
      *
      * 旧代码只把 version 改成 SAVE_VERSION 就放行 —— 那就是 P0-1。
      * ================================================================ */
-    if (g_save.version >= 25 && g_save.version <= 30) {
+    if ((g_save.version >= 25 && g_save.version <= 30) || g_save.version == 31) {
         int legacyCont = (g_save.version <= 28) ? 32 : (int)sizeof(Container);
+        int oldWidth=g_save.version==31?MAP_WIDTH:LEGACY_MAP_W;
+        int oldHeight=g_save.version==31?MAP_HEIGHT:LEGACY_MAP_H;
         /* ================================================================
          * P0-1：**这里是真正的修复点**
          * ----------------------------------------------------------------
@@ -1438,11 +1405,11 @@ static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
             if (rn > 0) {
                 migrated = LoadLegacyBlob(raw, (size_t)rn, legacyCont,
                                           LEGACY_CONTAINER_COUNT,
-                                          LEGACY_MAP_W, LEGACY_MAP_H, &g_save);
+                                          oldWidth, oldHeight, &g_save);
                 if (migrated)
                     info->fileSize = LegacyValidBytes((size_t)rn, legacyCont,
                                                 LEGACY_CONTAINER_COUNT,
-                                                LEGACY_MAP_W, LEGACY_MAP_H);
+                                                oldWidth, oldHeight);
             }
         }
         if (raw) free(raw);
@@ -1469,7 +1436,7 @@ static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
      * 会直接拒档。不做这一步，玩家一更新版本就丢整局进度。
      * 这正是"新增字段追加在末尾"还需要配套放行的原因。
      * ================================================================ */
-    if (g_save.version == 33) {
+    if (g_save.version == 31 || g_save.version == 32 || g_save.version == 33) {
         g_save.version = SAVE_VERSION;
     }
     /* ==================================================================
@@ -1497,7 +1464,7 @@ static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
     }
     /* v38 appends only mimic knowledge; the zero-filled tail preserves v37 reads. */
     /* Valid user display choices survive migration; normal validation clamps invalid values. */
-    if (g_save.version == 37 || g_save.version == 38 || g_save.version == 39 || g_save.version == 40 || g_save.version == 41 || g_save.version == 42 || g_save.version == 43) g_save.version = SAVE_VERSION;
+    if (g_save.version == 37 || g_save.version == 38 || g_save.version == 39 || g_save.version == 40 || g_save.version == 41 || g_save.version == 42 || g_save.version == 43 || g_save.version == 44) g_save.version = SAVE_VERSION;
     if(originalVersion>=25 && originalVersion<40){
         g_save.archivedJumperKnowledge[0]=(g_save.seenMonsters>>2)&1;
         for(int i=0;i<3;i++){g_save.archivedJumperKnowledge[i+1]=g_save.bestiaryKnowledge[i*6+2];g_save.bestiaryKnowledge[i*6+2]=0;}
@@ -1677,7 +1644,7 @@ static void RestoreLoadedProgress(const LoadedSaveInfo* info) {
         /* v8 新增：恢复无尽模式进度 */
         bestEndlessLevel = g_save.bestEndlessLevel;
         bestEndlessScore = g_save.bestEndlessScore;
-        isEndlessRun = g_save.isEndlessRunSaved;
+        isEndlessRun = (g_save.isEndlessRunSaved == 1);
     }
     else {  /* 老档没有成就数据 */
         /* 老存档没有成就数据，全置 0 */
@@ -1721,9 +1688,41 @@ int LoadSettings(void) {
     memset(&info, 0, sizeof(info));
     if (!ReadSettingsCandidate(&info)) return 0;
     if (!MigrateSettingsCandidate(&info)) return 0;
+    info.hasMusicField=info.fileSize>=offsetof(SaveBlob,musicVolume)+sizeof(float);
+    info.hasDynamicResField=info.fileSize>=offsetof(SaveBlob,dynamicRes)+sizeof(int);
+    info.hasGameClearedField=info.fileSize>=offsetof(SaveBlob,gameClearedSave)+sizeof(int);
     ApplyLoadedSettings(&info);
     RestoreLoadedProgress(&info);
     return g_save.hasRun;
+}
+
+int SaveSelectSlot(int slot){
+    if(slot<0 || slot>=SAVE_SLOTS)return 0;
+    if(slot==g_saveSlot)return 1;
+    if(runInProgress || trainingMode)return 0;
+    int previous=g_saveSlot;
+    SaveSettingsOnly();if(g_saveState!=1)return 0;
+    g_saveSlot=slot;forcedSaveSlot=slot;
+    LoadedSaveInfo info;memset(&info,0,sizeof(info));
+    int found=ReadSettingsCandidate(&info);
+    if(found && !MigrateSettingsCandidate(&info))found=-1;
+    if(!found){
+        for(int i=0;i<SAVE_CAND_COUNT;i++){char path[MAX_PATH];SavePathCand(i,path,sizeof(path));if(PlatFileTime(path)>0)found=-1;}
+    }
+    if(found<0){g_saveSlot=previous;forcedSaveSlot=previous;LoadSettings();forcedSaveSlot=-1;return 0;}
+    if(!found){
+        memset(&g_save,0,sizeof(g_save));g_save.magic=SAVE_MAGIC;g_save.version=SAVE_VERSION;g_save.gameVersion=CANITY_VERSION_NUM;
+        CopyDisplaySettings(&g_save);g_save.difficultyPlus1=difficulty+1;
+        g_save.bankRiskPlanPlus1=2;g_save.bankCarryPctSave=10;
+        info.fileSize=sizeof(g_save);s_saveReadOnly=0;SaveCarryClear();
+    }
+    g_save.saveSlot=slot;
+    info.hasMusicField=info.fileSize>=offsetof(SaveBlob,musicVolume)+sizeof(float);
+    info.hasDynamicResField=info.fileSize>=offsetof(SaveBlob,dynamicRes)+sizeof(int);
+    info.hasGameClearedField=info.fileSize>=offsetof(SaveBlob,gameClearedSave)+sizeof(int);
+    DailyResetProfile();ApplyLoadedSettings(&info);RestoreLoadedProgress(&info);
+    g_saveSlot=slot;forcedSaveSlot=-1;hasSave=g_save.hasRun!=0;runInProgress=0;
+    return 1;
 }
 
 /* 把存档里的进度灌回运行时 */
@@ -1750,13 +1749,13 @@ static void RestoreRunGeometry(void) {
             dirX *= inverseLength; dirY *= inverseLength;
         }
     }
-    fusesHeld = g_save.fusesHeld;
-    fusesNeeded = g_save.fusesNeeded;
+    fusesHeld = g_save.fusesHeld<0?0:g_save.fusesHeld>MAX_CONTAINERS?MAX_CONTAINERS:g_save.fusesHeld;
+    fusesNeeded = g_save.fusesNeeded<1?1:g_save.fusesNeeded>MAX_CONTAINERS?MAX_CONTAINERS:g_save.fusesNeeded;
     breakerOpen = g_save.breakerOpen;
     breaker.active = g_save.breakerActive;
     breaker.x = g_save.breakerX;
     breaker.y = g_save.breakerY;
-    searchedCount = g_save.searchedCount;
+    searchedCount = g_save.searchedCount<0?0:g_save.searchedCount>MAX_CONTAINERS?MAX_CONTAINERS:g_save.searchedCount;
     runTime = g_save.runTime;
     containerCount = g_save.nContainers;
     /* 防呆：被改坏的存档可能写出越界的容器数。
@@ -1808,8 +1807,8 @@ static void RestoreRunInventory(void) {
     flares = g_save.flares;      CLAMP_ITEM(flares);
     bottles = g_save.bottles;    CLAMP_ITEM(bottles);
     /* v13：v2.0 新系统（不读回来 = 中途退出丢光遗物/Boss 状态/每日战役） */
-    for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = g_save.relicOwned[i];
-    relicTotal = g_save.relicTotal;
+    for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = g_save.relicOwned[i]<0?0:g_save.relicOwned[i]>99?99:g_save.relicOwned[i];
+    relicTotal=0;for(int i=0;i<RELIC_COUNT;i++)relicTotal+=relicOwned[i];
     /* v8: boss 字段已移除。bossLevel 恒为 0，下面两行本就永不成立。 */
     /* ==================================================================
      * 2026-11-06（**P0-2 读档字段没有合法性夹取**）
@@ -1908,7 +1907,7 @@ static void RestoreRunEquipment(void) {
     SpawnMonster();
     SpawnLightBeast();
     SpawnLightBeast2();   /* 2026-11-06：追光怪两只 */
-    isEndlessRun = g_save.isEndlessRunSaved;  /* 恢复无尽模式标记 */
+    isEndlessRun = (g_save.isEndlessRunSaved == 1);  /* 恢复无尽模式标记 */
 }
 
 /* Repair only invalid loaded positions. Preserve IDs, contents and intact hiding places. */
@@ -2109,7 +2108,7 @@ void ContinueRun(void) {
     RunUpgLoadFromSave(g_save.runUpgSave);
     { 
       RunUpgLoadExtra(g_save.runUpgMinimapSave); }   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
-    if (!(energy > 0.0f)) energy = ENERGY_MAX;
+    energy=isfinite(energy)?fmaxf(0,fminf((float)EnergyMax(),energy)):(float)EnergyMax();
     flashlightOn = g_save.flashlightOn;
     /* v8：模式规则优先于存档里的开关状态 ——
        每日“不能开手电”/ SALVAGE keystone 读档后必须保持关闭；
@@ -2126,6 +2125,18 @@ void ContinueRun(void) {
     RoomThemeSetMadness(g_save.runMadness);
     RoomThemeLoadEvent(g_save.roomEventKindV43,g_save.roomEventTimeV43);
     CollectorLoadRun(g_save.collectorRunV44);
+    MoneyBagsLoad(&g_save.moneyBagPositionsV45[0][0],g_save.moneyBagAmountsV45);
+    if(g_save.collectorBountyV45>0){
+        /* A transient thief becomes a recoverable bag instead of deleting stolen money. */
+        float x=g_save.collectorPositionV45[0],y=g_save.collectorPositionV45[1];
+        if(!isfinite(x) || !isfinite(y) || x<1 || y<1 || x>=MAP_WIDTH-1 || y>=MAP_HEIGHT-1 || Blocked(x,y)){x=posX;y=posY;}
+        MoneyBagDropAt(x,y,g_save.collectorBountyV45);
+    }
+    counterKillUsed=g_save.counterKillUsedV45==1;
+    {int data[15]={g_save.dailyGoalId,g_save.dailyGoalParam,g_save.dailyProgress,g_save.dailyDone,g_save.dailyStreak,(int)g_save.dailyQuestDate,(int)g_save.dailyLastCompletedDate};
+     for(int i=0;i<8;i++){data[7+i]=g_save.dailySamples[i];}
+     DailyLoadFrom(data);}
+    CalibResetRun();
     ShopRestoreServices(g_save.serviceUsesV42);RunEconomyRestore(g_save.rewardFloorV42,g_save.escapeRewardMaskV42,g_save.rhythmGoldV42);
     ResumeRestoredRun();
 }

@@ -3282,12 +3282,14 @@ static void RenderWallBand(int x0, int x1) {
    顺便用递增代替乘 3 来定位噪点。 */
 static unsigned int* horrorSource=NULL;
 static size_t horrorCapacity=0;
-static int horrorReady=0;
+static int horrorReady=0,horrorW=0,horrorH=0;
 static void PrepareHorrorSource(void){
     horrorReady=0;if(perception.stress<.02f)return;
-    size_t count=(size_t)renderW*renderH;
+    horrorW=(renderW+1)/2;horrorH=(renderH+1)/2;
+    size_t count=(size_t)horrorW*horrorH;
     if(count>horrorCapacity){unsigned int* next=(unsigned int*)realloc(horrorSource,count*sizeof(unsigned int));if(!next)return;horrorSource=next;horrorCapacity=count;}
-    memcpy(horrorSource,pixels,count*sizeof(unsigned int));horrorReady=1;
+    for(int y=0;y<horrorH;y++)for(int x=0;x<horrorW;x++)horrorSource[(size_t)y*horrorW+x]=pixels[(size_t)(y*2)*renderW+x*2];
+    horrorReady=1;
 }
 static void RenderPostBand(int y0,int y1) {
     float stress=perception.stress,crisis=perception.contamination;
@@ -3302,10 +3304,10 @@ static void RenderPostBand(int y0,int y1) {
             unsigned int c=row[x];float edge=vignetteMask?vignetteMask[(size_t)y*renderW+x]/255.0f:0;
             int r=(c>>16)&255,g=(c>>8)&255,b=c&255;
             if(horrorReady){
-                int sx=x+wobble;if(sx<radius)sx=radius;if(sx>=renderW-radius)sx=renderW-radius-1;
-                int sy=y<radius?radius:y>=renderH-radius?renderH-radius-1:y;
-                unsigned int a=horrorSource[(size_t)sy*renderW+sx-radius],d=horrorSource[(size_t)sy*renderW+sx+radius];
-                unsigned int u=horrorSource[(size_t)(sy-radius)*renderW+sx],v=horrorSource[(size_t)(sy+radius)*renderW+sx];
+                int sx=(x+wobble)/2;if(sx<radius)sx=radius;if(sx>=horrorW-radius)sx=horrorW-radius-1;
+                int sy=y/2;if(sy<radius)sy=radius;if(sy>=horrorH-radius)sy=horrorH-radius-1;
+                unsigned int a=horrorSource[(size_t)sy*horrorW+sx-radius],d=horrorSource[(size_t)sy*horrorW+sx+radius];
+                unsigned int u=horrorSource[(size_t)(sy-radius)*horrorW+sx],v=horrorSource[(size_t)(sy+radius)*horrorW+sx];
                 float blur=stress*.68f;
                 r=(int)(r*(1-blur)+blur*(((a>>16)&255)+((d>>16)&255)+((u>>16)&255)+((v>>16)&255))*.25f);
                 g=(int)(g*(1-blur)+blur*(((a>>8)&255)+((d>>8)&255)+((u>>8)&255)+((v>>8)&255))*.25f);

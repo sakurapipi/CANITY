@@ -48,7 +48,7 @@ int RunEconomyRhythmGold(int hits,int bestCombo){
     int amount=12+hits/4+bestCombo/5;
     if(BenchHas(BENCH_POCKET_CHANGE))amount=amount*6/5;
     if(amount>45)amount=45;
-    if(rhythmPaid>=90)amount=3;
+    if(rhythmPaid>=90)amount=0;
     else if(amount>90-rhythmPaid)amount=90-rhythmPaid;
     if(amount<0)amount=0;
     rhythmPaid+=amount;if(rhythmPaid>90)rhythmPaid=90;WalletAddRun(amount);totalGoldEarned+=amount;return amount;

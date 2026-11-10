@@ -798,7 +798,79 @@ static void test_append_only_migration_contract_files(void){
           "a missing original cannot be reported as backed up");
 }
 
+
+#include "player_tick.h"
+#include "loop_private.h"
+#include "lockbox.h"
+#include "calibration.h"
+static void test_stable_training_and_snapshot(void){
+    clear_meta();StartFreshTestRun();carryGold=10000;
+    CHECK(BenchTryBuy(BENCH_ENDURANCE)==1,"training reset fixture buys a real run node");
+    for(int rank=0;rank<RUN_UPG_MAX;rank++){CHECK(RunUpgTryBuy(0)==0,"fixture buys each upgrade rank");}ThreatAdd(5);counterKillUsed=1;
+    lockActive=1;int beforeLevel=currentLevel;CanityKeyDown('B',0);
+    CHECK(!guideMode && lockActive && currentLevel==beforeLevel,"B cannot escape a lock modal into training");lockActive=0;
+    LoopQueueStart(START_GUIDE,0);StartGame();
+    CHECK(trainingMode && guideMode,"guide entry succeeds outside modals");
+    CHECK(!BenchHas(BENCH_ENDURANCE) && RunUpgLevel(0)==0 && ThreatValue()==0,"training resets all per-run upgrades and threat");
+    CHECK(counterKillUsed==0,"a new run rearms the once-per-run counter");
+    sanity=61;battery=47;hiddenIn=-1;PlayerTickVitals(300,0);PlayerTickBattery(300);
+    CHECK(sanity==61 && battery==47,"training cannot lose passive sanity or battery");
+    int bank=WalletBank();carryGold=1200;WalletSettle(0,0);
+    CHECK(WalletBank()==bank && carryGold==0,"practice money never enters real death settlement");
+    StartFreshTestRun();counterKillUsed=1;
+    MoneyBagDropAt(posX,posY,73);SaveGame();CHECK(g_saveState==1,"money and counter snapshot saves");
+    MoneyBagsResetForNewFloor();counterKillUsed=0;CHECK(LoadSettings(),"v45 money snapshot loads");ContinueRun();
+    int total=0;for(int i=0;i<MAX_MONEYBAG;i++)total+=MoneyBagAmount(i);
+    CHECK(total==73 && counterKillUsed==1,"ground money and consumed counter survive continue");
+    StartFreshTestRun();
+    int daily[15]={DQ_KNOCK,8,4,0,0,(int)DailySeedToday(),0,0};daily[7+DQ_KNOCK]=4;
+    DailyResetProfile();DailyLoadFrom(daily);knockCountRun=4;SaveGame();
+    LoopQueueStart(START_GUIDE,0);StartGame();ContinueRun();DailyObserve(DQ_KNOCK,5);
+    CHECK(DailyCurrent()==5,"guide detour and continue restore daily observation baseline");
+    CalibResetRun();ResetRunModeFlags();
+}
+static void test_stable_slots_and_backups(void){
+    clear_meta();StartFreshTestRun();SaveGame();ResetRunModeFlags();currentState=STATE_MAIN_MENU;
+    int oldBank=WalletBank();
+    CHECK(SaveSelectSlot(1),"selecting another slot is an explicit load transaction");
+    CHECK(g_saveSlot==1 && WalletBank()==0,"empty slot cannot inherit the outgoing bank");
+    WalletAddBank(321);SaveGame();
+    CHECK(SaveSelectSlot(0) && WalletBank()==oldBank,"switch back loads the first profile without overwriting it");
+    CHECK(SaveSelectSlot(1) && WalletBank()==321,"second profile retains its own bank");
+    runInProgress=1;CHECK(!SaveSelectSlot(2) && g_saveSlot==1,"changing slot is blocked during a live run");
+    runInProgress=0;CHECK(SaveSelectSlot(0),"slot zero restored for following tests");
+    StartFreshTestRun();SaveGame();SaveGame();
+    char path[MAX_PATH],backup[MAX_PATH+8];SavePathForSlot(0,0,path,sizeof(path));snprintf(backup,sizeof(backup),"%s.bak",path);
+    unsigned char* old=malloc(65536);unsigned char* now=malloc(65536);
+    CHECK(old && now,"backup comparison buffers allocated");
+    if(old && now){
+        long n=SaveBackendRead(backup,old,65536);CHECK(n>0,"good previous save is backed up");
+        FILE* f=fopen(path,"wb");if(f){fwrite("bad",1,3,f);fclose(f);}
+        SaveGame();long m=SaveBackendRead(backup,now,65536);
+        CHECK(g_saveState==1 && n==m && n>0 && !memcmp(old,now,(size_t)n),"bad primary cannot overwrite a good backup during save");
+    }
+    free(old);free(now);
+}
+
+static void test_historical_v31_v32_layouts(void){
+    for(int version=31;version<=32;version++){
+        char source[MAX_PATH],target[MAX_PATH],backup[MAX_PATH+8];
+        snprintf(source,sizeof(source),"tests/fixtures/saves/layout_contract_v%d.sav",version);
+        g_saveSlot=0;trainingMode=0;runInProgress=0;currentState=STATE_MAIN_MENU;
+        SavePathForSlot(0,0,target,sizeof(target));snprintf(backup,sizeof(backup),"%s.bak",target);remove(backup);
+        CHECK(fixture_copy(source,target),"historical-header layout contract copied");
+        SaveTestClearReadOnly();CHECK(LoadSettings(),"v31 and v32 layouts migrate with a resumable run");
+        CHECK(SaveTestBlob()->version==SAVE_VERSION,"historical-header layout promotes to current save format");
+        CHECK(fabsf(musicVolumeF-.65f)<.001f && dynamicRes==0 && gameCleared==1,"post-repack presence flags preserve music display and completion settings");
+        ContinueRun();
+        CHECK(currentLevel==3 && containerCount==2 && fabsf(containers[0].x-8.5f)<.01f,"v31 container expansion preserves map and container positions");
+        CHECK(fabsf(posX-3.5f)<.01f && fabsf(posY-3.5f)<.01f,"historical map coordinates survive migration");
+    }
+}
 void TestSuite_save(void) {
+    test_historical_v31_v32_layouts();
+    test_stable_training_and_snapshot();
+    test_stable_slots_and_backups();
     test_append_only_migration_contract_files();
     test_saving_preserves_live_skill_ranks();
     test_v37_prefix_is_migrated_to_current();

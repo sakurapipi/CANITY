@@ -51,7 +51,7 @@ void MoneyBagDropAt(float x, float y, int amount) {
     if (amount <= 0) return;
     int slot = -1;
     for (int i = 0; i < MAX_MONEYBAG; i++) if (!moneyBags[i].active) { slot = i; break; }
-    if (slot < 0) slot = 0;
+    if (slot < 0) {slot=0;amount=amount>INT_MAX-moneyBags[slot].amount?INT_MAX:amount+moneyBags[slot].amount;}
     moneyBags[slot].x = x; moneyBags[slot].y = y;
     moneyBags[slot].amount = amount;
     moneyBags[slot].life = 45.0f;
@@ -109,13 +109,7 @@ void MoneyTick(float dt) {
                         int slot = -1;
                         for (int mi = 0; mi < MAX_MONEYBAG; mi++)
                             if (!moneyBags[mi].active) { slot = mi; break; }
-                        if (slot < 0) {
-                            float worst = 1e9f;
-                            for (int mi = 0; mi < MAX_MONEYBAG; mi++) {
-                                float dl = moneyBags[mi].life;
-                                if (dl < worst) { worst = dl; slot = mi; }
-                            }
-                        }
+                        if(slot<0){pickupMsg=Tr("RECOVER A BAG FIRST","请先回收钱袋");pickupMsgTimer=1.5f;}
                         if (slot >= 0) {
                             float bx = posX + dirX * 1.5f;
                             float by = posY + dirY * 1.5f;
@@ -163,4 +157,21 @@ void MoneyTick(float dt) {
         }
     }
 
+}
+
+void MoneyBagsSave(float* positions,int* amounts){
+    for(int i=0;i<MAX_MONEYBAG;i++){
+        positions[i*3]=moneyBags[i].x;positions[i*3+1]=moneyBags[i].y;positions[i*3+2]=moneyBags[i].life;
+        amounts[i]=moneyBags[i].active?moneyBags[i].amount:0;
+    }
+}
+void MoneyBagsLoad(const float* positions,const int* amounts){
+    MoneyBagsResetForNewFloor();moneyDropPrev=0;
+    for(int i=0;i<MAX_MONEYBAG;i++){
+        float x=positions[i*3],y=positions[i*3+1],life=positions[i*3+2];
+        if(amounts[i]<=0 || !isfinite(life) || life<=0)continue;
+        if(!isfinite(x) || !isfinite(y) || x<1 || y<1 || x>=MAP_WIDTH-1 || y>=MAP_HEIGHT-1 || Blocked(x,y)){x=posX;y=posY;}
+        moneyBags[i]=(MoneyBag){x,y,amounts[i],fminf(life,45),1};
+        SuspicionAdd(x,y,fmaxf(5,fminf(100,amounts[i]/200.0f)),.6f,moneyBags[i].life,SUSP_GOLD);
+    }
 }

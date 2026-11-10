@@ -86,7 +86,7 @@ jobs:
         run: |
           $ver = (Select-String -Path include/common.h -Pattern 'CANITY_VERSION_STR\s+"([^"]+)"').Matches[0].Groups[1].Value
           $name = "CANITY_v${ver}_win64"
-          python -X utf8 tools/package_playable.py --output stage --label $name --notes docs/2.4.2-RC4_交付说明.md --acceptance-report work/codex-build/validation-summary.json --source-commit $env:GITHUB_SHA --single-exe
+          python -X utf8 tools/package_playable.py --output stage --label $name --notes docs/RELEASE-v2.4.2.md --acceptance-report work/codex-build/validation-summary.json --source-commit $env:GITHUB_SHA --single-exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $folder = (Get-Content work/latest_playable_path.txt -Raw).Trim()
           $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { 'v' + $ver.Replace(' ', '-') }
@@ -214,14 +214,7 @@ jobs:
             assets/CANITY_v*_web_single.html
             assets/build-manifest.json
           generate_release_notes: false
-          body: |
-            三个版本，同一份源码、同一个提交：
-
-            · `CANITY_v*_win64.zip` —— Windows 桌面版，解压双击 `canity.exe`
-            · `CANITY_v*_web.zip` —— 网页版，解压后在该目录起 HTTP 服务
-            · `CANITY_v*_web_single.html` —— 单文件版，wasm 内联，双击即玩
-
-            `build-manifest.json` 记录本次产物的 SHA256、tag、提交 SHA 与编译器版本。
+          body_path: docs/RELEASE-v2.4.2.md
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

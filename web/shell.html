@@ -170,6 +170,10 @@
   @media (prefers-reduced-motion:reduce) {#boot {transition:none}}
 #treeZoom{display:none;position:fixed;right:clamp(155px,25vw,290px);top:calc(8px + env(safe-area-inset-top,0px));z-index:21;gap:8px}
 #treeZoom button{width:44px;height:40px;background:#102432eF;color:#e6f5ff;border:1px solid #7bc9e8;border-radius:5px;font-size:25px;touch-action:none}
+#saveToggle{display:none;position:fixed;left:80px;top:4px;z-index:111;background:#142334;color:#daeaf5;border:1px solid #72accc;min-height:28px}
+#entry{z-index:112}#saveSlotChoice{max-width:90px;background:#122334;color:white;min-height:30px}
+@media(pointer:coarse){#saveToggle{display:block}#entry.saveopen{display:flex;left:5px;right:auto;bottom:55px;gap:4px;background:#091320;flex-wrap:wrap;max-width:90vw}}
+body.touchControls #saveToggle{display:block}body.touchControls #entry.saveopen{display:flex}
 </style>
 </head>
 <body>
@@ -189,7 +193,8 @@
 
   <div id="btns">
     <button data-act="INTERACT">交互</button>
-    <button data-act="SWING">挥击</button>
+    <button data-act="SWING">蓄力/挥击</button>
+    <button data-act="DODGE">挣脱/闪避</button>
     <button data-act="MENU_CONFIRM">确认</button>
     <button data-act="THROW">投掷</button>
   </div>
@@ -211,7 +216,9 @@
   <a class="lnk" href="javascript:void(0)" id="rotBtn">点我尝试自动横屏</a>
 </div>
 
+<button id="saveToggle" type="button">存档</button>
 <div id="entry">
+<select id="saveSlotChoice" aria-label="存档槽"><option value="-1">当前槽</option><option value="0">槽0</option><option value="1">槽1</option><option value="2">槽2</option></select>
   <a class="primary" href="https://github.com/sakurapipi/CANITY/releases/latest">下载完整版 (Windows)</a>
   <a href="javascript:void(0)" id="savExport">导出存档</a>
   <a href="javascript:void(0)" id="savImport">导入存档</a>
@@ -219,7 +226,7 @@
          style="display:none">
 </div>
 
-<div id="screenTools"><button id="fullscreenBtn" type="button">全屏 / 窗口</button></div>
+<div id="screenTools"><button id="fullscreenBtn" type="button">全屏 / 窗口</button><button id="mapClose" data-act="MAP" type="button" style="display:none">收起地图</button></div>
 <div id="treeZoom" aria-label="技能树缩放"><button data-tree-zoom="1">+</button><button data-tree-zoom="-1">−</button></div>
 <div id="menuNav" aria-label="菜单导航">
 <button data-menu-key="27">返回</button><button data-menu-key="37">←</button><button data-menu-key="38">↑</button><button data-menu-key="40">↓</button><button data-menu-key="39">→</button><button data-menu-key="13">确认</button>
@@ -227,6 +234,7 @@
 <script>
   var Module = {
     canvas: document.getElementById('canvas'),
+    _usingTouch:location.search.indexOf('touch=1')>=0 || (window.matchMedia('(pointer:coarse)').matches && !window.matchMedia('(hover:hover)').matches),
     print: function () {},
     printErr: function (t) { console.error(t); },
     setStatus: function (t) {
@@ -251,10 +259,12 @@
   // 导入的是坏档时，游戏自己的"坏档不覆盖"逻辑会回退 .bak。
   // ==================================================================
   (function () {
-    var KEY = 'canity:canity0.sav';
-    var TS  = 'canity:canity0.sav#ts';
-    var BAK = 'canity:canity0.sav.bak';
-    var BAK_TS = 'canity:canity0.sav.bak#ts';
+    function saveKeys(){
+      var select=document.getElementById('saveSlotChoice'),chosen=select?Number(select.value):-1;
+      var slot=chosen>=0?chosen:(Module._CanityWebSaveSlot?Module._CanityWebSaveSlot():0);
+      if(slot<0 || slot>2)slot=0;var key='canity:canity'+slot+'.sav';
+      return {slot:slot,key:key,time:key+'#ts',backup:key+'.bak',backupTime:key+'.bak#ts'};
+    }
 
     function b64ToBytes(b64) {
       var bin = atob(b64);
@@ -270,7 +280,7 @@
 
     /* 返回当前存档的原始字节（没有存档返回 null）。测试直接调它。 */
     function exportBytes() {
-      var v = localStorage.getItem(KEY);
+      var v = localStorage.getItem(saveKeys().key);
       if (!v) return null;
       return b64ToBytes(v);
     }
@@ -281,6 +291,7 @@
         -1  不是可识别的存档（不写入）
         -2  浏览器存储失败（配额 / 隐私模式） */
     function importBytes(arr) {
+      var k=saveKeys(),KEY=k.key,TS=k.time,BAK=k.backup,BAK_TS=k.backupTime;
       if (!arr || arr.length < 16) return -1;
       /* 只做最外层的魔数检查：CSAV 信封 或 裸档 'CAN2'/'2NAC' */
       var m = String.fromCharCode(arr[0], arr[1], arr[2], arr[3]);
@@ -322,11 +333,11 @@
       var blob = new Blob([b], { type: 'application/octet-stream' });
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'canity0.sav';
+      a.download = 'canity'+saveKeys().slot+'.sav';
       document.body.appendChild(a);
       a.click();
       setTimeout(function () { document.body.removeChild(a); }, 200);
-      toast('已导出 canity0.sav（可直接放进桌面版存档目录）');
+      toast('已导出当前选择的存档');
     });
 
     if (iBtn && file) {
@@ -357,7 +368,7 @@
   // ==================================================================
   (function () {
     var forced = (location.search || '').indexOf('touch=1') >= 0;
-    var isTouch = forced || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    var isTouch = forced || Module._usingTouch;
     if (!isTouch) return;
     var box = document.getElementById('rotate');
     var btn = document.getElementById('rotBtn');
@@ -401,12 +412,11 @@
   (function () {
     // ?touch=1 可以强制打开，方便在桌面上调试触屏布局
     var forceTouch = (location.search || '').indexOf('touch=1') >= 0;
-    var touchable = forceTouch ||
-                    ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-    if (!touchable) return;
+    var touchable = forceTouch || Module._usingTouch;
     var layer = document.getElementById('touch');
     if (!layer) return;
-    layer.classList.add('on');
+    if(touchable)layer.classList.add('on');
+    Module._touchResetHandlers=[];
 
     /* ==================================================================
      * 触屏按键的两条规则（2026-11-06 第二版）
@@ -436,10 +446,12 @@
 
     // 右侧半屏拖动 = 转视角
     var look = document.getElementById('look');
-    var lookId = null, lastX = 0;
+    var lookId = null, lastX = 0,lastY=0;
+    function ended(e,id){if(id===null)return false;for(var i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===id)return true;return false;}
     look.addEventListener('touchstart', function (e) {
+      if(lookId!==null)return;
       var t = e.changedTouches[0];
-      lookId = t.identifier; lastX = t.clientX;
+      lookId = t.identifier; lastX = t.clientX;lastY=t.clientY;
       Module._touchLook = true;
       e.preventDefault();
     }, { passive: false });
@@ -447,15 +459,15 @@
       for (var i = 0; i < e.changedTouches.length; i++) {
         var t = e.changedTouches[i];
         if (t.identifier !== lookId) continue;
-        var dx = t.clientX - lastX;
-        lastX = t.clientX;
+        var dx = t.clientX - lastX,dy=t.clientY-lastY;
+        lastX = t.clientX;lastY=t.clientY;
         Module._mouseDX = (Module._mouseDX || 0) + dx * 2;
+        Module._mouseDY = (Module._mouseDY || 0) + dy * 2;
       }
       e.preventDefault();
     }, { passive: false });
-    look.addEventListener('touchend', function () {
-      lookId = null; Module._touchLook = false;
-    }, false);
+    function endLook(e){if(ended(e,lookId)){lookId=null;Module._touchLook=false;}}
+    look.addEventListener('touchend',endLook,false);look.addEventListener('touchcancel',endLook,false);
 
     // ==================================================================
     // 左半屏移动区（v5）
@@ -468,7 +480,7 @@
     var stickEl = document.getElementById('stick');
     var knob = stickEl ? stickEl.querySelector('i') : null;
     var moveId = null, originX = 0, originY = 0;
-    var STICK_R = 46;
+    var STICK_R = 46,lastMoveX=0,lastMoveY=0;
 
     function clearMove() {
       key(87, 0); key(83, 0); key(65, 0); key(68, 0);
@@ -480,7 +492,7 @@
        现在：① 死区带回滞（进入 14、退出 7）② 只有状态真的变了才写。 */
     var moveState = { up: 0, down: 0, left: 0, right: 0 };
     function setMove(vk, cur, next) {
-      if (cur === next) return cur;
+      if(cur===next && !!Module._keys[vk]===!!next)return cur;
       key(vk, next ? 1 : 0);
       return next;
     }
@@ -491,6 +503,8 @@
       return pos;
     }
     function applyMove(dx, dy) {
+      lastMoveX=dx;lastMoveY=dy;
+      if(Module._CanityUiFlags && !(Module._CanityUiFlags()&1))return;
       var up, down;
       // 前：负 dy
       if (dy < -14) up = 1; else if (dy > -7) up = 0; else up = moveState.up;
@@ -513,6 +527,7 @@
 
     if (movezone) {
       movezone.addEventListener('touchstart', function (e) {
+        if(moveId!==null)return;
         var t = e.changedTouches[0];
         moveId = t.identifier;
         originX = t.clientX; originY = t.clientY;
@@ -540,6 +555,7 @@
       }, { passive: false });
 
       function endMove(e) {
+        if(!ended(e,moveId))return;
         moveId = null;
         clearMove();
         if (stickEl) stickEl.classList.remove('on');
@@ -548,6 +564,14 @@
       movezone.addEventListener('touchend', endMove, false);
       movezone.addEventListener('touchcancel', endMove, false);
     }
+
+    Module._resetTouchInput=function(hard){
+      for(var vk in (Module._held || {})){clearTimeout(Module['_kt'+vk]);}
+      Module._held={};moveState.up=moveState.down=moveState.left=moveState.right=0;
+      (Module._touchResetHandlers || []).forEach(function(reset){reset();});
+      if(hard){moveId=lookId=null;lastMoveX=lastMoveY=0;if(stickEl)stickEl.classList.remove('on');}
+      else if(moveId!==null && Module._CanityUiFlags && (Module._CanityUiFlags()&1))applyMove(lastMoveX,lastMoveY);
+    };
 
     // ==================================================================
     // 动作按钮（v2.4.2 / B4）
@@ -587,9 +611,10 @@
 
     /* 绑定在 C 侧是运行期状态（可能还没加载完），所以延迟解析：
        第一次触摸时再问，问到就缓存。 */
-    Array.prototype.forEach.call(document.querySelectorAll('#btns button, #btns2 button'), function(b){
+    Array.prototype.forEach.call(document.querySelectorAll('#btns button, #btns2 button, #mapClose'), function(b){
       if(!b.getAttribute('data-act'))return;
       var heldVk=-1;
+      Module._touchResetHandlers.push(function(){heldVk=-1;});
       function press(e){
         e.preventDefault();e.stopPropagation();
         var vk=resolveAct(b);if(vk<0 || heldVk>=0)return;
@@ -600,9 +625,8 @@
         if(e)e.preventDefault();if(heldVk<0)return;
         var vk=heldVk;heldVk=-1;
         key(vk,0);
-        if(b.getAttribute('data-act')==='SWING'){
+        if(b.getAttribute('data-act')==='SWING' || b.getAttribute('data-act')==='DODGE'){
           clearTimeout(Module['_kt'+vk]);Module._held[vk]=0;Module._keys[vk]=0;
-          if(Module._keyPulses)Module._keyPulses[vk]=0;
         }
       }
       if(window.PointerEvent){
@@ -673,21 +697,23 @@
   });
 
 
+  document.getElementById('saveToggle').addEventListener('click',function(){document.getElementById('entry').classList.toggle('saveopen');});
   // RC4: optional browser capabilities must never abort the Wasm runtime.
   (function(){
     var cv=Module.canvas,active=null,start=null;
     Module._menuQueue=[];
     Module._safePointerLock=function(){
-      if(navigator.maxTouchPoints>0 || !Module.requestLock || !cv.requestPointerLock)return;
+      if(Module._usingTouch || !Module.requestLock || !cv.requestPointerLock)return;
       try {var p=cv.requestPointerLock();if(p && p.catch)p.catch(function(){});}catch(ignored){}
     };
     function interactive(){return Module._CanityUiFlags && !(Module._CanityUiFlags()&1);}
-    function clearInput(){
+    function clearInput(hard){
       if(Module._keys)Module._keys.fill(0);
       if(Module._keyPulses)Module._keyPulses.fill(0);
       Module._mouseDX=0;Module._mouseDY=0;Module._touchLook=false;
       Module._menuQueue.length=0;active=null;
       if(Module._CanityWebPointer)Module._CanityWebPointer(3,0,0);
+      if(Module._resetTouchInput)Module._resetTouchInput(hard===true);
     }
     document.querySelectorAll('[data-menu-key]').forEach(function(b){
       b.addEventListener(window.PointerEvent?'pointerdown':'touchstart',function(e){
@@ -712,7 +738,18 @@
       cv.addEventListener('touchend',function(e){for(var i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===active){e.preventDefault();route(2,e.changedTouches[i]);active=null;}},{passive:false});
       cv.addEventListener('touchcancel',clearInput);
     }
-    window.addEventListener('blur',clearInput);document.addEventListener('visibilitychange',function(){if(document.hidden)clearInput();});
+    window.addEventListener('blur',function(){clearInput(true);});
+    document.addEventListener('visibilitychange',function(){
+      if(document.hidden){
+        clearInput(true);if(Module._CanityWebVisibility)Module._CanityWebVisibility(1);
+        if(Module._actx && Module._actx.suspend){var p=Module._actx.suspend();if(p && p.catch)p.catch(function(){});}
+      }
+    });
+    window.addEventListener('pointerdown',function(e){
+      if(e.pointerType!=='mouse' && e.pointerType!=='touch')return;
+      var touch=e.pointerType==='touch';
+      if(Module._usingTouch!==touch){clearInput(true);Module._usingTouch=touch;document.getElementById('touch').classList.toggle('on',touch);document.body.classList.toggle('touchControls',touch);}
+    },true);
     var fullscreen=document.getElementById('fullscreenBtn');
     function fullElement(){return document.fullscreenElement || document.webkitFullscreenElement || document.webkitCurrentFullScreenElement;}
     function fullLabel(){fullscreen.textContent=fullElement()?'退出全屏':'进入全屏';}
@@ -736,6 +773,7 @@
       if(!Module._CanityUiFlags)return;
       var flags=Module._CanityUiFlags();
       document.getElementById('treeZoom').style.display=(flags&8)?'flex':'none';
+      var closeMap=document.getElementById('mapClose');if(closeMap)closeMap.style.display=Module._CanityWebInputState && Module._CanityWebInputState(0)===3?'inline-block':'none';
       if(previous!==flags){
         clearInput();previous=flags;
         if(!(flags&1)){
@@ -764,8 +802,8 @@
 {{{ SCRIPT }}}
 <script>
 (function(){
-  var coarse=window.matchMedia('(pointer:coarse)').matches || navigator.maxTouchPoints>0 || location.search.indexOf('touch=1')>=0;
-  if(!coarse)return;
+  var coarse=!!Module._usingTouch;
+  // Install on hybrid devices too; the overlay is enabled by the actual pointer type.
   document.querySelectorAll('[data-vk]').forEach(function(button){
     var code=Number(button.dataset.vk);
     function send(down){if(Module._key)Module._key(code,down);else if(Module._keys)Module._keys[code]=down?1:0;}
@@ -775,6 +813,7 @@
   setInterval(function(){
     if(!Module._CanityUiFlags)return;
     var flags=Module._CanityUiFlags();document.body.classList.toggle('calibrating',!!(flags&2));document.body.classList.toggle('touchmenu',!(flags&1) && !(flags&2));
+    var wrench=document.querySelector('[data-act="SWING"]');if(wrench && Module._CanityWebInputState){var charge=Module._CanityWebInputState(1);wrench.textContent=charge>0?'预备 '+Math.min(100,Math.floor(charge/10))+'%':'蓄力/挥击';}
     if(Module._CanityUiAccent)document.documentElement.style.setProperty('--canity-accent','#'+(Module._CanityUiAccent()>>>0).toString(16).padStart(6,'0'));
     var shop=document.querySelector('[data-vk="84"]');if(shop){shop.disabled=!(flags&4);shop.style.opacity=flags&4?'1':'.3';}
   },200);

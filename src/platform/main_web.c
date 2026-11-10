@@ -110,6 +110,7 @@ static void WebFrame(void) {
     }
 
 
+    PlatPollInput();
     CanityProbeSampleKeys();
     /* One queued command per frame survives fast taps and submenu transitions. */
     { int command=js_menu_command();if(command)CanityKeyDown(command,0); }
@@ -393,7 +394,7 @@ int main(void) {
 
     InitAchievements();
     hasSave = LoadSettings();
-    if(dynamicRes)pixelBudget=emscripten_run_script_int("(navigator.maxTouchPoints>0 ? 360000 : 540000)");
+    if(dynamicRes)pixelBudget=emscripten_run_script_int("(Module._usingTouch ? 360000 : 540000)");
     InitAudio();
     MusicInit();
     MusicLoadGameTracks();
@@ -496,6 +497,12 @@ EMSCRIPTEN_KEEPALIVE int CanityWebInputState(int field){
     case 3:return SkillViewZoom();
     case 4:return (int)(treeVK*1000);
     case 5:return SkillIsDragging() || treeDragging;
+    case 6:return (int)(pitchRatio*1000);
     default:return -1;
     }
+}
+
+EMSCRIPTEN_KEEPALIVE int CanityWebSaveSlot(void){return g_saveSlot;}
+EMSCRIPTEN_KEEPALIVE void CanityWebVisibility(int hidden){
+    if(hidden && currentState==STATE_PLAYING){PauseGame();autoPaused=0;resetInputState=1;firstMouseMove=1;CanityPointerCancel();}
 }

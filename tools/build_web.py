@@ -107,7 +107,7 @@ def main(argv):
         '-sSTACK_SIZE=1048576',
         '-sASSERTIONS=%d' % (1 if debug else 0),
         '-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPU32,HEAP32,UTF8ToString,stringToUTF8',
-        '-sEXPORTED_FUNCTIONS=_CanityWebInputState,_CanityWebPointer,_CanityWebZoom,_CanityUiFlags,_CanityUiAccent,_HelpBookText,_main,_malloc,_free,_CanityProbeWorldSound,_CanityProbePanner,_CanityActionVk,_CanityActionMenu,_CanityActionPause,_CanityActionFlashlight,_CanityProbeFlashlight,_CanityProbeState,_CanityProbeMenu,_CanityProbeKeys,_CanityProbeUpdates,_CanityProbeDt,_CanityProbeGameKey,_CanityProbeDir,_CanityProbeLayout',
+        '-sEXPORTED_FUNCTIONS=_CanityWebSaveSlot,_CanityWebVisibility,_CanityWebInputState,_CanityWebPointer,_CanityWebZoom,_CanityUiFlags,_CanityUiAccent,_HelpBookText,_main,_malloc,_free,_CanityProbeWorldSound,_CanityProbePanner,_CanityActionVk,_CanityActionMenu,_CanityActionPause,_CanityActionFlashlight,_CanityProbeFlashlight,_CanityProbeState,_CanityProbeMenu,_CanityProbeKeys,_CanityProbeUpdates,_CanityProbeDt,_CanityProbeGameKey,_CanityProbeDir,_CanityProbeLayout',
         '-sINCOMING_MODULE_JS_API=canvas,print,printErr,setStatus,onRuntimeInitialized,locateFile',
         '--shell-file', str(SHELL),
     ]

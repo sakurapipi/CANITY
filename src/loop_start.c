@@ -118,13 +118,18 @@ void ResetRunModeFlags(void) {
 }
 
 static void InitializeRunEconomy(void) {
-    if(trainingMode){carryGold=0;carryAtRunStart=0;return;}
+    ThreatReset();BenchResetRun();RunUpgReset();counterKillUsed=0;
+    if(trainingMode){
+        carryGold=0;carryAtRunStart=0;throwSelected=0;runInProgress=1;runTime=0;
+        RunEconomyReset();return;
+    }
     /* v3.4 银行：按选择的档位从存款里取出本金 */
     {
         int p = bankCarryPct;
         if (p < 0) p = 0;
         if (p >= BANK_CARRY_STEPS) p = BANK_CARRY_STEPS - 1;
-        int take = (int)((double)WalletBank() * (double)(p * BANK_STEP_PCT) / 100.0 + 0.5);
+        double withdrawal=(double)WalletBank()*(p*BANK_STEP_PCT)/100.0+.5;
+        int take=withdrawal>=INT_MAX?INT_MAX:(int)withdrawal;
         {   /* v6：取款走 Wallet（银行 → 携带） */
             take = WalletWithdraw(take);
         }
@@ -295,11 +300,7 @@ void StartGame(void) {
        上一次的弹窗标志进来，开局即被冻结。 */
     exitChoiceOpen = 0;
     exitGoDeeper = 0;
-    /* v3.0：**改造树 / 强化都不重置** ——
-       它们花的是 carryGold（跨局持久的元货币），重置等于把玩家买的东西吞掉：
-       买一个 620 的星节点，下一局归零，金币永久损失。
-       benchOwned / runUpg 都已进存档（benchOwnedSave / runUpgSave），
-       本来就是元进度。每局该清的只有「假死」这类局内一次性状态。 */
+    /* Per-run builds reset in InitializeRunEconomy, including practice. */
     playDeadUsed = 0;   /* v3.0 假死每局重置 */
     /* v3.0：这几个也必须在开局清零，否则上一局用过之后新局直接失效 */
     CalibResetRun();

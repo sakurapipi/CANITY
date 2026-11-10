@@ -95,7 +95,7 @@ static int PrepareBundledMusic(void) {
         /* CRT getenv uses its own environment snapshot. */
         _wputenv_s(L"CANITY_DATA_DIR",path);
     }
-    _snwprintf(cache,MAX_PATH,L"%ls\\CANITY\\audio-2.4.2-RC4",base);CreateDirectoryW(cache,NULL);
+    _snwprintf(cache,MAX_PATH,L"%ls\\CANITY\\audio-2.4.2",base);CreateDirectoryW(cache,NULL);
     for(int i=0;i<6;i++) {
         HRSRC res=FindResourceW(NULL,MAKEINTRESOURCEW(3000+i),MAKEINTRESOURCEW(10));
         if(!res)return 0;

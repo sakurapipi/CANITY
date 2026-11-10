@@ -31,13 +31,22 @@ EM_JS(void,js_music_init,(void),{
     bus.heartGain=ctx.createGain();bus.heartGain.gain.value=0;bus.heart.connect(bus.heartGain);bus.heartGain.connect(filter);bus.heart.start();
     Module._musicPlay=function(scene,offset){
         var m=Module._musicBus;if(!m)return;
-        var old=m.source;if(old){try{old.stop();}catch(e){} old.disconnect();m.source=null;}
+        /* Keep the prior voice until a replacement is ready; fade each voice,
+           not the shared master bus, so scene changes cannot click. */
         m.scene=scene;m.offset=offset||0;m.serial++;
         var generation=m.serial;
         function start(buffer){
             if(generation!==m.serial)return;
-            var node=ctx.createBufferSource();node.buffer=buffer;node.loop=true;
-            node.connect(m.filter);node.start(0,m.offset%buffer.duration);m.source=node;m.startedAt=ctx.currentTime;
+            var node=ctx.createBufferSource(),voice=ctx.createGain(),now=ctx.currentTime;
+            node.buffer=buffer;node.loop=true;voice.gain.setValueAtTime(0,now);voice.gain.linearRampToValueAtTime(1,now+.04);
+            node.connect(voice);voice.connect(m.filter);node.start(0,m.offset%buffer.duration);
+            var old=m.source,oldGain=m.sourceGain;
+            if(old){
+                if(oldGain){oldGain.gain.cancelScheduledValues(now);oldGain.gain.setValueAtTime(oldGain.gain.value,now);oldGain.gain.linearRampToValueAtTime(0,now+.05);}
+                old.onended=function(){old.disconnect();if(oldGain)oldGain.disconnect();old.buffer=null;};
+                try{old.stop(now+.06);}catch(ended){old.disconnect();if(oldGain)oldGain.disconnect();}
+            }
+            m.source=node;m.sourceGain=voice;m.startedAt=now;
         }
         function fallback(){
             if(generation!==m.serial)return;
@@ -61,8 +70,13 @@ EM_JS(void,js_music_init,(void),{
         var path=m.paths[scene]||(globalThis.CANITY_MUSIC_TRACKS && globalThis.CANITY_MUSIC_TRACKS[scene])||'music/'+names[scene]+'.mp3';
         if(!m.loading[scene]){
             function decode(url){return fetch(url).then(function(r){if(!r.ok)throw new Error('music unavailable');return r.arrayBuffer();}).then(function(b){return ctx.decodeAudioData(b);});}
-            m.loading[scene]=decode(path).catch(function(e){
-                if(!m.paths[scene] && path.endsWith('.mp3'))return decode('music/'+names[scene]+'.wav');
+            var queued=(m.decodeQueue || Promise.resolve()).catch(function(){}).then(function(){
+                if(generation!==m.serial)throw new Error('superseded scene');
+                return decode(path);
+            });
+            m.decodeQueue=queued.catch(function(){});
+            m.loading[scene]=queued.catch(function(e){
+                if(generation===m.serial && !m.paths[scene] && path.endsWith('.mp3'))return decode('music/'+names[scene]+'.wav');
                 throw e;
             }).then(function(buffer){
                 /* Keep the active scene; avoid retaining the whole decoded album. */
@@ -81,7 +95,7 @@ EM_JS(void,js_music_tick,(float gain,float ratio,int paused),{
     var m=Module._musicBus;if(!m)return;var t=Module._actx.currentTime;
     m.gain.gain.setTargetAtTime(gain,t,.08);
     if(paused && gain<.0002 && !m.paused){
-        if(m.source){m.offset=(m.offset+Math.max(0,t-m.startedAt))%m.source.buffer.duration;try{m.source.stop();}catch(e){}m.source.disconnect();m.source=null;}
+        if(m.source){m.offset=(m.offset+Math.max(0,t-m.startedAt))%m.source.buffer.duration;try{m.source.stop();}catch(e){}m.source.disconnect();m.source=null;if(m.sourceGain){m.sourceGain.disconnect();m.sourceGain=null;}}
         m.paused=true;
     }else if(!paused && m.paused){m.paused=false;Module._musicPlay(m.scene,m.offset);}
     var stress=ratio>.8?0:Math.max(0,Math.min(1,(.8-ratio)/.8));

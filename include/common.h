@@ -167,7 +167,7 @@ typedef struct { LONG x, y; } POINT;
 
 /* v2.4.2：双端稳定性补丁 —— 旧档迁移 / 运行段隔离 / 相位与舱门 /
    网页动作绑定与存档导出。存档结构**未变**（仍是 v34）。 */
-#define CANITY_VERSION_STR "2.4.2-RC4"
+#define CANITY_VERSION_STR "2.4.2"
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -252,6 +252,7 @@ extern int bestEndlessScore;
    8 个箱子被摊薄成"走很久遇不到一个"。
    注意：Container cont[] 是存档字段，改这个数就是改布局 ——
    必须同时提供迁移（见 save.c 的 LoadLegacyBlob 的 containerCount 参数）。 */
+#define MAX_MONEYBAG 3
 #define MAX_CONTAINERS 12
 #define CONTAINERS_BASE 5    /* v3.4：6 → 5。箱子太多 = 道具白送，
                                 方案 v5 决定把箱子从「道具售货机」改成「金币来源」。 */

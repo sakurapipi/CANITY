@@ -353,7 +353,6 @@ static int UpdateSurvival(float dt, int inSafe) {
 
 static int UpdateCoverInput(void) {
     if(calibActive){CalibHandleInput(0);return 0;}
-    if(!guideMode && keyPressed['B']){keyPressed['B']=0;if(!trainingMode){SaveGame();if(g_saveError)return 0;}LoopQueueStart(START_GUIDE,0);StartGame();return 0;}
     /* 先判断交互目标，决定这一帧能不能移动 */
     /* ===== v3.3 交互目标优先级重排 =====
        试玩实测卡关：「站在带锁箱子前时配电箱就在正前方，

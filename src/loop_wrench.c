@@ -264,8 +264,8 @@ void WrenchKnockUpdate(float dt) {
             if (wrenchCharge > 1.0f) wrenchCharge = 1.0f;
         }
     } else if (!down && wrenchPrev) {
-        if (wrenchArmed && wrenchCharge >= WRENCH_CHARGE_DEADZONE) {
-            WrenchStartSwing(wrenchCharge);
+        if (wrenchArmed && wrenchCharge > 0.0f) {
+            WrenchStartSwing(fmaxf(WRENCH_CHARGE_DEADZONE,wrenchCharge));
         }
         wrenchCharge = 0.0f;
     }

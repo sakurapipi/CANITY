@@ -205,7 +205,21 @@ static void test_shared_map_release_and_tree_drag(void){
     CHECK(chance>=70 && chance<=85,"deep-floor spider chance increases with an 85 percent cap");
 }
 
+
+#include "run_economy.h"
+static void test_stable_rhythm_gold_cap(void){
+    int training=trainingMode,level=currentLevel;trainingMode=0;currentLevel=4;RunEconomyReset();
+    int amount=0;for(int i=0;i<20;i++)amount+=RunEconomyRhythmGold(100,100);
+    CHECK(amount==90,"rhythm gold has a hard per-floor ceiling");
+    CHECK(RunEconomyRhythmGold(100,100)==0,"repeating the minigame after the cap cannot print gold");
+    trainingMode=1;CHECK(RunEconomyRhythmGold(100,100)==0,"training minigame coins never count as real rewards");
+    trainingMode=training;currentLevel=level;RunEconomyReset();
+}
 void TestSuite_update(void) {
+    float savedPitch=pitchRatio;pitchRatio=0;CanityMouseLook(0,60);
+    CHECK(pitchRatio<0 && pitchRatio>=-1,"vertical input reaches true pitch projection");
+    pitchRatio=savedPitch;UpdatePitch();
+    test_stable_rhythm_gold_cap();
     test_shared_map_release_and_tree_drag();
     test_invalid_action_and_key_indices();
     test_session_input_cancellation();
