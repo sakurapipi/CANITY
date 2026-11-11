@@ -29,6 +29,15 @@ def main():
     gcc=Path(os.environ.get('CANITY_GCC','gcc'))
     strip=gcc.parent/'strip.exe'
     if strip.is_file():subprocess.run([str(strip),'--strip-unneeded',str(exe)],check=True)
+    music=out/'music';music.mkdir(exist_ok=True)
+    music_files=[]
+    for scene in ('menu','explore','chase','safe','victory','defeat'):
+        for suffix in ('.mp3','.chart.json'):
+            source=ROOT/'music'/(scene+suffix)
+            if source.is_file():
+                shutil.copy2(source,music/source.name);music_files.append(source.name)
+    manifest_source=ROOT/'music/score-manifest.json'
+    if manifest_source.is_file():shutil.copy2(manifest_source,music/'score-manifest.json');music_files.append('score-manifest.json')
     legal=out/'资料';legal.mkdir(exist_ok=True)
     for source in [ROOT/'LICENSE',ROOT/'l10n/OFL-NotoSansSC.txt',ROOT/'third_party/minimp3/minimp3-LICENSE.txt',ROOT/'docs/2.4.2-RC4_交付说明.md']:
         if source.is_file():shutil.copy2(source,legal/source.name)
@@ -41,16 +50,16 @@ def main():
     def archive(path,entries):
         with zipfile.ZipFile(path,'w',zipfile.ZIP_DEFLATED,compresslevel=9) as z:
             for p,rel in entries:z.write(p,rel)
-    archive(out/'CANITY_2.4.2-RC4_Windows.zip',[(exe,exe.name)]+[(p,'资料/'+p.name) for p in legal.iterdir() if p.is_file()])
+    archive(out/'CANITY_2.4.2-RC4_Windows.zip',[(exe,'CANITY_2.4.2-RC4.exe')]+[(music/n,'music/'+n) for n in music_files]+[(p,'资料/'+p.name) for p in legal.iterdir() if p.is_file()])
     archive(out/'CANITY_2.4.2-RC4_网页手机版.zip',[(p,'Web/'+p.relative_to(web).as_posix()) for p in web.rglob('*') if p.is_file()])
     archive(out/'CANITY_2.4.2-RC4_单文件网页.zip',[(dist/'standalone.html','CANITY_2.4.2-RC4.html')]+[(p,'资料/'+p.name) for p in legal.iterdir() if p.is_file()])
     excluded={'.git','work','dist','__pycache__','node_modules','build','.cache'}
     sources=[p for p in ROOT.rglob('*') if p.is_file() and not any(x in excluded for x in p.relative_to(ROOT).parts) and p.suffix.lower() not in {'.o','.obj','.exe','.dll','.pyc','.wav','.zip','.ppm'} and (p.suffix.lower()!='.sav' or p.relative_to(ROOT).as_posix().startswith('tests/fixtures/saves/'))]
     archive(out/'CANITY_2.4.2-RC4_源码.zip',[(p,'Source/'+p.relative_to(ROOT).as_posix()) for p in sources])
-    manifest={'version':'2.4.2-RC4','save_version':44,'map_size':[36,36],'container_slots':12,'windows_compiled':True,'web_compiled':True,'tests_run':bool(report),'source_git_commit':args.source_commit,'manual_acceptance':False,'pushed':False,'native_launch':'direct EXE; MP3 resources embedded; no BAT/DAT dependency','native_music_cache':'%LOCALAPPDATA%/CANITY/audio-2.4.2-RC4','default_save_directory':'%LOCALAPPDATA%/CANITY/saves; CANITY_DATA_DIR respected','files':{}}
+    manifest={'version':'2.4.2-RC4','save_version':44,'map_size':[36,36],'container_slots':12,'windows_compiled':True,'web_compiled':True,'tests_run':bool(report),'source_git_commit':args.source_commit,'manual_acceptance':False,'pushed':False,'native_build':'lite','native_launch':'Lite EXE + external music/ folder; no embedded MP3','default_save_directory':'%LOCALAPPDATA%/CANITY/saves; CANITY_DATA_DIR respected','files':{}}
     for p in [exe,*sorted(out.glob('*.zip'))]:manifest['files'][p.name]={'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
     (out/'交付清单.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),'utf-8')
-    (out/'先看这里.txt').write_text('CANITY 2.4.2-RC4\n\n直接双击 CANITY_2.4.2-RC4.exe 运行Windows版，不需要BAT或DAT。音乐嵌在EXE内，运行时缓存到用户目录。\n默认存档：%LOCALAPPDATA%/CANITY/saves，原GAME存档没有修改。若要继续旧进度，请先备份再迁入，或设置CANITY_DATA_DIR。\nWeb为网页/手机触控版，通过HTTP访问。单文件网页在单独ZIP中。\n本轮验证结果见交付清单、验收报告和GitHub实际记录，不能将编译成功视为人工验收。Source是本轮可编辑源码。\n','utf-8-sig')
+    (out/'先看这里.txt').write_text('CANITY 2.4.2-RC4（默认 Lite 构建）\n\n解压 Windows ZIP 后双击 CANITY_2.4.2-RC4.exe；必须把 music/ 目录放在 EXE 旁边。默认 Lite 构建不把 MP3 嵌进 EXE，因此 EXE 约 2 MB，音乐从 music/ 读取。\n默认存档：%LOCALAPPDATA%/CANITY/saves，原GAME存档没有修改。若要继续旧进度，请先备份再迁入，或设置CANITY_DATA_DIR。\nWeb为网页/手机触控版，通过HTTP访问。单文件网页在单独ZIP中。\n本轮验证结果见交付清单、验收报告和GitHub实际记录，不能将编译成功视为人工验收。Source是本轮可编辑源码。\n','utf-8-sig')
     print(json.dumps({k:v['bytes'] for k,v in manifest['files'].items()},ensure_ascii=False))
 
 if __name__=='__main__':main()

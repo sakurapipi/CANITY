@@ -1,4 +1,4 @@
-> **2.4.2 RC4**：修复网页地图松键、全屏退出、手机蓄力扳手和技能树拖动，新增缩放按钮，调整蜘蛛出场率与精神污染层级。Windows提供内嵌MP3的直接运行EXE。详见 [RC4更新与验证说明](docs/RELEASE-v2.4.2-rc4.md)。
+> **2.4.2 RC4**：修复网页地图松键、全屏退出、手机蓄力扳手和技能树拖动，新增缩放按钮，调整蜘蛛出场率与精神污染层级。Windows 默认 **Lite 构建**：EXE 约 2 MB，音乐放外部 `music/`；需要单文件 EXE 时用 `--embed-music` 构建 Full 版。详见 [RC4更新与验证说明](docs/RELEASE-v2.4.2-rc4.md)。
 
 # CANITY
 
@@ -18,9 +18,11 @@ Windows 桌面版与 WebAssembly 网页版共用游戏规则。射线投射、�
 
 ### Windows
 
-RC4 Windows包完整解压后，双击 **canity.exe**，无需 BAT 或 DAT。MP3音乐已嵌入程序，首次运行会缓存到用户目录；请保留随包许可证。
+RC4 Windows包默认是 **Lite 构建**：完整解压后双击 **canity.exe**，但必须保留旁边的 `music/` 目录；音乐不嵌入 EXE，因此 EXE 约 2 MB。请保留随包许可证。
 
-RC4单EXE在未指定 `CANITY_DATA_DIR` 时使用 `%LOCALAPPDATA%/CANITY/saves/`，已设置该变量时保留用户指定位置。旧版便携包的 `saves/` 不会自动被覆盖。升级前请备份自己的存档，不要用测试目录覆盖玩家数据。
+如果使用 `build_validate.py --embed-music` 构建 Full 版，则 MP3 会嵌入 EXE，可单文件运行。
+
+Lite/Full 在未指定 `CANITY_DATA_DIR` 时都使用 `%LOCALAPPDATA%/CANITY/saves/`，已设置该变量时保留用户指定位置。旧版便携包的 `saves/` 不会自动被覆盖。升级前请备份自己的存档，不要用测试目录覆盖玩家数据。
 
 ### 网页与手机
 
@@ -90,11 +92,14 @@ python -m http.server 8080
 需要 Python 3、MinGW-w64 GCC 与 `windres`。工具默认从 PATH 查找，也可设置 `CANITY_GCC`、`CANITY_WINDRES` 指向可执行文件。
 
 ```sh
-# 编译、独立运行全部测试域，并执行结构与内容检查
+# 默认 Lite：编译 + 全部测试；EXE 不嵌入 MP3，需保留 music/ 目录
 python -X utf8 tools/build_validate.py
 
 # 只编译，不构成验证通过
 python -X utf8 tools/build_validate.py --build-only
+
+# 可选 Full：把六首 MP3 嵌进 EXE（体积约 +7 MB，可单文件运行）
+python -X utf8 tools/build_validate.py --embed-music
 ```
 
 权威源文件清单由 `tools/build_sources.py` 管理，包含子目录和平台后端筛选，请勿用手写的 `src/*.c` 替代。
@@ -119,7 +124,7 @@ python -X utf8 tools/package_playable.py --include-web --acceptance-report work/
 python -X utf8 tools/package_web_mobile.py
 ```
 
-`--include-web` 要求网页构建已存在。运行包记录源码、资源和验证摘要；报告与当前验证输入不匹配时拒绝套用。生成安装包不等于已经完成真实桌面或手机验收。
+`--include-web` 要求网页构建已存在。默认打包 **Lite**：复制 EXE 与 `music/`、谱面和清单；只有用 `--embed-music` 构建 Full 版后，才可加 `--single-exe --embed-music` 打单文件 EXE 包。运行包记录源码、资源和验证摘要；报告与当前验证输入不匹配时拒绝套用。生成安装包不等于已经完成真实桌面或手机验收。
 
 ## RC4 验证记录
 

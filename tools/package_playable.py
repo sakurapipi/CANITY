@@ -1,5 +1,9 @@
 """Package an already compiled local game; does not run it, test it or push git.
 
+Default package is Lite: copy canity.exe + external music/ (MP3, chart, manifest).
+For a Full single EXE, first build with build_validate.py --embed-music, then
+pass --single-exe --embed-music.
+
 python tools/build_validate.py --build-only
 python tools/build_web.py                 # optional browser build
 python tools/package_playable.py --include-web
@@ -26,12 +30,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=Path.home()/'Desktop'/'GAME')
     parser.add_argument('--include-web', action='store_true')
-    parser.add_argument('--single-exe', action='store_true',help='MP3 resources are already embedded in this Windows build')
-    parser.add_argument('--label', default='CANITY_2.4.2RC_完整运行包')
+    parser.add_argument('--single-exe', action='store_true',
+                        help='Only for a Full build made with build_validate.py --embed-music')
+    parser.add_argument('--embed-music', action='store_true',
+                        help='Assert that the compiled EXE already embeds MP3 resources (Full build)')
+    parser.add_argument('--label', default='CANITY_2.4.2RC_Lite运行包')
     parser.add_argument('--notes', type=Path, default=Path('docs/2.4.2RC_审计整改_20261110.md'))
     parser.add_argument("--acceptance-report", type=Path)
     parser.add_argument("--source-commit", default=os.environ.get("GITHUB_SHA"))
     args = parser.parse_args()
+    if args.single_exe and not args.embed_music:
+        raise SystemExit('默认是 Lite 构建：EXE 不含 MP3，必须保留 music/ 目录。'
+                         '只有用 build_validate.py --embed-music 重建后才可使用 --single-exe --embed-music。')
     if args.source_commit and not re.fullmatch(r"[0-9a-fA-F]{40}",args.source_commit):
         raise SystemExit("source commit must be a complete Git SHA")
     acceptance = json.loads(args.acceptance_report.read_text(encoding="utf-8")) if args.acceptance_report else None
@@ -109,14 +119,14 @@ def main():
                 'if not defined CANITY_MUSIC set "CANITY_MUSIC=files"\r\n'
                 'start "" /wait "%~dp0canity.exe"\r\nendlocal\r\n')
     if not args.single_exe:(folder/'开始游戏.bat').write_bytes(launcher.encode('ascii'))
-    (folder/'运行说明.txt').write_text('CANITY 2.4.2 RC — 验收链、迁移与交互反馈整改\n\nWindows：完整解压后双击“开始游戏.bat”。保留DLL与music目录。\n本轮修复静态检查截断、分域验收流程、迁移备份与显示设置、技能前置、商店和引导反馈及发布资源遗漏。\n详细内容见随包修改说明。保留36×36地图、12容器槽、64世界精灵容量及v44存档格式。\n存档位于saves目录，沿用旧进度前请备份。\n\n网页及手机触控版：部署index.html、index.js、index.wasm和music到HTTP网站。\n手机推荐横屏；这是触控网页版，不是APK。\n\n本轮仅修改代码、编译和打包；未启动游戏、未运行测试或验收、未提交或推送。\n先前验收记录仅代表旧代码，不能作为本轮通过证据。\n',encoding='utf-8-sig')
+    (folder/'运行说明.txt').write_text('CANITY 2.4.2 RC — 验收链、迁移与交互反馈整改\n\nWindows（默认 Lite 构建）：完整解压后双击“开始游戏.bat”。必须保留 DLL 与 music 目录；音乐从 music/ 读取，不嵌入 EXE。\n本轮修复静态检查截断、分域验收流程、迁移备份与显示设置、技能前置、商店和引导反馈及发布资源遗漏。\n详细内容见随包修改说明。保留36×36地图、12容器槽、64世界精灵容量及v44存档格式。\n存档位于saves目录，沿用旧进度前请备份。\n\n网页及手机触控版：部署index.html、index.js、index.wasm和music到HTTP网站。\n手机推荐横屏；这是触控网页版，不是APK。\n\n本轮仅修改代码、编译和打包；未启动游戏、未运行测试或验收、未提交或推送。\n先前验收记录仅代表旧代码，不能作为本轮通过证据。\n',encoding='utf-8-sig')
     if acceptance:
         shutil.copy2(args.acceptance_report,folder/'验收摘要.json')
-        (folder/'运行说明.txt').write_text('CANITY — 本轮验证运行包\n\n完整解压后双击“开始游戏.bat”。\n本轮实际验证结果见验收摘要.json；自动化通过不等于所有Windows真机或实体手机场景已验收。\n存档默认位于saves，预先设置CANITY_DATA_DIR时使用指定目录。\n详细变更见随包交接说明。\n',encoding='utf-8-sig')
+        (folder/'运行说明.txt').write_text('CANITY — 本轮验证运行包（默认 Lite 构建）\n\n完整解压后双击“开始游戏.bat”，必须保留 music 目录。\n本轮实际验证结果见验收摘要.json；自动化通过不等于所有Windows真机或实体手机场景已验收。\n存档默认位于saves，预先设置CANITY_DATA_DIR时使用指定目录。\n详细变更见随包交接说明。\n',encoding='utf-8-sig')
     if args.single_exe:
         strip=Path(compiler).resolve().parent/'strip.exe' if compiler else None
         if strip and strip.is_file():subprocess.run([str(strip),'--strip-unneeded',str(folder/'canity.exe')],check=True)
-        (folder/'运行说明.txt').write_text('CANITY RC4：直接双击canity.exe，无需BAT或DAT。音乐嵌入EXE，首次运行写入用户缓存。默认存档位于%LOCALAPPDATA%/CANITY/saves，尊重CANITY_DATA_DIR。验证范围以随包报告为准。',encoding='utf-8-sig')
+        (folder/'运行说明.txt').write_text('CANITY Full：直接双击canity.exe，无需BAT或DAT。音乐嵌入EXE，首次运行写入用户缓存。默认存档位于%LOCALAPPDATA%/CANITY/saves，尊重CANITY_DATA_DIR。验证范围以随包报告为准。',encoding='utf-8-sig')
     source_hashes = {}
     for directory in ('src', 'include', 'tools', 'tests', 'l10n', 'third_party'):
         for path in sorted((ROOT/directory).rglob('*')):

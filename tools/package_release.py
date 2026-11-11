@@ -1,4 +1,7 @@
-"""打包发布：编译 -> 嵌资源 -> 生成可直接发布的 zip。
+"""打包发布：编译 Lite EXE -> 复制外部 music/ -> 生成可直接发布的 zip。
+
+默认 Lite：EXE 不嵌入 MP3，压缩包内必须保留 music/ 目录。
+需要 Full 单文件版时用 tools/build_validate.py --embed-music 另行打包。
 
 为什么需要它：
   直接把 exe 甩给别人，Windows 会在对方电脑上弹
@@ -23,6 +26,7 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = os.path.join(ROOT, "dist")
+SCENES = ("menu", "explore", "chase", "safe", "victory", "defeat")
 
 # 可选的本地工具链目录。
 # 默认只用 PATH 里的 gcc/windres（CI 和正常环境都够用）；
@@ -77,6 +81,24 @@ def copy_extra(out_dir: str, ver: str) -> None:
     shutil.copyfile(UNBLOCK_SRC, os.path.join(out_dir, "解除锁定.bat"))
 
 
+def copy_music(out_dir: str) -> int:
+    """Lite 构建的 EXE 不嵌 MP3，运行时从同目录 music/ 读取。"""
+    music = os.path.join(out_dir, "music")
+    os.makedirs(music, exist_ok=True)
+    count = 0
+    for scene in SCENES:
+        for suffix in (".mp3", ".chart.json"):
+            src = os.path.join(ROOT, "music", scene + suffix)
+            if os.path.isfile(src):
+                shutil.copyfile(src, os.path.join(music, scene + suffix))
+                count += 1
+    manifest = os.path.join(ROOT, "music", "score-manifest.json")
+    if os.path.isfile(manifest):
+        shutil.copyfile(manifest, os.path.join(music, "score-manifest.json"))
+        count += 1
+    return count
+
+
 def main() -> int:
     ver = version()
     name = "CANITY_v%s_win64" % ver
@@ -87,7 +109,9 @@ def main() -> int:
     os.makedirs(out_dir)
 
     print("1/4 资源")
-    obj = os.path.join(ROOT, "res", "canity_res.o")
+    # 独立对象名：不要覆盖 build_validate 的 canity_res.o，
+    # 否则 Full/Lite 的缓存指纹会和磁盘上的资源对象脱节。
+    obj = os.path.join(ROOT, "res", "canity_res_lite.o")
     run([tool("windres"), os.path.join("res", "canity.rc"), "-O", "coff", "-o", obj])
 
     print("2/4 编译")
@@ -114,22 +138,31 @@ def main() -> int:
 
     print("3/4 附带文件")
     copy_extra(out_dir, ver)
+    music_count = copy_music(out_dir)
+    if music_count < 13:
+        print("   警告：music/ 资源不完整（%d 个文件）" % music_count)
+        return 1
 
     print("4/4 打 zip")
     zip_path = os.path.join(DIST, name + ".zip")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-        for fn in sorted(os.listdir(out_dir)):
-            z.write(os.path.join(out_dir, fn), os.path.join(name, fn))
+        for root_dir, _dirs, files in os.walk(out_dir):
+            for fn in sorted(files):
+                full = os.path.join(root_dir, fn)
+                rel = os.path.relpath(full, out_dir)
+                z.write(full, os.path.join(name, rel))
 
     # 自检：清单和版本信息必须真的嵌进去了
     data = open(os.path.join(out_dir, "canity.exe"), "rb").read()
     ok_manifest = b"requestedExecutionLevel" in data and b"asInvoker" in data
     ok_version = "Canity - raycasting horror game".encode("utf-16-le") in data
-    print("   exe %.0f KB | 清单 %s | 版本信息 %s"
-          % (len(data) / 1024.0, "OK" if ok_manifest else "缺失!", "OK" if ok_version else "缺失!"))
+    ok_music = os.path.isfile(os.path.join(out_dir, "music", "menu.mp3"))
+    print("   Lite exe %.0f KB | 清单 %s | 版本信息 %s | music %s"
+          % (len(data) / 1024.0, "OK" if ok_manifest else "缺失!",
+             "OK" if ok_version else "缺失!", "OK" if ok_music else "缺失!"))
     print("   zip %.0f KB -> %s" % (os.path.getsize(zip_path) / 1024.0, zip_path))
-    if not (ok_manifest and ok_version):
-        print("   警告：资源没嵌全，检查 res/canity.rc")
+    if not (ok_manifest and ok_version and ok_music):
+        print("   警告：资源没打包完整，检查 res/canity.rc 与 music/")
         return 1
     return 0
 

@@ -1,5 +1,8 @@
 """ASCII-only, incremental C99 build and real-runtime validation.
 
+默认构建是 Lite：不把 music/*.mp3 嵌进 EXE，运行时从外部 music/ 目录读取。
+可选 --embed-music 生成 Full 单文件 EXE（体积约 +7 MB）。
+
 工具链解析（本地与 CI 同源）：
   CANITY_GCC      gcc 可执行路径；未设则在 PATH 里找 gcc
   CANITY_WINDRES  windres 可执行路径；未设则在 PATH 里找 windres
@@ -20,6 +23,9 @@ os.chdir(root)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--build-only', action='store_true')
+parser.add_argument('--embed-music', action='store_true',
+                    help='Full build: embed the six MP3s into the EXE (larger). '
+                         'Default is Lite with external music/ files.')
 args = parser.parse_args()
 
 
@@ -79,7 +85,7 @@ def run(cmd,env=None,label=None,timeout=300):
     return code==0
 
 def finish():
-    report=dict(passed=all(item['returncode']==0 for item in results),build_only=args.build_only,acceptance_tests_run=not args.build_only,
+    report=dict(passed=all(item['returncode']==0 for item in results),build_only=args.build_only,embed_music=bool(args.embed_music),acceptance_tests_run=not args.build_only,
                 source_inputs_sha256=inputs_digest(root,sources),include_sha256=include_digest(root),validation_inputs_sha256=validation_digest(root),stages=results)
     (cache/'validation-summary.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
     print(('BUILD SUMMARY' if args.build_only else 'VALIDATION SUMMARY')+': %d passed / %d failed'%(sum(r['returncode']==0 for r in results),sum(r['returncode']!=0 for r in results)))
@@ -94,10 +100,14 @@ res_o = root / 'res' / 'canity_res.o'
 rc = root / 'res' / 'canity.rc'
 resource_inputs = [p for p in (root / 'res').rglob('*')
                    if p.is_file() and p.suffix.lower() in {'.rc', '.h', '.ico', '.manifest', '.bmp', '.png'}]
-resource_inputs += sorted((root/'music').glob('*.mp3'))  # RC4 embeds these in PE resources.
-resources = dict(compiler=tool_identity(WINDRES), inputs=inputs_digest(root, resource_inputs))
+# Lite（默认）不把 MP3 当资源输入；Full 才需要它们参与指纹并嵌入。
+if args.embed_music:
+    resource_inputs += sorted((root/'music').glob('*.mp3'))
+resources = dict(compiler=tool_identity(WINDRES), inputs=inputs_digest(root, resource_inputs),
+                 embed_music=bool(args.embed_music))
 if not res_o.exists() or previous.get('resources') != resources:
-    resources_ok=run([WINDRES, rc, '-O', 'coff', '-o', res_o],label='resources')
+    rc_flags = ['-D', 'CANITY_EMBED_MUSIC'] if args.embed_music else []
+    resources_ok=run([WINDRES, *rc_flags, rc, '-O', 'coff', '-o', res_o],label='resources')
 else:
     resources_ok=True
 
