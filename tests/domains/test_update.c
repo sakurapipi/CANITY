@@ -205,7 +205,161 @@ static void test_shared_map_release_and_tree_drag(void){
     CHECK(chance>=70 && chance<=85,"deep-floor spider chance increases with an 85 percent cap");
 }
 
+/* ==================================================================
+ * 回归探针：暂停菜单回主菜单 / 藏身点识别
+ * 用户实测报告的两个 bug，先在这里钉住"玩家能看到的结果"。
+ * ================================================================== */
+static void probe_pause_menu_returns_to_main_menu(void) {
+    enter_playing();
+    lockActive = 0; calibActive = 0; shopOverlayOpen = 0; menuSelection = 0;
+
+    CanityKeyDown(VK_ESCAPE, 0);
+    CHECK(currentState == STATE_PAUSED, "Esc during play must open the pause menu");
+
+    CanityKeyDown(VK_DOWN, 0);
+    CanityKeyDown(VK_DOWN, 0);
+    CHECK(menuSelection == 2, "the pause menu must reach its Main Menu row");
+
+    CanityKeyDown(VK_RETURN, 0);
+    CHECK(currentState == STATE_MAIN_MENU,
+          "confirming the pause menu Main Menu row must return to the main menu");
+}
+
+static void probe_hide_spot_is_recognised(void) {
+    extern float hideBlockTimer;
+    extern int roomPropCount, hatchCount;
+    int interactKey = (int)g_bindings[ACT_INTERACT];
+
+    enter_playing();
+    /* 隔离：玩家身边不放别的可交互物，只留一个正前方的藏身点 */
+    containerCount = 0;
+    roomPropCount = 0;
+    hatchCount = 0;
+    breaker.active = 0;
+    hideBlockTimer = 0.0f;
+    hoverKind = 0;
+    memset(hideSpots, 0, sizeof(hideSpots));
+    hideSpotCount = 1;
+    hideSpots[0].active = 1;
+    hideSpots[0].x = posX + dirX * 0.5f;
+    hideSpots[0].y = posY + dirY * 0.5f;
+    hiddenIn = -1;
+    hideSpotNear = -1;
+
+    /* 先松开 E，清掉 EnterHide 的静态锁存 */
+    keys[interactKey] = 0;
+    keyPressed[interactKey] = 0;
+    Update(0.016f);
+    CHECK(hideSpotNear == 0,
+          "a hide spot directly in front of the player must be recognised");
+
+    keyPressed[interactKey] = 1;
+    keys[interactKey] = 1;
+    Update(0.016f);
+    CHECK(hiddenIn == 0, "pressing E at a recognised hide spot must let the player hide");
+
+    keys[interactKey] = 0;
+    keyPressed[interactKey] = 0;
+    Update(0.016f);
+    CHECK(hiddenIn == 0, "releasing E must not pop the player back out of cover");
+}
+
+static void probe_pause_menu_mouse_and_hide_priority(void) {
+    extern float hideBlockTimer;
+    extern int roomPropCount, hatchCount;
+    int interactKey = (int)g_bindings[ACT_INTERACT];
+
+    /* 暂停菜单：鼠标点第 3 行「主菜单」 */
+    enter_playing();
+    lockActive = 0; calibActive = 0; shopOverlayOpen = 0;
+    CanityKeyDown(VK_ESCAPE, 0);
+    {
+        MenuGeo g = GetMenuGeo();
+        RECT r = RowRect(g, 2);
+        CHECK(g.count == 3 && g.maxVisibleRows >= 3,
+              "the pause menu must show all three of its rows without scrolling");
+        CanityMouseClick((int)((r.left + r.right) / 2), (int)((r.top + r.bottom) / 2));
+        CHECK(currentState == STATE_MAIN_MENU,
+              "mouse click on the pause menu Main Menu row must return to the main menu");
+    }
+
+    /* 家具在触达范围内时藏身点仍要能进，且进去后不能顺手触发长按搜查 */
+    enter_playing();
+    containerCount = 0; hatchCount = 0; breaker.active = 0;
+    hideBlockTimer = 0.0f; hoverKind = 0;
+    memset(hideSpots, 0, sizeof(hideSpots));
+    hideSpotCount = 1;
+    hideSpots[0].active = 1;
+    hideSpots[0].x = posX + dirX * 0.5f;
+    hideSpots[0].y = posY + dirY * 0.5f;
+    hiddenIn = -1; hideSpotNear = -1;
+    roomPropCount = 1;
+    memset(roomProps, 0, sizeof(roomProps));
+    roomProps[0].active = 1;
+    roomProps[0].searchLeft = 1;
+    roomProps[0].x = posX; roomProps[0].y = posY;
+
+    keys[interactKey] = 0; keyPressed[interactKey] = 0;
+    Update(0.016f);
+    CHECK(hideSpotNear == 0,
+          "a hide spot directly in front of the player must be recognised");
+    CHECK(hoverKind == 3, "the probe must actually have furniture in reach");
+
+    keyPressed[interactKey] = 1; keys[interactKey] = 1;
+    Update(0.016f);
+    CHECK(hiddenIn == 0,
+          "a hide spot must stay enterable when furniture is in reach");
+    CHECK(!holdingNow, "hiding must not start a long-press search on that furniture");
+
+    keys[interactKey] = 0; keyPressed[interactKey] = 0;
+    Update(0.016f);
+    roomPropCount = 0;
+}
+
+/* 暂停菜单「主菜单」不能因为一次存盘失败就把玩家永久关在暂停里。
+   存盘失败时 toast 也不会在暂停画面绘制（DrawPickupToast 只在游玩中画），
+   玩家看到的就是"点了没反应"。
+   同时：CANITY_DATA_DIR 只是首选目录，不可写时必须继续尝试 exe 目录等
+   兜底位置，而不是把整张候选表都指向同一个坏路径。 */
+static void probe_save_failure_must_not_trap_pause_menu(void) {
+    char saved[512];
+    char fallback[MAX_PATH];
+    const char* cur;
+    enter_playing();
+    lockActive = 0; calibActive = 0; shopOverlayOpen = 0; menuSelection = 0;
+
+    CanityKeyDown(VK_ESCAPE, 0);
+    CanityKeyDown(VK_DOWN, 0);
+    CanityKeyDown(VK_DOWN, 0);
+    CHECK(menuSelection == 2, "pause menu must reach its Main Menu row");
+
+    cur = getenv("CANITY_DATA_DIR");
+    snprintf(saved, sizeof(saved), "%s", cur ? cur : "");
+    _putenv_s("CANITY_DATA_DIR", "Q:\\canity-unwritable-probe");
+    _putenv_s("CANITY_DATA_DIR_AUTO", "1");
+    CanityKeyDown(VK_RETURN, 0);
+    CHECK(currentState == STATE_MAIN_MENU,
+          "a failed save must not trap the player in the pause menu");
+    CHECK(g_saveState == 1,
+          "an unwritable auto-selected data dir must fall back to a writable location");
+    CHECK(strncmp(g_savePath, "Q:", 2) != 0,
+          "the fallback save must name the location that actually accepted it");
+    snprintf(fallback, sizeof(fallback), "%s", g_savePath);
+    _putenv_s("CANITY_DATA_DIR", saved);
+    _putenv_s("CANITY_DATA_DIR_AUTO", "0");
+    if (fallback[0]) {
+        char bak[MAX_PATH + 8];
+        remove(fallback);
+        snprintf(bak, sizeof(bak), "%s.bak", fallback);
+        remove(bak);
+    }
+}
+
 void TestSuite_update(void) {
+    probe_pause_menu_returns_to_main_menu();
+    probe_hide_spot_is_recognised();
+    probe_save_failure_must_not_trap_pause_menu();
+    probe_pause_menu_mouse_and_hide_priority();
     test_shared_map_release_and_tree_drag();
     test_invalid_action_and_key_indices();
     test_session_input_cancellation();

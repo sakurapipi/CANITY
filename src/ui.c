@@ -755,23 +755,21 @@ void FrameRectWin(int x0, int y0, int x1, int y1, unsigned int color, float alph
 
 /* v2.5：校准条本体（位置由调用方给）。
    拆出来是因为「游戏内按空格开始小游戏」时，安全屋面板根本没画，
-   原来画在面板里的条就永远看不到。 */
+   原来画在面板里的条就永远看不到。
+   v3.5：这是**40 秒谱面进度条**，不是判定区。原来的绿色“安全区/完美区”
+   是旧扫条玩法的残留，QWER 音游里它只会误导玩家对着某个时间点按空格。
+   现在只画进度和播放头，判定看上方四条轨道的音符落点。 */
 void DrawCalibBar(int bx, int by, int barW, int barH) {
     if (barW < UIS(120)) return;
     BlendRectWin(bx, by, bx + barW, by + barH, 0x00101418, 0.92f);
     {
-        float zsc = CalibZoneScale();   /* v2.6：随层数缩小 */
-        int zx0 = bx + (int)((calibZoneC - CALIB_ZONE_W * zsc) * barW);
-        int zx1 = bx + (int)((calibZoneC + CALIB_ZONE_W * zsc) * barW);
-        BlendRectWin(zx0, by, zx1, by + barH, 0x00307A4A, 0.85f);
-        int px0 = bx + (int)((calibZoneC - CALIB_PERFECT_W * zsc) * barW);
-        int px1 = bx + (int)((calibZoneC + CALIB_PERFECT_W * zsc) * barW);
-        BlendRectWin(px0, by, px1, by + barH, 0x00E8F0A0, 0.95f);
-    }
-    {
-        int mx = bx + (int)(calibPos * barW);
+        float p = calibPos;
+        if (!(p >= 0.0f)) p = 0.0f;
+        if (p > 1.0f) p = 1.0f;
+        int px = bx + (int)(p * barW);
+        if (px > bx) BlendRectWin(bx, by, px, by + barH, 0x00307A4A, 0.85f);
         int mw = UIS(4);
-        BlendRectWin(mx - mw / 2, by - UIS(3), mx + mw / 2, by + barH + UIS(3),
+        BlendRectWin(px - mw / 2, by - UIS(3), px + mw / 2, by + barH + UIS(3),
                      calibActive ? 0x00FFFFFFu : 0x00606060u, 0.98f);
     }
     FrameRectWin(bx, by, bx + barW, by + barH, 0x00708090u, 0.8f, 1);
@@ -2570,14 +2568,11 @@ static void DrawHudCoverAndThreat(void) {
 
         /* ① 藏身提示 */
         if (hiddenIn >= 0) {
-            /* v3.0：**只保留左下角那一条** ——
-               玩家实测中间和左下各有一条 HIDDEN，重复且抢画面中央。 */
-        } else if (hiddenIn >= 0) {
             /* v3.0：藏在藏身点里 —— **两行提示**（用户要求）
                第 1 行：空格开始校准小游戏（或显示冷却剩余）
                第 2 行：T 打开商店面板 */
 
-            int hy = winH - UIS(150);
+            int hy = winH - UIS(134) - 2 * TextHeightWin();
             int lh = TextHeightWin() + UIS(4);
 
             if (calibCooldown > 0.0f) {
@@ -2593,7 +2588,8 @@ static void DrawHudCoverAndThreat(void) {
             }
             DrawTextWin(UIS(20), hy + lh,
                         Tr("T  -  OPEN SHOP", "T  -  打开商店"), UI_ACCENT);
-        } else if (hideSpotNear >= 0 && currentState == STATE_PLAYING) {
+        } else if (hideSpotNear >= 0 && currentState == STATE_PLAYING &&
+                   (hoverKind == 0 || hoverKind == 3 || hoverKind == 4)) {
             /* ===== v2.4.21 **坏掉的藏身点要报修复金额** =====
                用户反馈：柜子坏了之后只提示 "NOT ENOUGH GOLD"，
                根本不知道要多少钱 —— 等于让玩家盲赌。
@@ -3205,6 +3201,9 @@ static void DrawHudActionHints(const HudBarLayout* layout) {
 }
 
 void DrawHUD(void) {
+    /* 锁盘是模态层：解锁时整层 HUD 让位，避免“藏好了 / 空格小游戏 /
+       T 商店”这些提示从锁盘边缘透出来，和面板文字挤在一起。 */
+    if (lockActive) return;
     /* Keep this order: later units intentionally overlay earlier drawing. */
     if (currentState == STATE_PLAYING && !isMapOpen) DrawCrosshair();
     int effDetail = keys[VK_TAB] ? 2 : hudDetail;
@@ -3262,7 +3261,8 @@ static void DrawSaveStatusBanner(void) {
        还写着 "TRIED: <本机绝对路径>"，
        第一眼让人以为存档废了。
        现在只在游戏中（PLAYING/PAUSED）提示，且**不显示路径和错误码**。 */
-    if (currentState != STATE_PLAYING && currentState != STATE_PAUSED) return;
+    if (currentState != STATE_PLAYING && currentState != STATE_PAUSED &&
+        currentState != STATE_MAIN_MENU) return;
     int th = TextHeightWin();
     int h = th + th / 2;
     /* v3.0 **BUG 修复**：原来 msg 指向字符串字面量，直接传给 ClampRowText，
@@ -3309,6 +3309,9 @@ void UiShowActionError(const char* message){
 }
 
 void DrawPickupToast(void) {
+    /* 锁盘打开时不画任何拾取/藏身 toast；它原来画在锁盘之后，
+       会和锁盘底部说明文字直接叠在一起。 */
+    if (lockActive) return;
     if(actionErrorMessage && PlatNow()<actionErrorUntil &&
        (currentState==STATE_PLAYING || currentState==STATE_SAFEHOUSE)){
         int width=DrawTextSmallWidth(actionErrorMessage),x=(winW-width)/2,y=UIS(90);

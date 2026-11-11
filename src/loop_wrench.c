@@ -79,6 +79,7 @@ static void WrenchApplyHit(float power) {
             /* 第 1 轮：命中闪光 —— 让玩家**看得见**自己打中了 */
             {  wrenchHitFlashT = 0.22f; }
             target->stun=RunUpgWrenchStun()*BenchKnockStunMul();
+            SpawnParticles(target->x, target->y, 1);   /* v3.6：受击血/墨粒子 */
             knockCountRun++;
             if(SkillOwned(SK_COUNTER_REPOSITION) && retaliateT<1.0f)retaliateT=1.0f;
             if(BenchShock()) { SuspicionReset();target->stateTimer=0.0f;target->tx=target->x;target->ty=target->y; }
@@ -107,6 +108,7 @@ static void WrenchApplyHit(float power) {
             float sdx = SpiderX() - posX, sdy = SpiderY() - posY;
             float reach = RunUpgWrenchRange() + BenchKnockExtra() + 1.2f;
             if (sdx * sdx + sdy * sdy < reach * reach) {
+                SpawnParticles(posX + sdx, posY + sdy, 1);
                 SpiderDispel();
                 wrenchHitMask |= 32u;
                 knockCountRun++;

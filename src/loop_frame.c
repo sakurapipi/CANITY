@@ -379,7 +379,10 @@ static int UpdateCoverInput(void) {
        没锁的仍然长按搜索。 */
     if (hoverKind == 1 && hoverIndex >= 0 && hoverIndex < MAX_CONTAINERS &&
         containers[hoverIndex].active && !containers[hoverIndex].searched &&
-        containers[hoverIndex].locked && !lockActive) {
+        containers[hoverIndex].locked && !lockActive && hiddenIn < 0) {
+        /* 藏在藏身点里时 E 的语义是“出来”。箱子与藏身点刷得太近时，
+           原来这里会越过藏身状态直接弹锁盘，出现“藏好了 + 锁盘/HUD”
+           叠在一起。现在先离开藏身点，下一次 E 才能开箱。 */
         if (IsActionPressed(ACT_INTERACT)) {
             LockOpenFor(hoverIndex, containers[hoverIndex].lockType);
             keyPressed[g_bindings[ACT_INTERACT]] = 0;
@@ -468,7 +471,7 @@ static int UpdateCoverInput(void) {
                 }
                 uiDirty = 1;
             }
-        } else if (hideSpotNear >= 0 && hoverKind == 0 && hideBlockTimer <= 0.0f) {
+        } else if (hideSpotNear >= 0 && (hoverKind == 0 || hoverKind == 3 || hoverKind == 4) && hideBlockTimer <= 0.0f) {
             /* v3.0 修复：**附近有可交互的箱子时，藏身点不抢 E** ——
                原来藏身点无条件抢在容器前面消费按键
                （用户实测：箱子和躲藏点刷在一起时箱子开不了）。 */
@@ -509,7 +512,7 @@ static int UpdateCoverInput(void) {
         }
     }
 
-    holdingNow = (!calibActive && hoverKind != 0 && ActionIsDown(ACT_INTERACT));
+    holdingNow = (!calibActive && hiddenIn < 0 && hoverKind != 0 && ActionIsDown(ACT_INTERACT));
     }
 
     return 1;

@@ -614,8 +614,34 @@ static void test_stable_visuals_and_input(void) {
      现在反过来检查：那段不透明黑边不该再回来。 */
     check(!contains(ui, "int bandT = winH * 37 / 100;"),
           "hide mask bands came back (user asked to remove it)");
+    check(!contains(ui, "} else if (hiddenIn >= 0)"),
+          "unreachable hide-hint branch hides the SPACE/T minigame prompt");
     check(contains(render,"GenerateVignette(void)") && contains(render,"vignetteMask"),
           "low-sanity rendering keeps its precomputed edge mask");
+    /* 音游判定：一次物理按键只能判一次；系统重复/触屏重复边沿不能
+       每个都算失误。 */
+    {
+        const char* calib = read_file("src/loop_calibration.c");
+        const char* ui_menu = read_file("src/domain/ui/ui_menu.c");
+        check(contains(calib, "CALIB_LANE_DEBOUNCE") &&
+              contains(calib, "if(laneLatch[lane] || elapsed-lanePressAt[lane]<CALIB_LANE_DEBOUNCE)return;"),
+              "calibration repeated keydowns must be debounced per lane");
+        check(contains(calib, "if(best>=0 && delta<=HitWindow()*2.0f) judged[best]=1;") &&
+              contains(calib, "int alreadyMissed = (elapsed-laneMissAt[lane] <= HitWindow());"),
+              "a miss press must not be charged twice for the same note");
+        check(!contains(ui, "CALIB_ZONE_W * zsc"),
+              "the obsolete sweep zone must not return to the QWER progress bar");
+        check(!contains(ui_menu, "按空格锁定"),
+              "the QWER minigame must not tell the player to lock a sweep bar");
+        free((void*)calib);
+        free((void*)ui_menu);
+    }
+    /* 锁盘与藏身/拾取提示不能同屏叠加。 */
+    check(contains(game, "containers[hoverIndex].locked && !lockActive && hiddenIn < 0"),
+          "a hidden player must leave cover before opening a locked box");
+    check(contains(ui, "if (lockActive) return;") &&
+          contains(ui, "锁盘打开时不画任何拾取/藏身 toast"),
+          "lock overlay must suppress hiding/pickup HUD and toasts");
     check(contains(render,"RenderPostBand(int y0,int y1)") &&
           contains(render,"perception.grain") && contains(render,"perception.seed") &&
           contains_tight(render,"noise=noise*1664525u+1013904223u;"),

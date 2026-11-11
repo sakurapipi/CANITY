@@ -1251,13 +1251,14 @@ static void BakeHumanoidLegs(const HumanoidBakeContext* shape) {
            walkDir 让 pose1 和 pose3 的迈步方向相反，两个走路帧才不一样。 */
         int walkDir = (pose == 3) ? -1 : 1;
         float stepAmt = walk ? 9.0f : 0.0f;
+        int crouched = shape->mon->kind == 0;
         for (int s2 = -1; s2 <= 1; s2 += 2) {
             float hx = cx + (float)s2 * shoulderW * 0.34f;
             /* s2 * walkDir = +1 的那条腿在前，-1 的在后 */
             float ph = (float)(s2 * walkDir);
-            float kneeX = hx + ph * stepAmt * 0.55f;
-            float kneeY = (pelvisY + footY) * 0.5f - ph * stepAmt * 0.20f;
-            float ankleX = hx + ph * stepAmt * 0.95f;
+            float kneeX = hx + ph * stepAmt * 0.55f + (crouched ? (float)s2 * 4.0f : 0.0f);
+            float kneeY = (pelvisY + footY) * 0.5f - ph * stepAmt * 0.20f + (crouched ? 4.0f : 0.0f);
+            float ankleX = hx + ph * stepAmt * 0.95f - (crouched ? (float)s2 * 1.5f : 0.0f);
             Limb(hx, pelvisY, kneeX, kneeY, 13.0f, 10.0f, edge, body, hi);
             Limb(kneeX, kneeY, ankleX, footY - 4.0f, 10.0f, 7.0f, edge, body, hi);
             cvEllipse(ankleX, footY - 3.0f - (walk ? ph * 2.0f : 0.0f), 7.0f, 3.4f, edge, 1.0f);
@@ -1329,18 +1330,20 @@ static void BakeHumanoidArms(const HumanoidBakeContext* shape) {
     {
         /* --- 手臂：上臂 + 前臂 + 爪 --- */
         float armSwing = walk ? 0.0f : 0.0f;
+        int hunched = shape->mon->kind == 0;
         for (int s2 = -1; s2 <= 1; s2 += 2) {
             float sx = cx + (float)s2 * shoulderW * 0.92f;
             float ex = cx + (float)s2 * (shoulderW + 10.0f) + armSwing;
-            float ey = shoulderY + H * 0.20f;
-            float wx = cx + (float)s2 * (shoulderW + 6.0f);
-            float wy = shoulderY + H * 0.34f + (walk ? (float)s2 * 6.0f : 0.0f);
+            float ey = shoulderY + H * (hunched ? 0.245f : 0.20f);
+            float wx = cx + (float)s2 * (shoulderW + (hunched ? 3.0f : 6.0f));
+            float wy = shoulderY + H * (hunched ? 0.455f : 0.34f) + (walk ? (float)s2 * 6.0f : 0.0f);
             Limb(sx, shoulderY, ex, ey, 11.0f, 8.0f, edge, body, hi);
             Limb(ex, ey, wx, wy, 8.0f, 6.0f, edge, body, hi);
-            /* 三根手指 */
+            /* 三根手指：听声鬼的爪子垂到膝下 */
+            float claw = hunched ? 18.0f : 11.0f;
             for (int f = -1; f <= 1; f++) {
                 float fx = wx + (float)f * 3.0f + (float)s2 * 2.0f;
-                Limb(wx, wy, fx, wy + 11.0f, 3.0f, 1.4f, edge, body, hi);
+                Limb(wx, wy, fx, wy + claw, 3.0f, 1.4f, edge, body, hi);
             }
         }
 
@@ -1456,11 +1459,11 @@ static void BakeHumanoidScavengerDetails(const HumanoidBakeContext* shape) {
                 float ax1 = cx + (float)a2 * (shoulderW * 1.35f);
                 float ay1 = footY + extra;           /* 垂到地面以下 */
                 Limb(ax0, ay0, ax1, ay1, 11.0f, 6.0f, edge, body, hi);
-                /* 爪 */
-                for (int f = -1; f <= 1; f++) {
+                /* 爪：五根，比正常人多两根 */
+                for (int f = -2; f <= 2; f++) {
                     /* 爪尖给一点病绿 —— 小面积点缀，不破坏整体暗色 */
-                    Limb(ax1, ay1 + 8.0f, ax1 + (float)f * 5.0f, ay1 + 14.0f,
-                         2.2f, 1.0f, 0x00101810u, 0x004A7040u, 0x0070A060u);
+                    Limb(ax1, ay1 + 8.0f, ax1 + (float)f * 3.2f, ay1 + 14.0f,
+                         2.0f, 0.9f, 0x00101810u, 0x004A7040u, 0x0070A060u);
                 }
             }
             /* 无眼：只在脸上留两个深到看不见底的凹坑 */
@@ -1638,20 +1641,26 @@ static void BakeHumanoidHunterFace(const HumanoidBakeContext* shape) {
     {
 
             /* 寻声鬼：没有眼睛 —— 它靠听。取而代之的是一张咧开的下颌。 */
-            float jaw[8] = { cx - hrx * 0.85f, hy + 4,
-                             cx + hrx * 0.85f, hy + 4,
-                             cx + hrx * 0.55f, hy + hry + 12.0f,
-                             cx - hrx * 0.55f, hy + hry + 12.0f };
+            float jaw[8] = { cx - hrx * 1.00f, hy + 4,
+                             cx + hrx * 1.00f, hy + 4,
+                             cx + hrx * 0.62f, hy + hry + 16.0f,
+                             cx - hrx * 0.62f, hy + hry + 16.0f };
             cvPoly(jaw, 4, 0x00040208u, 1.0f);
-            /* 牙 */
+            /* 牙：五枚短牙，别做成灯罩栅栏 */
             for (int i = 0; i < 5; i++) {
-                float tx = cx - hrx * 0.62f + (float)i * (hrx * 0.31f);
-                cvLine(tx, hy + 5, tx + 1.5f, hy + 12, 2.4f, 0x00C8C0A8u, 0.9f);
-                cvLine(tx, hy + hry + 10, tx + 1.5f, hy + hry + 2, 2.4f, 0x00B0A890u, 0.9f);
+                float tx = cx - hrx * 0.66f + (float)i * (hrx * 0.33f);
+                cvLine(tx, hy + 6, tx + 1.0f, hy + 10.5f, 1.6f, 0x009A927Au, 0.82f);
+                cvLine(tx, hy + hry + 11, tx + 1.0f, hy + hry + 6, 1.6f, 0x008C856Eu, 0.82f);
             }
-            /* 眼窝：两个凹坑，不发光 */
-            cvEllipse(cx - hrx * 0.42f, hy - 4, 5.0f, 4.0f, 0x00020406u, 0.9f);
-            cvEllipse(cx + hrx * 0.42f, hy - 4, 5.0f, 4.0f, 0x00020406u, 0.9f);
+            /* v3.6：眼窝改成**缝死的横向眼缝**。
+               每边一道短黑缝 + 一个交叉针脚；远看是无眼，近看是缝眼。 */
+            for (int side = -1; side <= 1; side += 2) {
+                float ex = cx + (float)side * hrx * 0.48f;
+                float ey = hy - 2.0f;
+                cvLine(ex - 4.5f, ey - 0.8f, ex + 4.5f, ey - 0.8f, 2.0f, 0x00020305u, 0.95f);
+                cvLine(ex - 3.0f, ey - 3.4f, ex + 3.0f, ey + 3.2f, 0.75f, 0x00B7AA90u, 0.78f);
+                cvLine(ex + 3.0f, ey - 3.4f, ex - 3.0f, ey + 3.2f, 0.65f, 0x008C806Cu, 0.62f);
+            }
         
     }
 }
@@ -1772,6 +1781,200 @@ static void BakeHumanoidLeechFace(const HumanoidBakeContext* shape) {
 }
 
 /* Fine anatomical/material landmarks are vector strokes, not enlarged noise. */
+static void BakeHumanoidSoundHunterDetails(const HumanoidBakeContext* shape) {
+    const MonsterBakeContext* b = shape->mon;
+    float x = b->cx, sy = shape->shoulderY, wy = shape->waistY;
+    float w = shape->shoulderW;
+    /* 错版印刷的纸带：横向三条深浅不一的拼贴层，边缘留一道亮纤维。 */
+    for (int i = 0; i < 3; i++) {
+        float y = sy + 11.0f + (float)i * 12.0f;
+        float half = w * (0.74f - (float)i * 0.045f);
+        cvLine(x - half, y, x + half, y + 2.0f, 3.0f, 0x000B0D0E, 0.42f);
+        cvLine(x - half, y - 1.2f, x + half, y + 0.8f, 0.9f, 0x007A7466, 0.55f);
+        cvLine(x - half + 3.0f, y + 2.0f, x + half - 2.0f, y + 3.2f, 0.7f, 0x00343836, 0.55f);
+    }
+    /* 中央缝线：把“拼贴的身体”缝在一起。 */
+    cvLine(x + 1.0f, sy + 6.0f, x - 1.0f, wy + 10.0f, 1.0f, 0x00191D1E, 0.85f);
+    for (int i = 0; i < 11; i++) {
+        float y = sy + 8.0f + (float)i * (wy - sy + 2.0f) / 11.0f;
+        cvLine(x - 3.2f, y, x + 3.2f, y + 1.0f, 0.7f, 0x00B8AC92, 0.7f);
+    }
+    /* 一个很小的印刷套准十字，放在胸口偏左。 */
+    float rx = x + w * 0.34f, ry = sy + (wy - sy) * 0.34f;
+    cvLine(rx - 3.0f, ry, rx + 3.0f, ry, 0.7f, 0x00C9BFA6, 0.65f);
+    cvLine(rx, ry - 3.0f, rx, ry + 3.0f, 0.7f, 0x00C9BFA6, 0.65f);
+
+    /* 错版色块：冷青在左胸、洋红在右腰，像两套印版没有对齐。 */
+    {
+        float cyan[8] = { x - w * 0.62f, sy + 18.0f,
+                          x - w * 0.20f, sy + 21.0f,
+                          x - w * 0.24f, sy + 34.0f,
+                          x - w * 0.64f, sy + 31.0f };
+        cvPoly(cyan, 4, 0x003FA6B8u, 0.42f);
+        float pink[8] = { x + w * 0.10f, wy - 4.0f,
+                          x + w * 0.58f, wy - 8.0f,
+                          x + w * 0.54f, wy + 6.0f,
+                          x + w * 0.08f, wy + 9.0f };
+        cvPoly(pink, 4, 0x00C84A78u, 0.36f);
+    }
+    /* 一截骨色胶带横过右肩，边缘不齐。 */
+    cvLine(x + w * 0.18f, sy + 3.0f, x + w * 0.94f, sy + 11.0f, 9.0f, 0x00D6CDB8u, 0.28f);
+    cvLine(x + w * 0.18f, sy + 3.0f, x + w * 0.94f, sy + 11.0f, 1.0f, 0x00EFE6CFu, 0.45f);
+    /* 胸口的小纸标签，三行印刷字。 */
+    {
+        float tag[8] = { x + w * 0.08f, sy + 23.0f,
+                         x + w * 0.44f, sy + 21.0f,
+                         x + w * 0.43f, sy + 34.0f,
+                         x + w * 0.07f, sy + 36.0f };
+        cvPoly(tag, 4, 0x00CFC4A8u, 0.34f);
+        for (int i = 0; i < 3; i++) {
+            float ty = sy + 25.0f + (float)i * 3.2f;
+            cvLine(x + w * 0.11f, ty, x + w * (0.34f - (float)i * 0.04f), ty + 0.5f, 0.6f, 0x001B1A16u, 0.55f);
+        }
+    }
+}
+
+static void BakeHumanoidCollagePaper(const HumanoidBakeContext* shape) {
+    const MonsterBakeContext* b = shape->mon;
+    float x = b->cx, sy = shape->shoulderY, wy = shape->waistY;
+    float w = shape->shoulderW;
+    if (b->kind == 1) {
+        /* 追光鬼：一张被撕下来的“照片条”贴在胸前，边缘露白。 */
+        float strip[8] = { x - w * 0.34f, sy + 14.0f, x - w * 0.06f, sy + 12.0f,
+                           x - w * 0.02f, wy + 2.0f, x - w * 0.30f, wy + 4.0f };
+        cvPoly(strip, 4, 0x00C9CFC6u, 0.40f);
+        for (int i = 0; i < 4; i++)
+            cvLine(x - w * 0.30f, sy + 20.0f + (float)i * 9.0f,
+                   x - w * 0.06f, sy + 19.0f + (float)i * 9.0f, 0.7f, 0x0014171Au, 0.55f);
+        float tape[8] = { x + w * 0.10f, sy + 4.0f, x + w * 0.84f, sy + 9.0f,
+                          x + w * 0.83f, sy + 19.0f, x + w * 0.09f, sy + 14.0f };
+        cvPoly(tape, 4, 0x00D8D2BEu, 0.30f);
+        cvPoly((float[]){ x + w * 0.18f, wy - 2.0f, x + w * 0.45f, wy - 5.0f,
+                          x + w * 0.42f, wy + 7.0f, x + w * 0.15f, wy + 9.0f },
+               4, 0x003FA6B8u, 0.30f);
+    } else if (b->kind == 7) {
+        /* 拾荒者：钱袋上贴一张旧价签，再压一道冷青纸带。 */
+        float bagX = x - w * 1.55f, bagY = sy + b->H * 0.02f;
+        float tag[8] = { bagX - w * 0.34f, bagY - 4.0f, bagX + w * 0.16f, bagY - 8.0f,
+                         bagX + w * 0.18f, bagY + 10.0f, bagX - w * 0.32f, bagY + 14.0f };
+        cvPoly(tag, 4, 0x00D0C29Cu, 0.52f);
+        for (int i = 0; i < 3; i++)
+            cvLine(bagX - w * 0.28f, bagY - 1.0f + (float)i * 6.0f,
+                   bagX + w * 0.08f, bagY - 2.0f + (float)i * 6.0f, 0.6f, 0x0016120Cu, 0.6f);
+        cvLine(x + w * 0.10f, sy + 8.0f, x + w * 0.86f, sy + 15.0f, 8.0f, 0x003FA6B8u, 0.30f);
+        cvLine(x + w * 0.10f, sy + 8.0f, x + w * 0.86f, sy + 15.0f, 0.8f, 0x00A9D4DEu, 0.5f);
+    } else if (b->kind == 8) {
+        /* 清道夫：三条竖着撕下来的纸带从肩垂到腰，红墨缝合。 */
+        for (int i = 0; i < 3; i++) {
+            float sx = x - w * 0.38f + (float)i * w * 0.30f;
+            float strip[8] = { sx, sy + 10.0f, sx + w * 0.13f, sy + 8.0f,
+                               sx + w * 0.10f, wy + 4.0f, sx - w * 0.03f, wy + 7.0f };
+            cvPoly(strip, 4, (i == 1 ? 0x00B5AA8Eu : 0x007A8A78u), 0.34f);
+        }
+        cvLine(x - w * 0.30f, sy + 12.0f, x + w * 0.30f, wy - 2.0f, 0.8f, 0x00B03028u, 0.70f);
+        for (int i = 0; i < 5; i++)
+            cvLine(x - w * 0.28f + (float)i * w * 0.14f, sy + 18.0f + (float)i * 6.0f,
+                   x - w * 0.24f + (float)i * w * 0.14f, sy + 22.0f + (float)i * 6.0f,
+                   0.7f, 0x00D8C8A8u, 0.55f);
+    } else if (b->kind == 9) {
+        /* 守门人：胸口盖一枚洋红印章，肩甲贴金纸胶带。 */
+        float seal[8] = { x - w * 0.22f, sy + 22.0f, x + w * 0.10f, sy + 19.0f,
+                          x + w * 0.12f, sy + 42.0f, x - w * 0.20f, sy + 45.0f };
+        cvPoly(seal, 4, 0x00C84A78u, 0.36f);
+        cvLine(x - w * 0.14f, sy + 28.0f, x + w * 0.04f, sy + 27.0f, 1.2f, 0x00221A1Eu, 0.7f);
+        cvLine(x - w * 0.12f, sy + 34.0f, x + w * 0.02f, sy + 33.0f, 1.0f, 0x00221A1Eu, 0.7f);
+        cvLine(x - w * 0.72f, sy + 3.0f, x - w * 0.28f, sy + 9.0f, 7.0f, 0x00B58A3Cu, 0.34f);
+        cvLine(x - w * 0.70f, sy + 3.0f, x - w * 0.30f, sy + 9.0f, 0.8f, 0x00E0C080u, 0.55f);
+        cvLine(x + w * 0.34f, sy + 18.0f, x + w * 0.34f, sy + 26.0f, 0.8f, 0x003FA6B8u, 0.7f);
+        cvLine(x + w * 0.30f, sy + 22.0f, x + w * 0.38f, sy + 22.0f, 0.8f, 0x003FA6B8u, 0.7f);
+    }
+}
+
+static void BakeHumanoidLightHunterGrotesque(const HumanoidBakeContext* shape) {
+    const MonsterBakeContext* b = shape->mon;
+    float cx = b->cx, hy = shape->hy, hrx = shape->hrx, hry = shape->hry;
+    float sy = shape->shoulderY, w = shape->shoulderW;
+    unsigned int teeth = 0x00C8C0A8u;
+    /* 纵裂的嘴：从双眼之间一直裂到下颌下面。 */
+    float mouth[8] = { cx - 2.2f, hy + 5.0f, cx + 2.2f, hy + 5.0f,
+                       cx + 3.0f, hy + hry + 12.0f, cx - 3.0f, hy + hry + 12.0f };
+    cvPoly(mouth, 4, 0x00020305u, 0.95f);
+    for (int i = 0; i < 4; i++) {
+        float y = hy + 7.0f + (float)i * 5.0f;
+        cvLine(cx - 2.0f, y, cx - 4.5f, y + 2.0f, 0.6f, teeth, 0.75f);
+        cvLine(cx + 2.0f, y, cx + 4.5f, y + 2.0f, 0.6f, teeth, 0.75f);
+    }
+    /* 右侧多长出来的一簇小眼睛：光猎者不该只有一对。 */
+    for (int i = 0; i < 3; i++) {
+        float ex = cx + hrx * 0.62f + (float)i * 1.8f;
+        float ey = hy - 8.0f + (float)i * 5.5f;
+        cvEllipse(ex, ey, 2.6f, 2.2f, 0x00020305u, 0.95f);
+        cvEllipse(ex, ey, 1.5f, 1.2f, 0x00D8F4FFu, 1.0f);
+    }
+    cvGlow(cx + hrx * 0.72f, hy - 1.0f, 15.0f, 0x0060C0FFu, 0.22f);
+    /* 脖子下方再开一只“喉眼”，用来看见声音。 */
+    cvEllipse(cx, sy - 3.0f, 3.2f, 2.6f, 0x00020305u, 0.95f);
+    cvEllipse(cx, sy - 3.0f, 1.8f, 1.4f, 0x00E8F6FFu, 0.95f);
+
+    /* 肋条被光照穿：左右各四道苍白骨线。 */
+    for (int i = 0; i < 4; i++) {
+        float y = sy + 13.0f + (float)i * 9.0f;
+        cvLine(cx - w * 0.50f, y, cx - 3.0f, y + 2.0f, 0.8f, teeth, 0.55f);
+        cvLine(cx + w * 0.50f, y + 2.0f, cx + 3.0f, y, 0.8f, teeth, 0.55f);
+    }
+    /* 两条退化的副臂，从肋下伸出来，末端只有三根指头。 */
+    for (int side = -1; side <= 1; side += 2) {
+        float ax = cx + (float)side * w * 0.54f, ay = sy + 22.0f;
+        float bx = cx + (float)side * w * 1.02f, by = sy + 48.0f;
+        float ex = cx + (float)side * w * 0.88f, ey = by + 24.0f;
+        Limb(ax, ay, bx, by, 5.0f, 3.4f, b->edge, 0x00988C76u, b->hi);
+        Limb(bx, by, ex, ey, 3.2f, 1.8f, b->edge, 0x00A89C80u, b->hi);
+        for (int f = -1; f <= 1; f++)
+            cvLine(ex, ey, ex + (float)f * 2.6f, ey + 7.0f, 0.8f, 0x00C8C0A8u, 0.82f);
+    }
+}
+
+static void BakeHumanoidScavengerGrotesque(const HumanoidBakeContext* shape) {
+    const MonsterBakeContext* b = shape->mon;
+    float cx = b->cx, hy = shape->hy, hry = shape->hry;
+    float sy = shape->shoulderY, wy = shape->waistY, w = shape->shoulderW;
+    float footY = b->footY;
+    unsigned int teeth = 0x00B8AC92u;
+    /* 脸被从上到下劈开：没有眼睛，只有一条竖嘴和倒刺牙。 */
+    float mouth[8] = { cx - 2.0f, hy - hry * 0.55f, cx + 2.0f, hy - hry * 0.55f,
+                       cx + 4.0f, hy + hry + 10.0f, cx - 4.0f, hy + hry + 10.0f };
+    cvPoly(mouth, 4, 0x00010304u, 0.95f);
+    for (int i = 0; i < 7; i++) {
+        float y = hy - hry * 0.45f + (float)i * 5.2f;
+        cvLine(cx - 1.8f, y, cx - 5.0f, y + 2.2f, 0.65f, teeth, 0.82f);
+        cvLine(cx + 1.8f, y, cx + 5.0f, y + 2.2f, 0.65f, teeth, 0.82f);
+    }
+    /* 第二张嘴长在胸口，牙齿从肋骨里往外翻。 */
+    float chest[8] = { cx - 4.0f, sy + 12.0f, cx + 4.0f, sy + 12.0f,
+                       cx + 9.0f, wy - 4.0f, cx - 9.0f, wy - 4.0f };
+    cvPoly(chest, 4, 0x00020303u, 0.92f);
+    for (int i = 0; i < 6; i++) {
+        float y = sy + 15.0f + (float)i * 6.5f;
+        cvLine(cx - 3.0f, y, cx - 8.0f, y + 2.5f, 0.7f, teeth, 0.78f);
+        cvLine(cx + 3.0f, y, cx + 8.0f, y + 2.5f, 0.7f, teeth, 0.78f);
+    }
+    cvLine(cx - 7.0f, sy + 20.0f, cx + 7.0f, wy - 9.0f, 0.8f, 0x00B03028u, 0.7f);
+    /* 从腰上垂下来的皮纸条，一直拖到脚边。 */
+    for (int i = 0; i < 4; i++) {
+        float sx = cx - w * 0.48f + (float)i * w * 0.30f;
+        float strip[8] = { sx, wy - 2.0f, sx + 5.0f, wy - 4.0f,
+                           sx + 7.0f, footY - 8.0f + (float)(i % 2) * 8.0f,
+                           sx + 1.0f, footY - 3.0f };
+        cvPoly(strip, 4, (i % 2) ? 0x00A89C80u : 0x007A826E, 0.34f);
+        cvLine(sx + 2.0f, wy, sx + 3.0f, footY - 6.0f, 0.5f, 0x00111514u, 0.55f);
+    }
+    /* 脊骨从胸口一直顶到腰。 */
+    for (int i = 0; i < 5; i++) {
+        float y = sy + 7.0f + (float)i * 7.0f;
+        cvEllipse(cx, y, 1.7f, 1.2f, 0x00B8AC92u, 0.65f);
+    }
+}
+
 static void BakeHumanoidFineDetail(const HumanoidBakeContext* shape){
     const MonsterBakeContext* b=shape->mon;
     float x=b->cx,sy=shape->shoulderY,wy=shape->waistY,hy=shape->hy;
@@ -1830,7 +2033,7 @@ static void BakeMonsterHumanoid(const MonsterBakeContext* bake) {
     int side = bake->side;
     float H = bake->H;
     float headY = bake->headY;
-    float narrow = (kind == 1) ? 0.82f : (kind == 2 ? 1.35f : 1.0f);   /* 体型胖瘦 */
+    float narrow = (kind == 1) ? 0.70f : (kind == 2 ? 1.35f : 1.0f);   /* 体型胖瘦 */
     /* v2.4.1 审美规范：体型必须和移速一致（见 include/art_direction.h 铁律四） */
     if (kind == 7) narrow = 1.42f;   /* 拾荒者：最宽，负重 */
     if (kind == 8) narrow = 0.60f;   /* 清道夫：最瘦 */
@@ -1840,12 +2043,22 @@ static void BakeMonsterHumanoid(const MonsterBakeContext* bake) {
        · 长颈几乎不带体积，瘦成一根 */
     if (kind == 11) narrow = 1.34f;
     if (kind == 12) narrow = 0.52f;
+    if (kind == 0) narrow = 1.10f;   /* hunched listener: heavier shoulders */
     float shoulderW = 30.0f * narrow;
     if (side) shoulderW *= 0.68f;
 
     float shoulderY = headY + H * 0.22f;
     float waistY    = headY + H * 0.55f;
     float pelvisY   = headY + H * 0.66f;
+    /* Sound Hunter: the listener is hunched.  The head sinks, the shoulders
+       ride up, and the pelvis lifts so the legs stay shorter than the torso.
+       Render-only silhouette change; collision and AI are untouched. */
+    if (kind == 0) {
+        headY    += H * 0.035f;
+        shoulderY = headY + H * 0.275f;
+        waistY    = headY + H * 0.590f;
+        pelvisY   = headY + H * 0.660f;
+    }
 
     /* --- 头 --- */
     /* 头型也是区分点：
@@ -1875,6 +2088,10 @@ static void BakeMonsterHumanoid(const MonsterBakeContext* bake) {
     else if (kind == 1) BakeHumanoidLightHunterFace(&shape);
     else if (kind == 2) BakeHumanoidLeechFace(&shape);
     BakeHumanoidFineDetail(&shape);
+    if (kind == 0) BakeHumanoidSoundHunterDetails(&shape);
+    else if (kind == 1 || kind == 7 || kind == 8 || kind == 9) BakeHumanoidCollagePaper(&shape);
+    if (kind == 1) BakeHumanoidLightHunterGrotesque(&shape);
+    else if (kind == 8) BakeHumanoidScavengerGrotesque(&shape);
 }
 
 /* Variant: kind == 5 */
@@ -2029,6 +2246,41 @@ static void BakeMonsterParasite(const MonsterBakeContext* b){
 }
 
 static unsigned int CreatureHash(unsigned int x){x^=x>>16;x*=0x7FEB352Du;x^=x>>15;x*=0x846CA68Bu;return x^(x>>16);}
+
+/* 错版印刷套色偏移：把身体剪影复制两份，错开几像素压到轮廓外。
+   只在透明处落色，不覆盖已经画好的身体；受击/光照仍走原有管线。
+   七只图鉴怪共用这套“套色没对准”的物理效果，颜色按物种区分。 */
+static void BakeMisprintFringe(int kind) {
+    size_t count = (size_t)RASTER_W * (size_t)RASTER_H;
+    unsigned int* src = (unsigned int*)malloc(count * sizeof(unsigned int));
+    if (!src) return;
+    memcpy(src, g_canvas, count * sizeof(unsigned int));
+    static const int ox[4] = { -8, 8, -4, 6 };
+    static const int oy[4] = {  4, -4, -8, 6 };
+    unsigned int inkA = 0x003FA6B8u, inkB = 0x00C84A78u;
+    if (kind == 1) { inkA = 0x006FD8E8u; inkB = 0x00E8E0C8u; }
+    else if (kind == 7) { inkA = 0x00B58A3Cu; inkB = 0x003FA6B8u; }
+    else if (kind == 8) { inkA = 0x003FA6B8u; inkB = 0x0094382Cu; }
+    else if (kind == 9) { inkA = 0x00B03028u; inkB = 0x003FA6B8u; }
+    else if (kind == 13) { inkA = 0x003FA6B8u; inkB = 0x00B58A3Cu; }
+    else if (kind == 16) { inkA = 0x00C84A78u; inkB = 0x003FA6B8u; }
+    const unsigned int ink[4] = { inkA, inkB, inkA, inkB };
+    static const int alpha[4] = { 128, 112, 70, 62 };
+    for (int y = 0; y < RASTER_H; y++) {
+        for (int x = 0; x < RASTER_W; x++) {
+            if ((src[(size_t)y * RASTER_W + x] >> 24) < 40) continue;
+            for (int k = 0; k < 4; k++) {
+                int nx = x + ox[k], ny = y + oy[k];
+                if (nx < 1 || nx >= RASTER_W - 1 || ny < 1 || ny >= RASTER_H - 1) continue;
+                unsigned int* dst = &g_canvas[(size_t)ny * RASTER_W + nx];
+                if ((*dst >> 24) > 8) continue;
+                *dst = ((unsigned int)alpha[k] << 24) | ink[k];
+            }
+        }
+    }
+    free(src);
+}
+
 static void BakeCreatureSurface(int kind){
     /* Stable per-surface texture: no runtime randomness or shimmering grain. */
     for(int y=1;y<RASTER_H-1;y++)for(int x=1;x<RASTER_W-1;x++){
@@ -2041,9 +2293,11 @@ static void BakeCreatureSurface(int kind){
         int grain=(int)(hash&15)-7;
         int line=(x+(y/21)*3)%(kind==13?29:43);
         float gain=1.0f+grain*.009f;
-        if(kind==7 || kind==8)gain+=((x%7==0)?-.06f:0)+((y%11==0)?.035f:0);
-        else if(kind==9)gain+=(line<2?-.13f:line==2?.13f:0);
-        else if(kind==13)gain+=(line<2?-.18f:line==2?.08f:0);
+        if(kind==1)gain+=(line<2?-.12f:line==2?.07f:0)+(((hash&2047)<5)?-.16f:0);
+        else if(kind==7 || kind==8)gain+=((x%7==0)?-.06f:0)+((y%11==0)?.035f:0)+(line<2?-.10f:line==2?.07f:0);
+        else if(kind==9)gain+=(line<2?-.13f:line==2?.13f:0)+((hash&2047)<4?-.14f:0);
+        else if(kind==13)gain+=(line<2?-.18f:line==2?.08f:0)+((hash&2047)<5?-.14f:0);
+        else if(kind==0)gain+=(line<2?-.16f:line==2?.09f:0)+(((hash&2047)<7)?-.22f:0);
         else {gain+=(line==0?-.10f:0);if((hash&1023)<5)gain-=.20f;}
         if(kind==14 && (y%46)<3)gain-=.15f;
         r=(int)(r*gain);g=(int)(g*gain);b=(int)(b*gain);
@@ -2052,6 +2306,24 @@ static void BakeCreatureSurface(int kind){
         if(b>255)b=255;
         *p=(col&0xFF000000u)|((unsigned)r<<16)|((unsigned)g<<8)|(unsigned)b;
     }
+}
+
+/* 宝箱怪：木箱上贴货运标签和撕裂胶带，让它同时读作“箱子”和“拼贴画”。 */
+static void BakeMimicCollage(float c, float baseY) {
+    float topY = baseY - 92.0f;
+    float label[8] = { c - 30.0f, baseY - 66.0f, c + 27.0f, baseY - 69.0f,
+                       c + 29.0f, baseY - 43.0f, c - 28.0f, baseY - 40.0f };
+    cvPoly(label, 4, 0x00D0C29Cu, 0.48f);
+    for (int i = 0; i < 4; i++)
+        cvLine(c - 24.0f, baseY - 61.0f + (float)i * 5.0f,
+               c + 21.0f, baseY - 62.0f + (float)i * 5.0f, 0.7f, 0x0016120Cu, 0.55f);
+    float tape[8] = { c - 44.0f, topY - 4.0f, c + 43.0f, topY + 2.0f,
+                      c + 41.0f, topY + 13.0f, c - 45.0f, topY + 7.0f };
+    cvPoly(tape, 4, 0x00D8D2BEu, 0.34f);
+    cvPoly((float[]){ c + 12.0f, baseY - 34.0f, c + 40.0f, baseY - 37.0f,
+                      c + 38.0f, baseY - 23.0f, c + 10.0f, baseY - 20.0f },
+           4, 0x00C84A78u, 0.30f);
+    cvLine(c - 38.0f, baseY - 26.0f, c - 18.0f, baseY - 27.0f, 0.8f, 0x003FA6B8u, 0.65f);
 }
 
 static void BakeMonster(int id, int kind, int pose) {
@@ -2074,10 +2346,10 @@ static void BakeMonster(int id, int kind, int pose) {
     float heightK = 1.0f;
 
     switch (kind) {
-    case 0:  /* 寻声鬼：瘦高，冷灰蓝 */
-        edge = 0x00080A0Eu; body = 0x00262C38u; hi = 0x003E4658u; heightK = 1.00f; break;
-    case 1:  /* 追光鬼：更细长，偏白 */
-        edge = 0x000A0C10u; body = 0x00303A48u; hi = 0x00526074u; heightK = 1.12f; break;
+    case 0:  /* 寻声鬼：错版印刷——近黑纸胎 + 冷青油墨 */
+        edge = 0x00030507u; body = 0x001A2026u; hi = 0x00313A44u; heightK = 0.98f; break;
+    case 1:  /* 追光鬼：漂白照片——冷灰纸胎 + 亮眼 */
+        edge = 0x00050609u; body = 0x001A222Cu; hi = 0x003C4E5Eu; heightK = 1.18f; break;
     case 2:  /* 偷电怪：矮胖，偏绿 */
         edge = 0x00060A08u; body = 0x00223428u; hi = 0x003A5442u; heightK = 0.78f; break;
     case 3:  /* 跳脸虫：暖褐 */
@@ -2089,8 +2361,8 @@ static void BakeMonster(int id, int kind, int pose) {
     /* v2.4.4 **统一暗色**（用户要求）：身体不再各自上色 ——
        多彩会削弱模型本身的明暗精度。现在三只怪的身体都是中性暗灰，
        只留极小的色相偏移；**颜色只留给识别特征**（口袋 / 爪 / 眼 / 灯）。 */
-    case 7:  /* 拾荒者：中性暗灰，略暖 */
-        edge = 0x00080A0Au; body = 0x00292A2Cu; hi = 0x0045474Cu; heightK = 0.74f; break;
+    case 7:  /* 拾荒者：油墨黑 + 旧金纸袋 */
+        edge = 0x00060606u; body = 0x001C1E1Eu; hi = 0x003B3C38u; heightK = 0.74f; break;
     /* ===== 听声鬼变体（2026-11-03）=====
        同族识别点必须保住：**无眼、牙齿下颌、瘦长肢体、冷色、不用高饱和**。
        区分靠**体态与地标**，不靠颜色（art_direction 铁律一 / 五）。 */
@@ -2098,12 +2370,14 @@ static void BakeMonster(int id, int kind, int pose) {
         edge = 0x000A0A08u; body = 0x002A2A26u; hi = 0x00444138u; heightK = 0.76f; break;
     case 12: /* 听声鬼·长颈：更高更瘦，冷灰偏紫 —— 像把耳朵伸到天花板 */
         edge = 0x0008090Bu; body = 0x00252A34u; hi = 0x003C4456u; heightK = 1.22f; break;
-    case 8:  /* 清道夫：中性暗灰，略冷绿 */
-        edge = 0x00070A08u; body = 0x00282E2Au; hi = 0x00444C46u; heightK = 1.26f; break;
-    case 9:  /* 守门人：中性暗灰，略冷蓝 */
-        edge = 0x00080A0Cu; body = 0x002A2E36u; hi = 0x00464C58u; heightK = 0.96f; break;
+    case 8:  /* 清道夫：冷青墨 + 撕纸条 */
+        edge = 0x00050607u; body = 0x001A201Eu; hi = 0x00343C38u; heightK = 1.26f; break;
+    case 9:  /* 守门人：钢灰纸甲 + 红章 */
+        edge = 0x0006070Au; body = 0x001A1E26u; hi = 0x00363C48u; heightK = 0.96f; break;
     case 10: /* 回声：不是生物，是「正在发声的东西」—— 冷白偏青 */
         edge = 0x00020A0Eu; body = 0x001A3848u; hi = 0x005AA8C8u; heightK = 0.90f; break;
+    case 13: /* 宝箱怪：旧木箱 + 洋红/冷青套色 */
+        edge = 0x00060403u; body = 0x00241E18u; hi = 0x00483C30u; heightK = 1.00f; break;
     default: /* 回响：钟形 */
         edge = 0x000A080Cu; body = 0x002A2234u; hi = 0x00443850u; heightK = 1.00f; break;
     }
@@ -2126,6 +2400,7 @@ static void BakeMonster(int id, int kind, int pose) {
         BakeMonsterEcho(&bake);
     } else if (kind == 13) {
         BakeMonsterMimic(&bake);
+        BakeMimicCollage(bake.c, bake.baseY);
     } else if (kind == 0 || kind == 1 || kind == 2 || kind == 7 || kind == 8 || kind == 9
                || kind == 11 || kind == 12) {
         BakeMonsterHumanoid(&bake);
@@ -2161,6 +2436,8 @@ static void BakeMonster(int id, int kind, int pose) {
     }
 
     BakeCreatureSurface(kind);
+    if (kind == 0 || kind == 1 || kind == 7 || kind == 8 || kind == 9 || kind == 13)
+        BakeMisprintFringe(kind);
     cvFinish(&g_sprites[id]);
     g_canvasScale=1;
 }
@@ -2504,6 +2781,9 @@ static void BakePropSpider(const PropBakeContext* bake){
         cvLine(kx-side,ky,fx-side,fy,1.0f,0x8A8B85,.8f);
         cvLine(fx,fy,fx-side*4,fy+7,1.6f,0x171A22,1);
         cvEllipse(kx,ky,3,3.6f,0x67625B,.9f);
+        /* 关节处包一圈撕纸，像标本针固定过的节肢。 */
+        cvLine(kx - 4.0f, ky - 1.0f, kx + 4.0f, ky + 1.0f, 1.1f, 0x00D0C29Cu, 0.60f);
+        cvLine(kx, ky - 4.0f, kx + 1.0f, ky + 4.0f, 0.7f, 0x00C84A78u, 0.55f);
         for(int hair=0;hair<4;hair++){
             float t=(hair+1)*.16f,hx=kx+(fx-kx)*t,hy=ky+(fy-ky)*t;
             cvLine(hx,hy,hx+side*3,hy-3,.5f,0xA8A08C,.7f);
@@ -2516,6 +2796,15 @@ static void BakePropSpider(const PropBakeContext* bake){
         cvLine(x-16,yy-1,x+15,yy+1,.65f,0x969085,.5f);
     }
     cvEllipse(x,y+15,17,14,0x252A35,1);cvEllipse(x-2,y+10,14,10,0x676373,1);
+    /* 腹部贴一张小标签，套色偏移之后再压一层纸。 */
+    {
+        float lab[8] = { x - 12.0f, y + 8.0f, x + 9.0f, y + 6.0f,
+                         x + 10.0f, y + 20.0f, x - 11.0f, y + 22.0f };
+        cvPoly(lab, 4, 0x00D0C29Cu, 0.38f);
+        for (int i = 0; i < 3; i++)
+            cvLine(x - 8.0f, y + 12.0f + (float)i * 3.5f,
+                   x + 6.0f, y + 11.5f + (float)i * 3.5f, 0.6f, 0x0016120Cu, 0.55f);
+    }
     for(int side=-1;side<=1;side+=2){
         for(int i=0;i<4;i++){
             float xx=x+side*(4+i*3),yy=y+9+(i%2)*3;
@@ -2838,6 +3127,7 @@ static void BakeProp(int id, int kind) {
 
     if(kind==16)BakeCreatureSurface(14);
     if(kind==7)BakeCreatureSurface(13);
+    if(kind==16 || kind==7)BakeMisprintFringe(kind==16?16:13);
     cvFinish(&g_sprites[id]);
     g_canvasScale=1;
 }

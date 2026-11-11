@@ -802,6 +802,11 @@ static void DrawBeastSprite(Monster* m,unsigned int eyeColor,int baseSpr){
     float halfH=.86f,tintMix=0;unsigned int tint=0;
     if(bossLevel && m==Hunter0()){halfH=1.45f;tint=0xFF2010;tintMix=.35f;}
     if(m->stun>0){tint=0xFFFFFF;tintMix=fminf(.75f,m->stun/MONSTER_STUN*.75f);}
+    else if(m->state==1 && Dist2(m->x,m->y,posX,posY)<2.4f*2.4f){
+        /* 听声鬼贴近时的攻击前摇提示：没有眼睛可发光，就用一层血墨色
+           把轮廓压红；不改变位置、判定或 AI。 */
+        tint=0x00C03020u;tintMix=.18f;
+    }
     DrawCreatureActor(sprite,m->x,m->y,halfH,1,1,m->facing,m->walkPhase,tint,tintMix,m->stun>0?0:m->state==1?1:.35f);
 }
 

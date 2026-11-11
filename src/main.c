@@ -94,6 +94,11 @@ static int PrepareBundledMusic(void) {
         SetEnvironmentVariableW(L"CANITY_DATA_DIR",path);
         /* CRT getenv uses its own environment snapshot. */
         _wputenv_s(L"CANITY_DATA_DIR",path);
+        /* 只有“程序自己挑的默认目录”才允许在不可写时继续尝试兜底位置。
+           外部显式设置的 CANITY_DATA_DIR 是玩家的明确选择，保持权威，
+           避免测试或玩家指定目录时悄悄写到别处。 */
+        SetEnvironmentVariableW(L"CANITY_DATA_DIR_AUTO",L"1");
+        _wputenv_s(L"CANITY_DATA_DIR_AUTO",L"1");
     }
     _snwprintf(cache,MAX_PATH,L"%ls\\CANITY\\audio-2.4.2-RC4",base);CreateDirectoryW(cache,NULL);
     for(int i=0;i<6;i++) {

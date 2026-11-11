@@ -1389,7 +1389,6 @@ void ActivateMenuItem(void) {
                 return;
             }
             SaveGame();
-            if(g_saveError){pickupMsg=Tr("SAVE FAILED: PROGRESS KEPT OPEN","保存失败：仍保留当前游戏");pickupMsgTimer=3;uiDirty=1;return;}
             hasSave = SaveHasPendingRun();
             ForceCursor(1);resetInputState=1;
             /* 注意：这里**不能**清 dailyMode/campaignMode/runInProgress ——

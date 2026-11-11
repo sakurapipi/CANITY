@@ -60,7 +60,7 @@ static SaveBlob g_save;
      ③ %LOCALAPPDATA%\Canity
      ④ %TEMP%
    实测这台机器上 ①② 都被拦（ACCESS_DENIED），所以列表要往多处退。 */
-#define SAVE_CAND_COUNT 6   /* v3.0：加 Documents 与 TEMP 子目录兜底 */
+#define SAVE_CAND_COUNT 8   /* v3.0：加 Documents 与 TEMP 子目录兜底；v3.5：环境变量之外再留兜底 */
 
 int g_saveSlot = 0;   /* v2.0：当前存档槽 0..2 */
 
@@ -92,9 +92,24 @@ static const char* SavePathCandSlot(int i, int slot, char* buf, size_t n) {
     buf[0] = 0;
     const char* isolated = getenv("CANITY_DATA_DIR");
     if (isolated && isolated[0]) {
-        snprintf(buf, n, "%s\\canity%d.sav", isolated, slot);
-        return buf;
+        /* 用户指定的目录只作为**首选**，不再独占整张候选表。
+           原来环境变量一旦设置，六个候选全变成同一个路径：目录只读或
+           被沙箱拦住时，一次都写不进去，而 exe 目录/用户目录明明可写。
+           现在保留用户目录的优先级，失败后仍按标准位置逐个兜底。
+           但只有 main.c 自动设定的默认目录（CANITY_DATA_DIR_AUTO=1）
+           才允许兜底；外部显式指定目录时它仍是权威，不能悄悄写到别处。 */
+        const char* autoDir = getenv("CANITY_DATA_DIR_AUTO");
+        if (!autoDir || !autoDir[0] || autoDir[0] == '0') {
+            snprintf(buf, n, "%s\\canity%d.sav", isolated, slot);
+            return buf;
+        }
+        if (i == 0) {
+            snprintf(buf, n, "%s\\canity%d.sav", isolated, slot);
+            return buf;
+        }
+        i -= 1;
     }
+    if (i > 6) i = 6;   /* 兼容多出来的候选槽 */
     if (i == 0) {
         /* 2026-11-06（R3）：目录名由平台层给（网页端为空 = 用相对名） */
         PlatExeDir(buf, (int)n);
@@ -114,7 +129,10 @@ static const char* SavePathCandSlot(int i, int slot, char* buf, size_t n) {
        ERROR_ACCESS_DENIED(5)，存档一次都没写成功（g_saveState=2）。
        Documents 和 TEMP 子目录是权限最稳的两个位置。 */
     else if (i == 4) { base = getenv("USERPROFILE");  sub = "Documents\\Canity"; }
-    else             { base = getenv("TEMP");         sub = "Canity"; }
+    else if (i == 5) { base = getenv("TEMP");         sub = "Canity"; }
+    /* RC4 起单 EXE 的默认落点（main.c 也会把它写进 CANITY_DATA_DIR）。
+       这里显式保留一份，便于没有嵌入音乐资源、或环境变量被外部清掉的构建。 */
+    else             { base = getenv("LOCALAPPDATA"); sub = "Canity\\saves"; }
     if (!base || !*base) base = getenv("TEMP");
     if (!base || !*base) {
         size_t need = strlen(SAVE_FILE) + 1;

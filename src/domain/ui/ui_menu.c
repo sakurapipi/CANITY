@@ -1052,8 +1052,8 @@ static void DrawCalibStrip(MenuGeo g) {
        （因为小游戏本身是从安全屋也能开的，得让玩家知道进度）。 */
     if (!calibActive) return;
     {
-        sprintf(line, "%s", Tr("QWER NOTES / ESC CANCEL",
-                               "校准中 - 按空格锁定"));
+        sprintf(line, "%s", Tr("QWER NOTES  -  40s PROGRESS",
+                               "QWER 接音符  ·  40 秒进度"));
     }
     BlendRectWin(bx - UIS(8), by - TextHeightWin() - UIS(8),
                  bx + barW + UIS(8), by + barH + UIS(6), 0x000A0E14, 0.96f);
