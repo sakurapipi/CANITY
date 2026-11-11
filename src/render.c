@@ -80,6 +80,99 @@ void GenerateVignette(void) {
    Win32 后端把它建在 DIB Section 上（GDI 共享内存，呈现时 BitBlt）；
    网页后端就是一片普通内存。render.c 只拿到一个可写指针。 */
 
+/* ==================================================================
+ * 2026-11-11：**手工布偶的整屏层**（RC4 版）
+ * ------------------------------------------------------------------
+ * 让整个画面读成"一个被灯照着的布景"：
+ *   · 织物 2×2 织纹 + 固定相位的纤维噪点（静止，不闪 —— AD-08）
+ *   · 舞台式渐晕：四周压暗（复用 vignetteMask），理智红晕另行叠加
+ *   · 布景边缘的"包边 + 缝线"：四边暗边，第 4px 上一段一段的亚麻线
+ * 预生成成与渲染缓冲同尺寸的 8 位乘数表（128 = 原亮度）：
+ *       最终 = (颜色 * craftTex) >> 7
+ * 颜色分级不在这里做 —— 它在材质烘焙期由 ArtDollGrade() 完成（art.c）。
+ * ================================================================== */
+static unsigned char* craftTex = NULL;
+
+static unsigned int CraftHash(int x, int y) {
+    unsigned int h = (unsigned int)x * 374761393u + (unsigned int)y * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return h ^ (h >> 16);
+}
+
+static void BuildCraftTex(void) {
+    free(craftTex);
+    craftTex = NULL;
+    if (!ArtStyleDoll() || renderW <= 0 || renderH <= 0) return;
+    craftTex = (unsigned char*)malloc((size_t)renderW * renderH);
+    if (!craftTex) return;
+    for (int y = 0; y < renderH; y++) {
+        for (int x = 0; x < renderW; x++) {
+            float v = 1.0f;
+            if (vignetteMask) {
+                unsigned char m = vignetteMask[(size_t)y * renderW + x];
+                v *= 1.0f - ((float)m / 255.0f) * 0.50f;
+            }
+            /* 织物织纹：2×2 棋盘，幅度 ±8%（暗部也要看得出来） */
+            v *= ((x ^ y) & 1) ? 0.92f : 1.0f;
+            /* 纤维噪点：固定相位，逐帧不变 */
+            v *= 1.0f + ((float)(CraftHash(x, y) & 7) - 3.5f) * 0.0040f;
+            /* 包边：四周 12px 压暗，缝线由 CraftFrameRow() 单独画 */
+            {
+                int ex = (x < renderW - 1 - x) ? x : (renderW - 1 - x);
+                int ey = (y < renderH - 1 - y) ? y : (renderH - 1 - y);
+                int edge = (ex < ey) ? ex : ey;
+                if (edge < 12) v *= 0.62f + (float)edge * 0.030f;
+            }
+            int k = (int)(v * 128.0f + 0.5f);
+            if (k < 0) k = 0;
+            if (k > 255) k = 255;
+            craftTex[(size_t)y * renderW + x] = (unsigned char)k;
+        }
+    }
+}
+
+/* 布景包边：屏幕四边压成布料暗边，再缝一圈线。
+   直接写像素而不是乘系数 —— 线要能在纯黑背景上也看得见。 */
+static void CraftFrameRow(int y, unsigned int* row) {
+    static const int THR_R = 158, THR_G = 132, THR_B = 90;   /* 亚麻线 */
+    int top = y, bot = renderH - 1 - y;
+    int vmin = (top < bot) ? top : bot;
+    int n = (vmin < 6) ? 1 : 2;
+    for (int s = 0; s < n; s++) {
+        int xa = (s == 0) ? 0 : renderW - 6;
+        int xb = (s == 0) ? (vmin < 6 ? renderW : 6) : renderW;
+        for (int x = xa; x < xb; x++) {
+            int left = x, right = renderW - 1 - x;
+            int hmin = (left < right) ? left : right;
+            int vert = (hmin < vmin);
+            int d = vert ? hmin : vmin;
+            int along = vert ? y : x;
+            unsigned int c = row[x];
+            int r = (int)((c >> 16) & 0xFF);
+            int g = (int)((c >> 8) & 0xFF);
+            int b = (int)(c & 0xFF);
+            if (d <= 1) {
+                r = r * 22 / 100; g = g * 22 / 100; b = b * 24 / 100;
+            } else if (d == 2) {
+                r = r * 52 / 100; g = g * 52 / 100; b = b * 56 / 100;
+            } else if (d == 3) {
+                r = r * 78 / 100; g = g * 78 / 100; b = b * 80 / 100;
+            } else if (d == 4) {
+                if (((along / 7) & 1) == 0) {
+                    r = (r * 25 + THR_R * 75) / 100;
+                    g = (g * 25 + THR_G * 75) / 100;
+                    b = (b * 25 + THR_B * 75) / 100;
+                } else {
+                    r = r * 62 / 100; g = g * 62 / 100; b = b * 66 / 100;
+                }
+            } else {
+                r = r * 70 / 100; g = g * 70 / 100; b = b * 72 / 100;
+            }
+            row[x] = (unsigned int)((r << 16) | (g << 8) | b);
+        }
+    }
+}
+
 /* 按当前设置重新分配内部渲染缓冲 */
 void InitPixels(void) {
     float s = renderScales[renderScaleIndex] / 100.0f;
@@ -140,6 +233,7 @@ void InitPixels(void) {
     if (pixels) memset(pixels, 0, (size_t)renderW * renderH * sizeof(unsigned int));
 
     GenerateVignette();
+    BuildCraftTex();      /* 2026-11-11：整屏布偶层的乘数表（尺寸变了要重建） */
     uiDirty = 1;
 }
 
@@ -285,11 +379,14 @@ void GenerateThemeTextures(int id) {
     if (id < 0 || id >= THEME_COUNT) id = 0;
     themeId = id;
 
-    floorBaseA=RoomMaterialSample(id,8,8,1);floorBaseB=RoomMaterialSample(id,16,16,1);
+    floorBaseA=ArtDollGrade(RoomMaterialSample(id,8,8,1));
+    floorBaseB=ArtDollGrade(RoomMaterialSample(id,16,16,1));
     for(int y=0;y<TEX_HEIGHT;y++)for(int x=0;x<TEX_WIDTH;x++){
-        texture[y][x]=RoomMaterialSample(id,x&~1,y&~1,0);
-        floorTexture[y][x]=RoomMaterialSample(id,x&~1,y&~1,1);
-        ceilTexture[y][x]=RoomMaterialSample(id,x&~1,y&~1,2);
+        /* 2026-11-11：布偶画风的材质分级在**烘焙期**落地（一次）。
+           classic 模式下 ArtDollGrade 原样返回，贴图逐像素不变。 */
+        texture[y][x]=ArtDollGrade(RoomMaterialSample(id,x&~1,y&~1,0));
+        floorTexture[y][x]=ArtDollGrade(RoomMaterialSample(id,x&~1,y&~1,1));
+        ceilTexture[y][x]=ArtDollGrade(RoomMaterialSample(id,x&~1,y&~1,2));
     }
 
 
@@ -3293,6 +3390,7 @@ static void RenderPostBand(int y0,int y1) {
     float stress=perception.stress,crisis=perception.contamination;
     float beat=.5f+.5f*sinf((float)g_timeSec*6.0f);
     int radius=1+(int)(stress*3),dark=(int)(256*perception.vignette);
+    int doll=(ArtStyleDoll()&&craftTex!=NULL);
     for(int y=y0;y<y1;y++){
         unsigned int* row=pixels+(size_t)y*renderW;
         uint32_t noise=perception.seed^(uint32_t)(y*7919+107);
@@ -3330,8 +3428,17 @@ static void RenderPostBand(int y0,int y1) {
             if(g>255)g=255;
             if(b<0)b=0;
             if(b>255)b=255;
+            if(doll){
+                /* 2026-11-11：布偶整屏层。只乘织纹/渐晕，不做颜色分级
+                   （分级已在贴图与精灵烘焙期完成）。 */
+                int k=craftTex[(size_t)y*renderW+x];
+                r=(r*k)>>7;if(r>255)r=255;
+                g=(g*k)>>7;if(g>255)g=255;
+                b=(b*k)>>7;if(b>255)b=255;
+            }
             row[x]=(unsigned)(r<<16|g<<8|b);
         }
+        if(doll)CraftFrameRow(y,row);
     }
 }
 

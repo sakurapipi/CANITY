@@ -170,3 +170,80 @@ unsigned int ArtScale(unsigned int c, float k) {
     if (b > 255u) b = 255u;
     return (r << 16) | (g << 8) | b;
 }
+
+/* ================================================================== */
+/* §6 画风开关                                                         */
+/* ================================================================== */
+
+/*
+ * 2026-11-11：手工布偶画风（Coraline 式）。
+ *
+ * 为什么做成开关而不是直接替换：
+ *   · 这是一次整体色调与材质的方向改变，必须能和原版并排看（AD-29 证据分级）；
+ *   · 出问题时一句 `set CANITY_STYLE=classic` 就能回到已验收的画面；
+ *   · 渲染与烘焙都读同一个判定，不会出现"精灵换了、整屏没换"的半套状态。
+ */
+int ArtStyleDoll(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* e = getenv("CANITY_STYLE");
+        if (e && (strcmp(e, "classic") == 0 || strcmp(e, "0") == 0))
+            cached = 0;
+        else
+            cached = 1;
+    }
+    return cached;
+}
+
+/* ================================================================== */
+/* §7 布偶画风的材质分级                                               */
+/* ================================================================== */
+
+/*
+ * 为什么分级放在**材质烘焙期**而不是每帧后处理：
+ *   把"去饱和 + 暖光"做进贴图与精灵，等于"这些材料本来就是这个颜色"，
+ *   每帧只乘一次织纹系数即可。beta 上实测（800×600）每帧省下约 3ms。
+ *   而且分级落在反照率上是物理正确的：手电的冷光仍然能照出冷暖对比。
+ *
+ * 两步：
+ *   ① 去饱和 38%，同时把亮度往暖灰偏 —— 各主题拉回同一条基线；
+ *   ② 高光偏琥珀、阴影偏冷青 —— 定格动画的灯光关系。
+ */
+static unsigned char g_gradeR[256], g_gradeG[256], g_gradeB[256];
+static int g_gradeReady = 0;
+
+static void BuildDollGrade(void) {
+    for (int i = 0; i < 256; i++) {
+        int v = i;
+        int hi = v * v / 255;
+        int lo = (255 - v) * (255 - v) / 255;
+        int r = v + (hi * 46) / 255 - (lo * 6) / 255 + 6;
+        int g = v + (hi * 18) / 255 + 2;
+        int b = v - (hi * 30) / 255 + (lo * 12) / 255 - 8;
+        if (r < 0) r = 0; else if (r > 255) r = 255;
+        if (g < 0) g = 0; else if (g > 255) g = 255;
+        if (b < 0) b = 0; else if (b > 255) b = 255;
+        g_gradeR[i] = (unsigned char)r;
+        g_gradeG[i] = (unsigned char)g;
+        g_gradeB[i] = (unsigned char)b;
+    }
+    g_gradeReady = 1;
+}
+
+unsigned int ArtDollGrade(unsigned int c) {
+    if (!ArtStyleDoll()) return c;          /* classic：一个字节都不动 */
+    if (!g_gradeReady) BuildDollGrade();
+    int r = (int)((c >> 16) & 0xFFu);
+    int g = (int)((c >> 8) & 0xFFu);
+    int b = (int)(c & 0xFFu);
+    int lum = (r * 77 + g * 151 + b * 28) >> 8;
+    r = (r * 159 + (lum + ((lum * 14) >> 8)) * 97) >> 8;
+    g = (g * 159 + lum * 97) >> 8;
+    b = (b * 159 + (lum - ((lum * 12) >> 8)) * 97) >> 8;
+    if (r > 255) r = 255;
+    if (g > 255) g = 255;
+    if (b > 255) b = 255;
+    return ((unsigned int)g_gradeR[r] << 16) |
+           ((unsigned int)g_gradeG[g] << 8) |
+           (unsigned int)g_gradeB[b];
+}

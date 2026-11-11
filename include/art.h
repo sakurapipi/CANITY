@@ -31,4 +31,16 @@ int ArtDitherOn(float t, int x, int y, float scale);
 /* ---- §5 辅助 ---- */
 unsigned int ArtScale(unsigned int c, float k);
 
+/* ---- §6 画风开关（2026-11-11，RC4 上重落） ----
+ *   1 = 手工布偶（默认）：布片剪边、织物颗粒、舞台式暖光分级
+ *   0 = 经典：改造前的暗色像素恐怖
+ * 环境变量 CANITY_STYLE=classic 切回 0；其余取值一律按 1。
+ * 只读一次环境变量并缓存 —— 渲染热路径里不做 getenv。 */
+int ArtStyleDoll(void);
+
+/* 布偶画风的材质分级：去饱和 38% + 高光偏琥珀 / 阴影偏冷青。
+ * 在**烘焙期**调用（贴图、精灵），不要在每帧内层循环里调用。
+ * ArtStyleDoll()==0 时原样返回，保证 classic 画面逐像素不变。 */
+unsigned int ArtDollGrade(unsigned int c);
+
 #endif

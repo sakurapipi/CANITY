@@ -15,6 +15,7 @@
 #include "sprites.h"
 #include "common.h"
 #include "render.h"
+#include "art.h"
 
 /* ------------------------------------------------------------------ */
 /* 画布（2× 超采样）                                                    */
@@ -249,6 +250,7 @@ static void cvGlow(float cx, float cy, float r, unsigned int col, float a) {
 static void cvFinish(Sprite* s) {
     int outputScale=g_canvasScale;
     int ow=SPR_W*outputScale,oh=SPR_H*outputScale;
+    int dollStyle=ArtStyleDoll();      /* 循环外取一次 */
     unsigned int* resized=(unsigned int*)realloc(s->px,(size_t)ow*oh*sizeof(unsigned int));
     if(resized)s->px=resized;
     else {outputScale=1;ow=SPR_W;oh=SPR_H;}
@@ -291,6 +293,14 @@ static void cvFinish(Sprite* s) {
             if (rr > 255) rr = 255;
             if (gg > 255) gg = 255;
             if (bb > 255) bb = 255;
+            if (dollStyle && outA > 0) {
+                unsigned int q = ArtDollGrade(((unsigned int)rr << 16) |
+                                              ((unsigned int)gg << 8) |
+                                              (unsigned int)bb);
+                rr = (int)((q >> 16) & 0xFFu);
+                gg = (int)((q >> 8) & 0xFFu);
+                bb = (int)(q & 0xFFu);
+            }
             s->px[(size_t)y * ow + x] = ((unsigned int)outA << 24) |
                                            (unsigned int)rr << 16 |
                                            (unsigned int)gg << 8 |
@@ -303,6 +313,101 @@ static void cvFinish(Sprite* s) {
         int v = (int)(k * 255.0f);
         if (v > 255) v = 255;
         s->shade[i] = (unsigned int)((v << 16) | (v << 8) | v);
+    }
+
+    /* ==================================================================
+     * 2026-11-11：**布偶画风的剪边与织纹**（烘焙期一次算完，运行时零成本）
+     * ------------------------------------------------------------------
+     * 让每个物件都读成"从布上剪下来、贴进布景"的一块：
+     *   ① 剪边：轮廓向内的一个窄带提亮成亚麻纤维色
+     *   ② 接触阴影：剪边外侧再压暗一圈（布片贴住布景的 AO）
+     *   ③ 织物：规则 2×2 棋盘（按分辨率放大），静止、不闪（AD-08）
+     * 只改颜色、不改 alpha：剪影、包围盒、命中框一律不动（AD-01/AD-11）。
+     *
+     * RC4 的精灵是 512（g_canvasScale），这里按 ow/128 缩放带宽 ——
+     * 否则同一条 1px 边在 512 上只有原来的 1/4 宽，等于没做。
+     * 性能：只处理包围盒；AO 用「从轮廓膨胀」而不是逐像素查 5×5，
+     * 否则 69 张 512×512 会让启动多等一秒以上。
+     * ================================================================== */
+    if (dollStyle) {
+        int sid = (int)(s - g_sprites);
+        if (!(sid >= SPR_UI_PANEL && sid < SPR_HATCH_0)) {
+            int S = ow / 128;                 /* 512 → 4 */
+            if (S < 1) S = 1;
+            int x0 = s->bx0, y0 = s->by0, x1 = s->bx1, y1 = s->by1;
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 >= ow) x1 = ow - 1;
+            if (y1 >= oh) y1 = oh - 1;
+            if (x1 > x0 && y1 > y0) {
+                size_t msz = (size_t)ow * oh;
+                unsigned char* emask = (unsigned char*)calloc(msz, 1);
+                unsigned char* rim = (unsigned char*)calloc(msz, 1);
+                unsigned char* ao = (unsigned char*)calloc(msz, 1);
+                if (emask && rim && ao) {
+                    /* ① 找轮廓：有像素、且四邻里有透明 */
+                    for (int y = y0; y <= y1; y++) {
+                        for (int x = x0; x <= x1; x++) {
+                            size_t i = (size_t)y * ow + x;
+                            if ((s->px[i] >> 24) < 40) continue;
+                            if (x <= 0 || y <= 0 || x >= ow - 1 || y >= oh - 1 ||
+                                (s->px[i - 1] >> 24) < 40 || (s->px[i + 1] >> 24) < 40 ||
+                                (s->px[i - ow] >> 24) < 40 || (s->px[i + ow] >> 24) < 40)
+                                emask[i] = 1;
+                        }
+                    }
+                    /* ② 膨胀两次：rim 带宽 S，AO 带宽 2S */
+                    for (int pass = 0; pass < 2; pass++) {
+                        int rad = (pass == 0) ? S : 2 * S;
+                        unsigned char* dst = (pass == 0) ? rim : ao;
+                        for (int y = y0; y <= y1; y++) {
+                            for (int x = x0; x <= x1; x++) {
+                                if (!emask[(size_t)y * ow + x]) continue;
+                                int ya = y - rad, yb = y + rad;
+                                int xa = x - rad, xb = x + rad;
+                                if (ya < 0) ya = 0;
+                                if (xb >= ow) xb = ow - 1;
+                                if (yb >= oh) yb = oh - 1;
+                                if (xa < 0) xa = 0;
+                                for (int yy = ya; yy <= yb; yy++)
+                                    memset(dst + (size_t)yy * ow + xa, 1, (size_t)(xb - xa + 1));
+                            }
+                        }
+                    }
+                    /* ③ 上色 */
+                    for (int y = y0; y <= y1; y++) {
+                        for (int x = x0; x <= x1; x++) {
+                            size_t i = (size_t)y * ow + x;
+                            if ((s->px[i] >> 24) < 8) continue;
+                            unsigned int c = s->px[i];
+                            int r = (int)((c >> 16) & 0xFF);
+                            int g = (int)((c >> 8) & 0xFF);
+                            int b = (int)(c & 0xFF);
+                            if (rim[i]) {
+                                r += (198 - r) * 30 / 100;
+                                g += (184 - g) * 30 / 100;
+                                b += (158 - b) * 30 / 100;
+                            } else if (ao[i]) {
+                                r = (r * 224) >> 8;
+                                g = (g * 224) >> 8;
+                                b = (b * 224) >> 8;
+                            } else if (((x / S) + (y / S)) & 1) {
+                                r = (r * 247) >> 8;
+                                g = (g * 247) >> 8;
+                                b = (b * 247) >> 8;
+                            }
+                            s->px[i] = (c & 0xFF000000u) |
+                                       ((unsigned int)r << 16) |
+                                       ((unsigned int)g << 8) |
+                                       (unsigned int)b;
+                        }
+                    }
+                }
+                free(emask);
+                free(rim);
+                free(ao);
+            }
+        }
     }
 }
 
