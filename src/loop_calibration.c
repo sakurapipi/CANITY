@@ -58,7 +58,7 @@ static void Finish(int result) {
 }
 void CalibStart(void) {
     if(calibActive || (!stationSession && hiddenIn<0 && !trainingMode) || calibCooldown>0)return;
-    if(!MusicCanCalibrate()){pickupMsg=LangTr("CHART MUSIC NOT READY","谱面音乐尚未就绪");pickupMsgTimer=1.4f;return;}
+    if(!MusicPrepareForCalibration()){pickupMsg=LangTr("CHART MUSIC NOT READY","谱面音乐尚未就绪");pickupMsgTimer=1.4f;return;}
     int scene=(int)MusicCurrentScene();if(scene<0 || scene>=6)scene=MUSIC_EXPLORE;
     chart=&scoreCharts[scene];
     if(chart->count>512 || chart->count<=0)return;
@@ -107,9 +107,11 @@ void CalibTick(float dt) {
     if(!calibActive)return;
     if(currentLevel!=level || (stationSession?currentState!=STATE_SAFEHOUSE:(!trainingMode && hiddenIn<0))){Finish(2);return;}
     if(hiddenIn>=0){
-        if(!flashlightOn)battery=fminf((float)BatteryMax(),battery+HIDE_BATTERY_REGEN*dt);
+        float regen = HIDE_BATTERY_REGEN * (flashlightOn ? 0.5f : 1.0f);
+        battery=fminf((float)BatteryMax(),battery+regen*dt);
         sanity=fminf(SanityMax(),sanity+HIDE_SANITY_REGEN*dt);
     }
+
     elapsed+=dt;calibPos=elapsed/40.0f;
     /* 松键锁存：安全屋里 CalibHandleInput 不跑（它只处理 PLAYING），
        所以 latch 的复位必须放在每帧都执行的 CalibTick 里。 */

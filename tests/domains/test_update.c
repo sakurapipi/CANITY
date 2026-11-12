@@ -355,6 +355,21 @@ static void probe_save_failure_must_not_trap_pause_menu(void) {
     }
 }
 
+static void test_hiding_recharges_battery_even_with_light_on(void) {
+    enter_playing();
+    hiddenIn = 0;
+    flashlightOn = 1;
+    battery = 50.0f;
+    float before = battery;
+    PlayerTickVitals(1.0f, 0);
+    PlayerTickBattery(1.0f);
+    CHECK(battery > before, "hiding must recharge battery instead of draining it");
+    CHECK(battery <= before + HIDE_BATTERY_REGEN * 0.5f + 0.05f,
+          "hiding with the flashlight on uses the advertised half-rate recharge");
+    hiddenIn = -1;
+    flashlightOn = 0;
+}
+
 void TestSuite_update(void) {
     probe_pause_menu_returns_to_main_menu();
     probe_hide_spot_is_recognised();
@@ -367,4 +382,5 @@ void TestSuite_update(void) {
     test_training_pad_refills_items();
     test_smoke_blinds_the_monster();
     test_empty_wrench_swing_leaves_a_visible_marker();
+    test_hiding_recharges_battery_even_with_light_on();
 }

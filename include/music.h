@@ -35,6 +35,10 @@ void MusicNotify(MusicEvent event);
 void MusicTick(float dt);
 void MusicSeekSeconds(float seconds);
 int MusicCanCalibrate(void);
+/* Try to make the current scene's PCM track ready before a calibration.
+   Unlike MusicCanCalibrate this may reload the track; call it on the
+   "start minigame" action, not every frame. */
+int MusicPrepareForCalibration(void);
 float MusicEffectiveGain(void);
 MusicScene MusicCurrentScene(void);
 MusicProviderId MusicCurrentProvider(void);

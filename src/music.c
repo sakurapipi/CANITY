@@ -178,3 +178,17 @@ void MusicLoadGameTracks(void) {
 }
 
 int MusicCanCalibrate(void) {return current==MUSIC_LOCAL && AudioOutputLatencySeconds()>0 && !strcmp(tracks[currentScene],loadedPcmTracks[currentScene]) && MusicPcmAvailable((int)currentScene);}
+
+int MusicPrepareForCalibration(void) {
+    if (current != MUSIC_LOCAL) return 0;
+    if (currentScene < 0 || currentScene >= MUSIC_SCENE_COUNT || !tracks[currentScene][0]) return 0;
+    /* Lite builds load MP3s from the external music/ folder. If the scene's
+       PCM was freed while another track was playing, or this is the first
+       entry into the scene, reload it here once instead of reporting
+       "chart music not ready" before the normal scene tick can do it. */
+    if (!MusicPcmAvailable((int)currentScene) ||
+        strcmp(tracks[currentScene], loadedPcmTracks[currentScene]) != 0) {
+        if (!localPlay(NULL, tracks[currentScene], 1)) return 0;
+    }
+    return MusicCanCalibrate();
+}

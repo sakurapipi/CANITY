@@ -69,7 +69,11 @@ int PlayerTickVitals(float dt,int inSafe){
         }
     }
     if(hiddenIn>=0){
-        if(!flashlightOn)battery=fminf((float)BatteryMax(),battery+HIDE_BATTERY_REGEN*dt);
+        /* 藏身回电与 HUD 的速率一致：手电开着时半速，关灯时全速。
+           原来只在关灯时回电，HUD 却按半速显示 +2/秒，玩家看到电池
+           一边显示 +2 一边继续下降。 */
+        float regen = HIDE_BATTERY_REGEN * (flashlightOn ? 0.5f : 1.0f);
+        battery = fminf((float)BatteryMax(), battery + regen * dt);
         sanity=fminf(SanityMax(),sanity+HIDE_SANITY_REGEN*dt);
     }
     lowSanitySeconds+=(sanity<=1)?dt:0;
@@ -86,7 +90,7 @@ void PlayerTickBattery(float dt){
         float threshold=BatteryMax()*.25f;
         if(battery<threshold)battery=fminf(threshold,battery+SkillPwrSiphonAdd()*dt);
     }
-    if(flashlightOn && !CampaignFlashlightLocked()){
+    if(flashlightOn && !CampaignFlashlightLocked() && hiddenIn<0){
         float rate=BatteryDrainRate()*PositiveDrainFactor(RunBatteryDrainMul())*PositiveDrainFactor(SkillGhostStepDrainMul());
         battery-=rate*dt;
     }

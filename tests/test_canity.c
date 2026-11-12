@@ -642,6 +642,15 @@ static void test_stable_visuals_and_input(void) {
     check(contains(ui, "if (lockActive) return;") &&
           contains(ui, "锁盘打开时不画任何拾取/藏身 toast"),
           "lock overlay must suppress hiding/pickup HUD and toasts");
+    {
+        const char* music_src = read_file("src/music.c");
+        const char* calib_src = read_file("src/loop_calibration.c");
+        check(contains(music_src, "int MusicPrepareForCalibration(void)") &&
+              contains(calib_src, "MusicPrepareForCalibration()"),
+              "starting the rhythm game must retry loading the current external track");
+        free((void*)music_src);
+        free((void*)calib_src);
+    }
     check(contains(render,"RenderPostBand(int y0,int y1)") &&
           contains(render,"perception.grain") && contains(render,"perception.seed") &&
           contains_tight(render,"noise=noise*1664525u+1013904223u;"),

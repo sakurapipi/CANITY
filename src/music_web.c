@@ -130,3 +130,4 @@ const char* MusicLastError(void){return "";}
 
 EM_JS(int,js_music_calibratable,(void),{var m=Module._musicBus;return m && !m.builtin && m.buffers[m.scene]?1:0;});
 int MusicCanCalibrate(void){return !WebCustomActive() && js_music_calibratable();}
+int MusicPrepareForCalibration(void){js_music_init();return MusicCanCalibrate();}
