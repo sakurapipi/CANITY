@@ -3542,7 +3542,10 @@ static void DrawViewModel(void) {
      * ================================================================== */
     /* 2026-11-16：挥击时切成"出招姿态"变体（钳口张开、头前探），
        其余时间仍是待机那把。 */
-    int sid = SPR_WRENCH;
+    /* 诊断开关：设 WRENCH_STRIKE_TEST=1 时，待机也画出招款，
+       用来判断"变体到底有没有生效"。
+       2026-11-16 临时加入，确认后删除。 */
+    int sid = getenv("WRENCH_STRIKE_TEST") ? SPR_WRENCH_STRIKE : SPR_WRENCH;
     float light = 0.85f;   /* 挥击动画会按帧微调亮度，所以不能是 const */
 
     int cx = (int)((float)renderW * 0.72f + sway);
@@ -3595,10 +3598,12 @@ static void DrawViewModel(void) {
         int fr = (int)(swingProg * 12.0f);
         if (fr > 11) fr = 11;
         /* 刺出到收势之间（fr3~fr6）换成出招姿态的模型 */
-        if (fr >= 3 && fr <= 6) sid = SPR_WRENCH_STRIKE;
+        if (fr >= 2 && fr <= 8) sid = SPR_WRENCH_STRIKE;   /* 窗口加宽：0.044~0.20s 都用出招款 */
 
-        /* 残影只在前半段（刺出过程）出现，回收阶段不再拖影 */
-        if (fr >= 2 && fr <= 6) {
+        /* 2026-11-16：**残影暂时关闭** —— 用户实测"攻击时多出一个方框"，
+           最可能是半透明残影的方形包围盒糊在画面上。
+           先关掉确认；如果方框消失，之后改用更小的偏移重开。 */
+        if (0 && fr >= 2 && fr <= 6) {
             for (int g = 2; g >= 1; g--) {
                 int gf = fr - g;
                 if (gf < 0) continue;
