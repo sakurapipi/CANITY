@@ -3560,6 +3560,7 @@ static void DrawViewModel(void) {
          6 回位  (+0.004,+0.004, 98%)   7 静止 ( 0.000, 0.000,100%)
     */
     float swingProg = -1.0f;
+    float swingAngle = 0.0f;
     if (wrenchSwingFxT > 0.0f) {
         const float kWin = WRENCH_SWING_TIME * 1.6f;
         swingProg = 1.0f - wrenchSwingFxT / kWin;
@@ -3567,37 +3568,50 @@ static void DrawViewModel(void) {
         if (swingProg > 1.0f) swingProg = 1.0f;
     }
     if (swingProg >= 0.0f) {
-        /* 命中与画面必须同刻：逻辑侧 5 帧制在第 2 帧（0.056s）结算，
-           视觉窗口 0.224s → 0.056/0.224 = 0.25 → **第 2 帧就是挥到**。 */
-        static const float kDx[8] = { -0.020f, -0.075f,  0.085f,  0.055f,
-                                       0.020f,  0.004f,  0.000f,  0.000f };
-        static const float kDy[8] = {  0.022f,  0.055f, -0.055f, -0.020f,
-                                       0.010f,  0.004f,  0.000f,  0.000f };
-        static const int   kSz[8] = { 92, 86, 118, 110, 102, 98, 100, 100 };
-        static const float kLi[8] = { 0.90f, 0.78f, 1.20f, 1.10f,
+        /* 旋转是这次的重点：光靠平移读起来就是"手抖"。
+           角度表（弧度，正=往右下甩），支点在握把 (0.52, 0.92)：
+             fr0 起手后仰 -0.18   fr1 后摆最大 -0.62   fr2 挥出 +0.95（命中）
+             fr3 过顶 +1.15      fr4 回收 +0.55      fr5 收势 +0.18
+             fr6 / fr7 归零 */
+        static const float kAng[8] = { -0.18f, -0.62f, 0.95f, 1.15f,
+                                        0.55f,  0.18f, 0.00f, 0.00f };
+        /* 平移只留少量（配合旋转，太多就变成抖动） */
+        static const float kDx[8] = { -0.012f, -0.042f,  0.052f,  0.034f,
+                                       0.012f,  0.004f,  0.000f,  0.000f };
+        static const float kDy[8] = {  0.012f,  0.030f, -0.030f, -0.012f,
+                                       0.006f,  0.002f,  0.000f,  0.000f };
+        static const int   kSz[8] = { 94, 90, 116, 108, 102, 98, 100, 100 };
+        static const float kLi[8] = { 0.92f, 0.80f, 1.22f, 1.10f,
                                       1.02f, 0.99f, 1.00f, 1.00f };
         int fr = (int)(swingProg * 8.0f);
         if (fr > 7) fr = 7;
 
-        /* 残影：先画最早的那层，再画晚一点的，最后画本体 */
-        for (int g = 2; g >= 1; g--) {            int gf = fr - g * 2;
+        /* 残影：先画最早的那层，再画晚一点的，最后画本体。残影也带旋转，否则轨迹对不上。 */
+        for (int g = 2; g >= 1; g--) {
+            int gf = fr - g * 2;
             if (gf < 0) continue;
             float ga = (g == 2) ? 0.10f : 0.22f;
             int gx = cx + (int)((float)renderW * kDx[gf]);
             int gy = cy + (int)((float)renderH * kDy[gf]);
             int gs = size * (kSz[gf] + 4) / 100;      /* 残影略大，制造拖影 */
-            DrawSprite(sid, gx - gs / 2, gy - gs, gs, gs,
-                       light * kLi[gf], ga, 0, 0.0f);
+            DrawSpriteRot(sid, gx - gs / 2, gy - gs, gs, gs,
+                          light * kLi[gf], ga, kAng[gf], 0.52f, 0.92f);
         }
 
         cx += (int)((float)renderW * kDx[fr]);
         cy += (int)((float)renderH * kDy[fr]);
         size = size * kSz[fr] / 100;
         light *= kLi[fr];
+        swingAngle = kAng[fr];
     }
     int px = cx - size / 2;
     int py = cy - size;
-    DrawSprite(sid, px, py, size, size, light, 1.0f, 0, 0.0f);
+    /* 有挥击时用旋转绘制，否则走原来的直绘（零开销、零回归） */
+    if (swingAngle != 0.0f) {
+        DrawSpriteRot(sid, px, py, size, size, light, 1.0f, swingAngle, 0.52f, 0.92f);
+    } else {
+        DrawSprite(sid, px, py, size, size, light, 1.0f, 0, 0.0f);
+    }
 
     /* 2026-11-06（用户要求）：**手持小图删掉**。
        用户原话：「把那个叫什么传送的那个小图也给删掉，然后就留一个信标」。

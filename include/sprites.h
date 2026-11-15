@@ -121,6 +121,12 @@ Sprite* SpriteGet(int id);
 int    SpritesReady(void);
 
 /* 运行时绘制：双线性采样 + 亮度查表 + alpha + 可选深度测试 */
+/* 2026-11-16: rotated blit for the first-person weapon (angle in radians,
+   pivotX/pivotY are normalized to the destination box). */
+void DrawSpriteRot(int id, int x, int y, int w, int h,
+                   float light, float alpha, float angle,
+                   float pivotX, float pivotY);
+
 void DrawSprite(int id, int x, int y, int w, int h,
                 float light, float alpha, int zTest, float zDist);
 

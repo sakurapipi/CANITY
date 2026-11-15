@@ -3506,6 +3506,72 @@ void DrawSpriteCreature(int id,int x,int y,int w,int h,float light,float alpha,i
 }
 
 
+/* ==================================================================
+ * 2026-11-16：**带旋转的精灵绘制**（只给第一人称武器用）
+ * ------------------------------------------------------------------
+ * 为什么加：DrawSprite 只有平移和缩放，没有角度 —— 扳手挥击时模型
+ * 始终保持同一朝向，只能左右挪，看起来像"手抖"而不是"挥出去"。
+ *
+ * 参数：
+ *   angle   弧度；正 = 顺时针（屏幕上往右下甩）
+ *   pivotX/pivotY  旋转支点（0..1 归一化，相对绘制框），用握把做支点
+ * 实现：对绘制框逐像素反算回源图坐标（先减支点、反向旋转、再加回来），
+ *       双线性采样，和 DrawSpriteSurface 一样的亮度/alpha 处理。
+ * ================================================================ */
+void DrawSpriteRot(int id, int x, int y, int w, int h,
+                   float light, float alpha, float angle,
+                   float pivotX, float pivotY) {
+    if (!g_ready || w <= 0 || h <= 0 || alpha <= 0.003f) return;
+    if (id < 0 || id >= SPR_COUNT) return;
+    Sprite* s = &g_sprites[id];
+    if (!s->px || s->w <= 0 || s->h <= 0) return;
+
+    int li = (int)(light * (float)(SPR_SHADES - 1) + 0.5f);
+    if (li < 0) li = 0;
+    if (li >= SPR_SHADES) li = SPR_SHADES - 1;
+    int lr = (s->shade[li] >> 16) & 0xFF;
+
+    float ca = cosf(angle), sa = sinf(angle);
+
+    for (int j = 0; j < h; j++) {
+        int py = y + j;
+        if (py < 0 || py >= renderH) continue;
+        for (int i = 0; i < w; i++) {
+            int pxi = x + i;
+            if (pxi < 0 || pxi >= renderW) continue;
+
+            /* 绘制框内归一化坐标（以支点为原点） */
+            float u = ((float)i + 0.5f) / (float)w - pivotX;
+            float v = ((float)j + 0.5f) / (float)h - pivotY;
+            /* 反向旋转，回到未旋转的源图位置 */
+            float su = u * ca + v * sa;
+            float sv = -u * sa + v * ca;
+            float fx = (su + pivotX) * (float)s->w - 0.5f;
+            float fy = (sv + pivotY) * (float)s->h - 0.5f;
+            if (fx < 0.0f || fy < 0.0f || fx >= (float)(s->w - 1) || fy >= (float)(s->h - 1)) continue;
+
+            int x0 = (int)fx, y0 = (int)fy;
+            float tx = fx - (float)x0, ty = fy - (float)y0;
+            unsigned int p00 = s->px[(size_t)y0 * s->w + x0];
+            unsigned int p10 = s->px[(size_t)y0 * s->w + x0 + 1];
+            unsigned int p01 = s->px[(size_t)(y0 + 1) * s->w + x0];
+            unsigned int p11 = s->px[(size_t)(y0 + 1) * s->w + x0 + 1];
+            float w00 = (1.0f - tx) * (1.0f - ty), w10 = tx * (1.0f - ty);
+            float w01 = (1.0f - tx) * ty,          w11 = tx * ty;
+            float a = (((p00 >> 24) & 0xFF) * w00 + ((p10 >> 24) & 0xFF) * w10 +
+                       ((p01 >> 24) & 0xFF) * w01 + ((p11 >> 24) & 0xFF) * w11) / 255.0f;
+            if (a < 0.004f) continue;
+            int r = (int)((((p00 >> 16) & 0xFF) * w00 + ((p10 >> 16) & 0xFF) * w10 +
+                           ((p01 >> 16) & 0xFF) * w01 + ((p11 >> 16) & 0xFF) * w11) * lr) >> 8;
+            int g = (int)((((p00 >> 8) & 0xFF) * w00 + ((p10 >> 8) & 0xFF) * w10 +
+                           ((p01 >> 8) & 0xFF) * w01 + ((p11 >> 8) & 0xFF) * w11) * lr) >> 8;
+            int b = (int)(((p00 & 0xFF) * w00 + (p10 & 0xFF) * w10 +
+                           (p01 & 0xFF) * w01 + (p11 & 0xFF) * w11) * lr) >> 8;
+            PutPixelBlend(pxi, py, (unsigned int)((r << 16) | (g << 8) | b), a * alpha);
+        }
+    }
+}
+
 void DrawSprite(int id, int x, int y, int w, int h,
                 float light, float alpha, int zTest, float zDist) {
     DrawSpriteTint(id, x, y, w, h, light, alpha, zTest, zDist, 0, 0.0f);
