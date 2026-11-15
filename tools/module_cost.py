@@ -42,7 +42,9 @@ DOMAINS = {
                  'domain/ui/ui_menu.c'],
                  ['ui.h', 'ui_text.h', 'ui_pages.h', 'ui_menu.h'], 'ui.md'),
     'render':   (['render.c', 'domain/render/render_map.c',
-                 'domain/render/render_decoy.c'], ['render.h'], 'render.md'),
+                 'domain/render/render_decoy.c',
+                 'domain/render/render_spritequeue.c',
+                 'domain/render/render_viewmodel.c'], ['render.h'], 'render.md'),
 }
 
 

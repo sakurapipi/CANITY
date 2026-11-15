@@ -117,4 +117,11 @@ void DrawDecoyModel(int idx);
 typedef struct { int ok; float ty; int x0, x1, y0, y1; } SpriteBox;
 SpriteBox ProjectSprite(float wx, float wy, float baseZ, float halfH);
 
+/* 2026-11-16：精灵绘制队列（render_spritequeue.c）与手持模型（render_viewmodel.c）。 */
+typedef struct { float d2; int kind, idx; } SpriteDrawEntry;
+int CollectSpriteScenery(SpriteDrawEntry* list, int n);
+int CollectSpriteActorsAndMarkers(SpriteDrawEntry* list, int n);
+int CollectSpriteEffectsAndExit(SpriteDrawEntry* list, int n);
+void DrawViewModel(void);
+
 #endif /* CANITY_RENDER_H */
