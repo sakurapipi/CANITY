@@ -28,11 +28,11 @@
       BEGIN
         VALUE "CompanyName",      "Canity"
         VALUE "FileDescription",  "Canity - raycasting horror game"
-        VALUE "FileVersion",      "2.4.5-rc1"
+        VALUE "FileVersion",      "2.4.5"
         VALUE "InternalName",     "canity"
         VALUE "OriginalFilename", "canity.exe"
         VALUE "ProductName",      "Canity"
-        VALUE "ProductVersion",   "2.4.5-rc1"
+        VALUE "ProductVersion",   "2.4.5"
         VALUE "LegalCopyright",   "MIT License"
       END
     END

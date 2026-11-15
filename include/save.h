@@ -352,4 +352,7 @@ int SaveHasPendingRun(void);
 void DeleteSave(void);
 
 int SaveAwardTrainingGraduation(void);
+/* 2026-11-16：存档诊断（只读记录，写入 canity_save.log）。 */
+void SaveDiag(const char* fmt, ...);
+
 #endif /* CANITY_SAVE_H */

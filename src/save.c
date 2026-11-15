@@ -174,6 +174,35 @@ char g_savePath[MAX_PATH] = "";/* 最近一次写入成功的路径 */
 /* Compatibility wrappers delegate all byte I/O to the save backend. */
 #include "save_format.h"
 
+/* ==================================================================
+ * 2026-11-16（v2.4.5 存档诊断）：**只读**记录，不改变任何保存/读取行为。
+ * ------------------------------------------------------------------
+ * 实测现象：多候选存档之间出现"一份新一份旧"，隔离目录运行还会
+ * "一个文件都没写出且只给一条红条"。没有日志就只能猜，所以先把
+ * 每一次保存尝试、每一次读档选择都写进 canity_save.log。
+ * 日志位置：CANITY_DATA_DIR（若设置）否则 exe 目录。
+ * 超过 256 KB 自动重写，避免长跑把盘塞满。
+ * ================================================================ */
+void SaveDiag(const char* fmt, ...) {
+    /* 2026-11-16（最简可靠版）：绝对路径 + fopen 追加。
+       探针已证明本进程对 exe 目录可写、对 %LOCALAPPDATA% 不可写，
+       所以固定写 exe 目录，不再跟随 CANITY_DATA_DIR。 */
+    char path[MAX_PATH + 32];
+    char line[600];
+    char dir[MAX_PATH];
+    FILE* f;
+    va_list ap;
+    PlatExeDir(dir, (int)sizeof(dir));
+    snprintf(path, sizeof(path), "%scanity_save.log", dir);
+    f = fopen(path, "a");
+    if (!f) return;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    fprintf(f, "%ld %s\n", (long)time(NULL), line);
+    fclose(f);
+}
+
 static int WriteWholeFile(const char* path, const void* data, size_t n) {
     return SaveBackendWrite(path, data, n);
 }
@@ -659,8 +688,10 @@ static void SaveSettingsOnly(void) {
         unsigned char* wbuf = NULL;
         int wn = SaveFileBytes(&tmp, &wbuf);
         if(wn>0)BackupSavePath(p);
-        int wok = (wn > 0) && WriteWholeFile(p, wbuf, (size_t)wn) == 0;
+        int werr = (wn > 0) ? WriteWholeFile(p, wbuf, (size_t)wn) : SAVE_ERR_CAPACITY;
+        int wok = (wn > 0) && werr == 0;
         if (wbuf) { free(wbuf); wbuf = NULL; }
+        SaveDiag("SETTINGS cand[%d]=%s bytes=%d err=%d ok=%d", i, p, wn, werr, wok);
         if (wok) {
             g_save = tmp;
             g_saveState = 1; SaveBackendUpload(p);
@@ -670,6 +701,7 @@ static void SaveSettingsOnly(void) {
             return;
         }
     }
+    SaveDiag("SETTINGS FAILED all %d candidates", (int)SAVE_CAND_COUNT);
     g_saveState = 2;
 }
 
@@ -954,8 +986,10 @@ static void WriteSaveCandidates(void) {
         }
         if (i == 0) firstErr = err;
         g_saveErrAll[i] = err;
+        SaveDiag("PROGRESS cand[%d]=%s bytes=%d err=%d", i, p, wn2, err);
     }
     /* 一个都写不进去：记下 exe 目录那次的错误码 + 路径，UI 会显示出来 */
+    SaveDiag("PROGRESS FAILED all %d candidates firstErr=%d", (int)SAVE_CAND_COUNT, firstErr);
     g_saveState = 2;
     g_saveError = firstErr;
     SavePathCand(0, p, sizeof(p));
@@ -1370,11 +1404,14 @@ static int ReadSettingsCandidate(LoadedSaveInfo* info) {
             char path[MAX_PATH];if(backup){if(strlen(p)+4>=sizeof(path))continue;snprintf(path,sizeof(path),"%s.bak",p);}else snprintf(path,sizeof(path),"%s",p);
             if(!SavePathValid(path))continue;
             double time=PathWriteTime(path);
+            SaveDiag("LOAD cand[%d]%s exists time=%.0f", i, backup ? ".bak" : "", time, path);
             if(!best[0] || time>newest){newest=time;snprintf(best,sizeof(best),"%s",path);}
         }
     }
     if(!best[0]){if(PlatSystemLanguageZh())g_lang=LANG_ZH;return 0;}
-    long size=ReadSaveFile(best,&g_save);if(size<=0)return 0;
+    long size=ReadSaveFile(best,&g_save);
+    SaveDiag("LOAD picked=%s size=%ld version=%d pitchLook=%d", best, size, g_save.version, g_save.pitchLook);
+    if(size<=0)return 0;
     info->fileSize=(size_t)size;snprintf(info->usedPath,sizeof(info->usedPath),"%s",best);
     return 1;
 }

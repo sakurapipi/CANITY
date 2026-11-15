@@ -157,7 +157,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
        否则读到的还是旧档、云端赢的那份要等下次启动才生效。 */
     {  SaveBackendSyncAll(); }
     InitAchievements();
+    SaveDiag("BOOT start exe=%s", (const char*)"");
     hasSave = LoadSettings();
+    SaveDiag("BOOT LoadSettings done hasSave=%d state=%d err=%d", hasSave, g_saveState, g_saveError);
 
     /* ==================================================================
      * v6 第 ㉕ 轮：**UI 调试入口**（自检用，不影响正常游玩）
