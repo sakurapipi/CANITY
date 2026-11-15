@@ -450,3 +450,5 @@ void PlatSfx(int id, float gain) { /* STUB: Optional native PlatSfx hook is not 
     (void)id;
     (void)gain;
 }
+
+void PlatPollInput(void){ /* PLATFORM_NOOP: Native input polling already reads the OS without crossing a JS bridge. */ }

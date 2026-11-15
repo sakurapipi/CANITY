@@ -279,7 +279,7 @@ void CanityMenuAction(void) {
         uiDirty = 1;
         break;
     case STATE_PAUSED:
-        currentState = STATE_PLAYING;
+        LoopCancelTransientInput();currentState=STATE_PLAYING;ForceCursor(0);firstMouseMove=1;
         uiDirty = 1;
         break;
     case STATE_SAFEHOUSE:
@@ -317,7 +317,7 @@ void CanityPauseToggle(void) {
         PauseGame();
         uiDirty = 1;
     } else if (currentState == STATE_PAUSED) {
-        currentState = STATE_PLAYING;
+        LoopCancelTransientInput();currentState=STATE_PLAYING;ForceCursor(0);firstMouseMove=1;
         uiDirty = 1;
     }
 }
@@ -1250,7 +1250,7 @@ int CanityKeyDown(int vk, int repeat) {
         }
         return 0;
     }
-    if(currentState==STATE_PLAYING && vk=='B' && !repeat && !guideMode) {
+    if(currentState==STATE_PLAYING && vk=='B' && !repeat && !guideMode && !lockActive && !calibActive) {
         if(!trainingMode){SaveGame();if(g_saveState==2){
             pickupMsg=Tr("COULD NOT SAVE: GUIDE NOT OPENED. CHECK SAVE LOCATION.","无法保存：未进入引导层，请检查存档位置。");
             pickupMsgTimer=4;UiShowActionError(pickupMsg);PlaySfx(SFX_CRANK,.45f);uiDirty=1;return 0;

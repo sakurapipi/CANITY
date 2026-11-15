@@ -138,6 +138,7 @@ int WalletPreviewSettle(int survived, int profit) {
 }
 
 void WalletSettle(int survived,int profit) {
+    if(trainingMode){carryGold=0;carryAtRunStart=0;return;}
 
     int gain=WalletPreviewSettle(survived,profit);
     if (survived) { if (bankStreak < INT_MAX) bankStreak++; } else bankStreak = 0;

@@ -16,7 +16,8 @@ int main(int argc,char** argv){
         {41,offsetof(SaveBlob,serviceUsesV42)},
         {42,offsetof(SaveBlob,decorV43)},
         {43,offsetof(SaveBlob,collectorRunV44)},
-        {44,sizeof(SaveBlob)}
+        {44,offsetof(SaveBlob,moneyBagPositionsV45)},
+        {45,sizeof(SaveBlob)}
     };
     SaveBlob* blob=calloc(1,sizeof(*blob));if(!blob)return 3;
     blob->magic=SAVE_MAGIC;blob->hasRun=1;blob->level=3;

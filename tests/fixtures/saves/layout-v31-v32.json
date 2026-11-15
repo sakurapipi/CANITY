@@ -1,0 +1,16 @@
+[
+  {
+    "version": 31,
+    "historical_header_commit": "67ab48a9418051e33d49a46eeb4d57d78e7cb9af",
+    "bytes": 12248,
+    "sha256": "ba56225322d73d10d60c641bf4bffdfd306dbd3074b17fc8a551a95ca5caf32e",
+    "kind": "Synthetic layout contract built with historical headers, not a real player save"
+  },
+  {
+    "version": 32,
+    "historical_header_commit": "489c2e0b318197bdd619702d94a6f36fd8a5cee2",
+    "bytes": 12408,
+    "sha256": "e4dcdb7391fd33ac32b99a7fb38846e536cb8e196d71baa63a4ea4194a5c8ec1",
+    "kind": "Synthetic layout contract built with historical headers, not a real player save"
+  }
+]

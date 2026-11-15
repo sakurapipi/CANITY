@@ -19,4 +19,5 @@ void PlayerTickSprintGrace(float dt, int wantSprint);
 PlayerFrameInput PlayerPrepareMovement(float dt);
 void PlayerApplyMovement(float dt, const PlayerFrameInput* input);
 
+extern int counterKillUsed;
 #endif

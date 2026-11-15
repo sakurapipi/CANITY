@@ -257,6 +257,7 @@ void DailyGenerateForDate(unsigned int seed) {
 void DailyGenerate(void) { DailyGenerateForDate(DailySeedToday()); }
 
 /* 新开一局：清空「上一次观测值」，增量从本局从 0 开始算 */
+void DailyResetProfile(void){memset(&s_daily,0,sizeof(s_daily));s_ready=0;s_pendingSave=0;s_pendingReward=0;s_rewardRetry=0;}
 void DailyBeginRun(void) { memset(s_daily.samples, 0, sizeof(s_daily.samples)); }
 
 /* ================================================================== */

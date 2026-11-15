@@ -139,7 +139,7 @@ EM_JS(void, js_plat_init, (void), {
         function measure() {
             var w=cv.clientWidth|0,h=cv.clientHeight|0;
             if(w<2 || h<2)return; // Keep last good size during fullscreen transitions.
-            var coarse=navigator.maxTouchPoints>0;
+            var coarse=!!Module._usingTouch;
             var cap=coarse?1280*720:1920*1080;
             var scale=Math.min(1,Math.sqrt(cap/(w*h)));
             Module._cw=Math.max(160,Math.round(w*scale));
@@ -177,9 +177,7 @@ EM_JS(int, js_has_selftest, (void), {
     return (location.search || "").indexOf('selftest') >= 0 ? 1 : 0;
 });
 
-EM_JS(int, js_key_down, (int vk), {
-    return (vk>=0 && vk<256 && Module._keys) ? (Module._keys[vk] || (Module._keyPulses && Module._keyPulses[vk]) ? 1 : 0) : 0;
-});
+
 
 EM_JS(void, js_consume_key_pulses, (void), {
     if(Module._keyPulses)Module._keyPulses.fill(0);
@@ -457,7 +455,14 @@ void PlatShutdown(void) {
 /* ---------------------------------------------------------------------
  * 输入
  * ------------------------------------------------------------------- */
-int PlatKeyDown(int vk) { return js_key_down(vk); }
+static unsigned char frameKeys[256];
+EM_JS(void,js_key_snapshot,(unsigned char* target),{
+    HEAPU8.fill(0,target,target+256);
+    if(Module._keys)HEAPU8.set(Module._keys,target);
+    if(Module._keyPulses)for(var i=0;i<256;i++)if(Module._keyPulses[i])HEAPU8[target+i]=1;
+});
+void PlatPollInput(void){js_key_snapshot(frameKeys);}
+int PlatKeyDown(int vk){return vk>=0 && vk<256?frameKeys[vk]:0;}
 
 void PlatMouseDelta(int* dx, int* dy) {
     int a = 0, b = 0;

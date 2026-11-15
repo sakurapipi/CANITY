@@ -42,4 +42,6 @@ int WalletPreviewSettle(int survived, int profit);
 extern int carryAtRunStart;
 int BankPreviewGain(int survived);
 
+void MoneyBagsSave(float* positions,int* amounts);
+void MoneyBagsLoad(const float* positions,const int* amounts);
 #endif /* CANITY_WALLET_H */

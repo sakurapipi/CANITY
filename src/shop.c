@@ -474,7 +474,7 @@ void ShopActivate(void) {
         }
     if (shopRow > RUN_UPG_COUNT) return;      /* 理论到不了：LEAVE 已在上面的 ShopLeaveRow 拦掉 */
         int r = RunUpgTryBuy(shopRow);
-        if (r == 0)            { pickupMsg = Tr("UPGRADED", "已强化"); }
+        if (r == 0)            { pickupMsg = Tr("UPGRADED", "已强化"); SaveGame(); }
         else if (r == 2)       { pickupMsg = Tr("MAX LEVEL", "已满级"); }
         else if (r == 4)       { pickupMsg = Tr("NOT ENOUGH", "金币不够"); }
         pickupMsgTimer = 1.4f;

@@ -100,7 +100,7 @@ static int PrepareBundledMusic(void) {
         SetEnvironmentVariableW(L"CANITY_DATA_DIR_AUTO",L"1");
         _wputenv_s(L"CANITY_DATA_DIR_AUTO",L"1");
     }
-    _snwprintf(cache,MAX_PATH,L"%ls\\CANITY\\audio-2.4.2-RC4",base);CreateDirectoryW(cache,NULL);
+    _snwprintf(cache,MAX_PATH,L"%ls\\CANITY\\audio-2.4.3",base);CreateDirectoryW(cache,NULL);
     for(int i=0;i<6;i++) {
         HRSRC res=FindResourceW(NULL,MAKEINTRESOURCEW(3000+i),MAKEINTRESOURCEW(10));
         if(!res)return 0;

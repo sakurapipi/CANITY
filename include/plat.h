@@ -158,4 +158,5 @@ void PlatSfx(int id, float gain);
 void PlatConsumeKeyPulses(void);
 #endif
 
+void PlatPollInput(void);
 #endif /* CANITY_PLAT_H */

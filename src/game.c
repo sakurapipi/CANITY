@@ -592,25 +592,9 @@ void ForceCursor(int visible) {
  * 现在 Win32 的 WndProc 与网页后端都调这一个函数，行为完全一致。
  * ================================================================== */
 void CanityMouseLook(int dx, int dyv) {
-    if (dyv != 0) {
-        /* v1.12：鼠标上下 = 抬头/低头（地平线偏移）。
-           y-shearing 与这套墙渲染冲突（远距离黑边、缝隙、光球遮挡错乱），
-           先关掉，等换成"真俯仰"（每列按 pitch 重新投影）再开。 */
-        #define PITCH_ENABLED 0
-        #if PITCH_ENABLED
-
-        pitchRatio -= (float)dyv * 0.0030f * mouseSens;
-        if (pitchRatio > 1.0f) pitchRatio = 1.0f;
-        if (pitchRatio < -1.0f) pitchRatio = -1.0f;
-        uiDirty = 1;
-        #else
-        {
-
-            pitchRatio = 0.0f;
-            horizon = 0;
-        }
-        #endif
-    }
+    /* Horizontal-only camera: ignore vertical mouse/touch input. */
+    (void)dyv;
+    pitchRatio = 0.0f;
     if (dx != 0) {
         float rot = (float)(dx * MOUSE_BASE_SENS * mouseSens);
         float oldDirX = dirX;

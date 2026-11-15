@@ -24,7 +24,10 @@ EM_JS(void, js_audio_init, (void), {
     if (Module._actx) return;
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    Module._actx = new AC();
+    try {
+        var coarse=window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(hover: hover)').matches;
+        Module._actx = new AC({sampleRate:coarse?22050:44100,latencyHint:'interactive'});
+    }catch(unsupported){Module._actx = new AC();}
 
     /* 主链：source -> master(音量) -> comp(限幅) -> destination
        限幅器很关键：并发的噪声爆发不加限幅会刺耳、破音，
@@ -44,7 +47,7 @@ EM_JS(void, js_audio_init, (void), {
     Module._noiseBuf = null;
 
     function unlock() {
-        if (Module._actx && Module._actx.state === 'suspended') Module._actx.resume();
+        if (!document.hidden && Module._actx && Module._actx.state === 'suspended'){var p=Module._actx.resume();if(p && p.catch)p.catch(function(){});}
     }
     window.addEventListener('pointerdown', unlock, { passive: true });
     window.addEventListener('keydown', unlock, { passive: true });

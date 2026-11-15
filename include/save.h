@@ -21,7 +21,7 @@
 /* v28: 末尾追加 Dynamic Res + 通关记录；v25/v26/v27 都按前缀迁移。
    v27 及更早的存档没有这两个字段，读档时按文件长度取默认值。 */
 /* v38 appends isolated mimic knowledge; all v37 field offsets stay unchanged. */
-#define SAVE_VERSION 44   /* v37: 末尾追加 ghostSkillRanks[4]（幽灵流派 4 个节点） */   /* v36（2026-11-08）：末尾追加 difficultyPlus1
+#define SAVE_VERSION 45   /* v37: 末尾追加 ghostSkillRanks[4]（幽灵流派 4 个节点） */   /* v36（2026-11-08）：末尾追加 difficultyPlus1
                            *   （0 = 老档 → 按标准难度；1/2/3 = 轻松/标准/硬核）
                            * v35：末尾追加 rngVersion（v34 及更早按旧 rand 序列重放）
                            * v34：末尾追加投掷物/信标/爆脸怪计数（v33 短档仍然可读） */
@@ -313,6 +313,12 @@ typedef struct {
     int hatchCountV43;Hatch hatchesV43[MAX_HATCHES];
     int roomEventKindV43;float roomEventTimeV43;
     int collectorRunV44[3]; /* appearances, thefts, last attempted floor */
+    /* v45 append-only: recoverable money and once-per-run counter, no prefix changes. */
+    float moneyBagPositionsV45[MAX_MONEYBAG][3];
+    int moneyBagAmountsV45[MAX_MONEYBAG];
+    int collectorBountyV45;
+    float collectorPositionV45[2];
+    int counterKillUsedV45;
 } SaveBlob;
 
 /* ==================================================================
@@ -335,6 +341,7 @@ const SaveBlob* SaveTestBlob(void);  /* 仅测试用：最近一次载入的 blo
 void SaveGame(void);
 /* 启动时只读设置；返回是否还有可继续的进度 */
 int LoadSettings(void);
+int SaveSelectSlot(int slot);
 /* 把存档里的进度灌回运行时 */
 void ContinueRun(void);
 /* 存档里是否还有一局可继续（训练局退出后恢复菜单用） */
