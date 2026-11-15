@@ -2572,28 +2572,11 @@ static void DrawHudCoverAndThreat(void) {
 
 
         /* ① 藏身提示 */
-        if (hiddenIn >= 0) {
-            /* v3.0：藏在藏身点里 —— **两行提示**（用户要求）
-               第 1 行：空格开始校准小游戏（或显示冷却剩余）
-               第 2 行：T 打开商店面板 */
-
-            int hy = winH - UIS(134) - 2 * TextHeightWin();
-            int lh = TextHeightWin() + UIS(4);
-
-            if (calibCooldown > 0.0f) {
-                char cb[64];
-                sprintf(cb, Tr("SPACE  -  CALIBRATE  (cooling %ds)",
-                               "按空格开始小游戏  (冷却 %d 秒)"),
-                        (int)(calibCooldown + 0.5f));
-                DrawTextWin(UIS(20), hy, cb, 0x00808080u);
-            } else {
-                DrawTextWin(UIS(20), hy,
-                            Tr("SPACE  -  START MINIGAME",
-                               "按空格开始小游戏"), 0x0060FF90u);
-            }
-            DrawTextWin(UIS(20), hy + lh,
-                        Tr("T  -  OPEN SHOP", "T  -  打开商店"), UI_ACCENT);
-        } else if (hideSpotNear >= 0 && currentState == STATE_PLAYING &&
+        /* 2026-11-16（用户截图反馈）：藏身时这两行
+           「按空格开始小游戏 (冷却 Ns)」「T - 打开商店」画在 winH-134，
+           正好落在藏身遮罩的黑色区域里 —— 玩家完全看不见，属于无意义提示，删除。
+           （藏身状态下按空格仍可开小游戏；安全屋界面里也有入口。） */
+        if (hideSpotNear >= 0 && currentState == STATE_PLAYING &&
                    (hoverKind == 0 || hoverKind == 3 || hoverKind == 4)) {
             /* ===== v2.4.21 **坏掉的藏身点要报修复金额** =====
                用户反馈：柜子坏了之后只提示 "NOT ENOUGH GOLD"，
@@ -2692,34 +2675,15 @@ static void DrawHudCoverAndThreat(void) {
      *   确实安静（>12 格） → 「外面安静了」
      * 中间模糊区不显示，免得误导。
      * ================================================================ */
+    /* 2026-11-16（用户截图反馈）：藏身时的「它在外面找你 / 它在附近 / 外面安静了」
+       这一行画在 winH-112，正好落在藏身遮罩的黑区里 —— 玩家根本看不见，
+       属于"被覆盖的无意义提示"，按要求直接删掉。 */
     if (hiddenIn >= 0) {
-
-        float nd = TelegraphNearestDist();
-        /* 2026-11-08（实机反馈）：三段全覆盖。
-           原来 8~12 格什么都不画 —— 玩家以为卡了。 */
-
-        {
-            int band = HideStatusBand(nd);
-            const char* hs;
-            unsigned int hc;
-            if (band == 0) {
-                hs = (g_lang == LANG_ZH) ? "它在外面找你" : "IT IS LOOKING FOR YOU";
-                hc = 0x00FF8050u;
-            } else if (band == 1) {
-                hs = (g_lang == LANG_ZH) ? "它在附近" : "IT IS CLOSE";
-                hc = 0x00FFD060u;
-            } else {
-                hs = (g_lang == LANG_ZH) ? "外面安静了" : "IT IS QUIET OUT THERE";
-                hc = 0x0080FFA0u;
-            }
-            {
-                int tw5 = TextWidthWin(hs);
-                DrawTextWin((winW - tw5) / 2, winH - UIS(112), hs, hc);
-            }
-        }
+        /* 藏身时不再绘制任何会被遮罩吃掉的提示文字 */
     }
 
-    DrawHudThemeRoom();   /* 第 3 轮：主题房间字幕抽成函数 */
+    /* 主题房间字幕同样会被藏身遮罩吃掉，藏身时不画 */
+    if (hiddenIn < 0) DrawHudThemeRoom();   /* 第 3 轮：主题房间字幕抽成函数 */
         
     }
 
@@ -3701,24 +3665,6 @@ static void RenderFrameOcclusion(void) {
 
 static void RenderFrameCalibration(void) {
     DrawExitChoice();
-    /* 2026-11-16（用户：躲藏时提示被遮罩覆盖）：藏身遮罩只留中间一条缝，
-       左下/右下的常驻提示全在黑影里。这里把**藏身时真正要用的**两条提示
-       画在缝隙内、面板之前，出柜或开小游戏时不画。 */
-    if (hiddenIn >= 0 && currentState == STATE_PLAYING && !calibActive) {
-        int ow = winW * 18 / 100, oh = winH * 38 / 100;
-        if (ow < 90) ow = 90;
-        if (oh < 110) oh = 110;
-        int ox0 = (winW - ow) / 2, oy1 = (winH - oh) / 2 + oh;
-        const char* msg = Tr("SPACE: CALIBRATE   E: LEAVE",
-                             "空格：校准    E：离开");
-        int tw2 = DrawTextSmallWidth(msg);
-        int mx = (winW - tw2) / 2;
-        if (mx < ox0) mx = ox0;
-        int my = oy1 - FONT_H - UIS(4);
-        BlendRectWin(mx - UIS(4), my - UIS(3), mx + tw2 + UIS(4), my + FONT_H + UIS(3),
-                     0x00000000u, 0.55f);
-        DrawTextSmallLiteralWin(mx, my, msg, UI_ACCENT);
-    }
     if(currentState==STATE_PLAYING){
         HushDraw();
         if(roomTheme.active && roomTheme.inside && !MonsterChaseActive()){
