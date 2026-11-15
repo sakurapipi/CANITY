@@ -133,4 +133,9 @@ void DrawGluePuddle(void);
 /* 2026-11-16：拆分后 render_props.c 也要用（原为 render.c 内部工具）。 */
 void DrawCreatureActor(int spr,float wx,float wy,float halfH,float lightK,int zTest,float facing,float stride,unsigned int tint,float tintMix,float activity);
 
+/* 2026-11-16：拆到 domain/render/render_surface.c。 */
+void InitPixels(void);
+void CraftFrameRow(int y, unsigned int* row);
+extern unsigned char* craftTex;   /* 布偶层乘数表（render_surface.c 拥有） */
+
 #endif /* CANITY_RENDER_H */

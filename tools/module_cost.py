@@ -45,7 +45,8 @@ DOMAINS = {
                  'domain/render/render_decoy.c',
                  'domain/render/render_spritequeue.c',
                  'domain/render/render_viewmodel.c',
-                 'domain/render/render_props.c'], ['render.h'], 'render.md'),
+                 'domain/render/render_props.c',
+                 'domain/render/render_surface.c'], ['render.h'], 'render.md'),
 }
 
 

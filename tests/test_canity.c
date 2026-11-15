@@ -616,8 +616,14 @@ static void test_stable_visuals_and_input(void) {
           "hide mask bands came back (user asked to remove it)");
     check(!contains(ui, "} else if (hiddenIn >= 0)"),
           "unreachable hide-hint branch hides the SPACE/T minigame prompt");
-    check(contains(render,"GenerateVignette(void)") && contains(render,"vignetteMask"),
-          "low-sanity rendering keeps its precomputed edge mask");
+    /* 2026-11-16：解耦把 GenerateVignette/vignetteMask 搬到了
+       domain/render/render_surface.c；契约不变，检查位置跟着搬。 */
+    {
+        const char* rs = read_file("src/domain/render/render_surface.c");
+        check((contains(render,"GenerateVignette(void)") || contains(rs,"GenerateVignette(void)")) &&
+              (contains(render,"vignetteMask") || contains(rs,"vignetteMask")),
+              "low-sanity rendering keeps its precomputed edge mask");
+    }
     /* 音游判定：一次物理按键只能判一次；系统重复/触屏重复边沿不能
        每个都算失误。 */
     {
