@@ -10,7 +10,15 @@
 #include "render.h"
 unsigned int UiThemeColor(int role) {
     int live=currentState==STATE_PLAYING || currentState==STATE_SAFEHOUSE || currentState==STATE_PAUSED || currentState==STATE_SKILL_PICK;
-    float pressure=live?GoldTier()+ThreatValue()*.45f:BankPreviewTier()+bankRiskPlan*2;
+    /* 2026-11-16（用户实测：满强度档下"第一级暂停页"仍是蓝色）：
+       原来 live 态（含暂停）只用 GoldTier()+ThreatValue()，
+       而设置页用的是 BankPreviewTier()+bankRiskPlan*2 ——
+       两边公式不同，于是"暂停=低档蓝、设置=满档红"同时出现。
+       现在统一取**两者较大值**：银行的强度档位也算进画面档位，
+       暂停页与二级/三级页面就一致了。 */
+    float livePressure   = live ? GoldTier() + ThreatValue()*.45f : 0.0f;
+    float bankPressure   = BankPreviewTier() + bankRiskPlan*2;
+    float pressure       = live ? fmaxf(livePressure, bankPressure) : bankPressure;
     int tier=pressure>=13?3:pressure>=8?2:pressure>=4?1:0;
     static const unsigned int colors[4][7]={
         {0x79CDF2,0xF0F5FF,0x0B111B,0x172433,0x294D6C,0x4C718D,0x243F56},
