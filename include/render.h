@@ -124,4 +124,13 @@ int CollectSpriteActorsAndMarkers(SpriteDrawEntry* list, int n);
 int CollectSpriteEffectsAndExit(SpriteDrawEntry* list, int n);
 void DrawViewModel(void);
 
+/* 2026-11-16：拆到 domain/render/render_props.c 的世界道具/投掷物绘制。 */
+void DrawOrbSprite(float wx, float wy, float z, float worldR,                           unsigned int coreCol, unsigned int haloCol,                           float alphaMul);
+void DrawNewMonsters(void);
+void DrawShotModel(int idx);
+void DrawGluePuddle(void);
+
+/* 2026-11-16：拆分后 render_props.c 也要用（原为 render.c 内部工具）。 */
+void DrawCreatureActor(int spr,float wx,float wy,float halfH,float lightK,int zTest,float facing,float stride,unsigned int tint,float tintMix,float activity);
+
 #endif /* CANITY_RENDER_H */
