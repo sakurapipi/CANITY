@@ -74,4 +74,10 @@ int TextMediumLiteralHeight(void);
 void DrawTextMediumLiteralWin(int x,int y,const char* text,unsigned int color);
 int SkillPickAt(int x,int y);
 void RunReplacementButtonRect(int index,RECT* rect);
+/* 2026-11-16：HUD 实现在 domain/ui/ui_hud.c。 */
+void DrawHUD(void);
+
+/* 2026-11-16：准星由 ui.c 定义，HUD（ui_hud.c）调用。 */
+void DrawCrosshair(void);
+
 #endif /* CANITY_UI_H */

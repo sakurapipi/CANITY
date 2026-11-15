@@ -220,7 +220,7 @@ static void test_no_unwired_api(void) {
         { "DailyGoldTierBonus",      "src/economy.c" },   /* 强度档在 economy.c */
         { "DailyForbidHide",         "src/loop_frame.c" },
         { "DailyForbidWrench",       "src/loop_wrench.c" },
-        { "DailyForbidMonsterMap",   "src/ui.c" },
+        { "DailyForbidMonsterMap",   "src/domain/ui/ui_hud.c" },   /* 2026-11-16：HUD 拆分后位置 */
         /* 每日任务本身 */
         { "DailyTick",               "src/loop_frame.c" },
         { "DailySetProgress",        "src/loop_frame.c" },
@@ -261,7 +261,7 @@ static void test_no_unwired_api(void) {
         /* v6 round 37: the whole in-run skill draft was unreachable */
         { "OpenSkillPick",           "src/loop_rewards.c" },
         /* v6 round 41: daily progress is now shown in the HUD */
-        { "DailyCurrent",            "src/ui.c" },
+        { "DailyCurrent",            "src/domain/ui/ui_hud.c" },   /* 2026-11-16：HUD 拆分后位置 */
         { "CampaignTierMul",          "src/economy.c" },
     };
 

@@ -39,7 +39,7 @@ DOMAINS = {
     'shop':     (['shop.c'], ['shop.h'], 'shop.md'),
     'map_rooms': (['map_rooms.c'], ['map_rooms.h'], 'map_rooms.md'),
     'ui':       (['ui.c', 'domain/ui/ui_text.c', 'domain/ui/ui_pages.c',
-                 'domain/ui/ui_menu.c'],
+                 'domain/ui/ui_menu.c', 'domain/ui/ui_hud.c'],
                  ['ui.h', 'ui_text.h', 'ui_pages.h', 'ui_menu.h'], 'ui.md'),
     'render':   (['render.c', 'domain/render/render_map.c',
                  'domain/render/render_decoy.c',
