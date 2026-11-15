@@ -3545,37 +3545,55 @@ static void DrawViewModel(void) {
 
     int cx = (int)((float)renderW * 0.72f + sway);
     int cy = (int)((float)renderH * 1.04f + lift - kick);
-    /* ===== v2.4.83 **五帧挥击动画** =====
-       用户要求「动画多来几帧」。
-       五帧足够读出「起手 → 后摆 → 挥到 → 收势 → 回位」，
-       再多在这个尺度上（69px 手持模型）已经分辨不出来。
-
-         帧 0  起手：向后下、缩到 92%，压暗
-         帧 1  后摆：最大后移、最小（88%）
-         帧 2  挥到：**最前、最大（112%）、最亮** ← 命中在这一帧
-         帧 3  收势：稍微回收、105%
-         帧 4  回位：接近原位、98%
+    /* ===== 2026-11-16 **八帧挥击 + 残影**（用户：只有两帧，只抖一下） =====
+       原来 5 帧、位移只有 ±2~5% 屏宽，且没有旋转（DrawSprite 不支持角度），
+       读起来就是"抖了一下"。现在：
+         · 帧数 5 → 8，时间用 wrenchSwingFxT（0.14×1.6=0.224s），比逻辑窗口长 60%
+           —— 命中判定仍在 p=0.40（= 逻辑 5 帧制的第 2 帧）对齐，玩法不变
+         · 位移加大到 ±8.5% 屏宽、并带上下弧线（后摆→挥出→过顶→收势）
+         · 缩放 86% → 118%，亮度 0.78 → 1.20
+         · 追加 2 层残影（半透明、略小），把"挥"的轨迹画出来
+       帧表（p = 播放进度）：
+         0 起手  (-0.020,+0.022, 92%)   1 后摆 (-0.075,+0.055, 86%)
+         2 加速  (+0.010,-0.012, 96%)   3 挥到 (+0.085,-0.055,118%) ← 命中
+         4 过顶  (+0.055,-0.020,110%)   5 收势 (+0.020,+0.010,102%)
+         6 回位  (+0.004,+0.004, 98%)   7 静止 ( 0.000, 0.000,100%)
     */
-    {
+    float swingProg = -1.0f;
+    if (wrenchSwingFxT > 0.0f) {
+        const float kWin = WRENCH_SWING_TIME * 1.6f;
+        swingProg = 1.0f - wrenchSwingFxT / kWin;
+        if (swingProg < 0.0f) swingProg = 0.0f;
+        if (swingProg > 1.0f) swingProg = 1.0f;
+    }
+    if (swingProg >= 0.0f) {
+        /* 命中与画面必须同刻：逻辑侧 5 帧制在第 2 帧（0.056s）结算，
+           视觉窗口 0.224s → 0.056/0.224 = 0.25 → **第 2 帧就是挥到**。 */
+        static const float kDx[8] = { -0.020f, -0.075f,  0.085f,  0.055f,
+                                       0.020f,  0.004f,  0.000f,  0.000f };
+        static const float kDy[8] = {  0.022f,  0.055f, -0.055f, -0.020f,
+                                       0.010f,  0.004f,  0.000f,  0.000f };
+        static const int   kSz[8] = { 92, 86, 118, 110, 102, 98, 100, 100 };
+        static const float kLi[8] = { 0.90f, 0.78f, 1.20f, 1.10f,
+                                      1.02f, 0.99f, 1.00f, 1.00f };
+        int fr = (int)(swingProg * 8.0f);
+        if (fr > 7) fr = 7;
 
-        if (wrenchSwingT > 0.0f) {
-            float prog = 1.0f - wrenchSwingT / 0.14f;
-            if (prog < 0.0f) prog = 0.0f;
-            if (prog > 1.0f) prog = 1.0f;
-            int fr = (int)(prog * 5.0f);
-            if (fr > 4) fr = 4;
-
-            /* 每帧的偏移（-1 后 / +1 前）与缩放/亮度 */
-            static const float kDx[5] = { -0.020f, -0.052f,  0.048f,  0.022f,  0.004f };
-            static const float kDy[5] = {  0.022f,  0.050f, -0.036f, -0.012f,  0.002f };
-            static const int   kSz[5] = { 92,      88,      112,     105,      98 };
-            static const float kLi[5] = { 0.90f,   0.82f,   1.14f,   1.04f,    0.99f };
-
-            cx += (int)((float)renderW * kDx[fr]);
-            cy += (int)((float)renderH * kDy[fr]);
-            size = size * kSz[fr] / 100;
-            light *= kLi[fr];
+        /* 残影：先画最早的那层，再画晚一点的，最后画本体 */
+        for (int g = 2; g >= 1; g--) {            int gf = fr - g * 2;
+            if (gf < 0) continue;
+            float ga = (g == 2) ? 0.10f : 0.22f;
+            int gx = cx + (int)((float)renderW * kDx[gf]);
+            int gy = cy + (int)((float)renderH * kDy[gf]);
+            int gs = size * (kSz[gf] + 4) / 100;      /* 残影略大，制造拖影 */
+            DrawSprite(sid, gx - gs / 2, gy - gs, gs, gs,
+                       light * kLi[gf], ga, 0, 0.0f);
         }
+
+        cx += (int)((float)renderW * kDx[fr]);
+        cy += (int)((float)renderH * kDy[fr]);
+        size = size * kSz[fr] / 100;
+        light *= kLi[fr];
     }
     int px = cx - size / 2;
     int py = cy - size;
