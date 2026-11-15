@@ -3540,7 +3540,9 @@ static void DrawViewModel(void) {
      * NO_COMBAT 之后本作只有扳手一件工具，所以直接钉死。
      * SPR_PISTOL / SPR_SIGIL 两个精灵与烘焙函数一并删除。
      * ================================================================== */
-    const int sid = SPR_WRENCH;
+    /* 2026-11-16：挥击时切成"出招姿态"变体（钳口张开、头前探），
+       其余时间仍是待机那把。 */
+    int sid = SPR_WRENCH;
     float light = 0.85f;   /* 挥击动画会按帧微调亮度，所以不能是 const */
 
     int cx = (int)((float)renderW * 0.72f + sway);
@@ -3592,6 +3594,8 @@ static void DrawViewModel(void) {
             1.00f, 1.00f, 1.00f, 1.00f };
         int fr = (int)(swingProg * 12.0f);
         if (fr > 11) fr = 11;
+        /* 刺出到收势之间（fr3~fr6）换成出招姿态的模型 */
+        if (fr >= 3 && fr <= 6) sid = SPR_WRENCH_STRIKE;
 
         /* 残影只在前半段（刺出过程）出现，回收阶段不再拖影 */
         if (fr >= 2 && fr <= 6) {

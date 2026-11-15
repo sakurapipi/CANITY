@@ -113,6 +113,10 @@ enum {
     SPR_ROOM_BOILER, SPR_ROOM_ARCHIVE, SPR_ROOM_COIL, SPR_ROOM_MEDBED, SPR_ROOM_PRISM, SPR_ROOM_ALTAR, SPR_ROOM_HEART,
     SPR_MON_PARASITE, SPR_MON_WARDEN_CHASE,
     SPR_PROP_BREAKER_ON, SPR_PROP_EXIT_OPEN, /* append-only visual states */
+    /* 2026-11-16（用户：模型太单一，攻击时要有变化）：
+       扳手的"出招姿态"变体 —— 钳口张开、头部前探、握把压短，
+       只在挥击的刺出帧使用。追加在末尾，不打乱任何已有 id。 */
+    SPR_WRENCH_STRIKE,
     SPR_COUNT
 };
 

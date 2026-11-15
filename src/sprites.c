@@ -414,6 +414,121 @@ static void cvFinish(Sprite* s) {
 /* ------------------------------------------------------------------ */
 /* 三把武器（用户点名"很粗糙"的那部分）                                  */
 /* ------------------------------------------------------------------ */
+/* ==================================================================
+ * 2026-11-16：扳手「出招姿态」变体（用户：模型太单一，攻击时要有变化）
+ * ------------------------------------------------------------------
+ * 和待机那把的区别（不是换色，是**几何不同**，符合 AD-01/51）：
+ *   · 握把被"推"到更靠下更靠右（手往前顶，画面里握把被压短）
+ *   · 头部整体前探（向准星方向）并放大 12%
+ *   · 钳口张开更小（咬合动作），上下颚各补一条高光表示受力
+ *   · 头部边缘加两道路径划痕，读作"这一下是砸出去的"
+ * 只在挥击的刺出帧用它；其余时间仍是待机那把。
+ * ================================================================ */
+static void BakeWrenchStrike(void) {
+    cvClear();
+    float c = CANVAS_W * 0.5f;
+
+    /* 握把末端更靠右下（被手往前顶），头颈更靠左上（前探） */
+    float ax0 = c + 54, ay0 = 258;
+    float ax1 = c - 40, ay1 = 78;
+    float dx = ax1 - ax0, dy = ay1 - ay0;
+    float L = sqrtf(dx * dx + dy * dy);
+    float ux = dx / L, uy = dy / L;
+    float vx = -uy, vy = ux;
+
+    /* ---- 手柄：比待机更短更粗（透视上前压） ---- */
+    cvLine(ax0 + 5, ay0 + 5, ax1 + 5, ay1 + 5, 34, 0x00080A0Eu, 1.0f);
+    cvLine(ax0, ay0, ax1, ay1, 31, 0x004C443Au, 1.0f);      /* 主体更粗 */
+    cvLine(ax0 + vx * 7, ay0 + vy * 7, ax1 + vx * 7, ay1 + vy * 7, 9, 0x007A7062u, 1.0f);
+    cvLine(ax0 - vx * 8, ay0 - vy * 8, ax1 - vx * 8, ay1 - vy * 8, 6, 0x00221C16u, 1.0f);
+
+    /* 缠带：三道，压得更紧 */
+    for (int i = 0; i < 3; i++) {
+        float t = 0.50f + (float)i * 0.15f;
+        float bx = ax0 + dx * t, by = ay0 + dy * t;
+        cvLine(bx + vx * 17, by + vy * 17, bx - vx * 17, by - vy * 17, 7, 0x001C1510u, 1.0f);
+        cvLine(bx + vx * 15 + ux * 2, by + vy * 15 + uy * 2,
+               bx - vx * 15 + ux * 2, by - vy * 15 + uy * 2, 4, 0x004A382C0u & 0x00FFFFFFu, 1.0f);
+    }
+
+    /* ---- 头部：比待机放大 12%，钳口收窄（咬合） ---- */
+    float hx = ax1, hy = ay1;
+    const float k = 1.12f;
+    float head[20] = {
+        hx - 30 * k, hy - 46 * k,
+        hx + 34 * k, hy - 40 * k,
+        hx + 44 * k, hy - 12 * k,
+        hx + 30 * k, hy + 22 * k,
+        hx - 26 * k, hy + 26 * k,
+        hx - 40 * k, hy + 2 * k,
+        hx - 34 * k, hy - 22 * k,
+        hx - 30 * k, hy - 34 * k,
+        hx - 34 * k, hy - 6 * k,
+        hx - 38 * k, hy - 26 * k
+    };
+    float outline[20];
+    for (int i = 0; i < 10; i++) {
+        outline[i * 2] = hx + (head[i * 2] - hx) * 1.10f;
+        outline[i * 2 + 1] = hy + (head[i * 2 + 1] - hy) * 1.10f;
+    }
+    cvPoly(outline, 10, 0x00080A0Eu, 1.0f);
+    cvPolyGrad(head, 10, 0x00C8C0AEu, 0x00625A4Eu, 1.0f);
+
+    /* 钳口：比待机张得更小（闭合方向），位置再往前一点 */
+    {
+        float mouth[8] = {
+            hx - 42 * k, hy - 24 * k,
+            hx - 10 * k, hy - 20 * k,
+            hx - 12 * k, hy + 4 * k,
+            hx - 40 * k, hy + 2 * k
+        };
+        int y0 = (int)(hy - 34 * k), y1 = (int)(hy + 8 * k);
+        for (int y = y0; y <= y1; y++) {
+            if (y < 0 || y >= CANVAS_H) continue;
+            for (int x = (int)(hx - 48 * k); x <= (int)hx; x++) {
+                if (x < 0 || x >= CANVAS_W) continue;
+                float fx = (float)x + 0.5f, fy = (float)y + 0.5f;
+                int inside = 0;
+                for (int i = 0; i < 4; i++) {
+                    int j = (i + 1) % 4;
+                    float ay = mouth[i * 2 + 1], by = mouth[j * 2 + 1];
+                    if ((ay <= fy && by > fy) || (by <= fy && ay > fy)) {
+                        float tt = (fy - ay) / (by - ay);
+                        if (fx < mouth[i * 2] + tt * (mouth[j * 2] - mouth[i * 2])) inside ^= 1;
+                    }
+                }
+                if (inside) g_canvas[(size_t)y * CANVAS_W + x] = 0;
+            }
+        }
+    }
+
+    /* 咬合高光：上下颚各一条亮线（表示这一下在受力） */
+    cvLine(hx - 40 * k, hy - 22 * k, hx - 12 * k, hy - 19 * k, 3, 0x00F0E8D8u, 1.0f);
+    cvLine(hx - 38 * k, hy + 0 * k,  hx - 14 * k, hy - 2 * k,  3, 0x00E0D8C8u, 1.0f);
+
+    /* 调节螺母 + 摇柄（位置随头部前探一起移） */
+    {
+        float nx = hx + 30 * k, ny = hy + 2 * k;
+        cvEllipse(nx, ny, 13.0f, 13.0f, 0x00080A0Eu, 1.0f);
+        cvEllipse(nx, ny, 10.0f, 10.0f, 0x00988E7Cu, 1.0f);
+        cvEllipse(nx - 2, ny - 2, 3.6f, 3.6f, 0x00302A22u, 1.0f);
+    }
+    {
+        float kx = hx + 10 * k, ky = hy + 34 * k;
+        cvEllipse(kx, ky, 8.0f, 8.0f, 0x00080A0Eu, 1.0f);
+        cvEllipse(kx, ky, 5.6f, 5.6f, 0x00807868u, 1.0f);
+        cvLine(kx, ky + 6, kx + 4, ky + 26, 6, 0x00080A0Eu, 1.0f);
+        cvLine(kx, ky + 6, kx + 4, ky + 26, 4, 0x006A6254u, 1.0f);
+    }
+
+    /* 受力痕迹：头部外侧两道划痕 + 锈斑 */
+    cvLine(hx + 6, hy - 40 * k, hx + 22, hy - 14 * k, 2, 0x00FFF2D0u, 0.85f);
+    cvLine(hx + 20, hy - 34 * k, hx + 34, hy - 12 * k, 2, 0x00FFF2D0u, 0.65f);
+    cvSpeckle((int)hx, (int)(hy + 4), 34, 90, 0x00703018u, 0.5f);
+
+    cvFinish(&g_sprites[SPR_WRENCH_STRIKE]);
+}
+
 static void BakeWrench(void) {
     cvClear();
     float c = CANVAS_W * 0.5f;
@@ -3254,6 +3369,7 @@ void SpritesInit(void) {
         if (!g_sprites[i].px || !g_sprites[i].shade) { g_ready = 0; return; }
         memset(g_sprites[i].px, 0, sizeof(unsigned int) * SPR_W * SPR_H);
     }
+    BakeWrenchStrike();
     BakeWrench();
     /* 2026-11-05：BakePistol() / BakeSigil() 已删除 */
     /* v2.4.82：六个槽位，一一对应，不再有"复用空闲槽位"这种事 */
