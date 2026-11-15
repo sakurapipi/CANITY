@@ -3545,57 +3545,66 @@ static void DrawViewModel(void) {
 
     int cx = (int)((float)renderW * 0.72f + sway);
     int cy = (int)((float)renderH * 1.04f + lift - kick);
-    /* ===== 2026-11-16 **八帧挥击 + 残影**（用户：只有两帧，只抖一下） =====
-       原来 5 帧、位移只有 ±2~5% 屏宽，且没有旋转（DrawSprite 不支持角度），
-       读起来就是"抖了一下"。现在：
-         · 帧数 5 → 8，时间用 wrenchSwingFxT（0.14×1.6=0.224s），比逻辑窗口长 60%
-           —— 命中判定仍在 p=0.40（= 逻辑 5 帧制的第 2 帧）对齐，玩法不变
-         · 位移加大到 ±8.5% 屏宽、并带上下弧线（后摆→挥出→过顶→收势）
-         · 缩放 86% → 118%，亮度 0.78 → 1.20
-         · 追加 2 层残影（半透明、略小），把"挥"的轨迹画出来
-       帧表（p = 播放进度）：
-         0 起手  (-0.020,+0.022, 92%)   1 后摆 (-0.075,+0.055, 86%)
-         2 加速  (+0.010,-0.012, 96%)   3 挥到 (+0.085,-0.055,118%) ← 命中
-         4 过顶  (+0.055,-0.020,110%)   5 收势 (+0.020,+0.010,102%)
-         6 回位  (+0.004,+0.004, 98%)   7 静止 ( 0.000, 0.000,100%)
+    /* ===== 2026-11-16（第二轮反馈）**前刺式挥击** =====
+       用户原话：「本质不像动画，只是左右摆两帧」「角度太多、转太快」
+                   「要的是直线往前 P 一下」。
+       所以这次不做"抡"，改成**向前刺/推**：
+         · 朝屏幕中心（准星）方向推出去：dx 向左、dy 向上、同时放大
+           —— 第一人称里"靠近镜头 + 朝准星移动"就是"往前P"
+         · 角度只留 ±9°（0.16 rad）做味道，不再大幅抡
+         · 时间拉长到 0.266s（1.9×），帧数 8 → **12**，
+           每帧角度/位移增量变小 → 不会再有"一帧跳 90°"的抽动感
+         · 命中仍在 0.056s：0.056/0.266 ≈ 0.21 → 第 2~3 帧之间，与刺出同刻
+       帧表：p = 播放进度，dx/dy 为屏宽/高比例（负=向左/向上）
+         fr0-2  后拉蓄力（缩小、右下沉）
+         fr3    **刺出**（放大 1.20、左移上抬、角度 +0.16）← 命中
+         fr4-5  保持/微收
+         fr6-11 缓慢回到原位
     */
     float swingProg = -1.0f;
     float swingAngle = 0.0f;
     if (wrenchSwingFxT > 0.0f) {
-        const float kWin = WRENCH_SWING_TIME * 1.6f;
+        const float kWin = WRENCH_SWING_TIME * 1.9f;
         swingProg = 1.0f - wrenchSwingFxT / kWin;
         if (swingProg < 0.0f) swingProg = 0.0f;
         if (swingProg > 1.0f) swingProg = 1.0f;
     }
     if (swingProg >= 0.0f) {
-        /* 旋转是这次的重点：光靠平移读起来就是"手抖"。
-           角度表（弧度，正=往右下甩），支点在握把 (0.52, 0.92)：
-             fr0 起手后仰 -0.18   fr1 后摆最大 -0.62   fr2 挥出 +0.95（命中）
-             fr3 过顶 +1.15      fr4 回收 +0.55      fr5 收势 +0.18
-             fr6 / fr7 归零 */
-        static const float kAng[8] = { -0.18f, -0.62f, 0.95f, 1.15f,
-                                        0.55f,  0.18f, 0.00f, 0.00f };
-        /* 平移只留少量（配合旋转，太多就变成抖动） */
-        static const float kDx[8] = { -0.012f, -0.042f,  0.052f,  0.034f,
-                                       0.012f,  0.004f,  0.000f,  0.000f };
-        static const float kDy[8] = {  0.012f,  0.030f, -0.030f, -0.012f,
-                                       0.006f,  0.002f,  0.000f,  0.000f };
-        static const int   kSz[8] = { 94, 90, 116, 108, 102, 98, 100, 100 };
-        static const float kLi[8] = { 0.92f, 0.80f, 1.22f, 1.10f,
-                                      1.02f, 0.99f, 1.00f, 1.00f };
-        int fr = (int)(swingProg * 8.0f);
-        if (fr > 7) fr = 7;
+        static const float kAng[12] = {
+            -0.02f, -0.06f, -0.10f,  0.16f,
+             0.14f,  0.10f,  0.06f,  0.03f,
+             0.01f,  0.00f,  0.00f,  0.00f };
+        static const float kDx[12] = {
+            -0.006f, -0.016f, -0.024f, -0.058f,
+            -0.046f, -0.034f, -0.024f, -0.016f,
+            -0.009f, -0.004f, -0.001f,  0.000f };
+        static const float kDy[12] = {
+             0.006f,  0.014f,  0.020f, -0.052f,
+            -0.040f, -0.028f, -0.019f, -0.012f,
+            -0.007f, -0.003f, -0.001f,  0.000f };
+        static const int   kSz[12] = {
+             97,  94,  92, 120,
+            116, 111, 106, 103,
+            101, 100, 100, 100 };
+        static const float kLi[12] = {
+            0.94f, 0.90f, 0.88f, 1.26f,
+            1.16f, 1.08f, 1.03f, 1.01f,
+            1.00f, 1.00f, 1.00f, 1.00f };
+        int fr = (int)(swingProg * 12.0f);
+        if (fr > 11) fr = 11;
 
-        /* 残影：先画最早的那层，再画晚一点的，最后画本体。残影也带旋转，否则轨迹对不上。 */
-        for (int g = 2; g >= 1; g--) {
-            int gf = fr - g * 2;
-            if (gf < 0) continue;
-            float ga = (g == 2) ? 0.10f : 0.22f;
-            int gx = cx + (int)((float)renderW * kDx[gf]);
-            int gy = cy + (int)((float)renderH * kDy[gf]);
-            int gs = size * (kSz[gf] + 4) / 100;      /* 残影略大，制造拖影 */
-            DrawSpriteRot(sid, gx - gs / 2, gy - gs, gs, gs,
-                          light * kLi[gf], ga, kAng[gf], 0.52f, 0.92f);
+        /* 残影只在前半段（刺出过程）出现，回收阶段不再拖影 */
+        if (fr >= 2 && fr <= 6) {
+            for (int g = 2; g >= 1; g--) {
+                int gf = fr - g;
+                if (gf < 0) continue;
+                float ga = (g == 2) ? 0.08f : 0.18f;
+                int gx = cx + (int)((float)renderW * kDx[gf]);
+                int gy = cy + (int)((float)renderH * kDy[gf]);
+                int gs = size * (kSz[gf] + 3) / 100;
+                DrawSpriteRot(sid, gx - gs / 2, gy - gs, gs, gs,
+                              light * kLi[gf], ga, kAng[gf], 0.52f, 0.92f);
+            }
         }
 
         cx += (int)((float)renderW * kDx[fr]);
