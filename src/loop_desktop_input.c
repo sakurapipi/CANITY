@@ -1239,7 +1239,9 @@ int CanityKeyDown(int vk, int repeat) {
         if(!repeat)CalibInputKey(vk);
         return 0;
     }
-    if(currentState==STATE_PLAYING && vk=='K' && !repeat){CalibStart();return 0;}
+    /* 2026-11-16（用户要求）：移除 K 键直接开小游戏的入口。
+       原来按一下 K 就在任意位置启动音游，容易误触；现在只有
+       藏身点内（空格/交互）与安全屋"休整服务"能进小游戏。 */
     if(currentState==STATE_HELP) {
         if(!repeat) {
             if(vk==(int)g_bindings[ACT_MENU_UP] || vk=='W')vk=VK_UP;

@@ -2487,6 +2487,11 @@ static void DrawHudWorldHints(void) {
 
 static void DrawHudSafeHints(void) {
     /* v2.5：站在安全区里 → 屏幕下方给一行提示（用户要求的那行字） */
+    /* 2026-11-16（用户：躲进藏身点时提示字幕被覆盖、且多数没价值）：
+       藏身状态下这两条提示（顶部"空格：开始校准"、左侧"T：商店 / 空格：校准"）
+       会被藏身遮罩和小游戏面板盖住 —— 而且玩家人在垃圾桶里也点不了商店。
+       所以藏身时直接不画；出柜子再照常显示。 */
+    if (hiddenIn >= 0) return;
     if (playerInSafe && currentState == STATE_PLAYING) {
         const char* hint = NULL;
         unsigned int hcol = 0x00E8E060u;
@@ -3113,8 +3118,11 @@ static void DrawHudCalibrationHints(const HudBarLayout* layout) {
        用户两次反馈「倒计时没有加进去」。
        之前只在 hiddenIn >= 0（藏进藏身点）时才画，玩家在走廊里
        根本看不到还剩多久。
-       现在只要在游戏中且冷却中，就显示在 RUN 条下方一行。 */
-    if (currentState == STATE_PLAYING) {
+       现在只要在游戏中且冷却中，就显示在 RUN 条下方一行。
+       2026-11-16（用户：藏身时提示被遮罩盖掉）：这一行在左下角，
+       藏身时正好落在遮罩黑区里 —— 画了也看不见，直接不画；
+       藏身期间真正要用的提示改画在"缝隙"里（见 RenderFrameCalibration）。 */
+    if (currentState == STATE_PLAYING && hiddenIn < 0) {
 
         char cd[48];
         unsigned int cdc;
@@ -3693,6 +3701,24 @@ static void RenderFrameOcclusion(void) {
 
 static void RenderFrameCalibration(void) {
     DrawExitChoice();
+    /* 2026-11-16（用户：躲藏时提示被遮罩覆盖）：藏身遮罩只留中间一条缝，
+       左下/右下的常驻提示全在黑影里。这里把**藏身时真正要用的**两条提示
+       画在缝隙内、面板之前，出柜或开小游戏时不画。 */
+    if (hiddenIn >= 0 && currentState == STATE_PLAYING && !calibActive) {
+        int ow = winW * 18 / 100, oh = winH * 38 / 100;
+        if (ow < 90) ow = 90;
+        if (oh < 110) oh = 110;
+        int ox0 = (winW - ow) / 2, oy1 = (winH - oh) / 2 + oh;
+        const char* msg = Tr("SPACE: CALIBRATE   E: LEAVE",
+                             "空格：校准    E：离开");
+        int tw2 = DrawTextSmallWidth(msg);
+        int mx = (winW - tw2) / 2;
+        if (mx < ox0) mx = ox0;
+        int my = oy1 - FONT_H - UIS(4);
+        BlendRectWin(mx - UIS(4), my - UIS(3), mx + tw2 + UIS(4), my + FONT_H + UIS(3),
+                     0x00000000u, 0.55f);
+        DrawTextSmallLiteralWin(mx, my, msg, UI_ACCENT);
+    }
     if(currentState==STATE_PLAYING){
         HushDraw();
         if(roomTheme.active && roomTheme.inside && !MonsterChaseActive()){
@@ -3701,13 +3727,25 @@ static void RenderFrameCalibration(void) {
         }
     }
     if((currentState!=STATE_PLAYING && currentState!=STATE_SAFEHOUSE) || !calibActive)return;
-    int w=UIS(360),h=winH*70/100,x=(winW-w)/2,y=winH*14/100,target=y+h-UIS(45);
+    /* 2026-11-16（用户：小游戏窗口 UI 重叠）重排布局：
+       原来"已恢复"那行(py=h-16)和按键行(target+12)挤在一起、退出提示还画在面板外，
+       会和 HUD / 世界提示叠。现在：
+         标题两行在顶部（COMBO / RESTORED 各占一行）
+         四条轨道从第二行下方开始
+         判定线在上方留出按键行的空间
+         退出提示画在面板**内部**底部，不再外溢 */
+    int th = TextHeightWin();
+    int w=UIS(360),h=winH*70/100,x=(winW-w)/2,y=winH*14/100;
+    int headY = y + UIS(8);
+    int laneTop = headY + th * 2 + UIS(10);
+    int target = y + h - UIS(52);
+    if (target < laneTop + UIS(40)) target = laneTop + UIS(40);   /* 小窗口兜底 */
     BlendRectWin(x,y,x+w,y+h,0x00081220u,.96f);
     FrameRectWin(x,y,x+w,y+h,UI_ACCENT,.9f,2);
     int laneW=w/4;
     for(int lane=0;lane<4;lane++) {
         int lx=x+lane*laneW;
-        BlendRectWin(lx+2,y+UIS(30),lx+laneW-2,target+UIS(10),lane%2?0x00162939u:0x000D1C2Au,1);
+        BlendRectWin(lx+2,laneTop,lx+laneW-2,target+UIS(10),lane%2?0x00162939u:0x000D1C2Au,1);
         char key[2]={"QWER"[lane],0};
         DrawTextCenterWin(lx+laneW/2,target+UIS(12),key,UI_INK);
     }
@@ -3715,15 +3753,18 @@ static void RenderFrameCalibration(void) {
     for(int i=0;i<CalibNoteCount();i++) {
         float offset=CalibNoteOffset(i);
         if(offset<-.18f || offset>2.0f)continue;
-        int ny=target-(int)(offset*(target-y-UIS(30))/2.0f);
+        int ny=target-(int)(offset*(target-laneTop)/2.0f);
         int nx=x+CalibNoteLane(i)*laneW+4;
         BlendRectWin(nx,ny-UIS(4),nx+laneW-8,ny+UIS(4),UI_ACCENT,1);
     }
-    char text[80];snprintf(text,sizeof(text),Tr("COMBO %d  ERRORS %d/6","连击%d  失误%d/6"),CalibCombo(),CalibErrors());
-    DrawTextSmallWin(x+UIS(8),y+UIS(9),text,UI_INK);
+    char text[80];
+    snprintf(text,sizeof(text),Tr("COMBO %d  ERRORS %d/6","连击%d  失误%d/6"),CalibCombo(),CalibErrors());
+    DrawTextSmallWin(x+UIS(8),headY,text,UI_INK);
     snprintf(text,sizeof(text),Tr("RESTORED +%d SAN / +%.1f CELL","已恢复 +%d理智 / +%.1f电量"),CalibPendingReward(),(double)CalibBatteryRestored());
-    UiTrimSmallText(text,w-UIS(12));DrawTextSmallLiteralWin(x+UIS(6),y+h-UIS(16),text,UI_OK);
-    DrawTextSmallWin(x,y+h+UIS(8),Tr("SPACE TWICE: EXIT","连按两次空格退出"),UI_ACCENT);
+    UiTrimSmallText(text,w-UIS(12));
+    DrawTextSmallLiteralWin(x+UIS(6),headY+th+UIS(2),text,UI_OK);
+    /* 退出提示移到面板内部底部（原来在 y+h+8，会盖住 HUD 与藏身提示） */
+    DrawTextSmallWin(x+UIS(8),y+h-UIS(14),Tr("SPACE TWICE: EXIT","连按两次空格退出"),UI_ACCENT);
 }
 
 

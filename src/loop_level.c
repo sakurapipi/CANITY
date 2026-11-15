@@ -897,8 +897,12 @@ static void PlaceFloorContainers(LevelBuildWorkspace* work) {
          *   第二轮 5 格   （兜底放宽，但绝不低于它）
          * 宁可少放一个，也不要在同一片区域堆两个。
          * ================================================================ */
-        const float HIDESPOT_MIN_GAP2      = 49.0f;   /* 7 格 */
-        const float HIDESPOT_MIN_GAP2_RELAX = 25.0f;  /* 5 格（兜底下限） */
+        /* 2026-11-16（用户实测：两个藏身点刷得太近，别处一个都没有）：
+           上一版是 7 格主约束 / 5 格兜底，仍然会在同一片区域堆两个。
+           现在提到 **10 格主约束 / 7 格兜底**，并额外加"每象限最多 2 个"，
+           让藏身点真正铺开到整张图，而不是挤在出生点附近。 */
+        const float HIDESPOT_MIN_GAP2      = 100.0f;  /* 10 格 */
+        const float HIDESPOT_MIN_GAP2_RELAX = 49.0f;  /* 7 格（兜底下限） */
         /* ==================================================================
          * 2026-11-06（用户要求）：藏身点"稍微增加一点，随层数逐渐减少"
          * ------------------------------------------------------------------
@@ -927,6 +931,18 @@ static void PlaceFloorContainers(LevelBuildWorkspace* work) {
             for (int k = 0; k < hideSpotCount; k++)
                 if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < HIDESPOT_MIN_GAP2) { bad = 1; break; }
             if (bad) continue;
+            /* 2026-11-16：同一象限最多 2 个 —— 让藏身点铺开到整张图 */
+            {
+                int qx = (hx2 < MAP_WIDTH * 0.5f) ? 0 : 1;
+                int qy = (hy2 < MAP_HEIGHT * 0.5f) ? 0 : 1;
+                int same = 0;
+                for (int k = 0; k < hideSpotCount; k++) {
+                    int sx = (hideSpots[k].x < MAP_WIDTH * 0.5f) ? 0 : 1;
+                    int sy = (hideSpots[k].y < MAP_HEIGHT * 0.5f) ? 0 : 1;
+                    if (sx == qx && sy == qy) same++;
+                }
+                if (same >= 2) continue;
+            }
             hideSpots[hideSpotCount].x = hx2;
             hideSpots[hideSpotCount].y = hy2;
             hideSpots[hideSpotCount].kind = rand() % 3;
@@ -945,6 +961,18 @@ static void PlaceFloorContainers(LevelBuildWorkspace* work) {
             for (int k = 0; k < hideSpotCount; k++)
                 if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < HIDESPOT_MIN_GAP2_RELAX) { bad = 1; break; }
             if (bad) continue;
+            /* 2026-11-16：同一象限最多 2 个 —— 让藏身点铺开到整张图 */
+            {
+                int qx = (hx2 < MAP_WIDTH * 0.5f) ? 0 : 1;
+                int qy = (hy2 < MAP_HEIGHT * 0.5f) ? 0 : 1;
+                int same = 0;
+                for (int k = 0; k < hideSpotCount; k++) {
+                    int sx = (hideSpots[k].x < MAP_WIDTH * 0.5f) ? 0 : 1;
+                    int sy = (hideSpots[k].y < MAP_HEIGHT * 0.5f) ? 0 : 1;
+                    if (sx == qx && sy == qy) same++;
+                }
+                if (same >= 2) continue;
+            }
             /* 兜底也不能压在箱子/配电箱上，否则垃圾桶会被道具盖住，
                玩家只看到 HIDE 提示却找不到桶。 */
             if (!SpotClear(hx2, hy2, 0.9f, 1, -1)) continue;

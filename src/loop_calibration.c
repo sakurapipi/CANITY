@@ -31,9 +31,16 @@ static float laneMissAt[4];    /* 本 lane 最近一次漏音/被吃掉的音符
 /* 同一物理按键的重复 keydown（系统重复、触屏重复事件、平台重复边沿）
    在这么短时间内只允许判定一次。谱面最小音距 240ms，70ms 不会吞掉连打。 */
 #define CALIB_LANE_DEBOUNCE 0.07f
-static float HitWindow(void) {return fmaxf(.085f,.18f-(currentLevel-1)*.006f);}
-float CalibZoneScale(void) {return HitWindow()/.18f;}
-float CalibSpeedScale(void) {return fminf(1.6f,1.0f+(currentLevel-1)*.025f);}
+/* 2026-11-16（用户实测"校准区间太小、符号越来越快"）：
+   判定窗口从 0.18s 起、随层数每层 -6ms（最低 85ms）→ 太苛刻；
+   现在 0.26s 起、每层 -2ms、最低 0.16s，前期宽松、后期也不会手抖必失。 */
+static float HitWindow(void) {return fmaxf(.16f,.26f-(currentLevel-1)*.002f);}
+float CalibZoneScale(void) {return HitWindow()/.26f;}
+/* 2026-11-16：移除"越打越快"的加速（原 1.0 + 每层 2.5%，最高 1.6 倍）。
+   用户反馈符号下落越来越快、手感失控 —— 现在恒为 1.0；
+   谱面密度仍随层数变化（Enabled() 解锁更多车道音符）。
+   FIXED_RESULT: 速度由"层数"改成"固定值"，符号下落速度恒定，不再加速。 */
+float CalibSpeedScale(void) {return 1.0f;}
 int CalibNoteCount(void) {return calibActive && chart?chart->count:0;}
 int CalibNoteLane(int note) {return chart && note>=0 && note<chart->count?chart->notes[note].lane:0;}
 static int Enabled(int note) {return chart->notes[note].difficulty<=1+(currentLevel>=4)+(currentLevel>=8);}
@@ -47,13 +54,15 @@ int CalibCombo(void) {return combo;}
 int CalibPendingReward(void) {return pending;}
 void CalibAccumulateDrain(float amount) {if(calibActive && amount>0 && isfinite(amount))drainBudget+=amount;}
 static void Finish(int result) {
-    if(result==3 && hiddenIn>=0){hiddenIn=-1;resetInputState=1;holdTimer=0;keyPressed[g_bindings[ACT_INTERACT]]=0;}
+    /* 2026-11-16（用户报告的 bug）：小游戏失败**不许把玩家踢出藏身点**。
+       原来这里 `hiddenIn=-1; resetInputState=1;` 会把玩家从柜子里弹出来，
+       等于失败一次就暴露在怪物面前。现在只结束音游，藏身状态保持不变。 */
     calibActive=0;calibResult=result;calibResultTimer=3;calibCooldown=guideMode?3:30;
     static char message[160];
     if(result==1){
         TutorialRecordAction(TUTOR_RHYTHM);int gold=RunEconomyRhythmGold(hits,bestCombo);
         snprintf(message,sizeof(message),LangTr("COMPLETE: +%.1f SAN / +%.1f CELL / +%d GOLD","完成：理智+%.1f / 电量+%.1f / 金币+%d"),(double)restored,(double)charged,gold);PlaySfx(SFX_POWER,.55f);
-    }else snprintf(message,sizeof(message),LangTr("%s / %.1f SANITY ALREADY RESTORED","%s / 已即时恢复%.1f理智"),result==3?LangTr("FAILED: LEFT COVER","失误超限：已离开藏身点"):LangTr("CANCELLED","取消"),(double)restored);
+    }else snprintf(message,sizeof(message),LangTr("%s / %.1f SANITY ALREADY RESTORED","%s / 已即时恢复%.1f理智"),result==3?LangTr("FAILED: TOO MANY MISSES","失误超限：小游戏结束"):LangTr("CANCELLED","取消"),(double)restored);
     pickupMsg=message;stationSession=0;memset(keyPressed,0,sizeof(keyPressed));pickupMsgTimer=3;uiDirty=1;
 }
 void CalibStart(void) {
