@@ -108,4 +108,13 @@ const unsigned long long* CjkRows(unsigned int cp, int scale);
  * ================================================================== */
 void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float lightK);
 
+/* 2026-11-16：拆到 domain/render/render_decoy.c 的诱饵模型入口。
+   只有这一个符号对外；其余部件仍是该文件内的 static。 */
+void DrawDecoyModel(int idx);
+
+/* 2026-11-16：屏幕投影结果 + 投影函数。
+   原来只是 render.c 的内部工具；拆出 render_decoy.c 后需要一个共享契约。 */
+typedef struct { int ok; float ty; int x0, x1, y0, y1; } SpriteBox;
+SpriteBox ProjectSprite(float wx, float wy, float baseZ, float halfH);
+
 #endif /* CANITY_RENDER_H */

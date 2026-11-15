@@ -41,7 +41,8 @@ DOMAINS = {
     'ui':       (['ui.c', 'domain/ui/ui_text.c', 'domain/ui/ui_pages.c',
                  'domain/ui/ui_menu.c'],
                  ['ui.h', 'ui_text.h', 'ui_pages.h', 'ui_menu.h'], 'ui.md'),
-    'render':   (['render.c'], ['render.h'], 'render.md'),
+    'render':   (['render.c', 'domain/render/render_map.c',
+                 'domain/render/render_decoy.c'], ['render.h'], 'render.md'),
 }
 
 
