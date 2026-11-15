@@ -56,12 +56,20 @@ static int  GetInt(const void* p)    { int v = 0; memcpy(&v, p, sizeof(int)); re
 
 /* 计算 payload 需要多少字节（不写） */
 static int ContainerNeed(const SaveChunkDesc* desc, int n) {
-    int need = SAVE_PAYLOAD_HEAD_SIZE + n * (int)sizeof(SaveChunkDesc);
+    /* 2026-11-16（v2.4.5-rc1 审计修复）：
+       原来先把 desc[i].size（unsigned int）转成 int 再相加 ——
+       传 size = 0xFFFFFFFF 时会被当成 -1，容量算成 19 字节，检查直接通过，
+       随后 SaveContainerPack 又用**无符号原值**调用 memcpy → 越界写。
+       现在全程 size_t 计算，并且**先判上界再减**，避免无符号下溢。 */
+    size_t need = (size_t)SAVE_PAYLOAD_HEAD_SIZE + (size_t)n * sizeof(SaveChunkDesc);
     for (int i = 0; i < n; i++) {
-        if (need > 0x7FFFFFF0 - (int)desc[i].size) return -1;   /* 溢出保护 */
-        need += (int)desc[i].size;
+        size_t sz = (size_t)desc[i].size;
+        if (sz > (size_t)0x7FFFFFF0u) return -1;                /* 单块就超了 */
+        if (need > (size_t)0x7FFFFFF0u - sz) return -1;         /* 累计溢出 */
+        need += sz;
     }
-    return need;
+    if (need > (size_t)0x7FFFFFF0u) return -1;
+    return (int)need;
 }
 
 int SaveContainerPack(const SaveChunkDesc* desc, const void* const* body, int n,

@@ -446,12 +446,12 @@ body.touchControls #saveToggle{display:block}body.touchControls #entry.saveopen{
 
     // 右侧半屏拖动 = 转视角
     var look = document.getElementById('look');
-    var lookId = null, lastX = 0;
+    var lookId = null, lastX = 0, lastY = 0;
     function ended(e,id){if(id===null)return false;for(var i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===id)return true;return false;}
     look.addEventListener('touchstart', function (e) {
       if(lookId!==null)return;
       var t = e.changedTouches[0];
-      lookId = t.identifier; lastX = t.clientX;
+      lookId = t.identifier; lastX = t.clientX; lastY = t.clientY;
       Module._touchLook = true;
       e.preventDefault();
     }, { passive: false });
@@ -460,9 +460,13 @@ body.touchControls #saveToggle{display:block}body.touchControls #entry.saveopen{
         var t = e.changedTouches[i];
         if (t.identifier !== lookId) continue;
         var dx = t.clientX - lastX;
+        var dy = t.clientY - lastY;
         lastX = t.clientX;
+        lastY = t.clientY;
         Module._mouseDX = (Module._mouseDX || 0) + dx * 2;
-        Module._mouseDY = 0; // Vertical look intentionally disabled.
+        /* 2026-11-16（审计修复）：原来这里硬写 0 —— 手机上打开 Vertical Look 也没有上下视角。
+           现在把纵向位移交下去；开关关闭时游戏侧（render.c UpdatePitch）自己忽略。 */
+        Module._mouseDY = (Module._mouseDY || 0) + dy * 2;
       }
       e.preventDefault();
     }, { passive: false });

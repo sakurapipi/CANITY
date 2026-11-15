@@ -84,7 +84,10 @@ SettingItem settings[] = {
     {"Fullscreen",      SET_LIST,   optOnOff,    2, &isFullscreen,      NULL,      0,    0,    0, 1},
     {"Frame Limit",     SET_LIST,   optFps,      5, &fpsCapIndex,       NULL,      0,    0,    0, 1},
     {"Graphics Quality", SET_LIST,  optScale,    4, &renderScaleIndex,  NULL,      0,    0,    0, 1},
-    {"Dynamic Res",     SET_LIST,   optOnOff,   2, &dynamicRes,        NULL,      0,    0,    0, 1},
+    /* 2026-11-16（审计修复）：UpdateDynamicRes() 里 `if (1) return;` 是永久禁用，
+       菜单却还摆着开关 —— 点了没有任何效果。先隐藏，等 3D 分辨率与 UI 缩放
+       真正解耦（见 docs 报告）再放回来。 */
+    /* {"Dynamic Res",     SET_LIST,   optOnOff,   2, &dynamicRes,        NULL,      0,    0,    0, 1}, */
     {"Gamma",           SET_SLIDER, NULL,        0, NULL,               &gammaValue, 0.7f, 1.6f, 0.05f, 1},
     {"Field of View",   SET_LIST,   optFov,      5, &fovIndex,          NULL,      0,    0,    0, 1},
     /* 2026-11-16：上下视角开关。默认 OFF = 镜头固定水平（2.4.3 行为）；

@@ -1125,6 +1125,36 @@ static void test_save_container_contract(void) {
         check(SaveContainerAt(buf2, n2, 0, &e, &eb) == 1 && e.id == 0x7777,
               "unknown chunk must still be enumerable (cloud forward-compat)");
 
+        /* ---- ③.5 容量计算的极端输入（2026-11-16 审计回归） ----
+           旧实现把 unsigned int 的 size 强转成 int：
+           传 0xFFFFFFFF 会被当成 -1，容量算成 19 字节，检查"通过"，
+           随后 memcpy 用无符号原值 → 越界写。这里直接钉住它。 */
+        {
+            SaveChunkDesc bad[1];
+            const void* badBody[1];
+            unsigned char small[64];
+            char dummy[1] = { 'X' };
+            bad[0].id = 0x0100; bad[0].schema = 1;
+            bad[0].size = 0xFFFFFFFFu;              /* UINT_MAX */
+            badBody[0] = dummy;
+            check(SaveContainerPack(bad, badBody, 1, small, (int)sizeof(small), NULL) == -1,
+                  "chunk size UINT_MAX must be rejected (no int truncation)");
+
+            bad[0].size = 0x80000000u;              /* INT_MAX + 1 */
+            check(SaveContainerPack(bad, badBody, 1, small, (int)sizeof(small), NULL) == -1,
+                  "chunk size INT_MAX+1 must be rejected");
+
+            /* 两块各 0x7FFFFFF0 —— 单块合法、累计溢出 */
+            SaveChunkDesc two[2];
+            const void* twoBody[2];
+            unsigned char big[512];
+            two[0].id = 0x0101; two[0].schema = 1; two[0].size = 0x7FFFFFF0u;
+            two[1].id = 0x0102; two[1].schema = 1; two[1].size = 0x7FFFFFF0u;
+            twoBody[0] = dummy; twoBody[1] = dummy;
+            check(SaveContainerPack(two, twoBody, 2, big, (int)sizeof(big), NULL) == -1,
+                  "accumulated size overflow must be rejected");
+        }
+
         /* ---- ② 信封校验和 ---- */
         SaveEnvelope h;
         SaveEnvelopeSeal(&h, buf, n, 1793866745u);

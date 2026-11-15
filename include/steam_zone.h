@@ -150,7 +150,10 @@ int SteamZoneCloudDecide(const void* local, int localLen,
                          const void* remote, int remoteLen,
                          int* outLen);
 
-int SteamZoneCloudSync(const char* name, void* localBuf, int* bufSize);
+/* 2026-11-16：参数拆分 —— localLen=本地有效字节数，capacity=缓冲区容量（进出参）。 */
+int SteamZoneCloudSync(const char* name, void* localBuf, int localLen, int* capacity);
+/* 首次恢复：本地无档时把云端那份拉下来，返回 1 = 成功，*outLen = 字节数。 */
+int SteamZoneCloudPullNew(const char* name, void* out, int cap, int* outLen);
 
 /* ---- 统计（Steamworks Stats）---- */
 

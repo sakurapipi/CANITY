@@ -319,6 +319,9 @@ typedef struct {
     int collectorBountyV45;
     float collectorPositionV45[2];
     int counterKillUsedV45;
+    /* v2.4.5-rc1 追加（仍然只在末尾，旧档按偏移判断是否存在）：
+       Vertical Look 开关。审计发现它只活在进程内存里，重启就丢。 */
+    int pitchLook;
 } SaveBlob;
 
 /* ==================================================================

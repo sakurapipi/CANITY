@@ -607,6 +607,9 @@ int SaveTestDeserialize(const void* buf, long n, SaveBlob* out) {
 
 /* 显示 / 音频 / 键位这些设置项是所有存档共用的，
    单独抽出来，训练场里也能只写设置、不动正式进度。 */
+/* 2026-11-16：Vertical Look 开关由 render.c 拥有（默认 0）。 */
+extern int pitchLookEnabled;
+
 static void CopyDisplaySettings(SaveBlob* s) {
     s->resIndex = resIndex;
     s->fullscreen = isFullscreen;
@@ -618,6 +621,7 @@ static void CopyDisplaySettings(SaveBlob* s) {
     s->showFps = showFps;
     s->hudDetail = hudDetail;
     s->qteHint = qteHint;
+    s->pitchLook = pitchLookEnabled ? 1 : 0;   /* v2.4.5-rc1：新功能必须能存住 */
     s->gamma = gammaValue;
     s->sens = mouseSens;
     s->volume = volumeF;
@@ -1351,6 +1355,7 @@ typedef char legacySave24_must_fit[(sizeof(LegacySaveV24) <= sizeof(SaveBlob)) ?
 typedef struct {
     size_t fileSize;
     int hasMusicField, hasDynamicResField, hasGameClearedField;
+    int hasPitchLookField;   /* v2.4.5-rc1：结构末尾追加字段是否存在 */
     char usedPath[MAX_PATH];
 } LoadedSaveInfo;
 
@@ -1548,6 +1553,8 @@ static void ApplyLoadedSettings(const LoadedSaveInfo* info) {
     showFps = g_save.showFps;
     hudDetail = g_save.hudDetail;
     qteHint = g_save.qteHint;
+    /* v2.4.5-rc1：Vertical Look 恢复。旧档没有这一段 → 保持默认关。 */
+    pitchLookEnabled = info->hasPitchLookField ? (g_save.pitchLook ? 1 : 0) : 0;
     /* ==================================================================
      * 第 2 轮：**难度是设置，读档时就该立刻生效**
      * ------------------------------------------------------------------
@@ -1708,6 +1715,7 @@ int LoadSettings(void) {
     if (!MigrateSettingsCandidate(&info)) return 0;
     info.hasMusicField=info.fileSize>=offsetof(SaveBlob,musicVolume)+sizeof(float);
     info.hasDynamicResField=info.fileSize>=offsetof(SaveBlob,dynamicRes)+sizeof(int);
+    info.hasPitchLookField=info.fileSize>=(long)(offsetof(SaveBlob,pitchLook)+sizeof(int));
     info.hasGameClearedField=info.fileSize>=offsetof(SaveBlob,gameClearedSave)+sizeof(int);
     ApplyLoadedSettings(&info);
     RestoreLoadedProgress(&info);
@@ -1737,6 +1745,7 @@ int SaveSelectSlot(int slot){
     g_save.saveSlot=slot;
     info.hasMusicField=info.fileSize>=offsetof(SaveBlob,musicVolume)+sizeof(float);
     info.hasDynamicResField=info.fileSize>=offsetof(SaveBlob,dynamicRes)+sizeof(int);
+    info.hasPitchLookField=info.fileSize>=(long)(offsetof(SaveBlob,pitchLook)+sizeof(int));
     info.hasGameClearedField=info.fileSize>=offsetof(SaveBlob,gameClearedSave)+sizeof(int);
     DailyResetProfile();ApplyLoadedSettings(&info);RestoreLoadedProgress(&info);
     g_saveSlot=slot;forcedSaveSlot=-1;hasSave=g_save.hasRun!=0;runInProgress=0;
@@ -2163,17 +2172,27 @@ void DeleteSave(void) {
     char p[MAX_PATH];
     for (int i = 0; i < SAVE_CAND_COUNT; i++) {
         const char* cand = SavePathCand(i, p, sizeof(p));
-        PlatDeletePath(cand);
+        /* 2026-11-16（审计修复）：**必须看返回值**。
+           文件被占用 / 权限不足时删除会失败，原来照样把内存标志清掉 ——
+           重启后旧档又被读回来，玩家以为"删了却还在"。 */
+        int delMain = PlatDeletePath(cand);
         /* v29：**连 .bak / .tmp 一起删** ——
            LoadSettings 在主档读不到时会回退 .bak；
            只删主档的话，「新开一局 → 首次存档前退出/崩溃」
            下次启动就会从 .bak 把旧局复活，等于删档没删干净。 */
         {
             char side[MAX_PATH + 8];
+            int delBak, delTmp;
             snprintf(side, sizeof(side), "%s.bak", cand);
-            PlatDeletePath(side);
+            delBak = PlatDeletePath(side);
             snprintf(side, sizeof(side), "%s.tmp", cand);
-            PlatDeletePath(side);
+            delTmp = PlatDeletePath(side);
+            /* 只把"本该删但没删掉"记成错误；文件不存在（返回 0/ENOENT）不算失败。 */
+            if (!delMain || !delBak || !delTmp) {
+                /* 记一个可诊断状态，但**不阻断**其余候选路径的清理 */
+                g_saveState = 2;
+                g_saveError = 32;   /* ERROR_SHARING_VIOLATION：文件被占用 */
+            }
         }
     }
     g_save.hasRun = 0;

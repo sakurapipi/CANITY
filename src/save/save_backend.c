@@ -92,8 +92,29 @@ void SaveBackendSyncAll(void) {
         size_t cap = 1024 * 1024;
         unsigned char* buf = (unsigned char*)malloc(cap);
         if (!buf) continue;
+
+        const char* name = strrchr(p, '\\');
+        name = name ? name + 1 : p;
+
         long n = SaveBackendRead(p, buf, cap);
-        if (n <= (long)sizeof(SaveEnvelope)) { free(buf); continue; }
+
+        /* 2026-11-16（v2.4.5-rc1 审计修复）：**新设备首次恢复**
+           换电脑时本地没有存档，原来这里直接 continue ——
+           云端有进度也永远拉不回来。现在先尝试从云端拉一份，校验后原子落盘。 */
+        if (n <= (long)sizeof(SaveEnvelope)) {
+            int pulled = 0;
+            if (SteamZoneCloudPullNew(name, buf, (int)cap, &pulled) &&
+                pulled > (int)sizeof(SaveEnvelope)) {
+                SaveEnvelope rh;
+                memcpy(&rh, buf, sizeof(rh));
+                if (rh.magic == SAVE_ENVELOPE_MAGIC &&
+                    SaveEnvelopeValid(&rh, buf + sizeof(rh), pulled - (int)sizeof(rh))) {
+                    (void)SaveBackendWrite(p, buf, (size_t)pulled);
+                }
+            }
+            free(buf);
+            continue;
+        }
 
         SaveEnvelope h;
         memcpy(&h, buf, sizeof(h));
@@ -103,9 +124,6 @@ void SaveBackendSyncAll(void) {
             continue;   /* 裸档不参与云同步 */
         }
 
-        const char* name = strrchr(p, '\\');
-        name = name ? name + 1 : p;
-
         /* ================================================================
          * 2026-11-06（v2.4-alpha R7）：长度改成 in-out
          * ----------------------------------------------------------------
@@ -113,8 +131,10 @@ void SaveBackendSyncAll(void) {
          * 现在传 &len：进来是本地缓冲容量，出去是**最终生效那份的长度**。
          * buf 分配的是 1 MiB，所以云端更长也放得下。
          * ================================================================ */
+        /* 2026-11-16：localLen（本地实际长度）与 capacity（可写容量）分开传 ——
+           原来只传一个 int，云端档更长时会被误判"装不下"，直接 CONFLICT。 */
         int len = (int)n;
-        int sync = SteamZoneCloudSync(name, buf, &len);
+        int sync = SteamZoneCloudSync(name, buf, (int)n, &len);
 
         if (sync == STEAM_SYNC_CLOUDWIN) {
             /* 云端赢：先留一份，再用**原子写**覆盖（修缺陷 ④） */

@@ -67,15 +67,30 @@ LONG WINAPI CanityCrashHandler(EXCEPTION_POINTERS* ep) {
         snprintf(cpath, sizeof(cpath), "%scanity_crash.txt", exe);
     }
     FILE* f = fopen(cpath, "a");
+    /* exe 目录只读（装在 Program Files / 只读介质）时，退到用户数据目录，
+       宁可换个位置也**不能没有日志**。 */
+    if (!f) {
+        /* main() 早就会把默认数据目录写进 CANITY_DATA_DIR，直接读它即可，
+           不需要新增跨模块接口（S3：不制造新的符号归属）。 */
+        const char* dataDir = getenv("CANITY_DATA_DIR");
+        if (dataDir && dataDir[0]) {
+            char alt[MAX_PATH + 48];
+            snprintf(alt, sizeof(alt), "%s\\canity_crash.txt", dataDir);
+            f = fopen(alt, "a");
+        }
+    }
     if (f) {
-        unsigned long base = (unsigned long)(size_t)GetModuleHandleA(NULL);
-        unsigned long addr = 0, code = 0;
+        /* 2026-11-16（审计修复）：64 位 Windows 上 unsigned long 只有 32 位，
+           原来的转换会把地址截断，RVA 反查就失效了。改用 uintptr_t + %p。 */
+        uintptr_t base = (uintptr_t)GetModuleHandleA(NULL);
+        uintptr_t addr = 0;
+        unsigned long code = 0;
         if (ep && ep->ExceptionRecord) {
-            addr = (unsigned long)(size_t)ep->ExceptionRecord->ExceptionAddress;
+            addr = (uintptr_t)ep->ExceptionRecord->ExceptionAddress;
             code = (unsigned long)ep->ExceptionRecord->ExceptionCode;
         }
-        fprintf(f, "code=0x%08lX base=0x%08lX addr=0x%08lX rva=0x%08lX mark=%d\n",
-                code, base, addr, addr - base, g_dbgMark);
+        fprintf(f, "code=0x%08lX base=0x%p addr=0x%p rva=0x%p mark=%d\n",
+                code, (void*)base, (void*)addr, (void*)(addr - base), g_dbgMark);
         fclose(f);
     }
     return EXCEPTION_EXECUTE_HANDLER;

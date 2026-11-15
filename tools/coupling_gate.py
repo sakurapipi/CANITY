@@ -52,7 +52,11 @@ def module_cost_module():
 
 
 def function_sizes():
+    """2026-11-16（审计修复）：按**大括号配平**找函数结束，不再用"下一个函数声明"。
+    原来的做法在函数体里出现函数指针/宏展开时会把长度算错，
+    也可能把声明和定义混在一起统计。"""
     out = []
+    sig = re.compile(r'^(?:static\s+)?(?:void|int|float|unsigned|double|char)\s+\**\w+\s*\(')
     for root, _d, fs in os.walk(os.path.join(ROOT, 'src')):
         for f in sorted(fs):
             if not f.endswith('.c'):
@@ -61,13 +65,26 @@ def function_sizes():
             if os.path.relpath(p, ROOT).replace('\\', '/') in EXEMPT_FILES:
                 continue
             lines = io.open(p, encoding='utf-8', errors='replace').read().split('\n')
-            starts = []
-            for i, l in enumerate(lines):
-                if re.match(r'^(?:static\s+)?(?:void|int|float|unsigned|double|char)\s+\**\w+\s*\(', l):
-                    starts.append(i)
-            for k, s in enumerate(starts):
-                e = starts[k + 1] - 1 if k + 1 < len(starts) else len(lines)
-                out.append((os.path.relpath(p, ROOT).replace('\\', '/'), s + 1, e - s + 1))
+            i = 0
+            while i < len(lines):
+                if not sig.match(lines[i]):
+                    i += 1
+                    continue
+                # 找到本行（或之后几行）的第一个 '{'
+                j, depth, seen_open, ended = i, 0, False, False
+                while j < len(lines):
+                    depth += lines[j].count('{') - lines[j].count('}')
+                    if '{' in lines[j]:
+                        seen_open = True
+                    if seen_open and depth <= 0:
+                        ended = True
+                        break
+                    j += 1
+                if not ended:
+                    i += 1
+                    continue
+                out.append((os.path.relpath(p, ROOT).replace('\\', '/'), i + 1, j - i + 1))
+                i = j + 1
     return out
 
 
@@ -88,6 +105,16 @@ def registered_sources():
 
 def main():
     quiet = '--quiet' in sys.argv
+    # --baseline <file>：已知技术债清单，逐行精确匹配；**新出现的失败依然拦截**。
+    baseline = set()
+    if '--baseline' in sys.argv:
+        bp = sys.argv[sys.argv.index('--baseline') + 1]
+        bpath = bp if os.path.isabs(bp) else os.path.join(ROOT, bp)
+        if os.path.exists(bpath):
+            for l in io.open(bpath, encoding='utf-8', errors='replace'):
+                l = l.strip()
+                if l and not l.startswith('#'):
+                    baseline.add(l)
     fails = []
     mc = module_cost_module()
 
@@ -130,6 +157,9 @@ def main():
         print('  >200 行：%d 个（软上限 %d）' % (len(over200), SOFT_200))
     for rel, line, size in big:
         fails.append('函数过大：%s:%d 有 %d 行 > %d' % (rel, line, size, FUNC_HARD))
+    # 2026-11-16（审计修复）：SOFT_200 原来只打印不判定 —— 软上限形同虚设。
+    if len(over200) > SOFT_200:
+        fails.append('超过 200 行的函数有 %d 个 > 软上限 %d' % (len(over200), SOFT_200))
 
     reg = registered_sources()
     for root, _d, fs in os.walk(os.path.join(ROOT, 'src')):
@@ -144,6 +174,19 @@ def main():
                 fails.append('未登记进 build_sources：src/%s' % rel)
 
     print()
+    if baseline:
+        known = [f for f in fails if f in baseline]
+        fresh = [f for f in fails if f not in baseline]
+        print('解耦闸门：已知欠账 %d 项（baseline），新增 %d 项' % (len(known), len(fresh)))
+        for f in known:
+            print('  (已知) ' + f)
+        if fresh:
+            print('解耦闸门：FAIL —— 出现 baseline 之外的新问题')
+            for f in fresh:
+                print('  - ' + f)
+            return 1
+        print('解耦闸门：PASS（只允许既有欠账，不允许新增）')
+        return 0
     if fails:
         print('解耦闸门：FAIL（%d 项）' % len(fails))
         for f in fails:

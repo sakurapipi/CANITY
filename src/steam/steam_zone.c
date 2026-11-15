@@ -439,14 +439,34 @@ int SteamZoneCloudDecide(const void* local, int localLen,
     return STEAM_SYNC_LOCALWIN;
 }
 
-int SteamZoneCloudSync(const char* name, void* localBuf, int* bufSize) {
-    if (!s_ready || !name || !localBuf || !bufSize) return STEAM_SYNC_ERROR;
-    int cap = *bufSize;
+/* 2026-11-16（v2.4.5-rc1 审计修复）：
+   原来只有 *bufSize 一个参数，既当"本地有效长度"又当"缓冲区容量"。
+   本地档短、云端档长时，容量被误判成不够 → 直接 CONFLICT，云端新进度永远拉不回来。
+   现在拆成两个：localLen（本地实际字节数）+ *capacity（缓冲能放多少）。
+   出口仍写回 *capacity = 最终生效长度，调用方用法不变。 */
+/* 2026-11-16（v2.4.5-rc1 审计修复）：**新设备首次恢复**。
+   本地没有存档时，SaveBackendSyncAll 走不到同步分支，云端进度永远拉不回来。
+   这个函数只做"把云端那份原样拉下来"，校验与落盘交给调用方。 */
+int SteamZoneCloudPullNew(const char* name, void* out, int cap, int* outLen) {
+    if (!s_ready || !name || !out || !outLen) return 0;
+    if (!SteamZoneCloudExists(name)) return 0;
+    int rsize = SteamZoneCloudGetSize(name);
+    if (rsize <= (int)sizeof(SteamCloudHead) || rsize > cap) return 0;
+    int got = SteamZoneCloudDownload(name, out, rsize);
+    if (got != rsize) return 0;
+    *outLen = rsize;
+    return 1;
+}
+
+int SteamZoneCloudSync(const char* name, void* localBuf, int localLen, int* capacity) {
+    if (!s_ready || !name || !localBuf || !capacity) return STEAM_SYNC_ERROR;
+    int cap = *capacity;
     if (cap <= (int)sizeof(SteamCloudHead)) return STEAM_SYNC_ERROR;
+    if (localLen <= (int)sizeof(SteamCloudHead) || localLen > cap) return STEAM_SYNC_ERROR;
 
     /* ① 云端没有 → 上传 */
     if (!SteamZoneCloudExists(name)) {
-        return SteamZoneCloudUpload(name, localBuf, cap)
+        return SteamZoneCloudUpload(name, localBuf, localLen)
              ? STEAM_SYNC_NOCLOUD : STEAM_SYNC_ERROR;
     }
 
@@ -461,12 +481,12 @@ int SteamZoneCloudSync(const char* name, void* localBuf, int* bufSize) {
 
     /* ③ 判定（纯函数，已被 test_runtime 单测） */
     int winLen = 0;
-    int verdict = SteamZoneCloudDecide(localBuf, cap, remote, rsize, &winLen);
+    int verdict = SteamZoneCloudDecide(localBuf, localLen, remote, rsize, &winLen);
 
     if (verdict == STEAM_SYNC_CLOUDWIN) {
         if (winLen <= 0 || winLen > cap) { free(remote); return STEAM_SYNC_CONFLICT; }
         memcpy(localBuf, remote, (size_t)winLen);
-        *bufSize = winLen;
+        *capacity = winLen;
         free(remote);
         return STEAM_SYNC_CLOUDWIN;
     }
@@ -474,7 +494,7 @@ int SteamZoneCloudSync(const char* name, void* localBuf, int* bufSize) {
     free(remote);
 
     if (verdict == STEAM_SYNC_LOCALWIN) {
-        return SteamZoneCloudUpload(name, localBuf, cap)
+        return SteamZoneCloudUpload(name, localBuf, localLen)
              ? STEAM_SYNC_LOCALWIN : STEAM_SYNC_ERROR;
     }
     return verdict;

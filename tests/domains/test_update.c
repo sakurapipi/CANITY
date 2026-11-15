@@ -412,6 +412,29 @@ void TestSuite_update(void) {
         pitchRatio = savedPitch;
         UpdatePitch();
     }
+    /* 2026-11-16（审计修复回归）：**Vertical Look 必须能存住**。
+       只验"开关能改镜头"不够 —— 重启丢设置正是这一版修的缺陷。
+       这里走真实的序列化出口：写一个带 pitchLook=1 的 blob，再读回来。 */
+    {
+        extern int SaveTestSerialize(const SaveBlob* blob, unsigned char** out);
+        extern int SaveTestDeserialize(const void* buf, long n, SaveBlob* out);
+        SaveBlob a;
+        unsigned char* sbuf = NULL;
+        int sn;
+        memset(&a, 0, sizeof(a));
+        a.magic = SAVE_MAGIC;
+        a.version = SAVE_VERSION;
+        a.pitchLook = 1;
+        sn = SaveTestSerialize(&a, &sbuf);
+        CHECK(sn > 0 && sbuf != NULL, "pitchLook blob must serialize");
+        if (sn > 0 && sbuf) {
+            SaveBlob b;
+            memset(&b, 0, sizeof(b));
+            CHECK(SaveTestDeserialize(sbuf, (long)sn, &b) > 0 && b.pitchLook == 1,
+                  "pitchLook must round-trip through the save file");
+            free(sbuf);
+        }
+    }
     test_stable_rhythm_gold_cap();
     test_shared_map_release_and_tree_drag();
     test_invalid_action_and_key_indices();
