@@ -77,6 +77,7 @@ void SettingsRegister(void) {
     }
 }
 
+extern int pitchLookEnabled;   /* render.c：Vertical Look 开关 */
 SettingItem settings[] = {
     /* ========== 分类 1: DISPLAY ========== */
     {"Resolution",      SET_LIST,   optRes,      RES_COUNT, &resIndex,          NULL,      0,    0,    0, 1},
@@ -86,6 +87,9 @@ SettingItem settings[] = {
     {"Dynamic Res",     SET_LIST,   optOnOff,   2, &dynamicRes,        NULL,      0,    0,    0, 1},
     {"Gamma",           SET_SLIDER, NULL,        0, NULL,               &gammaValue, 0.7f, 1.6f, 0.05f, 1},
     {"Field of View",   SET_LIST,   optFov,      5, &fovIndex,          NULL,      0,    0,    0, 1},
+    /* 2026-11-16：上下视角开关。默认 OFF = 镜头固定水平（2.4.3 行为）；
+       ON = 鼠标/触屏上下可小范围抬头低头（±26°），渲染层已支持真俯仰。 */
+    {"Vertical Look",   SET_LIST,   optOnOff,    2, &pitchLookEnabled,  NULL,      0,    0,    0, 1},
     {"Save Slot",       SET_LIST,   optSlot, SAVE_SLOTS, &g_saveSlot,  NULL,      0,    0,    0, 6},
 
     /* ========== 分类: KEY BINDINGS / MOVEMENT ========== */

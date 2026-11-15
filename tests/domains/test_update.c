@@ -385,11 +385,33 @@ void TestSuite_update(void) {
     probe_hide_spot_is_recognised();
     probe_save_failure_must_not_trap_pause_menu();
     probe_pause_menu_mouse_and_hide_priority();
-    /* v2.4.3：垂直视角必须保持关闭（与 main 的"horizontal-only"一致） */
-    float savedPitch=pitchRatio;pitchRatio=.5f;CanityMouseLook(0,60);
-    CHECK(pitchRatio==0,"vertical input resets to a level camera");
-    pitchRatio=savedPitch;UpdatePitch();
-    CHECK(pitchRatio==0,"render projection cannot retain vertical tilt");
+    /* 2026-11-16：上下视角改可开关。默认关 → 输入被丢弃；打开 → 跟随并夹取。
+       （原 v2.4.3 断言"永远为 0"，现在随开关变化。） */
+    {
+        extern int pitchLookEnabled;
+        float savedPitch = pitchRatio;
+        int savedFlag = pitchLookEnabled;
+
+        pitchLookEnabled = 0;
+        pitchRatio = .5f;
+        CanityMouseLook(0, 60);
+        CHECK(pitchRatio == 0, "vertical input is ignored while Vertical Look is off");
+        UpdatePitch();
+        CHECK(pitchRatio == 0, "level camera keeps the projection horizontal");
+
+        pitchLookEnabled = 1;
+        pitchRatio = 0;
+        CanityMouseLook(0, 60);
+        CHECK(pitchRatio < 0, "vertical input moves the camera when Vertical Look is on");
+        CanityMouseLook(0, 100000);
+        CHECK(pitchRatio >= -1.0f, "pitch is clamped at the low end");
+        CanityMouseLook(0, -100000);
+        CHECK(pitchRatio <= 1.0f, "pitch is clamped at the high end");
+
+        pitchLookEnabled = savedFlag;
+        pitchRatio = savedPitch;
+        UpdatePitch();
+    }
     test_stable_rhythm_gold_cap();
     test_shared_map_release_and_tree_drag();
     test_invalid_action_and_key_indices();

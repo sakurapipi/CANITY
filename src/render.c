@@ -245,17 +245,25 @@ static int noiseReady = 0;
 
 unsigned int floorBaseA = 0x00151515u, floorBaseB = 0x00202020u;
 int themeId = 0;
-/* Keep the camera level on every platform, including after resume/reset. */
-float pitchRatio = 0.0f; /* Compatibility state; vertical look is disabled. */
+/* 2026-11-16：上下视角做成**可开关**（默认关，保持 2.4.3 的水平镜头）。
+   开关来源：设置页 "Vertical Look"；关闭时 pitchRatio 恒为 0。 */
+int pitchLookEnabled = 0;
+/* v1.12/v1.13（沿用 main 的实现）：pitchRatio ∈ [-1,1]，映射到 ±0.45 rad ≈ ±26°，
+   墙的上下沿、精灵、地板/天花板都按旋转后的视锥重新投影。 */
+float pitchRatio = 0.0f;
 int horizon = 0;
+static float camPitch = 0.0f;
 static float pitchCos = 1.0f, pitchSin = 0.0f;
 static int   focal = 600;  /* 焦距 = 渲染高度（与原 lineHeight 一致） */
 
-/* Preserve the existing projection with a permanently horizontal camera. */
 void UpdatePitch(void) {
-    pitchRatio = 0.0f;
-    pitchCos = 1.0f;
-    pitchSin = 0.0f;
+    if (!pitchLookEnabled) pitchRatio = 0.0f;   /* 关掉时强制水平 */
+    if (!(pitchRatio == pitchRatio)) pitchRatio = 0.0f;   /* NaN 防呆 */
+    if (pitchRatio > 1.0f) pitchRatio = 1.0f;
+    else if (pitchRatio < -1.0f) pitchRatio = -1.0f;
+    camPitch = pitchRatio * 0.45f;
+    pitchCos = cosf(camPitch);
+    pitchSin = sinf(camPitch);
     focal = renderH;
     horizon = 0;
 }
