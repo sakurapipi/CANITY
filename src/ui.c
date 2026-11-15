@@ -3474,8 +3474,16 @@ static void RenderFrameMenus(void) {
     /* 文字也在这一层，先合成再一次性呈现；弹窗必须在列表文字之后画 */
     if (currentState != STATE_PLAYING) {
         int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
-        if(currentState!=STATE_PAUSED && !(currentState==STATE_SETTINGS && prevState==STATE_PAUSED))
+        /* 2026-11-16（用户实测）：满强度档时"第一级暂停页"仍是蓝色的。
+           原因：暂停页为了能看见身后的场景，完全没有铺背景色 ——
+           红色档位的面板下面透出来的还是蓝色走廊，所以整页看着是蓝的。
+           现在改成**铺一层 72% 的主题底色**：场景仍可见，但整体跟着档位变红。 */
+        if (currentState == STATE_PAUSED ||
+            (currentState == STATE_SETTINGS && prevState == STATE_PAUSED)) {
+            BlendRectWin(0,0,winW,winH,UI_BG_PANEL,0.72f);
+        } else {
             BlendRectWin(0,0,winW,winH,UI_BG_PANEL,1.0f);
+        }
         UiDreamFrame(); /* Collage belongs above the menu backdrop, below labels. */
         UiDrawMenuPages();   /* Menu composition has one shared entry point. */
         if (popupOpen) {
