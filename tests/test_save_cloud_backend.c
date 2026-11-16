@@ -1,4 +1,4 @@
-/* RC2 regression specifications. Not run for this code-only revision.
+/* 2.4.6 stable cloud/recovery regression cases.
  * Links real persistence/validation/transaction code with in-memory OS/Steam I/O.
  */
 #include "common.h"
@@ -16,6 +16,7 @@ typedef struct { char path[MAX_PATH+96]; unsigned char* data; int len, active; d
 static File files[128];
 static int count, cloudLen, localLen, seenCapacity, failPrimary, failAll, failSnapshot;
 static int verdict, uploads, syncCalls, deleteCrash, failBackupDelete;
+static int failMarker, partialRestore, snapshotAttempts;
 static unsigned char cloud[FIXTURE_CAP], local[FIXTURE_CAP];
 static jmp_buf powerLoss;
 static File* find(const char* path) {
@@ -47,7 +48,8 @@ static void reset(int withLocal) {
     for(int i=0;i<count;i++)free(files[i].data);
     memset(files,0,sizeof(files));count=0;
     g_saveState=g_saveError=seenCapacity=failPrimary=failAll=failSnapshot=0;
-    uploads=syncCalls=deleteCrash=failBackupDelete=0;g_savePath[0]=0;
+    uploads=syncCalls=deleteCrash=failBackupDelete=0;
+    failMarker=partialRestore=snapshotAttempts=0;g_savePath[0]=0;
     SaveBackendTestResetCloudCache();
     localLen=envelope(local,0,1,1000);cloudLen=envelope(cloud,80,7,2000);
     verdict=STEAM_SYNC_CLOUDWIN;
@@ -69,11 +71,14 @@ int PlatReadFilePath(const char* path,void* out,int cap) {
     memcpy(out,file->data,(size_t)file->len);return file->len;
 }
 int PlatWriteFileAtomic(const char* path,const void* bytes,int len) {
-    if(failAll || (failPrimary && !strcmp(path,"canity0.sav")))return 5;
+    if(failAll || (failMarker && strstr(path,".cloud-block")) ||
+       (failPrimary && !strcmp(path,"canity0.sav")))return 5;
     put(path,bytes,len);return 0;
 }
 int PlatWriteFileExclusive(const char* path,const void* bytes,int len) {
     if(find(path))return 80;
+    snapshotAttempts++;
+    if(partialRestore && !strcmp(path,"canity0.sav")) { put(path,bytes,len/2); return 5; }
     if(failAll || (failSnapshot && strstr(path,"pre-cloud")))return 5;
     put(path,bytes,len);return 0;
 }
@@ -91,11 +96,19 @@ int SteamZoneReady(void) { return 1; }
 int SteamZoneCloudExists(const char* name) { return !strcmp(name,"canity0.sav"); }
 int SteamZoneCloudGetSize(const char* name) { (void)name;return cloudLen; }
 int SteamZoneCloudUpload(const char* name,const void* bytes,int len) {
-    (void)name;(void)bytes;(void)len;uploads++;return 1;
+    (void)name;assert(len>0 && (unsigned)len<=FIXTURE_CAP);
+    memcpy(cloud,bytes,(size_t)len);cloudLen=len;uploads++;return 1;
 }
 int SteamZoneCloudPullNew(const char* name,void* out,int cap,int* len) {
     (void)name;if(cap<cloudLen)return 0;
     memcpy(out,cloud,(size_t)cloudLen);*len=cloudLen;return 1;
+}
+int SteamZoneCloudInspect(const char* name,const void* bytes,int length,void** remote,int* remoteLength) {
+    (void)name;syncCalls++;
+    *remote=malloc((size_t)cloudLen);assert(*remote);
+    memcpy(*remote,cloud,(size_t)cloudLen);*remoteLength=cloudLen;
+    if(length==cloudLen && !memcmp(bytes,cloud,(size_t)length))return STEAM_SYNC_SAMECL;
+    return verdict;
 }
 int SteamZoneCloudSyncEx(const char* name,void* out,int bytes,int* capacity,
                          void** conflict,int* conflictLen) {
@@ -113,7 +126,9 @@ static void original_survives(void) {
 }
 static void test_larger_valid_cloud_uses_real_capacity(void) {
     reset(1);assert(SaveValidateBytes(local,localLen));assert(SaveValidateBytes(cloud,cloudLen));
-    SaveBackendSyncAll();assert(seenCapacity==(int)SAVE_MAX_FILE_BYTES);
+    SaveBackendSyncAll();original_survives();
+    assert(SaveBackendCloudBlocked(0));
+    assert(SaveBackendResolveCloud(0,SAVE_CLOUD_USE_REMOTE)==0);
     File* file=find("canity0.sav");assert(file && file->len==cloudLen);
     assert(!memcmp(file->data,cloud,(size_t)cloudLen));
     File* backup=find("canity0.sav.pre-cloud.bak");
@@ -126,6 +141,8 @@ static void test_restore_failure_and_fallback(void) {
 }
 static void test_backup_failure_does_not_activate_fallback(void) {
     reset(1);failSnapshot=1;SaveBackendSyncAll();original_survives();
+    assert(SaveBackendResolveCloud(0,SAVE_CLOUD_USE_REMOTE)==SAVE_ERR_CLOUD_BACKUP);
+    original_survives();
     assert(!find("fallback1/canity0.sav"));assert(SaveBackendCloudBlocked(0));
     assert(find("canity0.sav.conflict-cloud.bak"));
 }
@@ -195,15 +212,59 @@ static void test_first_restore_above_one_megabyte(void) {
 }
 static void test_precloud_history_is_immutable(void) {
     reset(1);SaveBackendSyncAll();
+    assert(SaveBackendResolveCloud(0,SAVE_CLOUD_USE_REMOTE)==0);
     File* first=find("canity0.sav.pre-cloud.bak");assert(first);
     int firstLen=first->len;unsigned char* original=malloc((size_t)firstLen);assert(original);
     memcpy(original,first->data,(size_t)firstLen);
     localLen=cloudLen;memcpy(local,cloud,(size_t)localLen);
     cloudLen=envelope(cloud,120,11,3000);SaveBackendSyncAll();
+    assert(SaveBackendResolveCloud(0,SAVE_CLOUD_USE_REMOTE)==0);
     first=find("canity0.sav.pre-cloud.bak");
     assert(first && first->len==firstLen && !memcmp(first->data,original,(size_t)firstLen));
     int versions=0;for(int i=0;i<count;i++)if(files[i].active && strstr(files[i].path,"pre-cloud"))versions++;
     assert(versions>=2);free(original);
+}
+static void crash_with_pending_journal(void) {
+    deleteCrash=1;
+    if(!setjmp(powerLoss)){(void)SaveBackendDeleteSlot(0);assert(0);}
+    assert(find("canity0.sav.delete-journal"));
+}
+static void test_conflicting_restore_keeps_journal(void) {
+    reset(1);crash_with_pending_journal();
+    unsigned char* different=malloc((size_t)localLen);assert(different);
+    memcpy(different,local,(size_t)localLen);different[localLen-1]^=1;
+    put("canity0.sav",different,localLen);
+    assert(SaveBackendRecoverDelete(0)==SAVE_ERR_DELETE_CONFLICT);
+    File* file=find("canity0.sav");assert(!memcmp(file->data,different,(size_t)localLen));
+    assert(find("canity0.sav.delete-journal"));free(different);
+}
+static void test_partial_restore_is_not_success_on_retry(void) {
+    reset(1);crash_with_pending_journal();partialRestore=1;
+    assert(SaveBackendRecoverDelete(0)!=0);partialRestore=0;
+    assert(SaveBackendRecoverDelete(0)==SAVE_ERR_DELETE_CONFLICT);
+    assert(find("canity0.sav.delete-journal"));
+}
+static void test_marker_failure_still_attempts_snapshot(void) {
+    reset(1);failMarker=1;SaveBackendSyncAll();
+    assert(g_saveState==2 && snapshotAttempts>0);
+    assert(!find("canity0.sav.cloud-block") && find("canity0.sav.conflict-cloud.bak"));
+}
+static void test_all_writes_fail_then_restart_requires_choice(void) {
+    reset(1);failAll=1;SaveBackendSyncAll();
+    assert(snapshotAttempts>0 && uploads==0);
+    failAll=0;localLen=envelope(local,0,17,9000);put("canity0.sav",local,localLen);
+    SaveBackendTestResetCloudCache();verdict=STEAM_SYNC_LOCALWIN;
+    SaveBackendUpload("canity0.sav");assert(uploads==0);
+    SaveBackendSyncAll();original_survives();assert(uploads==0 && SaveBackendCloudBlocked(0));
+    assert(SaveBackendResolveCloud(0,SAVE_CLOUD_USE_LOCAL)==0 && uploads==1);
+}
+static void test_same_session_upload_checks_remote_again(void) {
+    reset(1);cloudLen=localLen;memcpy(cloud,local,(size_t)localLen);
+    SaveBackendSyncAll();assert(!SaveBackendCloudBlocked(0));
+    localLen=envelope(local,0,21,4000);put("canity0.sav",local,localLen);
+    SaveBackendUpload("canity0.sav");assert(uploads==1);
+    cloudLen=envelope(cloud,80,33,5000); /* Another device diverged. */
+    SaveBackendUpload("canity0.sav");assert(uploads==1 && SaveBackendCloudBlocked(0));
 }
 int main(void) {
     test_larger_valid_cloud_uses_real_capacity();test_restore_failure_and_fallback();
@@ -212,5 +273,8 @@ int main(void) {
     test_power_loss_before_commit_restores_original();test_committed_delete_does_not_restore_from_cloud();
     test_valid_outer_invalid_directory_is_rejected();test_first_restore_above_one_megabyte();
     test_precloud_history_is_immutable();
-    puts("RC2 cloud and deletion scenarios passed");return 0;
+    test_conflicting_restore_keeps_journal();test_partial_restore_is_not_success_on_retry();
+    test_marker_failure_still_attempts_snapshot();test_all_writes_fail_then_restart_requires_choice();
+    test_same_session_upload_checks_remote_again();
+    puts("2.4.6 cloud and deletion scenarios passed");return 0;
 }

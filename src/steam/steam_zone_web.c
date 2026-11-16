@@ -33,6 +33,13 @@ int  SteamZoneCloudPullNew(const char* n, void* o, int c, int* l) {
     (void)n; (void)o; (void)c; (void)l;
     return 0;
 }
+int SteamZoneCloudInspect(const char* name, const void* local, int length, void** remote, int* bytes) {
+    /* PLATFORM_NOOP: Steamworks reconciliation is unavailable in the browser. */
+    (void)name; (void)local; (void)length;
+    if (remote) *remote = NULL;
+    if (bytes) *bytes = 0;
+    return STEAM_SYNC_ERROR;
+}
 int SteamZoneCloudSync(const char* n, void* lb, int ll, int* bs) {
     /* PLATFORM_NOOP: Steamworks is unavailable in the browser. */
     (void)n; (void)lb; (void)ll; (void)bs; return STEAM_SYNC_NOCLOUD;

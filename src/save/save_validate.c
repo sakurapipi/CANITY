@@ -36,6 +36,14 @@ static int BlobValid(const void* bytes, size_t length) {
            length >= MinimumBlobBytes(version) && length <= sizeof(SaveBlob);
 }
 
+static int KnownSchemaSupported(unsigned short id, unsigned short schema) {
+    switch (id) {
+    case SC_SETTINGS: case SC_LOBBY: case SC_RUN: case SC_WORLD: case SC_LEGACY29:
+        return schema == 1;
+    default: return 1; /* Unknown IDs remain opaque and byte-preserved. */
+    }
+}
+
 int SaveValidateBytes(const void* bytes, size_t length) {
     if (!bytes || length < 8 || length > SAVE_MAX_FILE_BYTES) return 0;
     unsigned magic; memcpy(&magic, bytes, 4);
@@ -55,6 +63,7 @@ int SaveValidateBytes(const void* bytes, size_t length) {
         if (!SaveContainerAt(payload, payloadBytes, i, &desc, &body)) return 0;
         for (int j = 0; j < i; j++) if (ids[j] == desc.id) return 0;
         ids[i] = desc.id;
+        if (!KnownSchemaSupported(desc.id, desc.schema)) return 0;
         used += desc.size;
         if (desc.id == SC_LEGACY29) {
             if (desc.schema != 1 || !BlobValid(body, desc.size)) return 0;

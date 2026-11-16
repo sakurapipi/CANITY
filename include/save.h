@@ -50,6 +50,7 @@ extern char g_savePath[MAX_PATH];
 #define SAVE_ERR_CLOUD_CONFLICT (-4) /* Both snapshots preserved; user choice required. */
 #define SAVE_ERR_CLOUD_SYNC (-5)     /* Cloud transport/validation failure. */
 #define SAVE_ERR_CLOUD_BACKUP (-6)   /* Local snapshot could not be preserved. */
+#define SAVE_ERR_DELETE_CONFLICT (-8) /* Existing target differs from journal; keep both. */
 #define SAVE_ERR_DELETE_TXN (-7) /* Incomplete/corrupt delete journal; original snapshots retained. */
 #define SAVE_MAX_FILE_BYTES (16u * 1024u * 1024u)
 #define SAVE_MAX_CHUNKS 64

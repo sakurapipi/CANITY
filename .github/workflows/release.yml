@@ -90,7 +90,7 @@ jobs:
           $name = "CANITY_v${ver}_win64"
           # 合并后口径：默认 Lite 构建（本工作流未加 --embed-music），
           # 说明文档随版本名走；--single-exe 只在 Full 构建时才可用。
-          python -X utf8 tools/package_playable.py --output stage --label $name --notes docs/RELEASE-${ver}.md --acceptance-report work/codex-build/validation-summary.json --source-commit $env:GITHUB_SHA
+          python -X utf8 tools/package_playable.py --output stage --label $name --notes docs/RELEASE-v${ver}.md --acceptance-report work/codex-build/validation-summary.json --source-commit $env:GITHUB_SHA
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $folder = (Get-Content work/latest_playable_path.txt -Raw).Trim()
           $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { 'v' + $ver.Replace(' ', '-') }
@@ -218,6 +218,7 @@ jobs:
             assets/CANITY_v*_web_single.html
             assets/build-manifest.json
           generate_release_notes: false
+          body_path: docs/RELEASE-${{ github.ref_name }}.md
           body: |
             三个版本，同一份源码、同一个提交：
 

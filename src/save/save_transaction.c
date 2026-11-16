@@ -56,6 +56,7 @@ static int RestoreEntry(int slot, const DeleteEntry* entry, const unsigned char*
     int same = length == (long)entry->length && !memcmp(current, data + entry->offset, entry->length);
     free(current);
     if (length < 0) return SAVE_ERR_DELETE_TXN;
+    if (!same) return SAVE_ERR_DELETE_CONFLICT;
     if (same && entry->modified > 0 && PlatFileTime(path) != entry->modified)
         return PlatSetFileTime(path, entry->modified);
     return 0;

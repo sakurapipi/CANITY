@@ -459,6 +459,24 @@ int SteamZoneCloudPullNew(const char* name, void* out, int cap, int* outLen) {
     return 1;
 }
 
+int SteamZoneCloudInspect(const char* name, const void* local, int localLen,
+                           void** remoteOut, int* remoteLen) {
+    if (remoteOut) *remoteOut = NULL;
+    if (remoteLen) *remoteLen = 0;
+    if (!s_ready || !name || !local || !remoteOut || !remoteLen) return STEAM_SYNC_ERROR;
+    if (!SteamZoneCloudExists(name)) return STEAM_SYNC_NOCLOUD;
+    int size = SteamZoneCloudGetSize(name);
+    if (size <= (int)sizeof(SteamCloudHead) || size > STEAM_CLOUD_MAX_SAVE_BYTES) return STEAM_SYNC_ERROR;
+    unsigned char* bytes = malloc((size_t)size);
+    if (!bytes) return STEAM_SYNC_ERROR;
+    if (SteamZoneCloudDownload(name, bytes, size) != size) { free(bytes); return STEAM_SYNC_ERROR; }
+    int winning = 0;
+    int result = SteamZoneCloudDecide(local, localLen, bytes, size, &winning);
+    if (result == STEAM_SYNC_ERROR) { free(bytes); return result; }
+    *remoteOut = bytes; *remoteLen = size;
+    return result;
+}
+
 int SteamZoneCloudSync(const char* name, void* localBuf, int localLen, int* capacity) {
     return SteamZoneCloudSyncEx(name, localBuf, localLen, capacity, NULL, NULL);
 }

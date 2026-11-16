@@ -368,7 +368,10 @@ static int SaveFileBytes(const SaveBlob* blob, unsigned char** out) {
     *out = NULL;
     if (s_saveReadOnly) return SAVE_ERR_DUP_CHUNK;   /* 结构异常，拒绝改写 */
 
-    int nChunks = s_carryCount + 1;                  /* +1 = SC_LEGACY29 */
+    int containsLegacy = 0;
+    for (int i = 0; i < s_carryCount; i++)
+        if (s_carry[i].id == SC_LEGACY29) containsLegacy = 1;
+    int nChunks = s_carryCount + (containsLegacy ? 0 : 1);
     if (nChunks > SAVE_CARRY_MAX) return SAVE_ERR_CAPACITY;
 
     SaveChunkDesc desc[SAVE_CARRY_MAX + 1];

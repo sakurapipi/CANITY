@@ -1,19 +1,15 @@
-> **2.4.6 RC2（候选源码，未做本轮验证）**：统一完整存档校验、持久化冲突上传保护、可恢复删除及不可覆盖备份。详见 [RC2 修改说明](docs/RELEASE-v2.4.6-RC2.md)。
-
-> **2.4.3 正式版**：关闭桌面鼠标和手机触屏的上下转视角，镜头固定水平，保留左右转向。详见 [更新说明](docs/RELEASE-v2.4.3.md)。
-> **2.4.2 RC4（历史）**：修复网页地图松键、全屏退出、手机蓄力扳手和技能树拖动，新增缩放按钮，调整蜘蛛出场率与精神污染层级。详见 [RC4更新与验证说明](docs/RELEASE-v2.4.2-rc4.md)。
-
 # CANITY
 
 [![CI](https://github.com/sakurapipi/CANITY/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sakurapipi/CANITY/actions/workflows/ci.yml)
 
 一款以探索、声音、光线与资源取舍为核心的第一人称像素恐怖逃生游戏，使用 C99 编写。
 
-**当前源码版本：2.4.6-RC2 · 存档格式：v45 · 地图：36×36 · 容器槽：12。**
+**当前源码版本：2.4.6 · 存档格式：v45 · 地图：36×36 · 容器槽：12。**
 
 Windows 桌面版与 WebAssembly 网页版共用游戏规则。射线投射、纹理采样、深度遮挡与后处理由 CPU 软件渲染完成，无需 OpenGL 或 DirectX 图形接口。怪物造型与场景贴图使用程序化生成；配乐随包提供 MP3，另有内置合成回退。
 
-- [下载已发布版本](https://github.com/sakurapipi/CANITY/releases)（当前已发布正式版为 v2.4.5；本地 RC 修改尚未发布）
+- [下载 v2.4.6 正式版](https://github.com/sakurapipi/CANITY/releases/tag/v2.4.6)
+- [2.4.6 更新说明与验证范围](docs/RELEASE-v2.4.6.md)
 - [查看自动构建与验证](https://github.com/sakurapipi/CANITY/actions/workflows/ci.yml)
 - [2.4.2 修复范围与兼容说明](docs/RELEASE-v2.4.2.md)
 - [直接在线游玩](https://sakurapipi.github.io/CANITY/)
@@ -82,6 +78,8 @@ python -m http.server 8080
 ## 存档与音频
 
 当前格式为 **v45**，追加保存钱袋、未追回赃款与单局反击消耗状态，保留 v25–v44 迁移。读取包含旧版本迁移与位置恢复逻辑；保存前保留 `.bak`，部分迁移还会生成带版本的备份。兼容范围、字段处理及失败策略以 [存档实现](src/save.c) 为准，构造夹具不能替代真实历史玩家存档验收。
+
+2.4.6 统一校验本地及云端的完整存档结构。删除事务遇到内容不同的恢复目标时保留原始日志；云冲突标记写入失败也会独立尝试保留远端快照。每次启动重新确认云端版本：本地和云端不同则需要明确选择，未解决时正常本地保存不会自动上传。每次自动上传前再次核对远端是否仍是本次会话确认的版本，并保留替换前快照。此行为优先保护双设备进度，可能比旧版更频繁地询问版本选择。
 
 桌面存档位置由启动方式及 `CANITY_DATA_DIR` 决定。网页使用浏览器持久化存储；清除站点数据可能删除进度，请保留导出的存档或独立备份。
 

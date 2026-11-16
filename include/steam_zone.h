@@ -146,6 +146,11 @@ int SteamZoneCloudDecide(const void* local, int localLen,
 
 /* 2026-11-16：参数拆分 —— localLen=本地有效字节数，capacity=缓冲区容量（进出参）。 */
 int SteamZoneCloudSync(const char* name, void* localBuf, int localLen, int* capacity);
+/* Read-only reconciliation. Never uploads or modifies local bytes. The caller
+   owns *remote (free it); missing cloud returns NOCLOUD and NULL/0. */
+int SteamZoneCloudInspect(const char* name, const void* local, int localLen,
+                           void** remote, int* remoteLen);
+
 /* Extended sync preserves the exact downloaded conflict snapshot. On CONFLICT,
    ownership of *conflictData transfers to the caller (free it); localBuf and
    *capacity remain unchanged. Outputs are zeroed on all other results. */

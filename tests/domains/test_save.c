@@ -912,7 +912,58 @@ static void test_rc246_log_bound(void) {
 #endif
 }
 
+static void test_full_chunk_capacity_and_schemas(void) {
+    extern int SaveTestSerialize(const SaveBlob*, unsigned char**);
+    extern int SaveTestDeserialize(const void*, long, SaveBlob*);
+    static SaveBlob blob, loaded;
+    memset(&blob,0,sizeof(blob));blob.magic=SAVE_MAGIC;blob.version=SAVE_VERSION;
+    SaveChunkDesc chunks[SAVE_MAX_CHUNKS];const void* bodies[SAVE_MAX_CHUNKS];
+    unsigned char values[SAVE_MAX_CHUNKS];
+    chunks[0]=(SaveChunkDesc){SC_LEGACY29,1,sizeof(blob)};bodies[0]=&blob;
+    for(int i=1;i<SAVE_MAX_CHUNKS;i++) {
+        values[i]=(unsigned char)i;bodies[i]=&values[i];
+        chunks[i]=(SaveChunkDesc){(unsigned short)(0x7000+i),9,1};
+    }
+    size_t cap=sizeof(blob)+4096;unsigned char* bytes=malloc(cap);
+    CHECK(bytes!=NULL,"64-chunk fixture allocation");if(!bytes)return;
+    int pay=SaveContainerPack(chunks,bodies,SAVE_MAX_CHUNKS,bytes+sizeof(SaveEnvelope),
+                              (int)(cap-sizeof(SaveEnvelope)),NULL);
+    CHECK(pay>0,"exactly 64 chunks pack");
+    SaveEnvelope h;SaveEnvelopeSeal(&h,bytes+sizeof(h),pay,1000);memcpy(bytes,&h,sizeof(h));
+    CHECK(SaveValidateBytes(bytes,sizeof(h)+pay),"64-chunk save passes shared validation");
+    CHECK(SaveTestDeserialize(bytes,sizeof(h)+pay,&loaded),"64-chunk save loads");
+    unsigned char* out=NULL;int n=SaveTestSerialize(&loaded,&out);
+    CHECK(n>0 && out,"64-chunk save can be saved again without a phantom 65th chunk");
+    if(n>0 && out) {
+        CHECK(SaveContainerCount(out+sizeof(h),n-(int)sizeof(h))==SAVE_MAX_CHUNKS,
+              "round trip preserves all 64 chunks");
+        CHECK(SaveValidateBytes(out,n) && SaveTestDeserialize(out,n,&loaded),
+              "64-chunk output validates and loads again");
+        for(int i=1;i<SAVE_MAX_CHUNKS;i++) {
+            SaveChunkDesc d;const void* body=NULL;
+            CHECK(SaveContainerAt(out+sizeof(h),n-(int)sizeof(h),i,&d,&body) &&
+                  d.id==chunks[i].id && d.schema==9 && d.size==1 &&
+                  body && *(const unsigned char*)body==values[i],"opaque chunk schema and bytes survive");
+        }
+    }
+    free(out);
+    unsigned short known[]={SC_SETTINGS,SC_LOBBY,SC_RUN,SC_WORLD};
+    for(size_t k=0;k<sizeof(known)/sizeof(known[0]);k++)for(int schema=1;schema<=2;schema++) {
+        chunks[1]=(SaveChunkDesc){known[k],(unsigned short)schema,1};
+        pay=SaveContainerPack(chunks,bodies,2,bytes+sizeof(h),(int)(cap-sizeof(h)),NULL);
+        SaveEnvelopeSeal(&h,bytes+sizeof(h),pay,1000);memcpy(bytes,&h,sizeof(h));
+        CHECK(SaveValidateBytes(bytes,sizeof(h)+pay)==(schema==1),
+              "known chunk schema accepts version one and rejects unsupported versions");
+    }
+    /* Reset carried opaque blocks through a valid single-block load. */
+    pay=SaveContainerPack(chunks,bodies,1,bytes+sizeof(h),(int)(cap-sizeof(h)),NULL);
+    SaveEnvelopeSeal(&h,bytes+sizeof(h),pay,1000);memcpy(bytes,&h,sizeof(h));
+    CHECK(SaveTestDeserialize(bytes,sizeof(h)+pay,&loaded),"chunk fixture restores clean carry state");
+    free(bytes);
+}
+
 void TestSuite_save(void) {
+    test_full_chunk_capacity_and_schemas();
     test_rc246_delete_results();
     test_rc246_log_bound();
     test_historical_v31_v32_layouts();
