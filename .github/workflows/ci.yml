@@ -97,7 +97,7 @@ jobs:
       - name: "解耦闸门 (blocking: 只允许既有欠账，不许新增)"
         shell: pwsh
         run: |
-          python -X utf8 tools/coupling_gate.py --baseline docs/coupling_gate_baseline.txt
+          python -X utf8 tools/coupling_gate.py --baseline docs/coupling_gate_baseline.json
 
       - name: "Architecture budget (blocking: median commit size)"
         shell: pwsh

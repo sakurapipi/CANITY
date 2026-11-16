@@ -70,7 +70,7 @@ jobs:
           python -X utf8 tools/content_check.py
           python -X utf8 tools/build_validate.py
           # 解耦闸门：既有欠账放行，新增问题阻断发布
-          python -X utf8 tools/coupling_gate.py --baseline docs/coupling_gate_baseline.txt
+          python -X utf8 tools/coupling_gate.py --baseline docs/coupling_gate_baseline.json
           cp canity_verify.exe canity.exe
 
       - name: Preserve validation diagnostics

@@ -137,7 +137,11 @@ int PlatWriteFileAtomic(const char* path, const void* data, int len);
 /* 文件最后修改时间（秒，越大越新）。取不到返回 0。 */
 double PlatFileTime(const char* path);
 void PlatMakeDir(const char* path);                                 /* 失败静默 */
-int  PlatDeletePath(const char* path);                              /* 0 = 成功 */
+/* Path status: 1 = exists, 0 = missing, negative = platform error. */
+int PlatPathExists(const char* path);
+/* Deletion: 0 = deleted, 1 = already missing, negative = platform error.
+   Callers must accept both nonnegative outcomes as successful cleanup. */
+int PlatDeletePath(const char* path);
 
 /* 系统语言是否中文（首次运行时用来决定默认语言）。 */
 int  PlatSystemLanguageZh(void);

@@ -411,9 +411,20 @@ void PlatMakeDir(const char* path) {
     if (path && path[0]) CreateDirectoryA(path, NULL);
 }
 
+int PlatPathExists(const char* path) {
+    if (!path || !path[0]) return -ERROR_INVALID_PARAMETER;
+    if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 1;
+    DWORD error = GetLastError();
+    return (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+        ? 0 : -(int)error;
+}
+
 int PlatDeletePath(const char* path) {
-    if (!path || !path[0]) return -1;
-    return DeleteFileA(path) ? 0 : -1;
+    if (!path || !path[0]) return -ERROR_INVALID_PARAMETER;
+    if (DeleteFileA(path)) return 0;
+    DWORD error = GetLastError();
+    return (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+        ? 1 : -(int)error;
 }
 
 int PlatSystemLanguageZh(void) {

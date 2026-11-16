@@ -33,7 +33,16 @@ int  SteamZoneCloudPullNew(const char* n, void* o, int c, int* l) {
     (void)n; (void)o; (void)c; (void)l;
     return 0;
 }
-int  SteamZoneCloudSync(const char* n, void* lb, int ll, int* bs) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)n; (void)lb; (void)bs; return 0; }
+int SteamZoneCloudSync(const char* n, void* lb, int ll, int* bs) {
+    /* PLATFORM_NOOP: Steamworks is unavailable in the browser. */
+    (void)n; (void)lb; (void)ll; (void)bs; return STEAM_SYNC_NOCLOUD;
+}
+int SteamZoneCloudSyncEx(const char* n, void* lb, int ll, int* bs, void** data, int* len) {
+    /* PLATFORM_NOOP: Steamworks is unavailable in the browser. */
+    if (data) *data = NULL;
+    if (len) *len = 0;
+    return SteamZoneCloudSync(n, lb, ll, bs);
+}
 void SteamZoneSetStatInt(const char* n, int v) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)n; (void)v; }
 void SteamZoneStoreStats(void) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ }
 void SteamZoneSetRichPresence(const char* k, const char* v) { /* PLATFORM_NOOP: Steamworks is unavailable in the browser; this is the unsupported-platform contract. */ (void)k; (void)v; }

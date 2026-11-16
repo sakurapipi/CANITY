@@ -61,7 +61,7 @@ static SaveBlob g_save;
      ③ %LOCALAPPDATA%\Canity
      ④ %TEMP%
    实测这台机器上 ①② 都被拦（ACCESS_DENIED），所以列表要往多处退。 */
-#define SAVE_CAND_COUNT 8   /* v3.0：加 Documents 与 TEMP 子目录兜底；v3.5：环境变量之外再留兜底 */
+/* SAVE_CAND_COUNT is shared through save.h. */
 
 int g_saveSlot = 0;   /* v2.0：当前存档槽 0..2 */
 
@@ -174,33 +174,65 @@ char g_savePath[MAX_PATH] = "";/* 最近一次写入成功的路径 */
 /* Compatibility wrappers delegate all byte I/O to the save backend. */
 #include "save_format.h"
 
-/* ==================================================================
- * 2026-11-16（v2.4.5 存档诊断）：**只读**记录，不改变任何保存/读取行为。
- * ------------------------------------------------------------------
- * 实测现象：多候选存档之间出现"一份新一份旧"，隔离目录运行还会
- * "一个文件都没写出且只给一条红条"。没有日志就只能猜，所以先把
- * 每一次保存尝试、每一次读档选择都写进 canity_save.log。
- * 日志位置：CANITY_DATA_DIR（若设置）否则 exe 目录。
- * 超过 256 KB 自动重写，避免长跑把盘塞满。
- * ================================================================ */
+/* Diagnostics never change save state. Prefer the user's explicit data
+   directory, then the executable directory, then writable user locations. */
+char g_saveLogPath[MAX_PATH + 32] = "";
+
+#ifndef CANITY_WEB
+static FILE* SaveDiagOpen(const char* base, const char* child, size_t messageBytes) {
+    char dir[MAX_PATH + 32], path[MAX_PATH + 32];
+    if (!base || !base[0]) return NULL;
+    int n = snprintf(dir, sizeof(dir), "%s%s%s", base,
+        child && child[0] ? "/" : "", child ? child : "");
+    if (n < 0 || (size_t)n >= sizeof(dir)) return NULL;
+    if (child && child[0]) PlatMakeDir(dir);
+    size_t length = strlen(dir);
+    int separator = length && dir[length - 1] != '/' && dir[length - 1] != '\\';
+    n = snprintf(path, sizeof(path), "%s%scanity_save.log", dir, separator ? "/" : "");
+    if (n < 0 || (size_t)n >= sizeof(path)) return NULL;
+    FILE* file = fopen(path, "a+b");
+    if (!file) return NULL;
+    if (fseek(file, 0, SEEK_END)) { fclose(file); return NULL; }
+    long bytes = ftell(file);
+    if (bytes < 0) { fclose(file); return NULL; }
+    if ((size_t)bytes + messageBytes + sizeof(path) + 96 > 256u * 1024u) {
+        fclose(file);
+        file = fopen(path, "wb");
+        if (!file) return NULL;
+        bytes = 0;
+    }
+    if (!bytes) fprintf(file, "CANITY save diagnostics; path=%s\n", path);
+    snprintf(g_saveLogPath, sizeof(g_saveLogPath), "%s", path);
+    return file;
+}
+#endif
+
 void SaveDiag(const char* fmt, ...) {
-    /* 2026-11-16（最简可靠版）：绝对路径 + fopen 追加。
-       探针已证明本进程对 exe 目录可写、对 %LOCALAPPDATA% 不可写，
-       所以固定写 exe 目录，不再跟随 CANITY_DATA_DIR。 */
-    char path[MAX_PATH + 32];
+    if (!fmt) return;
     char line[600];
-    char dir[MAX_PATH];
-    FILE* f;
     va_list ap;
-    PlatExeDir(dir, (int)sizeof(dir));
-    snprintf(path, sizeof(path), "%scanity_save.log", dir);
-    f = fopen(path, "a");
-    if (!f) return;
     va_start(ap, fmt);
     vsnprintf(line, sizeof(line), fmt, ap);
     va_end(ap);
-    fprintf(f, "%ld %s\n", (long)time(NULL), line);
-    fclose(f);
+#ifdef CANITY_WEB
+    snprintf(g_saveLogPath, sizeof(g_saveLogPath), "%s", "browser console");
+    PlatLog(line);
+#else
+    char exe[MAX_PATH];
+    PlatExeDir(exe, sizeof(exe));
+    const char* bases[] = { getenv("CANITY_DATA_DIR"), exe,
+        getenv("LOCALAPPDATA"), getenv("APPDATA"), getenv("TEMP") };
+    const char* children[] = { "", "", "CANITY", "CANITY", "CANITY" };
+    g_saveLogPath[0] = 0;
+    for (size_t i = 0; i < sizeof(bases) / sizeof(bases[0]); i++) {
+        FILE* file = SaveDiagOpen(bases[i], children[i], strlen(line));
+        if (!file) continue;
+        int ok = fprintf(file, "%ld %s\n", (long)time(NULL), line) >= 0;
+        if (fclose(file)) ok = 0;
+        if (ok) return;
+        g_saveLogPath[0] = 0;
+    }
+#endif
 }
 
 static int WriteWholeFile(const char* path, const void* data, size_t n) {
@@ -2206,35 +2238,32 @@ void ContinueRun(void) {
 }
 
 void DeleteSave(void) {
-    char p[MAX_PATH];
+    static const char* suffixes[] = { "", ".bak", ".tmp" };
+    int firstError = 0;
     for (int i = 0; i < SAVE_CAND_COUNT; i++) {
-        const char* cand = SavePathCand(i, p, sizeof(p));
-        /* 2026-11-16（审计修复）：**必须看返回值**。
-           文件被占用 / 权限不足时删除会失败，原来照样把内存标志清掉 ——
-           重启后旧档又被读回来，玩家以为"删了却还在"。 */
-        int delMain = PlatDeletePath(cand);
-        /* v29：**连 .bak / .tmp 一起删** ——
-           LoadSettings 在主档读不到时会回退 .bak；
-           只删主档的话，「新开一局 → 首次存档前退出/崩溃」
-           下次启动就会从 .bak 把旧局复活，等于删档没删干净。 */
-        {
-            char side[MAX_PATH + 8];
-            int delBak, delTmp;
-            snprintf(side, sizeof(side), "%s.bak", cand);
-            delBak = PlatDeletePath(side);
-            snprintf(side, sizeof(side), "%s.tmp", cand);
-            delTmp = PlatDeletePath(side);
-            /* 只把"本该删但没删掉"记成错误；文件不存在（返回 0/ENOENT）不算失败。 */
-            if (!delMain || !delBak || !delTmp) {
-                /* 记一个可诊断状态，但**不阻断**其余候选路径的清理 */
-                g_saveState = 2;
-                g_saveError = 32;   /* ERROR_SHARING_VIOLATION：文件被占用 */
-            }
+        char candidate[MAX_PATH];
+        SavePathCand(i, candidate, sizeof(candidate));
+        if (!candidate[0]) continue;
+        for (size_t side = 0; side < sizeof(suffixes) / sizeof(suffixes[0]); side++) {
+            char path[MAX_PATH + 8];
+            snprintf(path, sizeof(path), "%s%s", candidate, suffixes[side]);
+            int result = PlatDeletePath(path);
+            SaveDiag("DELETE path=%s result=%d", path, result);
+            if (result < 0 && !firstError) firstError = -result;
         }
+    }
+    if (firstError) {
+        /* Partial cleanup is not success: retain the in-memory run and report
+           the first real error, while still attempting every candidate above. */
+        g_saveState = 2;
+        g_saveError = firstError;
+        return;
     }
     g_save.hasRun = 0;
     hasSave = 0;
     runInProgress = 0;
+    g_saveState = 1;
+    g_saveError = 0;
 }
 
 int SaveAwardTrainingGraduation(void) {

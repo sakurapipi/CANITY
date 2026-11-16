@@ -130,15 +130,9 @@ enum {
     STEAM_SYNC_CONFLICT = 5
 };
 
-/* 带冲突判定的云同步。
-   localBuf 既是输入也是输出：CLOUDWIN 时它会被云端内容覆盖。
-   返回上面那个 enum。 */
-/* 2026-11-06（R7）：**长度改成 in/out**。
-   原来用本地 bufSize 去要求云端，长度不同就直接判损坏 ——
-   一旦开始拆块（SC_SETTINGS / SC_WORLD），payload 长度必然变化，
-   云同步会全线报错。
-   现在：*bufSize 进来是本地缓冲容量，出去是**最终生效那份的长度**。
-   返回 STEAM_SYNC_CLOUDWIN 时，localBuf 里是新内容且 *bufSize 已更新。 */
+/* localLen is the number of initialized local bytes. *capacity is the writable
+   allocation size on entry. Only CLOUDWIN replaces localBuf and updates
+   *capacity to the downloaded length; other outcomes leave both unchanged. */
 /* 2026-11-06（v2.4-alpha R8）：**纯判定层**，不碰 Steam。
    把「两份合法存档怎么比」从传输里拆出来，才能在没有 Steam 客户端的
    环境里单元测试。返回 STEAM_SYNC_*：
@@ -152,6 +146,13 @@ int SteamZoneCloudDecide(const void* local, int localLen,
 
 /* 2026-11-16：参数拆分 —— localLen=本地有效字节数，capacity=缓冲区容量（进出参）。 */
 int SteamZoneCloudSync(const char* name, void* localBuf, int localLen, int* capacity);
+/* Extended sync preserves the exact downloaded conflict snapshot. On CONFLICT,
+   ownership of *conflictData transfers to the caller (free it); localBuf and
+   *capacity remain unchanged. Outputs are zeroed on all other results. */
+int SteamZoneCloudSyncEx(const char* name, void* localBuf, int localLen, int* capacity,
+                         void** conflictData, int* conflictLen);
+#define STEAM_CLOUD_MAX_SAVE_BYTES (16 * 1024 * 1024)
+
 /* 首次恢复：本地无档时把云端那份拉下来，返回 1 = 成功，*outLen = 字节数。 */
 int SteamZoneCloudPullNew(const char* name, void* out, int cap, int* outLen);
 

@@ -25,6 +25,7 @@
                            *   （0 = 老档 → 按标准难度；1/2/3 = 轻松/标准/硬核）
                            * v35：末尾追加 rngVersion（v34 及更早按旧 rand 序列重放）
                            * v34：末尾追加投掷物/信标/爆脸怪计数（v33 短档仍然可读） */
+#define SAVE_CAND_COUNT 8 /* Shared candidate count for save and cloud backends. */
 #define SAVE_SLOTS   3   /* v2.0：3 个存档槽 */
 /* 测试时可以把存档路径换掉，避免覆盖玩家真正的存档 */
 #ifndef SAVE_FILE
@@ -46,6 +47,9 @@ extern char g_savePath[MAX_PATH];
 #define SAVE_ERR_CAPACITY   (-1)   /* 容量不足（含块数超限） */
 #define SAVE_ERR_DUP_CHUNK  (-2)   /* 块表出现重复 ID → 拒绝改写 */
 #define SAVE_ERR_PAYLOAD    (-3)   /* 信封/块表/校验和损坏 */
+#define SAVE_ERR_CLOUD_CONFLICT (-4) /* Both snapshots preserved; user choice required. */
+#define SAVE_ERR_CLOUD_SYNC (-5)     /* Cloud transport/validation failure. */
+#define SAVE_ERR_CLOUD_BACKUP (-6)   /* Local snapshot could not be preserved. */
 
 
 /* ---- 存档分区后端（src/save/save_backend.c）----
@@ -354,5 +358,7 @@ void DeleteSave(void);
 int SaveAwardTrainingGraduation(void);
 /* 2026-11-16：存档诊断（只读记录，写入 canity_save.log）。 */
 void SaveDiag(const char* fmt, ...);
+/* Actual diagnostics destination, or empty when no writable sink was found. */
+extern char g_saveLogPath[MAX_PATH + 32];
 
 #endif /* CANITY_SAVE_H */

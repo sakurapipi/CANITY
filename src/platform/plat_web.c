@@ -328,13 +328,19 @@ EM_JS(int, js_file_rename, (const char* from, const char* to), {
     } catch (e) { return -1; }
 });
 
+EM_JS(int, js_file_exists, (const char* name), {
+    try { return localStorage.getItem('canity:' + UTF8ToString(name)) === null ? 0 : 1; }
+    catch (e) { return -5; }
+});
+
 EM_JS(int, js_file_delete, (const char* name), {
     try {
-        var k = 'canity:' + UTF8ToString(name);
-        localStorage.removeItem(k);
-        localStorage.removeItem(k + '#ts');   /* 别留孤儿时间戳键 */
-        return 0;
-    } catch (e) { return -1; }
+        var key = 'canity:' + UTF8ToString(name);
+        var existed = localStorage.getItem(key) !== null;
+        localStorage.removeItem(key);
+        localStorage.removeItem(key + '#ts');
+        return existed ? 0 : 1;
+    } catch (e) { return -5; }
 });
 
 EM_JS(double, js_file_time, (const char* name), {
@@ -562,8 +568,13 @@ int PlatWriteFileAtomic(const char* path, const void* data, int len) {
 
 void PlatMakeDir(const char* path) { /* PLATFORM_NOOP: Browser contract: no blocking sleep, native minimization, absolute cursor/capture or directory operation. */ (void)path; }   /* 浏览器没有目录 */
 
+int PlatPathExists(const char* path) {
+    if (!path || !path[0]) return -87;
+    return js_file_exists(BaseName(path));
+}
+
 int PlatDeletePath(const char* path) {
-    if (!path) return -1;
+    if (!path || !path[0]) return -87;
     return js_file_delete(BaseName(path));
 }
 

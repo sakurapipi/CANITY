@@ -4,6 +4,7 @@
  * 入口：TestSuite_save()
  */
 #include "../test_common.h"
+#include "plat.h"
 #include <stddef.h>
 
 static void test_legacy_fixture_one(const char* file, int oldVer, int wantPayload,
@@ -867,7 +868,53 @@ static void test_historical_v31_v32_layouts(void){
         CHECK(fabsf(posX-3.5f)<.01f && fabsf(posY-3.5f)<.01f,"historical map coordinates survive migration");
     }
 }
+/* 2.4.6-RC deletion and bounded-diagnostics regressions. */
+static void test_rc246_delete_results(void) {
+    clear_meta();SaveTestClearReadOnly();StartFreshTestRun();SaveGame();
+    CHECK(g_saveState==1,"delete fixture has a real save");
+    char path[MAX_PATH];SavePathForSlot(0,g_saveSlot,path,sizeof(path));
+    CHECK(PlatPathExists(path)==1,"existing save is distinguished from missing");
+#ifndef CANITY_WEB
+    hasSave=1;
+    HANDLE held=CreateFileA(path,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,
+                            FILE_ATTRIBUTE_NORMAL,NULL);
+    CHECK(held!=INVALID_HANDLE_VALUE,"fixture holds the save without delete sharing");
+    if(held!=INVALID_HANDLE_VALUE){
+        DeleteSave();
+        CHECK(g_saveState==2 && g_saveError==ERROR_SHARING_VIOLATION,
+              "delete reports the real sharing error");
+        CHECK(hasSave && runInProgress && SaveHasPendingRun(),
+              "failed cleanup keeps all in-memory run flags");
+        CHECK(PlatPathExists(path)==1,"locked primary remains available for recovery");
+        CloseHandle(held);
+    }
+#endif
+    DeleteSave();
+    CHECK(g_saveState==1 && g_saveError==0,"successful cleanup is not reported as failure");
+    CHECK(!hasSave && !runInProgress && !SaveHasPendingRun(),"successful cleanup clears run flags");
+    CHECK(PlatPathExists(path)==0 && PlatDeletePath(path)==1,
+          "already missing is an explicit non-error deletion outcome");
+    DeleteSave();CHECK(g_saveState==1,"repeated deletion is idempotent");
+}
+
+static void test_rc246_log_bound(void) {
+#ifndef CANITY_WEB
+    const char* directory=getenv("CANITY_DATA_DIR");
+    CHECK(directory && directory[0],"log fixture uses an isolated save directory");
+    if(!directory || !directory[0])return;
+    char message[560];memset(message,'x',sizeof(message)-1);message[sizeof(message)-1]=0;
+    for(int i=0;i<700;i++)SaveDiag("ROTATION %d %s",i,message);
+    CHECK(g_saveLogPath[0]!=0,"diagnostics expose the actual log destination");
+    FILE* file=fopen(g_saveLogPath,"rb");
+    CHECK(file!=NULL,"diagnostic output is available");
+    if(file){fseek(file,0,SEEK_END);long bytes=ftell(file);fclose(file);
+        CHECK(bytes>0 && bytes<=256L*1024L,"long-running diagnostics are bounded to 256 KiB");}
+#endif
+}
+
 void TestSuite_save(void) {
+    test_rc246_delete_results();
+    test_rc246_log_bound();
     test_historical_v31_v32_layouts();
     test_stable_training_and_snapshot();
     test_stable_slots_and_backups();

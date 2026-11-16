@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "description": "v2.4.5 existing debt ceilings; reductions are allowed, new or worse violations fail",
+  "limits": [
+    {"rule": "domain_cost", "target": "ui", "max_value": 3050},
+    {"rule": "file_lines", "target": "src/sprites.c", "max_value": 3863}
+  ]
+}

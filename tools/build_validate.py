@@ -147,6 +147,13 @@ rule_sources=['tests/test_v5_rules.c','src/perception.c','src/map_topology.c','s
 if run([GCC,*rule_sources,'-Iinclude','-std=c99','-Wall','-Wextra','-o',rules,'-lm'],label='compile gameplay rules'):
     run([rules],label='gameplay rules')
 
+# Real save-backend behavior with in-memory filesystem/Steam doubles. The
+# production backend handles the capacity, conflict and restore branches.
+cloud=cache/'test_save_cloud_backend.exe'
+cloud_sources=['tests/test_save_cloud_backend.c','src/save/save_backend.c','src/save/save_container.c']
+if run([GCC,*cloud_sources,'-Iinclude','-std=c99','-Wall','-Wextra','-o',cloud],label='compile cloud backend contracts'):
+    run([cloud],label='cloud backend contracts')
+
 # Run every runtime domain in its own process/directory so a failing assertion
 # cannot hide another domain or contaminate its save state.
 suites=('base','phase','hatch','collapse','throwing','core','ui','update','progress','actors','world','save','delivery','existing_save','legacy_fixtures')
@@ -170,6 +177,8 @@ if objects_ok and run([GCC,*test_srcs,*objects,'-Iinclude','-std=c99','-Wall','-
             run([runtime,'--suite',suite],env,label='runtime '+suite,timeout=180)
 else:
     for suite in suites:results.append(dict(stage='runtime '+suite,returncode=2,error='runtime executable unavailable after compilation failure'))
+
+run([sys.executable,'-X','utf8','-m','unittest','discover','-s','tools/tests','-p','test_*.py'],label='maintenance tool regressions')
 
 for script in ('partition_check.py','content_check.py','skill_layout_check.py','hotkey_check.py','stub_scan.py'):
     run([sys.executable,'-X','utf8','tools/'+script],label=script)
