@@ -40,6 +40,7 @@ int popupItem = -1;
 int rebindingAct = -1;       /* >=0 = 正在等待按键改绑的动作（ActionId），-1 = 未在改绑 */
 int rebindConflict = -1;     /* 改绑确认中：目标键被该动作占用（ActionId），-1 = 无冲突 */
 int resetDefaultsFlag = 0;   /* Reset to Defaults 行的哨兵变量（见 settings 表） */
+static int resetDisplayFlag = 0;
 int sliderDragging = 0;
 float volumeF = 0.8f;     /* 0..1，音效音量，0 = 静音 */
 float musicVolumeF = 0.8f;/* 0..1，音乐音量，0 = 静音 */
@@ -55,6 +56,7 @@ static const char* optFps[5] = {"30", "60", "120", "144", "Unlimited"};
 static const char* optScale[4] = {"HIGH (100%)", "MEDIUM (75%)", "LOW (50%)", "MINIMAL (25%)"};
 static const char* optFov[5] = {"66", "75", "85", "95", "105"};
 static const char* optOnOff[2] = {"OFF", "ON"};
+static const char* optReset[1] = {"RESET"};
 /* v6 第 ㊳ 轮：语言选项 —— 之前 g_lang 只能靠改存档改 */
 static const char* optLang[2] = {"ENGLISH", "\xe4\xb8\xad\xe6\x96\x87"};
 /* HUD 详细度：游戏画面上放多少字。
@@ -77,7 +79,6 @@ void SettingsRegister(void) {
     }
 }
 
-extern int pitchLookEnabled;   /* render.c：Vertical Look 开关 */
 SettingItem settings[] = {
     /* ========== 分类 1: DISPLAY ========== */
     {"Resolution",      SET_LIST,   optRes,      RES_COUNT, &resIndex,          NULL,      0,    0,    0, 1},
@@ -90,9 +91,9 @@ SettingItem settings[] = {
     /* {"Dynamic Res",     SET_LIST,   optOnOff,   2, &dynamicRes,        NULL,      0,    0,    0, 1}, */
     {"Gamma",           SET_SLIDER, NULL,        0, NULL,               &gammaValue, 0.7f, 1.6f, 0.05f, 1},
     {"Field of View",   SET_LIST,   optFov,      5, &fovIndex,          NULL,      0,    0,    0, 1},
-    /* 2026-11-16：上下视角开关。默认 OFF = 镜头固定水平（2.4.3 行为）；
-       ON = 鼠标/触屏上下可小范围抬头低头（±26°），渲染层已支持真俯仰。 */
-    {"Vertical Look",   SET_LIST,   optOnOff,    2, &pitchLookEnabled,  NULL,      0,    0,    0, 1},
+    /* Optional experimental +/-6 degree vertical shear; OFF preserves level rendering. */
+    {"Experimental Look", SET_LIST, optOnOff,   2, &pitchLookEnabled,  NULL,      0,    0,    0, 1},
+    {"Reset Display",   SET_LIST,   optReset,    1, &resetDisplayFlag,  NULL,      0,    0,    0, 1},
     {"Save Slot",       SET_LIST,   optSlot, SAVE_SLOTS, &g_saveSlot,  NULL,      0,    0,    0, 6},
 
     /* ========== 分类: KEY BINDINGS / MOVEMENT ========== */
@@ -190,6 +191,9 @@ void ApplySetting(int item, int value) {
        以前没做判断，靠调用方保证只传列表项；现在显式拦下来。 */
     if (settings[item].kind != SET_LIST || !settings[item].value) return;
     if (value < 0 || value >= settings[item].count) return;
+    if(settings[item].value==&pitchLookEnabled) {
+        RenderSetLookMode(value);SaveGame();return;
+    }
     if(settings[item].value==&g_saveSlot){
         if(!SaveSelectSlot(value)){
             pickupMsg=Tr("RETURN TO MENU OR CHECK SAVE SLOT","请返回主菜单或检查存档");pickupMsgTimer=3;uiDirty=1;return;
@@ -208,6 +212,17 @@ void ApplySetting(int item, int value) {
     else if (settings[item].value == &fovIndex) ApplyFov();
     SaveGame();   /* 设置改完立刻落盘，不再等退出设置页 */
     uiDirty = 1;
+}
+
+void SettingsResetDisplay(void) {
+    /* Display-only reset never changes progress, slot, language, bindings or audio. */
+    resIndex=RES_AUTO;isFullscreen=0;fpsCapIndex=4;renderScaleIndex=0;dynamicRes=1;
+    fovIndex=2;gammaValue=1;gammaBuilt=-1;pitchLookEnabled=0;pitchRatio=0;horizon=0;
+    settingsPopupOpen=0;sliderDragging=0;popupItem=-1;popupSelection=0;
+    ApplyDisplayMode();
+    InitPixels(); /* Reapply quality even when native window size did not change. */
+    ApplyFov();UpdatePitch();BuildShadeTables();gammaBuilt=gammaValue;
+    SaveGame();uiDirty=1;
 }
 
 void ActivateSettingRow(void) {
@@ -248,18 +263,18 @@ void ActivateSettingRow(void) {
     }
 
     popupItem = idx[settingsSelection];
+    if(settings[popupItem].value==&resetDisplayFlag) {
+        SettingsResetDisplay();PlaySfx(SFX_POWER,.5f);return;
+    }
     /* Reset to Defaults：一键恢复出厂（键位 + 全部设置项）。
        用哨兵地址识别，不走弹窗。 */
     if (settings[popupItem].value == &resetDefaultsFlag) {
         static const int defBindings[ACT_COUNT] = BINDINGS_DEFAULT;
         for (int a = 0; a < ACT_COUNT; a++) g_bindings[a] = defBindings[a];
-        resIndex = RES_AUTO; isFullscreen = 0; fpsCapIndex = 4; renderScaleIndex = 0; dynamicRes=1;
-        fovIndex = 2; vignetteOn = 1; showFps = 0; hudDetail = 1; qteHint = 1;
-        gammaValue = 1.0f; mouseSens = 1.0f; volumeF = 0.8f; musicVolumeF = 0.8f;
-        ApplyDisplayMode();
-        ApplyFov();
+        vignetteOn = 1; showFps = 0; hudDetail = 1; qteHint = 1;
+        mouseSens = 1.0f; volumeF = 0.8f; musicVolumeF = 0.8f;
+        SettingsResetDisplay();
         PlaySfx(SFX_POWER, 0.5f);
-        SaveGame();
         uiDirty = 1;
         return;
     }

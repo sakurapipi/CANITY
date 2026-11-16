@@ -657,7 +657,6 @@ int SaveTestDeserialize(const void* buf, long n, SaveBlob* out) {
 /* 显示 / 音频 / 键位这些设置项是所有存档共用的，
    单独抽出来，训练场里也能只写设置、不动正式进度。 */
 /* 2026-11-16：Vertical Look 开关由 render.c 拥有（默认 0）。 */
-extern int pitchLookEnabled;
 
 static void CopyDisplaySettings(SaveBlob* s) {
     s->resIndex = resIndex;
@@ -1615,7 +1614,9 @@ static void ApplyLoadedSettings(const LoadedSaveInfo* info) {
     hudDetail = g_save.hudDetail;
     qteHint = g_save.qteHint;
     /* v2.4.5-rc1：Vertical Look 恢复。旧档没有这一段 → 保持默认关。 */
-    pitchLookEnabled = info->hasPitchLookField ? (g_save.pitchLook ? 1 : 0) : 0;
+    /* Experimental view is opt-in for each load/session. Keep the v45 field
+       readable for compatibility, but never auto-enable it from an old trial. */
+    pitchLookEnabled=0;pitchRatio=0;horizon=0;
     /* ==================================================================
      * 第 2 轮：**难度是设置，读档时就该立刻生效**
      * ------------------------------------------------------------------

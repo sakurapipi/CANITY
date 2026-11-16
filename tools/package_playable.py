@@ -27,15 +27,17 @@ SCENES = ('menu', 'explore', 'chase', 'safe', 'victory', 'defeat')
 
 
 def main():
+    version = re.search(r'^#define\s+CANITY_VERSION_STR\s+"([^"]+)"',
+                        (ROOT/'include/common.h').read_text(encoding='utf-8-sig'), re.M)[1]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=Path.home()/'Desktop'/'GAME')
+    parser.add_argument('--output', type=Path, default=Path.home()/'Desktop'/'GAME1')
     parser.add_argument('--include-web', action='store_true')
     parser.add_argument('--single-exe', action='store_true',
                         help='Only for a Full build made with build_validate.py --embed-music')
     parser.add_argument('--embed-music', action='store_true',
                         help='Assert that the compiled EXE already embeds MP3 resources (Full build)')
-    parser.add_argument('--label', default='CANITY_2.4.6_完整运行包')
-    parser.add_argument('--notes', type=Path, default=Path('docs/RELEASE-v2.4.6.md'))
+    parser.add_argument('--label', default=f'CANITY_{version}_完整运行包')
+    parser.add_argument('--notes', type=Path, default=Path(f'docs/RELEASE-v{version}.md'))
     parser.add_argument("--acceptance-report", type=Path)
     parser.add_argument("--source-commit", default=os.environ.get("GITHUB_SHA"))
     args = parser.parse_args()

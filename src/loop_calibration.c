@@ -62,7 +62,7 @@ static void Finish(int result) {
     if(result==1){
         TutorialRecordAction(TUTOR_RHYTHM);int gold=RunEconomyRhythmGold(hits,bestCombo);
         snprintf(message,sizeof(message),LangTr("COMPLETE: +%.1f SAN / +%.1f CELL / +%d GOLD","完成：理智+%.1f / 电量+%.1f / 金币+%d"),(double)restored,(double)charged,gold);PlaySfx(SFX_POWER,.55f);
-    }else snprintf(message,sizeof(message),LangTr("%s / %.1f SANITY ALREADY RESTORED","%s / 已即时恢复%.1f理智"),result==3?LangTr("FAILED: TOO MANY MISSES","失误超限：小游戏结束"):LangTr("CANCELLED","取消"),(double)restored);
+    }else snprintf(message,sizeof(message),LangTr("%s / %.1f SANITY ALREADY RESTORED","%s / 已即时恢复%.1f理智"),result==3?LangTr("FAILED: TOO MANY MISSES","失误超限：小游戏结束"):LangTr("CANCELLED","已取消"),(double)restored);
     pickupMsg=message;stationSession=0;memset(keyPressed,0,sizeof(keyPressed));pickupMsgTimer=3;uiDirty=1;
 }
 void CalibStart(void) {

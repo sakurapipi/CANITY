@@ -40,16 +40,15 @@ static int ProjectPoint(float wx, float wy, float z,
                         int* outX, int* outY, float* outUnit, float* outTy) {
     float dx = wx - posX, dy = wy - posY;
     float det = planeX * dirY - dirX * planeY;
-    if (det == 0.0f) return 0;
+    if (!isfinite(det) || fabsf(det) < 0.000001f) return 0;
     float invDet = 1.0f / det;
     float tx = invDet * (dirY * dx - dirX * dy);
     float ty = invDet * (-planeY * dx + planeX * dy);
-    if (ty <= 0.05f) return 0;
-    float unit = (float)renderH / ty;
+    if (!isfinite(tx) || !isfinite(ty) || ty <= 0.05f) return 0;
+    float unit = RenderProjectionScale(ty);
     *outX = (int)((renderW / 2.0f) * (1.0f + tx / ty));
-    /* 地平线按 pitch 偏移（和 ProjectSprite 一致） */
-    float hz = (float)renderH * 0.5f + (float)horizon;
-    *outY = (int)(hz + unit * (0.5f - z));
+    float hz=RenderProjectionCenterY();
+    *outY = (int)(hz+unit*(.5f-z));
     *outUnit = unit;
     *outTy = ty;
     return 1;
@@ -65,18 +64,18 @@ void DrawOrbSprite(float wx, float wy, float z, float worldR,
     int cx, cy, cyFloor;
     float unit, ty;
     {
-        float hz = (float)renderH * 0.5f + (float)horizon;
         float dx0 = wx - posX, dy0 = wy - posY;
         float det = planeX * dirY - dirX * planeY;
-        if (det == 0.0f) return;
+        if (!isfinite(det) || fabsf(det) < 0.000001f) return;
         float invDet = 1.0f / det;
         float tx = invDet * (dirY * dx0 - dirX * dy0);
         ty = invDet * (-planeY * dx0 + planeX * dy0);
-        if (ty <= 0.05f) return;
-        unit = (float)renderH / ty;
+        if (!isfinite(tx) || !isfinite(ty) || ty <= 0.05f) return;
+        unit = RenderProjectionScale(ty);
         cx = (int)((renderW / 2.0f) * (1.0f + tx / ty));
-        cyFloor = (int)(hz + unit * 0.5f);
-        cy = (int)(hz + unit * (0.5f - z));
+        float hz=RenderProjectionCenterY();
+        cyFloor = (int)(hz+unit*.5f);
+        cy = (int)(hz+unit*(.5f-z));
     }
 
     int r = (int)(unit * worldR);

@@ -328,7 +328,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         int steps = 0;
         while (accum >= LOGIC_STEP && steps < 16) {
             PollInput();          /* v1.8：每帧轮询键盘，不依赖焦点消息 */
-            UpdatePitch();        /* v1.13：真俯仰（每帧刷新 cos/sin/focal） */
+            UpdatePitch();        /* Shared comfortable horizon offset, before raster workers. */
             Update((float)LOGIC_STEP);
             accum -= LOGIC_STEP;
             steps++;

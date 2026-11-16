@@ -170,7 +170,7 @@ typedef struct { LONG x, y; } POINT;
 
 /* v2.4.2：双端稳定性补丁 —— 旧档迁移 / 运行段隔离 / 相位与舱门 /
    网页动作绑定与存档导出。存档结构**未变**（仍是 v34）。 */
-#define CANITY_VERSION_STR "2.4.6"
+#define CANITY_VERSION_STR "2.4.7"
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -341,7 +341,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 44   /* 2026-11-16：+1（Vertical Look 上下视角开关）*/   /* 2026-11-08：+3（挥击/诱饵/丢钱可改绑）*/   /* 2026-11-08：+1（第 2 轮加 Difficulty 行） */
+#define SETTING_COUNT 45   /* Includes Vertical Look and display-only reset action. */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 

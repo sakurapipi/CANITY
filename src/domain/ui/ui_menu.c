@@ -122,7 +122,7 @@ static const char* MenuLabel(int i) {
                                 VkName(g_bindings[ACT_MOVE_FWD]), VkName(g_bindings[ACT_MOVE_LEFT]),
                                 VkName(g_bindings[ACT_MOVE_BACK]), VkName(g_bindings[ACT_MOVE_RIGHT])); break;
                 case 1: sprintf(kb, "%s: %s  (NOISE)", Tr("SPRINT","冲刺"), VkName(g_bindings[ACT_SPRINT])); break;
-                case 2: sprintf(kb, "%s: HOLD %s  (NOISE)", Tr("SEARCH","翻找"), VkName(g_bindings[ACT_INTERACT])); break;
+                case 2: sprintf(kb, "%s: HOLD %s  (NOISE)", Tr("SEARCH","搜查"), VkName(g_bindings[ACT_INTERACT])); break;
                 case 3: sprintf(kb, "%s: HOLD %s  (+32)", Tr("CRANK","摇电"), VkName(g_bindings[ACT_CRANK])); break;
                 case 4: sprintf(kb, "%s: %s", Tr("LIGHT","手电"), VkName(g_bindings[ACT_FLASHLIGHT])); break;
                 case 5: sprintf(kb, "%s: %s (FULL)  TAB (MINI)", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
@@ -303,22 +303,23 @@ static const char* MenuLabel(int i) {
             int n = PageItems(idx);
             if (i >= n) return "Back";
             const SettingItem* it = &settings[idx[i]];
+            const char* label=Transl(it->name);
             if (IsKeyBindItem(it)) {
-                return it->name;  /* 键位行：名称左对齐，键名右对齐（DrawMenuText 里画） */
+                return label;
             }
             if (it->kind == SET_SLIDER) {
-                if (it->fvalue == &gammaValue) sprintf(buf, "%s: %.2f", it->name, *it->fvalue);
+                if (it->fvalue == &gammaValue) sprintf(buf, "%s: %.2f", label, *it->fvalue);
                 else if (it->fvalue == &volumeF || it->fvalue == &musicVolumeF)
-                    sprintf(buf, "%s: %.0f%%", it->name, *it->fvalue * 100.0f);
-                else sprintf(buf, "%s: %.1fx", it->name, *it->fvalue);
+                    sprintf(buf, "%s: %.0f%%", label, *it->fvalue * 100.0f);
+                else sprintf(buf, "%s: %.1fx", label, *it->fvalue);
             } else {
                 int dispVal = *it->value;
                 if (dispVal >= 0 && dispVal < it->count) {
                     /* v2.9：选项值也走翻译（原来 LOW/MEDIUM/HIGH 全英文） */
-                    sprintf(buf, "%s: %s", it->name,
+                    sprintf(buf, "%s: %s", label,
                             Tr(it->options[dispVal], it->options[dispVal]));
                 } else {
-                    sprintf(buf, "%s: %s", it->name,
+                    sprintf(buf, "%s: %s", label,
                             Tr(it->options[0], it->options[0]));
                 }
             }
@@ -702,7 +703,7 @@ static void DrawBestiaryPage(MenuGeo g) {
     const BestiaryEntry* entry = &bestiary[id];
     int seen = BestiaryIsSeen(id), stage = BestiaryStage(id), active = BestiaryIsActive(id);
     int y = DossierText(seen ? ((id==BST_ID_HUNTER)?Tr("SOUND HUNTERS / THREE FORMS","听声鬼 / 三种形态"):Tr(entry->nameEn,entry->nameZh)) : Tr("UNIDENTIFIED","未知生物"),x,g.firstY,right-x,g.panel.bottom-pad,0x00F0E1C8u);
-    snprintf(text,sizeof(text),"%s / %s",active ? Tr("ACTIVE","现行") : Tr("ARCHIVED","旧版"),seen?Tr(entry->tagEn,entry->tagZh):"???");
+    snprintf(text,sizeof(text),"%s / %s",active ? Tr("ACTIVE","现行") : Tr("ARCHIVED","旧版记录"),seen?Tr(entry->tagEn,entry->tagZh):"???");
     y = DossierText(text,x,y,right-x,g.panel.bottom-pad,0x007DA7BEu);
     int bottom = g.panel.bottom-th-pad;
     int imageSize = (right-x)*46/100;
@@ -743,7 +744,7 @@ static void DrawBestiaryPage(MenuGeo g) {
         y = DossierText(Tr("COUNTERMEASURE","对策"),x,half+UIS(4),right-x,bottom,0x008CCBD3u);
         DossierText(stage>=BST_COUNTER?Tr(entry->counterEn,entry->counterZh):Tr("Study across 5 floors or escape three times.","累计遭遇五层，或逃脱三次后揭示。"),x,y,right-x,bottom,0x00B6C7D1u);
     }
-    DrawTextSmallWin(x,bottom,Tr("ARROWS / MOUSE   ESC BACK","ARROWS / MOUSE   ESC BACK"),0x006E8497u);
+    DrawTextSmallWin(x,bottom,Tr("ARROWS / MOUSE   ESC BACK","方向键或鼠标选择  ESC返回"),0x006E8497u);
 }
 
 
@@ -1253,7 +1254,7 @@ static void DrawRecoveryDetail(void) {
         snprintf(text,sizeof(text),Tr("RESTORE +%.0f / PRICE %d GOLD","本次恢复 +%.0f / 当前价格 %d金币"),(double)ShopServiceGain(row),ShopServicePrice(row));
         y=DossierText(text,x,y,w,bottom,UI_GOLD)+UIS(12);
         y=DossierText(row==0?Tr("Unlimited recovery. Every use doubles this service price for the rest of the run.","无次数限制。每次使用后，本项服务本局价格翻倍。"):Tr("No cooldown or use limit; prices double per use and persist between floors.","无冷却、无次数限制；每次价格翻倍，跨层保留涨价。"),x,y,w,bottom,UI_INK_DIM)+UIS(14);
-    }else y=DossierText(row==3?Tr("Skip this non-boss floor. Requires the permanent SHORTCUT skill; once per run.","需要永久捷径技能，跳过当前非首领层，每局限一次。"):Tr("Each QWER hit immediately restores sanity; combos increase healing. Five misses fail. Finish for gold. Sanity/battery drain pauses during play.","每次QWER命中即时回理智，连击提高恢复，断连重置加成。失误5次失败，完成另奖金币；游玩期间不耗理智和电量。"),x,y,w,bottom,UI_INK)+UIS(15);
+    }else y=DossierText(row==3?Tr("Skip this non-boss floor. Requires the permanent SHORTCUT skill; once per run.","需要永久捷径技能，跳过当前非首领层，每局限一次。"):Tr("Each QWER hit restores sanity and battery; combos improve recovery. Six misses end the game. Finish for gold. Passive resource drain pauses during play.","每次QWER命中恢复理智和电量，连击提高恢复量；累计6次失误结束。完成可获金币，游玩期间暂停自然理智与电量消耗。"),x,y,w,bottom,UI_INK)+UIS(15);
     DossierText(ShopServiceStatus(row),x,y,w,bottom-UIS(10),ShopServiceCanUse(row)?UI_OK:UI_INFO);
 }
 static void DrawUpgradeCard(int row,RECT r) {

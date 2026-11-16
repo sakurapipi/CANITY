@@ -562,6 +562,7 @@ static void GenerateMazeTopology(void) {
 static void CollectFloorCandidates(LevelBuildWorkspace* work) {
     if(!campaignMode){posX = 1.5f; posY = 1.5f;}
     dirX = 1.0f; dirY = 0.0f;
+    pitchRatio=0;horizon=0; /* Same level reference as the freshly reset yaw. */
     ApplyFov();
 
     /* 出生区只挖内部格 1..3，第 0 行/列必须保持是墙 */

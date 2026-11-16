@@ -564,9 +564,9 @@ void DrawDecoyModel(int idx) {
 
     SpriteBox sb = ProjectSprite(d->x, d->y, 0.0f, 0.55f * pulse);
     if (!sb.ok) return;
-    int cx = (sb.x0 + sb.x1) / 2;
-    int baseY = sb.y1;                 /* 脚底 */
-    int h = (sb.y1 - sb.y0);           /* 整体高度 */
+    int cx = sb.centerX;
+    int baseY = sb.baseY;
+    int h = sb.height; /* Screen clipping must not squash the model. */
     if (h < 8) return;                 /* 太远就别画，免得糊成一个点 */
 
     /* Quiet: slumped body and closed mouth. Armed: raised head and ripples. */

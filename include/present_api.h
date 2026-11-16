@@ -79,6 +79,7 @@ void ApplyDisplayMode(void);
 void ForceCursor(int visible);
 int IsActionPressed(ActionId act);
 void SettingsRegister(void);
+void SettingsResetDisplay(void);
 const char* PageTitle(int page);
 int PageItems(int* out);
 int SettingsRowCount(void);

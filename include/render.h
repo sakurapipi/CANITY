@@ -11,11 +11,32 @@
 /* ---- 内部分辨率与像素缓冲 ---- */
 extern int renderW, renderH;
 extern int pixelBudget;      /* v1.9：动态像素预算 */
-extern float pitchRatio;      /* v1.12：视角上下（地平线偏移比例） */
-extern int horizon;           /* v1.12：地平线偏移像素 */
+extern int pitchLookEnabled;  /* Optional vertical look; disabled by default. */
+extern float pitchRatio;     /* [-1, 1], comfortable vertical shear up to +/-6 degrees. */
+extern int horizon;          /* Signed pixel offset, published before render workers run. */
 extern int dynamicRes;       /* v1.9：自动画质开关 */
 extern unsigned int* pixels;
 extern unsigned char* vignetteMask;
+
+/* Shared world projection. Pitch translates the horizon only; it never changes
+   depth, scale, horizontal FOV or the wall/sprite occlusion distance. Keep UI
+   and the held weapon in screen space rather than applying these helpers. */
+#define RENDER_EYE_HEIGHT 0.5f
+#define RENDER_LOOK_LIMIT_RADIANS 0.104719755f
+static inline int RenderLevelCenterY(void) { return renderH / 2; }
+static inline float RenderProjectionCenterY(void) {
+    return (float)(RenderLevelCenterY() + (pitchLookEnabled ? horizon : 0));
+}
+/* Callers reject nonpositive/near-plane depths before asking for scale. */
+static inline float RenderProjectionScale(float depth) {
+    return (float)renderH / depth;
+}
+static inline float RenderProjectHeight(float worldZ, float unit) {
+    return RenderProjectionCenterY() + (RENDER_EYE_HEIGHT - worldZ) * unit;
+}
+static inline float RenderProjectionRowSlope(int y) {
+    return (RenderProjectionCenterY() - (float)y) / (float)(renderH > 0 ? renderH : 1);
+}
 
 /* ---- 贴图 ---- */
 extern unsigned int texture[TEX_HEIGHT][TEX_WIDTH];
@@ -75,6 +96,8 @@ void GenerateThemeTextures(int id);
 void BuildShadeTables(void);
 void ApplyFov(void);
 void UpdatePitch(void);
+void RenderSetLookMode(int enabled); /* Explicit legacy/experimental switch, starting level. */
+void RenderAddPitchInput(float delta); /* Available at every wall distance. */
 void InitWorkers(void);
 void ShutdownWorkers(void);
 
@@ -114,7 +137,11 @@ void DrawDecoyModel(int idx);
 
 /* 2026-11-16：屏幕投影结果 + 投影函数。
    原来只是 render.c 的内部工具；拆出 render_decoy.c 后需要一个共享契约。 */
-typedef struct { int ok; float ty; int x0, x1, y0, y1; } SpriteBox;
+typedef struct {
+    int ok; float ty;
+    int x0, x1, y0, y1; /* Visible bounds for screen-space effects. */
+    int centerX, baseY, width, height; /* Legacy level-camera geometry, then translated. */
+} SpriteBox;
 SpriteBox ProjectSprite(float wx, float wy, float baseZ, float halfH);
 
 /* 2026-11-16：精灵绘制队列（render_spritequeue.c）与手持模型（render_viewmodel.c）。 */

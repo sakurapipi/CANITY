@@ -69,24 +69,35 @@ int themeId = 0;
 /* 2026-11-16：上下视角做成**可开关**（默认关，保持 2.4.3 的水平镜头）。
    开关来源：设置页 "Vertical Look"；关闭时 pitchRatio 恒为 0。 */
 int pitchLookEnabled = 0;
-/* v1.12/v1.13（沿用 main 的实现）：pitchRatio ∈ [-1,1]，映射到 ±0.45 rad ≈ ±26°，
-   墙的上下沿、精灵、地板/天花板都按旋转后的视锥重新投影。 */
+/* 2.4.7-RC: stable y-shear, not a rotated near plane. At collision distance
+   the former rotated wall endpoint could cross zero depth and explode in size. */
 float pitchRatio = 0.0f;
 int horizon = 0;
-static float camPitch = 0.0f;
-static float pitchCos = 1.0f, pitchSin = 0.0f;
-static int   focal = 600;  /* 焦距 = 渲染高度（与原 lineHeight 一致） */
+
+void RenderSetLookMode(int enabled) {
+    pitchLookEnabled=enabled ? 1 : 0;
+    pitchRatio=0;horizon=0;
+    /* Restore this mode's own lens immediately; do not inherit the other mode's
+       normalization or blindness treatment until a later input/logic tick. */
+    ApplyFov();uiDirty=1;
+}
+/* Vertical input stays available beside walls. Comfort rendering must never
+   change collision, camera position or whether the player can look around. */
+void RenderAddPitchInput(float delta) {
+    if (!pitchLookEnabled) { pitchRatio=0;return; }
+    if (!isfinite(pitchRatio)) pitchRatio=0;
+    if (!isfinite(delta)) return;
+    pitchRatio=fmaxf(-1,fminf(1,pitchRatio+delta));
+}
 
 void UpdatePitch(void) {
-    if (!pitchLookEnabled) pitchRatio = 0.0f;   /* 关掉时强制水平 */
-    if (!(pitchRatio == pitchRatio)) pitchRatio = 0.0f;   /* NaN 防呆 */
+    if (!pitchLookEnabled) { pitchRatio=0;horizon=0;return; }
+    if (!isfinite(pitchRatio)) pitchRatio = 0.0f;
     if (pitchRatio > 1.0f) pitchRatio = 1.0f;
     else if (pitchRatio < -1.0f) pitchRatio = -1.0f;
-    camPitch = pitchRatio * 0.45f;
-    pitchCos = cosf(camPitch);
-    pitchSin = sinf(camPitch);
-    focal = renderH;
-    horizon = 0;
+    /* Experimental look changes only the vertical offset; OFF exits above. */
+    horizon = renderH > 0 ? (int)((float)renderH *
+        tanf(pitchRatio * RENDER_LOOK_LIMIT_RADIANS)) : 0;
 }
 /* ---- 地板/天花板预乘表 ----
    地板是全屏最贵的部分（占 Render3D 的一半以上），每像素原本要做
@@ -263,18 +274,16 @@ void GenerateThemeTextures(int id) {
 /* ------------------------------------------------------------------ */
 /* 地图生成                                                            */
 /* ------------------------------------------------------------------ */
-/* 按 FOV 设置重建相机平面：长度 = tan(fov/2)，方向与朝向垂直
-   状态效果 FX_BLIND 会把视野往最窄的一档压 —— 这是「致盲」的实现。
-   不改 fovIndex 本身（那是玩家的设置项），而是算一个临时的有效 FOV，
-   这样效果一结束，视野立刻回到玩家设的值。 */
+/* Stable lens: explicit FOV settings control magnification. Blindness is a
+   visibility effect in post-processing, never an automatic camera zoom. */
+#include "domain/render/legacy/render_246_fov.inc"
 void ApplyFov(void) {
-    float L = fovPlaneLen[fovIndex];
-    float blind = FxStrength(FX_BLIND);
-    if (blind > 0.0f) {
-        /* 与最窄档（66 度，fovPlaneLen[0]）线性插值 */
-        float narrow = fovPlaneLen[0];
-        L = narrow + (L - narrow) * (1.0f - blind);
-    }
+    if(!pitchLookEnabled) { ApplyFovLegacy246(); return; }
+    if(fovIndex<0 || fovIndex>=5)fovIndex=2;
+    float length=sqrtf(dirX*dirX+dirY*dirY);
+    if(!isfinite(length) || length<.000001f){dirX=1;dirY=0;}
+    else {dirX/=length;dirY/=length;}
+    float L=fovPlaneLen[fovIndex];
     /* v1.9：像素必须是方的。
        射线投射里 屏幕像素宽/高的比例 = (renderW/2)/L : renderH ，
        要保持 1:1 就得 L = (renderW/renderH)/2。
@@ -326,34 +335,48 @@ void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, flo
  * 走动时层间有视差，才像立体的。
  * baseZ = 0 时与旧行为**逐像素相同**。
  * ================================================================ */
+/* Original 2.4.6 horizontal projection and clipping are the reference for
+   both modes. Do not replace clipped model sizes with full sizes here: that
+   changes nearby monsters/props even at zero degrees and with look disabled. */
+static SpriteBox ProjectSpriteLevel(float wx, float wy, float baseZ, float halfH) {
+    SpriteBox s = {0};
+    float dx=wx-posX,dy=wy-posY;
+    float det=planeX*dirY-dirX*planeY;
+    if(!isfinite(det) || fabsf(det)<.000001f)return s;
+    float invDet=1.0f/det;
+    float tx=invDet*(dirY*dx-dirX*dy);
+    float ty=invDet*(-planeY*dx+planeX*dy);
+    if(!isfinite(tx) || !isfinite(ty) || ty<.05f)return s;
+    float unit=(float)renderH/ty;
+    int cx=(int)((renderW/2.0f)*(1.0f+tx/ty));
+    int half=(int)(unit*.28f);
+    int cyFloor=renderH/2-(int)(-.5f*unit);
+    int cyBase=cyFloor-(int)(unit*baseZ);
+    int yTop=cyBase-(int)(unit*halfH);
+    s.ty=ty;
+    s.x0=cx-half;if(s.x0<0)s.x0=0;
+    s.x1=cx+half;if(s.x1>=renderW)s.x1=renderW-1;
+    s.y0=yTop;if(s.y0<0)s.y0=0;
+    s.y1=cyBase;if(s.y1>=renderH)s.y1=renderH-1;
+    s.ok=s.x1>s.x0 && s.y1>s.y0;
+    s.centerX=(s.x0+s.x1)/2;s.baseY=s.y1;
+    s.width=s.x1-s.x0;s.height=s.y1-s.y0;
+    return s;
+}
+
+#include "domain/render/legacy/render_246_sprite.inc"
 SpriteBox ProjectSprite(float wx, float wy, float baseZ, float halfH) {
-    SpriteBox s;
-    s.ok = 0;
-    float dx = wx - posX, dy = wy - posY;
-    float invDet = 1.0f / (planeX * dirY - dirX * planeY);
-    float tx = invDet * (dirY * dx - dirX * dy);
-    float ty = invDet * (-planeY * dx + planeX * dy);
-    if (ty <= 0.02f) return s;   /* v1.10：太近就丢弃的阈值放宽，避免出手瞬间消失 */
-
-    /* v1.13 真俯仰：地面点的竖直偏移旋转后再投影 */
-    float v2 = (-0.5f) * pitchCos - ty * pitchSin;
-    float d2 = (-0.5f) * pitchSin + ty * pitchCos;
-    if (d2 < 0.05f) return s;
-    float unit = (float)focal / d2;
-    int cx = (int)((renderW / 2.0f) * (1.0f + tx / ty));
-    int half = (int)(unit * 0.28f);
-    int cyFloor = renderH / 2 - (int)(v2 * unit);
-    /* P1：底边按 baseZ 抬高（baseZ=0 时与原实现完全一致） */
-    int cyBase = cyFloor - (int)(unit * baseZ);
-    int hgt = (int)(unit * halfH);
-    int yTop = cyBase - hgt;
-
-    s.ty = ty;
-    s.x0 = cx - half; if (s.x0 < 0) s.x0 = 0;
-    s.x1 = cx + half; if (s.x1 >= renderW) s.x1 = renderW - 1;
-    s.y0 = yTop; if (s.y0 < 0) s.y0 = 0;
-    s.y1 = cyBase; if (s.y1 >= renderH) s.y1 = renderH - 1;
-    s.ok = (s.x1 > s.x0 && s.y1 > s.y0);
+    if(!pitchLookEnabled) { return ProjectSpriteLegacy246(wx,wy,baseZ,halfH); }
+    SpriteBox s=ProjectSpriteLevel(wx,wy,baseZ,halfH);
+    /* Hard gate: OFF and ON at zero use the identical legacy projection. */
+    if(!pitchLookEnabled || horizon==0 || !s.ok)return s;
+    /* Translate the already established model geometry. Output clipping may
+       hide pixels, but must not change the model size or the horizontal FOV. */
+    s.baseY+=horizon;
+    s.y0+=horizon;s.y1+=horizon;
+    if(s.y0<0)s.y0=0;
+    if(s.y1>=renderH)s.y1=renderH-1;
+    s.ok=s.x1>s.x0 && s.y1>s.y0;
     return s;
 }
 /* ---------------- 精灵：统一的投影 + 排序绘制 ---------------- */
@@ -455,7 +478,7 @@ void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float 
        这时 billboard 的投影会被放大到几倍屏幕、看起来像视角畸变。
        近平面裁掉比硬拉一个巨大精灵更干净；交互提示仍然保留。 */
     if (s.ty < 0.55f) return;
-    int w = s.x1 - s.x0, h = s.y1 - s.y0;
+    int w = s.width, h = s.height;
     if (w < 2 || h < 2) return;
     /* v3.2：道具按**投影高度**缩放，不再用 max(w,h)。
        箱子的 halfH=0.34，但固定 half 宽是 0.56；
@@ -464,7 +487,7 @@ void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float 
     int size = h;
 
     float light = SpriteShade(s.ty, 0.12f) * PropProximityLight(wx, wy);   /* v2.4.3 距离衰减 */
-    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, (s.x1 - s.x0) / 3, s.ty);
+    DrawGroundShadow(s.centerX, s.baseY, w / 3, s.ty);
 
     /* ==================================================================
      * 2026-11-06：**老物件保持原尺寸**
@@ -478,8 +501,8 @@ void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float 
      * 需要"按艺术高度"精确控制的新物件（房间家具）走 DrawBakedPropArt。
      * ================================================================ */
     {
-        int x = (s.x0 + s.x1) / 2 - size / 2;
-        int y = s.y1 - size;
+        int x = s.centerX - size / 2;
+        int y = s.baseY - size;
         DrawSprite(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty);
         return;
     }
@@ -493,12 +516,12 @@ void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, flo
     if (!s.ok) return;
     /* 贴脸不画（和旧路径一致，避免巨型精灵糊屏） */
     if (s.ty < 0.55f) return;
-    int boxW = s.x1 - s.x0;
-    int h = s.y1 - s.y0;
+    int boxW = s.width;
+    int h = s.height;
     if (boxW < 2 || h < 2) return;
 
     float light = SpriteShade(s.ty, 0.12f) * PropProximityLight(wx, wy);
-    DrawGroundShadow((s.x0 + s.x1) / 2, s.y1, boxW / 3, s.ty);
+    DrawGroundShadow(s.centerX, s.baseY, boxW / 3, s.ty);
 
     /* ==================================================================
      * 2026-11-06：**只画艺术包围盒，别画整块画布**
@@ -520,8 +543,8 @@ void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, flo
     if (sp && bw > 0 && bh > 0) {
         int dw = (int)((long)h * bw / bh);
         if (dw < 1) dw = 1;
-        int dx = (s.x0 + s.x1) / 2 - dw / 2;
-        int dy = s.y1 - h;
+        int dx = s.centerX - dw / 2;
+        int dy = s.baseY - h;
         if(spr==SPR_PROP_SPIDER || spr==SPR_PROP_CRATE_MIMIC){
             float scale=(float)h/bh;
             int fullW=(int)(sp->w*scale+.5f),fullH=(int)(sp->h*scale+.5f);
@@ -533,8 +556,8 @@ void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, flo
         }
     } else {
         /* 包围盒无效（全透明）：退回正方形绘制 */
-        int x = (s.x0 + s.x1) / 2 - h / 2;
-        DrawSprite(spr, x, s.y1 - h, h, h, light * lightK, 1.0f, 1, s.ty);
+        int x = s.centerX - h / 2;
+        DrawSprite(spr, x, s.baseY - h, h, h, light * lightK, 1.0f, 1, s.ty);
     }
 }
 /* v2.1：怪物改用烘焙精灵                                              */
@@ -591,7 +614,7 @@ void DrawCreatureActor(int spr,float wx,float wy,float halfH,float lightK,
                               int zTest,float facing,float stride,unsigned int tint,float tintMix,float activity){
     SpriteBox box=ProjectSprite(wx,wy,0,halfH);
     if(!box.ok || box.ty<.55f || !SpritesReady())return;
-    int w=box.x1-box.x0,h=box.y1-box.y0,size=w>h?w:h;if(size<2)return;
+    int w=box.width,h=box.height,size=w>h?w:h;if(size<2)return;
     int use=spr,mirror=0,frame=0;
     if(spr==SPR_MON_HUNTER || spr==SPR_MON_HUNTER2 || spr==SPR_MON_HUNTER3 || spr==SPR_MON_LIGHT || spr==SPR_MON_LEECH){
         Monster model;memset(&model,0,sizeof(model));model.active=1;model.x=wx;model.y=wy;model.facing=facing;model.walkPhase=stride;
@@ -600,9 +623,9 @@ void DrawCreatureActor(int spr,float wx,float wy,float halfH,float lightK,
     float light=SpriteShade(box.ty,.10f)*ArtMonsterLight(wx,wy)*lightK;
     light+=FlareLightAt(wx,wy)*.85f;
     if(light>1.2f)light=1.2f;
-    DrawGroundShadow((box.x0+box.x1)/2,box.y1,w/3,box.ty);
+    DrawGroundShadow(box.centerX,box.baseY,w/3,box.ty);
     SpritePose pose={(float)g_timeSec+spr*.27f,stride,activity,mirror};
-    DrawSpriteCreature(use,(box.x0+box.x1)/2-size/2,box.y1-size,size,size,light,1,zTest,box.ty,tint,tintMix,&pose);
+    DrawSpriteCreature(use,box.centerX-size/2,box.baseY-size,size,size,light,1,zTest,box.ty,tint,tintMix,&pose);
 }
 static void DrawBakedMonster(int spr,float wx,float wy,float halfH,float lightK,int zTest,float facing,float walkPhase){
     DrawCreatureActor(spr,wx,wy,halfH,lightK,zTest,facing,walkPhase,0,0,.6f);
@@ -722,9 +745,7 @@ static float FlareLightAt(float wx, float wy) {
     return best;
 }
 
-/* v2.2：把一次相机投影抽成函数（原来有三份拷贝，后两份没算 pitch）。
-   ProjectSprite 用 pitchCos/pitchSin，另外两处直接用 renderH/2，
-   抬头/低头时就会和墙错开。这里统一。 */
+/* World sprites and light effects use the same horizon as walls and floors. */
 
 static void DrawFlareSprite(int idx) {
     if (!thrown[idx].active) return;
@@ -1121,18 +1142,18 @@ static void DrawListedHatch(int hi) {
                ProjectSprite 就是本文件的静态函数，直接调。 */
             SpriteBox sb = ProjectSprite(hatches[hi].x, hatches[hi].y, 0.0f, 0.72f);
             if (sb.ok) {
-                int boxH = sb.y1 - sb.y0;
-                int boxW = sb.x1 - sb.x0;
+                int boxH = sb.height;
+                int boxW = sb.width;
                 if (boxH > 8 && boxW > 8) {
                     unsigned int lamp = HatchLampRGB(hatches[hi].themeId);
                     /* 灯的亮度跟手电走：暗场里也该有一点自发光感 */
                     float litK = SpriteShade(sb.ty, 0.12f);
                     if (litK < 0.45f) litK = 0.45f;   /* 指示灯自己发亮 */
-                    int ly = sb.y0 + boxH / 12;
+                    int ly = sb.baseY - boxH + boxH / 12;
                     int lr = boxH / 50;  if (lr < 1) lr = 1;   /* 灯要小，别抢门 */
                     int lw = lr * 2 + 1;
                     for (int k = 0; k < 3; k++) {
-                        int lx = sb.x0 + boxW * (3 + k * 4) / 12;
+                        int lx = sb.centerX - boxW / 2 + boxW * (3 + k * 4) / 12;
                         for (int dy = 0; dy < lw; dy++) {
                             for (int dx = 0; dx < lw; dx++) {
                                 int px = lx + dx, py = ly + dy;
@@ -1446,25 +1467,47 @@ void BuildShadeTables(void) {
     }
 }
 
+static unsigned int LerpSurfaceColor(unsigned int a,unsigned int b,unsigned int weight) {
+    unsigned int inverse=256-weight;
+    unsigned int rb=(((a&0x00ff00ffu)*inverse+(b&0x00ff00ffu)*weight)>>8)&0x00ff00ffu;
+    unsigned int g=(((a&0x0000ff00u)*inverse+(b&0x0000ff00u)*weight)>>8)&0x0000ff00u;
+    return rb|g;
+}
+
+static unsigned int SampleSmoothFloor(float wx,float wy,int level) {
+    float u=wx*TEX_WIDTH,v=wy*TEX_HEIGHT;
+    int ix=(int)floorf(u),iy=(int)floorf(v);
+    unsigned int fu=(unsigned int)((u-ix)*256),fv=(unsigned int)((v-iy)*256);
+    if(fu>255)fu=255;
+    if(fv>255)fv=255;
+    int x0=ix&(TEX_WIDTH-1),x1=(ix+1)&(TEX_WIDTH-1);
+    int y0=iy&(TEX_HEIGHT-1),y1=(iy+1)&(TEX_HEIGHT-1);
+    unsigned int a=premulFloor[floorColorIdx[y0][x0]][level];
+    unsigned int b=premulFloor[floorColorIdx[y0][x1]][level];
+    unsigned int c=premulFloor[floorColorIdx[y1][x0]][level];
+    unsigned int d=premulFloor[floorColorIdx[y1][x1]][level];
+    return LerpSurfaceColor(LerpSurfaceColor(a,b,fu),LerpSurfaceColor(c,d,fu),fv);
+}
+
 /* 地板：棋盘只有两种底色，亮度查表；出口发光只在出口所在格判断 */
+#include "domain/render/legacy/render_246_floor.inc"
 static void RenderFloorBand(int y0, int y1) {
-    int halfH = renderH / 2;
-    int centery = halfH + horizon;
-    /* v1.13：真俯仰后不再需要这两个端点射线（逐行按角度求交） */
-    (void)0;
+    if(!pitchLookEnabled) { RenderFloorBandLegacy246(y0,y1); return; }
     int exitBX = (int)(exitX * 4.0f), exitBY = (int)(exitY * 4.0f);
     int safeBX = (int)(safeRoom.x * 4.0f), safeBY = (int)(safeRoom.y * 4.0f);
     int lightOnF = (flashlightOn && battery > 0.0f);
+    /* Fade in spatial filtering while looking down, instead of snapping between
+       2-texel blocks as the horizon moves. OFF/level retains the original texture. */
+    unsigned int floorFilter=pitchLookEnabled ? (unsigned int)(fmaxf(0,fminf(1,-pitchRatio))*256) : 0;
 
     /* v1.12：y-shear 之后地板与天花板**不再是镜像关系**（镜像只在 horizon==0 时成立），
        所以这里改成单次全屏通道：每一行按 y 相对地平线判上下，分别采样地板/天花板。
        之前那套"地板行 + 镜像天花板"在抬头时会留下一条黑带，低头时上下颠倒。 */
     for (int y = y0; y < y1; y++) {
         unsigned int* row = pixels + (size_t)y * renderW;
-        /* v1.13 真俯仰：该行的视线竖直分量（旋转后） */
-        float cyv = (float)(centery - y) / (float)focal;
-        float ry = pitchSin + pitchCos * cyv;
-        float kk = pitchCos - cyv * pitchSin;
+        /* Inverse of RenderProjectHeight: a floor/wall seam has exactly the
+           same forward depth. Do not rotate the ray again after y-shear. */
+        float ry = RenderProjectionRowSlope(y);
         int isCeil = (ry > 0.0f);
         float t;
         if (isCeil) {
@@ -1477,13 +1520,11 @@ static void RenderFloorBand(int y0, int y1) {
             t = 0.5f / den;
         }
         if (t > 60.0f) t = 60.0f;
-        /* v1.13b 修正：射线 = F + R·cameraX + U·cameraY，
-           其中 R（平面向量）的系数**恒为 1**，不该乘 (cos - cy·sin)。
-           上一版把整个水平方向都乘了 kk，pitch 越大横向拉伸越狠 → 鱼眼扭曲。 */
+        /* Forward and lateral ray coefficients retain the horizontal camera. */
         float stepX = t * planeX * 2.0f / renderW;
         float stepY = t * planeY * 2.0f / renderW;
-        float fx = posX + t * kk * dirX - t * planeX;
-        float fy = posY + t * kk * dirY - t * planeY;
+        float fx = posX + t * dirX - t * planeX;
+        float fy = posY + t * dirY - t * planeY;
         float rowDistance = t;
 
         /* 亮度：环境光 + 手电的平方衰减 */
@@ -1541,6 +1582,8 @@ static void RenderFloorBand(int y0, int y1) {
                 k8 = shadeLut[k8];
                 int lvl = k8 >> PREMUL_K8_SHIFT;
                 color = premulFloor[floorColorIdx[ty2][tx2]][lvl];
+                if(floorFilter)
+                    color=LerpSurfaceColor(color,SampleSmoothFloor(fx,fy,lvl),floorFilter);
 
                 /* 房间补光：先叠，后面安全屋/出口的特效可以覆盖它 */
                 if (roomCount > 0 &&
@@ -1645,9 +1688,12 @@ typedef struct {
     int stepX, stepY;
 } WallRay;
 
+#include "domain/render/legacy/render_246_ray.inc"
 static WallRay CastWallRay(int x) {
+    if(!pitchLookEnabled) { return CastWallRayLegacy246(x); }
     float cameraX = 2.0f * x / (float)renderW - 1.0f;
-    cameraX+=perception.distortion*sinf((float)g_timeSec*2.7f+cameraX*4);
+    /* Geometry stays static in BOTH look modes. Sanity effects must not
+       bend walls independently of the floor, props or collision grid. */
     float rayDirX = dirX + planeX * cameraX;
     float rayDirY = dirY + planeY * cameraX;
 
@@ -1676,26 +1722,20 @@ static WallRay CastWallRay(int x) {
     return result;
 }
 
-static void RenderWallSurface(int x, int halfH, const WallRay* ray) {
+#include "domain/render/legacy/render_246_wall.inc"
+static void RenderWallSurface(int x, const WallRay* ray) {
+    if(!pitchLookEnabled) { RenderWallSurfaceLegacy246(x,renderH/2,ray); return; }
     float rayDirX = ray->rayDirX;
     float rayDirY = ray->rayDirY;
     int mapX = ray->mapX;
     int mapY = ray->mapY;
     int side = ray->side;
     float perpWallDist = ray->perpWallDist;
-    /* v1.13 真俯仰：墙的下沿(v=-眼高)与上沿(v=1-眼高)各自旋转后投影。
-       同一列 z 不变 → 屏幕上仍是线性，贴图线性采样依然正确。 */
-    int lineHeight = (int)(renderH / perpWallDist);
-    (void)lineHeight;
-    const float eyeH = 0.5f;
-    float vb2 = (-eyeH) * pitchCos - perpWallDist * pitchSin;
-    float db2 = (-eyeH) * pitchSin + perpWallDist * pitchCos;
-    float vt2 = (1.0f - eyeH) * pitchCos - perpWallDist * pitchSin;
-    float dt2 = (1.0f - eyeH) * pitchSin + perpWallDist * pitchCos;
-    if (db2 < 0.05f) db2 = 0.05f;
-    if (dt2 < 0.05f) dt2 = 0.05f;
-    int yBottom = (int)((float)halfH - vb2 * (float)focal / db2);
-    int yTop    = (int)((float)halfH - vt2 * (float)focal / dt2);
+    /* Both endpoints share forward depth. Pitch cannot turn one of them
+       into a tiny/negative denominator at a nearby wall or corner. */
+    float unit = RenderProjectionScale(perpWallDist);
+    int yBottom = (int)RenderProjectHeight(0.0f, unit);
+    int yTop = (int)RenderProjectHeight(1.0f, unit);
     if (yBottom <= yTop) return;
     int startF = yTop;
     int drawStart = yTop < 0 ? 0 : yTop;
@@ -1968,10 +2008,9 @@ static void RenderWallSurface(int x, int halfH, const WallRay* ray) {
 }
 
 static void RenderWallBand(int x0, int x1) {
-    int halfH = renderH / 2;
     for (int x = x0; x < x1; x++) {
         WallRay ray = CastWallRay(x);
-        RenderWallSurface(x, halfH, &ray);
+        RenderWallSurface(x, &ray);
     }
 }
 
@@ -1990,21 +2029,24 @@ static void PrepareHorrorSource(void){
     for(int y=0;y<horrorH;y++)for(int x=0;x<horrorW;x++)horrorSource[(size_t)y*horrorW+x]=pixels[(size_t)(y*2)*renderW+x*2];
     horrorReady=1;
 }
+#include "domain/render/legacy/render_246_post.inc"
 static void RenderPostBand(int y0,int y1) {
+    if(!pitchLookEnabled) { RenderPostBandLegacy246(y0,y1); return; }
     float stress=perception.stress,crisis=perception.contamination;
     float beat=.5f+.5f*sinf((float)g_timeSec*6.0f);
+    float blind=fmaxf(0,fminf(1,FxStrength(FX_BLIND)));
     int radius=1+(int)(stress*3),dark=(int)(256*perception.vignette);
     int doll=(ArtStyleDoll()&&craftTex!=NULL);
     for(int y=y0;y<y1;y++){
         unsigned int* row=pixels+(size_t)y*renderW;
         uint32_t noise=perception.seed^(uint32_t)(y*7919+107);
-        int wobble=(int)(sinf(y*.075f+(float)g_timeSec*1.9f)*perception.distortion*renderW);
+        /* No moving spatial offsets, including when Vertical Look is OFF. */
         int veinOffset=(int)(sinf(y*.037f)*36)+(int)(perception.seed%9)*3;
         for(int x=0;x<renderW;x++){
             unsigned int c=row[x];float edge=vignetteMask?vignetteMask[(size_t)y*renderW+x]/255.0f:0;
             int r=(c>>16)&255,g=(c>>8)&255,b=c&255;
             if(horrorReady){
-                int sx=(x+wobble)/2;if(sx<radius)sx=radius;if(sx>=horrorW-radius)sx=horrorW-radius-1;
+                int sx=x/2;if(sx<radius)sx=radius;if(sx>=horrorW-radius)sx=horrorW-radius-1;
                 int sy=y/2;if(sy<radius)sy=radius;if(sy>=horrorH-radius)sy=horrorH-radius-1;
                 unsigned int a=horrorSource[(size_t)sy*horrorW+sx-radius],d=horrorSource[(size_t)sy*horrorW+sx+radius];
                 unsigned int u=horrorSource[(size_t)(sy-radius)*horrorW+sx],v=horrorSource[(size_t)(sy+radius)*horrorW+sx];
@@ -2026,6 +2068,9 @@ static void RenderPostBand(int y0,int y1) {
             r=(int)(r*shade*(1-blood)+145*blood-45*vein)+speck;
             g=(int)(g*shade*(1-blood*.9f)-32*vein)+speck;
             b=(int)(b*shade*(1-blood*.85f)-28*vein)+speck;
+            /* Blindness reduces visibility without changing any ray/FOV. */
+            float visibility=1-blind*.8f;
+            r=(int)(r*visibility);g=(int)(g*visibility);b=(int)(b*visibility);
             if(r<0)r=0;
             if(r>255)r=255;
             if(g<0)g=0;

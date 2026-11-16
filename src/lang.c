@@ -81,6 +81,9 @@ const char* Transl(const char* en) {
 /* v8：TSV 单一词条源优先，内联 Tr 的第二个参数只当兜底。
    这样改翻译只需要动 l10n/zh.tsv，不会再出现“表里改了、调用点没改”。 */
 const char* LangTr(const char* en,const char* zh) {
-    return g_lang==LANG_ZH ? (zh && zh[0] ? zh : en) : en;
+    if(g_lang!=LANG_ZH)return en;
+    const char* translated=Transl(en);
+    if(translated && translated!=en)return translated;
+    return zh && zh[0] ? zh : en;
 }
 

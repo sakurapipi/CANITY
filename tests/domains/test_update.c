@@ -380,7 +380,78 @@ static void test_stable_rhythm_gold_cap(void){
     trainingMode=training;currentLevel=level;RunEconomyReset();
 }
 
+/* 2.4.7-RC: regression code only; execution belongs to user acceptance. */
+static void test_comfortable_vertical_projection(void) {
+    int oldW=renderW,oldH=renderH,oldFlag=pitchLookEnabled;
+    float oldPitch=pitchRatio,oldX=posX,oldY=posY;
+    float oldDX=dirX,oldDY=dirY,oldPX=planeX,oldPY=planeY;
+    renderW=800;renderH=601;
+    posX=posY=0;dirX=1;dirY=0;planeX=0;planeY=.66f;
+    pitchLookEnabled=1;
+    const float distances[]={.24f,.35f,.5f,1,2,4};
+    for(size_t d=0;d<sizeof(distances)/sizeof(distances[0]);d++) {
+        float depth=distances[d];pitchRatio=0;UpdatePitch();
+        SpriteBox level=ProjectSprite(depth,0,.5f,.1f);
+        float unit=RenderProjectionScale(depth);
+        float span=RenderProjectHeight(0,unit)-RenderProjectHeight(1,unit);
+        for(int step=-10;step<=10;step++) {
+            pitchRatio=step/10.0f;UpdatePitch();
+            SpriteBox moved=ProjectSprite(depth,0,.5f,.1f);
+            CHECK(isfinite(RenderProjectHeight(0,unit)) && isfinite(RenderProjectHeight(1,unit)),
+                  "near-wall look keeps wall endpoints finite");
+            CHECK(fabsf(RenderProjectHeight(0,unit)-RenderProjectHeight(1,unit)-span)<.01f,
+                  "pitch translates wall endpoints without changing wall scale");
+            CHECK(moved.width==level.width && abs(moved.height-level.height)<=1 &&
+                  moved.centerX==level.centerX && moved.ty==level.ty,
+                  "sprite scale and occlusion depth survive pitch and screen clipping");
+            CHECK(abs(moved.baseY-level.baseY-horizon)<=1,
+                  "sprite feet follow the same horizon as the wall");
+            int row=(int)RenderProjectHeight(0,unit);
+            CHECK(fabsf(RenderProjectionRowSlope(row)+RENDER_EYE_HEIGHT/depth)<.003f,
+                  "floor inverse projection meets the wall bottom");
+            CHECK(abs(horizon)<=renderH/4,"comfortable look stays within a quarter-screen shift");
+        }
+    }
+    pitchRatio=NAN;UpdatePitch();CHECK(pitchRatio==0 && horizon==0,"invalid look resets safely");
+    pitchRatio=INFINITY;UpdatePitch();CHECK(pitchRatio==0 && horizon==0,"infinite look resets safely");
+    pitchRatio=1;pitchLookEnabled=0;UpdatePitch();
+    CHECK(pitchRatio==0 && horizon==0,"disabled look restores a horizontal projection");
+    renderW=oldW;renderH=oldH;pitchLookEnabled=oldFlag;pitchRatio=oldPitch;
+    posX=oldX;posY=oldY;dirX=oldDX;dirY=oldDY;planeX=oldPX;planeY=oldPY;UpdatePitch();
+}
+
+static void test_pitch_gate_and_near_wall_input(void) {
+    float oldX=posX,oldY=posY,oldPitch=pitchRatio;int oldFlag=pitchLookEnabled;
+    int cells[3][3];
+    for(int y=0;y<3;y++)for(int x=0;x<3;x++) {
+        cells[y][x]=worldMap[9+y][9+x];worldMap[9+y][9+x]=0;
+    }
+    worldMap[10][11]=1;posX=10.75f;posY=10.5f;
+    pitchLookEnabled=1;pitchRatio=.4f;RenderAddPitchInput(.4f);
+    CHECK(fabsf(pitchRatio-.8f)<.001f,"upward look remains usable at collision distance");
+    RenderAddPitchInput(-.9f);
+    CHECK(fabsf(pitchRatio+.1f)<.001f,"near-wall input can cross level without a proximity lock");
+    /* An in-front, ground-anchored model exercises legacy screen clipping. */
+    float wx=posX+dirX,wy=posY+dirY;
+    pitchLookEnabled=0;UpdatePitch();SpriteBox off=ProjectSprite(wx,wy,0,1);
+    pitchLookEnabled=1;pitchRatio=0;UpdatePitch();SpriteBox zero=ProjectSprite(wx,wy,0,1);
+    CHECK(off.ok==zero.ok && off.ty==zero.ty && off.centerX==zero.centerX &&
+          off.baseY==zero.baseY && off.width==zero.width && off.height==zero.height &&
+          off.x0==zero.x0 && off.x1==zero.x1 && off.y0==zero.y0 && off.y1==zero.y1,
+          "zero-degree look has identical model dimensions to disabled look");
+    pitchRatio=1;UpdatePitch();pitchLookEnabled=0;
+    SpriteBox disabled=ProjectSprite(wx,wy,0,1);
+    CHECK(disabled.baseY==off.baseY && disabled.height==off.height &&
+          RenderProjectionCenterY()==(float)(renderH/2),
+          "OFF gate ignores the previous enabled frame even before the next tick");
+    UpdatePitch();CHECK(pitchRatio==0 && horizon==0,"OFF clears all vertical offset immediately");
+    for(int y=0;y<3;y++)for(int x=0;x<3;x++)worldMap[9+y][9+x]=cells[y][x];
+    posX=oldX;posY=oldY;pitchRatio=oldPitch;pitchLookEnabled=oldFlag;UpdatePitch();
+}
+
 void TestSuite_update(void) {
+    test_comfortable_vertical_projection();
+    test_pitch_gate_and_near_wall_input();
     probe_pause_menu_returns_to_main_menu();
     probe_hide_spot_is_recognised();
     probe_save_failure_must_not_trap_pause_menu();
@@ -388,9 +459,13 @@ void TestSuite_update(void) {
     /* 2026-11-16：上下视角改可开关。默认关 → 输入被丢弃；打开 → 跟随并夹取。
        （原 v2.4.3 断言"永远为 0"，现在随开关变化。） */
     {
-        extern int pitchLookEnabled;
         float savedPitch = pitchRatio;
         int savedFlag = pitchLookEnabled;
+        float savedX=posX,savedY=posY;int savedCells[3][3];
+        for(int y=0;y<3;y++)for(int x=0;x<3;x++) {
+            savedCells[y][x]=worldMap[9+y][9+x];worldMap[9+y][9+x]=0;
+        }
+        posX=10.5f;posY=10.5f;
 
         pitchLookEnabled = 0;
         pitchRatio = .5f;
@@ -410,6 +485,8 @@ void TestSuite_update(void) {
 
         pitchLookEnabled = savedFlag;
         pitchRatio = savedPitch;
+        posX=savedX;posY=savedY;
+        for(int y=0;y<3;y++)for(int x=0;x<3;x++)worldMap[9+y][9+x]=savedCells[y][x];
         UpdatePitch();
     }
     /* 2026-11-16（审计修复回归）：**Vertical Look 必须能存住**。

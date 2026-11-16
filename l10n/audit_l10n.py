@@ -61,9 +61,9 @@ def collect_strings():
             list((ROOT / "src").rglob("*.inc")) + list((ROOT / "include").rglob("*.h")) + \
             list((ROOT / "include").rglob("*.inc")):
         text = path.read_text(encoding="utf-8-sig")
+        chars |= strip_comments_and_collect(text)
         for m in re.finditer(r'"((?:[^"\\]|\\.)*)"', text):
             s = m.group(1)
-            chars |= strip_comments_and_collect(text)
             if re.search(r"[A-Za-z]{2}", s) and not s.startswith("%"):
                 literals.setdefault(s, path.name)
     return chars, literals
@@ -113,7 +113,7 @@ def main():
 
     missing = {s: f for s, f in draw_literals().items() if s not in rows}
     # 纯中文/格式串不算“缺翻译”；只报英文界面文本
-    missing = {s: f for s, f in missing.items() if re.search(r"[A-Za-z]", s)}
+    missing = {s: f for s, f in missing.items() if re.search(r"[A-Za-z]", s) and not re.search(r"[\u3400-\u9fff]",s)}
     if missing:
         print("WARN draw-call literals without TSV entry:", len(missing))
         for s, f in list(missing.items())[:25]:

@@ -592,25 +592,24 @@ void ForceCursor(int visible) {
  * 现在 Win32 的 WndProc 与网页后端都调这一个函数，行为完全一致。
  * ================================================================== */
 void CanityMouseLook(int dx, int dyv) {
-    extern int pitchLookEnabled;   /* render.c：设置页 "Vertical Look" */
     if (dx != 0) {
         float rot = (float)(dx * MOUSE_BASE_SENS * mouseSens);
         float oldDirX = dirX;
         dirX = dirX * cosf(rot) - dirY * sinf(rot);
         dirY = oldDirX * sinf(rot) + dirY * cosf(rot);
-        float oldPlaneX = planeX;
-        planeX = planeX * cosf(rot) - planeY * sinf(rot);
-        planeY = oldPlaneX * sinf(rot) + planeY * cosf(rot);
+        if(pitchLookEnabled) {
+            /* Experimental orientation normalization stays in its own mode. */
+            ApplyFov();
+        } else {
+            /* v2.4.6 mouse path: rotate the existing plane without rebuilding it. */
+            float oldPlaneX=planeX;
+            planeX=planeX*cosf(rot)-planeY*sinf(rot);
+            planeY=oldPlaneX*sinf(rot)+planeY*cosf(rot);
+        }
     }
     /* 2026-11-16：默认关闭（镜头固定水平，与 2.4.3 一致）；
-       设置里打开后允许小范围上下观察，夹在 ±1（渲染层映射成 ±26°）。 */
-    if (!pitchLookEnabled) {
-        pitchRatio = 0.0f;
-    } else if (dyv != 0) {
-        pitchRatio -= (float)dyv * 0.0030f * mouseSens;
-        if (pitchRatio > 1.0f) pitchRatio = 1.0f;
-        if (pitchRatio < -1.0f) pitchRatio = -1.0f;
-    }
+       设置里打开后使用 ±6°、较低纵向灵敏度；贴墙也允许上下观察。 */
+    RenderAddPitchInput(-(float)dyv * 0.0045f * mouseSens);
 }
 void UpdateExplored(void) {
     int radius = 4, px = (int)posX, py = (int)posY;

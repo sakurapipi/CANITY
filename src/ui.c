@@ -1470,13 +1470,13 @@ static void DrawSkillTreeDetails(const SkillTreeDrawContext* context) {
                        * 画布只有 800 —— 左右各被裁掉一截。
                        * 这里按可用宽度自动降级到短版本（信息没删，只是缩写）。
                        * ================================================ */
-                      (TextWidthWin(Tr("R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY",
-                                       "TAB切流派  P看前置  滚轮缩放  回车购买"))
+                      (TextWidthWin(Tr("TAB BRANCH / P PREREQUISITE / HOME RESET / WHEEL ZOOM / ENTER BUY",
+                                       "TAB切流派  P看前置  HOME复位  滚轮缩放  回车购买"))
                        > (L.panel.right - L.panel.left) - UIS(16))
-                      ? Tr("R RESET - WHEEL ZOOM - ENTER BUY",
-                           "TAB切流派  P前置  回车购买")
-                      : Tr("R x2 RESET / WHEEL ZOOM   DRAG PAN   HOME RESET   ENTER BUY",
-                           "TAB切流派  P看前置  滚轮缩放  回车购买"),
+                      ? Tr("TAB BRANCH / P PREV / HOME RESET / ENTER BUY",
+                           "TAB流派  P前置  HOME复位  回车购买")
+                      : Tr("TAB BRANCH / P PREREQUISITE / HOME RESET / WHEEL ZOOM / ENTER BUY",
+                           "TAB切流派  P看前置  HOME复位  滚轮缩放  回车购买"),
                       0x00707070u);
 
     /* 2026-11-06：左侧 + / - 缩放按钮 */

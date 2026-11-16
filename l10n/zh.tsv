@@ -1,6 +1,5 @@
-# Canity 中文词条表（单一来源）
-# 改这里，然后运行： python l10n/apply_tsv.py
-# 列：英文<TAB>中文<TAB>来源；# 开头是注释
+# Canity 中文词条表（运行时单一来源）
+# 英文<TAB>中文<TAB>来源；修改后生成词条表与字形。
   CAMPAIGN %d/5 %s	  战役 %d/5 %s	tr
   DAILY %d	  每日 %d	tr
 +1 DECOY	+1 诱饵	tr
@@ -83,8 +82,8 @@ CENTURION	百人斩	table
 CHARGE   +60 BATTERY	充电   +60 电量	tr
 CHARGED	已充电	tr
 CHARGING KNOCK	敲击蓄力	tr
-CHARGING THROW	蓄力投掷	table
-CHASES YOUR FLASHLIGHT. FASTER THAN THE SOUND HUNTER.	追着你的手电跑，比寻声鬼更快。	table
+CHARGING THROW	投掷蓄力	localization-247
+CHASES YOUR FLASHLIGHT. FASTER THAN THE SOUND HUNTER.	追着你的手电跑，比听声鬼更快。	table
 CHECK INVENTORY	查看背包	tr
 CHOOSE A RELIC	选择遗物	tr
 CHOOSE ONE	三选一	table
@@ -117,7 +116,7 @@ Complete a level with the flashlight off	关着手电过关	table
 Complete level 1	通过第 1 层	table
 Complete level 1 in under 2 minutes	2 分钟内通过第 1 层	table
 Continue	继续	table
-Crank Battery	手摇发电	table
+Crank Battery	手摇充电	localization-247
 Crank for 300 seconds total	累计摇电 300 秒	table
 Crank generator for 60 seconds total	累计摇电 60 秒	table
 Crank the generator for 300 seconds total	累计摇电 300 秒	table
@@ -179,10 +178,10 @@ FULL	全屏	table
 FULL LOADOUT	满配	table
 FUSE FINDER	寻丝者	table
 FUSE SMITH	保险丝匠	table
-Field of View	视野	table
+Field of View	视野范围	localization-247
 Fill both weapon slots	两个武器槽都装上配件	table
 Flashlight	手电	table
-Frame Limit	帧率上限	table
+Frame Limit	帧率上限	localization-247
 Full charge +1 dmg, slow charge	满蓄力 +1 伤害，蓄力变慢	table
 Fullscreen	全屏	table
 Fully explore 3 maps in one run	单局完整探索 3 张图	table
@@ -201,7 +200,7 @@ GOLD HUNTER	金币猎手	table
 GOLD TYCOON	金币大亨	table
 GOLD UPGRADE	金币强化	tr
 GREEN RING = RIGHT DIGIT	绿圈 = 数字正确	table
-Gamma	亮度	table
+Gamma	伽马	localization-247
 HANDS EMPTY	空手而归	table
 HEAVY HAND	重手	table
 HELL	地狱	table
@@ -308,9 +307,9 @@ NORMAL	正常	table
 NOT ENOUGH	金币不够	tr
 NOT ENOUGH GOLD	金币不够	table
 New Run	新游戏	table
-OFF	关	table
+OFF	关闭	localization-247
 OFF BY ONE	只差一层	table
-ON	开	table
+ON	开启	localization-247
 ONLY EXISTS WHILE YOUR LIGHT IS OFF. SLOW, BUT IT NEVER STOPS.	只在你关灯时存在。很慢，但永不停下。	table
 OWNED	已拥有	tr
 Open 5 lock puzzles	解开 5 个锁盘	table
@@ -352,9 +351,9 @@ RELOAD RHYTHM	换弹节奏	table
 REPAIR COST  %d   (SHORT %d)	修复需要  %d 金币   （还差 %d）	tr
 REQUIRES THE NODE ABOVE IT	需要先点亮上面的节点	table
 REROLL	重掷	table
-REST	休息	table
+REST	修整	localization-247
 REST   +40 SANITY  (25)	休息   +40 理智  (25)	tr
-RESTED	已休息	tr
+RESTED	已修整	localization-247
 RESTOCKING  %ds	补货中  %d 秒	tr
 RICH	富饶	table
 RUN	冲刺	table
@@ -388,9 +387,9 @@ SAFE ZONE	安全区	table
 SALVAGE	打捞	table
 SANITY	理智	table
 SANITY  %d%%	理智  %d%%	tr
-SCAVENGER	拾荒	table
+SCAVENGER	清道夫	localization-247
 SCAVENGER RIFLING YOUR CRATES	清道夫在翻你的箱子	tr
-SEARCH	翻找	tr
+SEARCH	搜查	localization-247
 SEARCH CONTAINERS FOR FUSES, THEN POWER THE BREAKER.	翻箱子找保险丝，然后给配电箱供电。	table
 SEARCHING	搜寻中	tr
 SETTINGS	设置	table
@@ -415,7 +414,7 @@ SMALL	小	table
 SMALL, SILENT, ONLY VISIBLE WHEN LIT. SIPS BATTERY WITHIN 3.5 TILES.	又小又安静，只有被照到才看得见。3.5 格内会偷电。	table
 SMOKE	烟雾弹	table
 SNEAK!	偷袭!	table
-SOUND HUNTER	寻声鬼	table
+SOUND HUNTER	听声鬼	localization-247
 SPACE  -  CALIBRATE  (cooling %ds)	按空格开始小游戏  (冷却 %d 秒)	tr
 SPACE  -  START MINIGAME	按空格开始小游戏	tr
 SPACE %ds	空格 %d秒	tr
@@ -426,7 +425,7 @@ SPACE TO LOCK	空格锁定	tr
 SPACE: CALIBRATE	空格：校准	tr
 SPACE: LOCK CALIBRATION	空格：锁定校准	tr
 SPACE: START CALIBRATION	空格：开始校准	tr
-SPECIMEN DMG	木桩伤害	table
+SPECIMEN DMG	训练场伤害	localization-247
 SPEED	速度	table
 SPEED DEMON	疾风	table
 SPEED RUNNER	速通者	table
@@ -514,7 +513,7 @@ kinds	种	tr
 Mouse Sens.	鼠标灵敏度	table
 SFX Volume	音效音量	table
 Music Volume	音乐音量	table
-Sanity FX	理智特效	table
+Sanity FX	理智特效	localization-247
 Show FPS	显示帧率	table
 Display	显示	table
 Key Bindings	按键绑定	table
@@ -717,5 +716,239 @@ COMPOSURE WINDOW	镇定窗口	blue-ui
 CLEAN BREAK	利落脱身	blue-ui
 READ THE OPENING	看准破绽	blue-ui
 FALSE OPENING	佯攻诱敌	blue-ui
-
 Battery cap +25/rank; light OFF below 25%: regen 2-4/s, sanity drain +20%	电量上限每级+25；关灯且电量低于25%时每秒回2至4，理智流失+20%	table
+Reset Display	恢复画面默认	localization-247
+RESET	重置	localization-247
+Experimental Look	上下视角(实验)	localization-247
+NEEDS THE NODE ABOVE	需要先点亮上面的节点	inline-game.c
+Run nodes cost carried gold, reset each run, and raise threat. Bank gold buys permanent meta nodes. A larger withdrawal raises hearing pressure; the bank previews the tradeoff.	局内节点仅花携带金币，每局清空并增加威胁；银行金币购买永久局外节点。携带越多，听觉压力越高，银行可预览风险。	inline-help_book.c
+TAB / LEFT / RIGHT: CATEGORY   UP / DOWN: BROWSE   ESC: BACK   %s	TAB或左右切分类  上下浏览  ESC返回  %s	inline-help_book.c
+TYPE A SKILL NAME TO LOCATE; BACKSPACE CLEARS	输入中文或英文技能名定位，退格删除	inline-help_book.c
+HUSH PULSE: REQUIRES 8 BATTERY / 24s COOLDOWN	静息脉冲：需要8电量，冷却24秒	inline-hush.c
+HUSH PULSE: %.0fs / FOOTSTEP NOISE -85%%	静息脉冲：%.0f秒内脚步噪声降低85%%	inline-hush.c
+HUSH	静息脉冲	inline-hush.c
+COMPLETE: +%.1f SAN / +%.1f CELL / +%d GOLD	完成：理智+%.1f / 电量+%.1f / 金币+%d	inline-loop_calibration.c
+%s / %.1f SANITY ALREADY RESTORED	%s / 已即时恢复%.1f理智	inline-loop_calibration.c
+FAILED: TOO MANY MISSES	失误超限：小游戏结束	inline-loop_calibration.c
+CANCELLED	已取消	localization-247
+CHART MUSIC NOT READY	谱面音乐尚未就绪	inline-loop_calibration.c
+HIDE BEFORE OPENING SUPPLIES	进入藏身点后才能打开局内商店	inline-loop_desktop_input.c
+COULD NOT SAVE: GUIDE NOT OPENED. CHECK SAVE LOCATION.	无法保存：未进入引导层，请检查存档位置。	inline-loop_desktop_input.c
+SALVAGED MEDICAL RESERVE: +6 SAN	取用急救储备：理智+6	inline-loop_frame.c
+ARCHIVE DRAWER: +12 GOLD	档案抽屉：金币+12	inline-loop_frame.c
+RECOVERED DEVICE CELL: +8 BATTERY	检修装置取回电芯：电量+8	inline-loop_frame.c
+PAWNED GOLD FOR SANITY	典当：金币换理智	inline-loop_player_tick.c
+RETURN TO MENU OR CHECK SAVE SLOT	请返回主菜单或检查存档	inline-loop_settings.c
+Walk one tile using your movement keys. This floor is separate from your run.	使用移动键走出一格。这是独立引导层，不覆盖正式对局。	inline-loop_tutorial.c
+Move the mouse to turn your view.	移动鼠标转动视角，寻找走廊两侧的练习站。	inline-loop_tutorial.c
+Hold %s and move for half a second.	按住 %s 并移动半秒，观察体力消耗。	inline-loop_tutorial.c
+Use %s to turn the flashlight off, then on.	按 %s 关闭手电，再打开。关灯能避开追光鬼。	inline-loop_tutorial.c
+Open the map with %s, then close it to continue.	使用 %s 打开地图，再关闭。锁箱在北侧，藏身点在南侧。	inline-loop_tutorial.c
+Hold %s at the unlocked box (7,18) to collect its fuse.	到未上锁的箱子（7,18）前，按住 %s 取走保险丝。	inline-loop_tutorial.c
+Hold %s for half a second to charge the battery.	按住 %s 半秒充电；充电会制造声音，实战时先确认安全。	inline-loop_tutorial.c
+Select a DIFFERENT carried item using 1/2/3 or the wheel.	按1/2/3或滚动滚轮，切换为另一种持有的道具。	inline-loop_tutorial.c
+Select a stone. Hold %s, aim down the corridor, then release.	选择投石，按住 %s 蓄力，朝走廊瞄准后松开。左键可以取消投掷。	inline-loop_tutorial.c
+Select a PHASE BEACON, throw it to place an anchor, walk away, then Q to return.	滚轮选择相位信标，投出并等它落地。离开锚点后按Q返回。	inline-loop_tutorial.c
+Select and throw a DECOY, then press C to arm it.	滚轮选择诱饵玩偶并投出，等落地后按C激活；用来引开听声鬼。	inline-loop_tutorial.c
+Hold and release the left mouse button to swing the wrench.	按住鼠标左键蓄力后松开，挥动扳手。准星反馈可区分命中与挥空。	inline-loop_tutorial.c
+At (18,22), use %s to enter a hiding place. Use it again to leave.	到（18,22）的藏身点，按 %s 进入；之后再按一次离开。	inline-loop_tutorial.c
+Leave cover, then use %s for Hush Pulse. The camp lends this ability.	先离开藏身点，再按 %s 释放静息脉冲。训练时临时开放，不改动永久技能。	inline-loop_tutorial.c
+Unlock the six north-side boxes: dial, wire, equalizer, tuning, overload, saw. %d / 6 unlocked.	打开北侧六只锁箱：拨盘、接线、均衡、调波、过载、锯锁。已解开 %d / 6。	inline-loop_tutorial.c
+Enter a hiding place, then T opens supplies. Buy one item, Esc returns. Practice gold: 1200.	先进入南侧藏身点，再按T开商店。买一件商品后ESC返回。练习金币1200，不带出。	inline-loop_tutorial.c
+While hidden, T opens the shop. Switch to UPGRADES and buy one rank.	留在藏身点中，按T进入属性强化，买一级后返回。	inline-loop_tutorial.c
+T > REST > RHYTHM CONSOLE. QWER hits four lanes; complete one 40-second chart. Esc cancels.	留在藏身点：T → 修整 → 节律校准台。QWER击打音符，完成谱面。	inline-loop_tutorial.c
+Take the fuse to (29,18), hold %s to restore exit power.	带保险丝到（29,18）的配电箱前，按住 %s 接通出口。	inline-loop_tutorial.c
+Reach the lit exit at (32,18). Your real run remains intact.	走到（32,18）的已通电出口。正式对局保持原样，完成后返回。	inline-loop_tutorial.c
+1500 STARTER GOLD DEPOSITED. Returning shortly.	1500启动金币已存入银行，即将返回。	inline-loop_tutorial.c
+Course complete. Starter gold was already claimed on this profile.	课程完成。本存档已领取过启动资金，不重复发放。	inline-loop_tutorial.c
+Reward save failed. Keep this window open to retry; no reward has been confirmed.	奖励保存失败，将重试；尚未确认发放，请暂时保留此窗口。	inline-loop_tutorial.c
+RECOVER A BAG FIRST	请先回收钱袋	inline-money.c
+REST +%.0f SAN  %d GOLD  CD %ds	修整 +%.0f理智  %d金币  冷却%d秒	inline-shop.c
+SET THE NEXT CONTRACT IN EXPEDITION CONTROL	下一局契约请在行动风险中枢设置	inline-shop.c
+ALREADY FULL	状态已满，无需补给	inline-shop.c
+BAG FULL	背包已满	inline-shop.c
++1 PHASE BEACON	+1 相位信标	inline-shop.c
+THIS PAGE USES THE OLD LAYOUT (ESC BACK)	该页暂用旧布局（ESC 返回）	inline-shop.c
+REFRESH IN %ds	刷新冷却剩余%d秒	inline-shop.c
+SUPPLIES REFRESHED: 60s COOLDOWN	补给已刷新，冷却60秒	inline-shop.c
+COOLDOWN %ds / FREE	冷却 %d秒 / 免费	inline-shop.c
+WAITING FOR SCORE / AUDIO OUTPUT	等待谱面音乐或音频输出	inline-shop.c
+QWER / 40s / COMBO RESTORES SANITY + BATTERY	QWER四键 / 40秒 / 连击恢复理智与电量	inline-shop.c
+RESOURCE FULL / NO RECOVERY NEEDED	资源已满 / 暂不需要恢复	inline-shop.c
+UNLOCK SHORTCUT IN META TREE	需在局外解锁捷径技能	inline-shop.c
+USED / RESETS NEXT RUN	本局已用 / 下局重置	inline-shop.c
+UNAVAILABLE ON BOSS FLOORS	首领层不可使用	inline-shop.c
+INSUFFICIENT RUN GOLD	局内金币不足	inline-shop.c
+READY / CLICK OR ENTER TO USE	可用 / 点击或回车使用	inline-shop.c
+ENTER TO EQUIP CROWN	回车切换流派王冠	inline-ui.c
+BANK GOLD REQUIRED TO SWITCH	切换王冠需要银行金币	inline-ui.c
+FIRST UNLOCK: %s	先解锁：%s	inline-ui.c
+INVEST 5 POINTS IN THIS ARCHETYPE	本流派需先投入五点	inline-ui.c
+REQUIRES ALL CONNECTED NODES	需要点亮全部连线前置	inline-ui.c
+ENTER / SPACE / CLICK TO BUY	回车、空格或左键购买	inline-ui.c
+EQUIP	装备	inline-ui.c
+BUY	购买	inline-ui.c
+R RESET - WHEEL ZOOM - ENTER BUY	TAB切流派  P前置  回车购买	inline-ui.c
+COURSE %d/%d	课程 %d/%d	inline-ui.c
+TARGET (%d,%d)	目标（%d,%d）	inline-ui.c
+A RUN IS ALREADY IN PROGRESS	当前有正在游玩的进度	inline-ui.c
+Replace it with a new run? Cancel keeps your progress.	是否用新对局覆盖？取消将保留原有进度。	inline-ui.c
+REPLACE [Y]	覆盖进度 [Y]	inline-ui.c
+KEEP PROGRESS [ESC]	保留进度 [ESC]	inline-ui.c
+QWER	QWER 校准	inline-ui.c
+COMBO %d  ERRORS %d/6	连击%d  失误%d/6	inline-ui.c
+RESTORED +%d SAN / +%.1f CELL	已恢复 +%d理智 / +%.1f电量	inline-ui.c
+SPACE TWICE: EXIT	连按两次空格退出	inline-ui.c
+CARRY %d / GOLD TIER %d	携带 %d / 金币档 %d	inline-ui_hud.c
+PRESSURE %d%% / NEXT %dG	综合压力 %d%% / 下档 %d金	inline-ui_hud.c
+PRESSURE %d%% / GOLD MAX	综合压力 %d%% / 金币满档	inline-ui_hud.c
+QWER: HIT NOTES	QWER：跟随节律	inline-ui_hud.c
+STEP INTO THE LIGHT	走进光柱	inline-ui_hud.c
+HOLD E: MASTER SWITCH / REROLL FLOOR	按住E：总控闸／重掷整层	inline-ui_hud.c
+INSPECT DEVICE	检修装置	inline-ui_hud.c
+HOLD %s  %s  (%d LEFT)	按住%s  %s（剩%d次）	inline-ui_hud.c
+[B] GUIDED FLOOR	[B] 进入引导层	inline-ui_hud.c
+LISTEN. HIDE. RETURN.	倾听。藏匿。归来。	inline-ui_menu.c
+ENTER / SPACE / CLICK	回车 / 空格 / 单击	inline-ui_menu.c
+FIELD ARCHIVE	怪物档案	inline-ui_menu.c
+ACTIVE %d / %d	现行 %d / %d	inline-ui_menu.c
+ARCHIVED	旧版记录	inline-ui_menu.c
+Return to the main menu. Your archive is kept.	返回主菜单。已发现的档案会保留。	inline-ui_menu.c
+SOUND HUNTERS / THREE FORMS	听声鬼 / 三种形态	inline-ui_menu.c
+UNIDENTIFIED	未知生物	inline-ui_menu.c
+ACTIVE	现行	inline-ui_menu.c
+KNOWLEDGE %d / 3	认知 %d / 3	inline-ui_menu.c
+RISK %d / 5	危险 %d / 5	inline-ui_menu.c
+ESCAPES %d	逃脱 %d	inline-ui_menu.c
+CAUGHT %d	被抓 %d	inline-ui_menu.c
+Legacy record. This creature no longer spawns and is excluded from completion.	历史记录：当前版本不生成，不计入现行全图鉴。	inline-ui_menu.c
+Encounter this creature in a run to identify its portrait and behavior.	在局内遭遇后，解锁肖像与身份。研究逐层积累，逃脱能加速揭示。	inline-ui_menu.c
+BEHAVIOR	行为	inline-ui_menu.c
+Study across 3 floors or escape twice.	累计遭遇三层，或逃脱两次后揭示。	inline-ui_menu.c
+COUNTERMEASURE	对策	inline-ui_menu.c
+Study across 5 floors or escape three times.	累计遭遇五层，或逃脱三次后揭示。	inline-ui_menu.c
+QWER NOTES  -  40s PROGRESS	QWER 接音符  ·  40 秒进度	inline-ui_menu.c
+RUN GOLD %d	局内金币 %d	inline-ui_menu.c
+COST %d / THREAT +%.1f	价格 %d金币 / 威胁 +%.1f	inline-ui_menu.c
+FIRST: %s / %s	前置：%s / %s	inline-ui_menu.c
+START	起点	inline-ui_menu.c
+CAN BUY	可购买	inline-ui_menu.c
+CHECK FUNDS / PREREQUISITE	检查金币或前置	inline-ui_menu.c
+SAVE %d%%	限时优惠 -%d%%	inline-ui_menu.c
+%d RUN GOLD	%d 局内金币	inline-ui_menu.c
+WAS %d	原价 %d	inline-ui_menu.c
+RESTOCK %ds	补货中 %d秒	inline-ui_menu.c
+FULL OR INSUFFICIENT GOLD	已满或金币不足	inline-ui_menu.c
+%d GOLD | USES %d | NO LIMIT	%d金币 | 已用%d次 | 无次数上限	inline-ui_menu.c
+FREE | CD %ds	免费 | 冷却%d秒	inline-ui_menu.c
+FREE | SKILL LIMIT	免费 | 技能限制	inline-ui_menu.c
+CURRENT %.0f / %.0f	当前 %.0f / %.0f	inline-ui_menu.c
+RESTORE +%.0f / PRICE %d GOLD	本次恢复 +%.0f / 当前价格 %d金币	inline-ui_menu.c
+Unlimited recovery. Every use doubles this service price for the rest of the run.	无次数限制。每次使用后，本项服务本局价格翻倍。	inline-ui_menu.c
+No cooldown or use limit; prices double per use and persist between floors.	无冷却、无次数限制；每次价格翻倍，跨层保留涨价。	inline-ui_menu.c
+Skip this non-boss floor. Requires the permanent SHORTCUT skill; once per run.	需要永久捷径技能，跳过当前非首领层，每局限一次。	inline-ui_menu.c
+Each QWER hit immediately restores sanity; combos increase healing. Five misses fail. Finish for gold. Sanity/battery drain pauses during play.	每次QWER命中即时回理智，连击提高恢复，断连重置加成。失误5次失败，完成另奖金币；游玩期间不耗理智和电量。	inline-ui_menu.c
+LV %d/%d / %d GOLD	等级 %d/%d / %d 金币	inline-ui_menu.c
+RESTOCK IN %ds  [F5]	刷新剩余 %d秒 [F5]	inline-ui_menu.c
+REFRESH STOCK [F5]	刷新补给 [F5]	inline-ui_menu.c
+LEAVE SAFE HOUSE	离开安全屋	inline-ui_menu.c
+EXPEDITION CONTROL	行动风险中枢	inline-ui_menu.c
+BANK: %d GOLD	银行存款：%d 金币	inline-ui_menu.c
+CARRY %d%% / %d GOLD	带入 %d%% / %d 金币	inline-ui_menu.c
+CONTRACT: %s	风险契约：%s	inline-ui_menu.c
+Higher risk raises awareness and extraction rewards.	提高风险会增加感知压力，也提高撤离收益。	inline-ui_menu.c
+This amount leaves the bank only when a normal run starts.	只在普通对局开始时取出，不会因拖动立即扣款。	inline-ui_menu.c
+NEXT RUN	下局预测	inline-ui_menu.c
+GOLD PRESSURE %d / 15	金币压力 %d / 15	inline-ui_menu.c
+AWARENESS x%.2f	感知倍率 x%.2f	inline-ui_menu.c
+EXIT REWARD x%.2f	撤离收益 x%.2f	inline-ui_menu.c
+DEFEAT REFUND %d%%	失败本金返还 %d%%	inline-ui_menu.c
+Drag sliders / Up-Down select / Left-Right adjust / Enter save / Esc back	拖动滑条；上下选择，左右调整；回车保存，ESC返回	inline-ui_menu.c
+Graphics Quality	画质	localization-247
+AUTO (FIT SCREEN)	自动(适配屏幕)	localization-247
+Unlimited	不限帧	localization-247
+HIGH (100%)	高(100%)	localization-247
+MEDIUM (75%)	中(75%)	localization-247
+LOW (50%)	低(50%)	localization-247
+MINIMAL (25%)	最低(25%)	localization-247
+ARROWS / MOUSE   ESC BACK	方向键或鼠标选择  ESC返回	localization-247
+Walk noise -20% and move speed +3% per rank	每级行走噪声降低20%，移速提高3%	localization-247
+HUSH PULSE	静息脉冲	localization-247
+G: suppress footsteps 85% for 4s; 8 battery, 24s cooldown	G键：脚步噪声降低85%，持续4秒；消耗8电量，冷却24秒	localization-247
+Safe-room recovery +25% base rate per rank	每级使藏身点基础恢复速度提高25%	localization-247
+While hidden, detection risk is reduced by 45%	藏身时被发现的风险降低45%	localization-247
+Hunters give up twice as quickly at your hiding place	追捕者在藏身点放弃搜寻所需时间减半	localization-247
+Start with light off; movement noise -25%	开局关闭手电，移动噪声降低25%	localization-247
+BREATH SYNC	呼吸同步	localization-247
+Standing still halves sanity drain (max 20s)	静止时理智流失减半，最长持续20秒	localization-247
+SHADOW STEP	踏影	localization-247
+Sprinting inside smoke makes no sound	在烟雾内冲刺不产生脚步声	localization-247
+SILENT LAND	无声落步	localization-247
+After standing 3s, your next 3s of steps are silent	静止3秒后，接下来3秒的脚步无声	localization-247
+FORMLESS	无形	localization-247
+Stand still 3s to vanish from sight (move speed -25%)	静止3秒后从视野中隐去，期间移速降低25%	localization-247
+PAWN	典当	localization-247
+Below 30% sanity: auto-spend 200x floor gold for +20 sanity	理智低于30%时，自动花费层数乘以200的金币恢复20理智	localization-247
+GAMBLER II	孤注一掷	localization-247
+Crate gold is 50% doubled, 50% nothing	箱子金币有50%概率翻倍，也有50%概率归零	localization-247
+GOLD POWER	金币之力	localization-247
+Each gold tier gives +1.5% move speed (cap +20%)	每档金币威胁使移速提高1.5%，最多提高20%	localization-247
+BREAK FREE	挣脱束缚	localization-247
+Struggle window is 1.5x wider when grabbed	被抓时的挣脱判定窗口扩大至1.5倍	localization-247
+RETALIATE	以牙还牙	localization-247
+After taking a hit: +30% move speed for 3s	受到攻击后，移速提高30%，持续3秒	localization-247
+COUNTERKILL	绝境反制	localization-247
+Once per run: repel the scavenger when it grabs you	每局一次：被清道夫抓住时将其击退	localization-247
+SELFTEST	开发自检	localization-247
+After a hit, retaliation briefly suspends passive sanity drain	受击后，反击效果会短暂停止自然理智流失	localization-247
+A successful wrench knockback grants a one-second speed burst	扳手成功击退目标后，获得1秒加速	localization-247
+Wrench cooldown recovers 50% faster near a stunned hunter	靠近眩晕的听声鬼时，扳手冷却恢复速度提高50%	localization-247
+A shattered decoy distracts its hunter for four extra seconds	诱饵破碎后，额外牵制追捕者4秒	localization-247
+LINGERING HUSH	余息	localization-247
+Hush Pulse lasts six seconds instead of four	静息脉冲持续时间由4秒延长至6秒	localization-247
+BACKUP SPARK	备用火花	localization-247
+Once per floor, an empty battery gains twelve charge	每层一次：电量耗尽时立即恢复12电量	localization-247
+EXIT MEMORY	出口记忆	localization-247
+Powering the breaker reveals the exit sector	为配电箱通电后，显示出口所在区域	localization-247
+HIDDEN RECOVERY	藏身调息	localization-247
+Once per floor, hide still for three seconds to recover twenty stamina	每层一次：藏身并静止3秒，恢复20体力	localization-247
+ECHO MAPPING	回声测绘	localization-247
+Hush Pulse reveals nearby map cells within three tiles	释放静息脉冲时，揭示周围3格地图	localization-247
+SILENT CRANK	静音摇电	localization-247
+Cranking below 25% battery makes no sound	电量低于25%时，手摇充电不产生噪声	localization-247
+BIOLUMINESCENCE	微光滋养	localization-247
+Landed flares heal sanity nearby	落地的光球可恢复附近玩家的理智	localization-247
+Collect %d gold	收集%d金币	localization-247
+Escape %d time(s)	成功撤离%d次	localization-247
+TAB BRANCH / P PREREQUISITE / HOME RESET / WHEEL ZOOM / ENTER BUY	TAB切流派  P看前置  HOME复位  滚轮缩放  回车购买	localization-247
+TAB BRANCH / P PREV / HOME RESET / ENTER BUY	TAB流派  P前置  HOME复位  回车购买	localization-247
+Each QWER hit restores sanity and battery; combos improve recovery. Six misses end the game. Finish for gold. Passive resource drain pauses during play.	每次QWER命中恢复理智和电量，连击提高恢复量；累计6次失误结束。完成可获金币，游玩期间暂停自然理智与电量消耗。	localization-247
+BLACKBOX RELAY	黑匣回路	content-campaign.c
+ECHO ARCHIVE	回声档案	content-campaign.c
+COLD QUARANTINE	冷凝隔离	content-campaign.c
+DEBT VAULTS	债务金库	content-campaign.c
+ZERO SIGNAL	归零列车	content-campaign.c
+ARCHIVE COURIER	档案信使	content-daily.c
+BLACKOUT SALVAGE	停电打捞	content-daily.c
+COLD RELAY	冷凝接力	content-daily.c
+SILENT DEPARTURE	静默撤离	content-daily.c
+DEBT COLLECTOR	债务追索	content-daily.c
+LAST TOOL	最后工具	content-daily.c
+LIGHTLESS PATH	无光归途	content-daily.c
+ECHO MARKSMAN	回声投手	content-daily.c
+WARD EVACUATION	病房撤离	content-daily.c
+VAULT RUNNER	密库行者	content-daily.c
+UNBROKEN ROUTE	无伤回路	content-daily.c
+OVERCHARGED	过载行动	content-daily.c
+NO MAP HOME	无图返航	content-daily.c
+SECOND SIGNAL	第二信号	content-daily.c
+STEEL NERVE	铁胆	content-relics.c
+MUFFLED BOOTS	静音靴	content-relics.c
+GLASS HEART	玻璃心	content-relics.c
+QUIET MIND	静心	content-relics.c
+THICK SOLE	厚鞋底	content-relics.c
+COPPER WIRE	铜线	content-relics.c
+BRASS LUNG	黄铜肺	content-relics.c
+SCOUT BOOTS	斥候靴	content-relics.c
+GHOST SHELL	幽壳	content-relics.c
+LAST LIGHT	残火	content-relics.c

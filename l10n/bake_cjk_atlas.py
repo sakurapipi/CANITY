@@ -15,6 +15,7 @@ Output: src/cjk_glyphs.c, l10n/cjk_preview.png
 """
 import pathlib
 import sys
+import os
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -86,6 +87,10 @@ def collect_chars() -> set[str]:
         for path in ROOT.glob(pattern):
             chars |= strip_comments_and_collect(path.read_text(encoding="utf-8-sig"))
     chars |= set(EXTRA)
+    # Include the authoritative glossary even before regenerating lang_table.inc.
+    for line in (ROOT / "l10n" / "zh.tsv").read_text(encoding="utf-8-sig").splitlines():
+        if line and not line.startswith("#") and "\t" in line:
+            chars |= {ch for ch in line.split("\t")[1] if ord(ch)>=0x80}
     chars.discard(" ")
     return chars
 
@@ -213,7 +218,9 @@ def main():
     chars = collect_chars()
     glyphs = bake(chars)
     out = write_c(glyphs)
-    preview(ROOT / "l10n" / "cjk_preview.png")
+    preview_path=pathlib.Path(os.environ.get("CANITY_CJK_PREVIEW",ROOT / "l10n" / "cjk_preview.png"))
+    preview_path.parent.mkdir(parents=True,exist_ok=True)
+    preview(preview_path)
     empty = [cp for cp, per in glyphs if not any(per[1])]
     print("glyphs: %d  -> %s" % (len(glyphs), out.relative_to(ROOT)))
     print("empty 12px glyphs:", ["U+%04X" % cp for cp in empty][:20], "total", len(empty))
