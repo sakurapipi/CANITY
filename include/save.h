@@ -50,6 +50,10 @@ extern char g_savePath[MAX_PATH];
 #define SAVE_ERR_CLOUD_CONFLICT (-4) /* Both snapshots preserved; user choice required. */
 #define SAVE_ERR_CLOUD_SYNC (-5)     /* Cloud transport/validation failure. */
 #define SAVE_ERR_CLOUD_BACKUP (-6)   /* Local snapshot could not be preserved. */
+#define SAVE_ERR_DELETE_TXN (-7) /* Incomplete/corrupt delete journal; original snapshots retained. */
+#define SAVE_MAX_FILE_BYTES (16u * 1024u * 1024u)
+#define SAVE_MAX_CHUNKS 64
+
 
 
 /* ---- 存档分区后端（src/save/save_backend.c）----
@@ -59,6 +63,18 @@ int SaveBackendPreserveVersion(const char* path,int version); /* 0 only after a 
 long  SaveBackendRead(const char* path, void* buf, size_t cap);       /* 字节数 / -1 */
 void  SaveBackendUpload(const char* path);                            /* 交给 Steam 专区 */
 void  SaveBackendSyncAll(void);                                       /* 云 <-> 本地 */
+/* Shared structural validation; raw legacy blobs remain supported. */
+int SaveValidateBytes(const void* data, size_t length);
+/* Immutable, verified snapshots. Existing different bytes are never replaced. */
+int SaveBackendKeepSnapshot(const char* base, const char* kind, const void* data,
+                             size_t length, char* savedPath, size_t pathCapacity);
+int SaveBackendRecoverDelete(int slot);
+int SaveBackendDeleteSlot(int slot);
+int SaveBackendCloudBlocked(int slot);
+enum { SAVE_CLOUD_USE_LOCAL = 1, SAVE_CLOUD_USE_REMOTE = 2 };
+/* Explicit user-choice entry point; never called by routine SaveGame. */
+int SaveBackendResolveCloud(int slot, int choice);
+
 
 /* 按「候选路径 i + 存档槽 slot」算路径（save.c 实现） */
 const char* SavePathForSlot(int i, int slot, char* buf, size_t n);

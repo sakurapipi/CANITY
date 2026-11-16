@@ -590,9 +590,42 @@ double PlatFileTime(const char* path) {
     return js_file_time(BaseName(path));
 }
 
+EM_JS(int, js_write_exclusive, (const char* path, const void* data, int len), {
+    try {
+        var key = 'canity:' + UTF8ToString(path);
+        if (localStorage.getItem(key) !== null) return 80;
+        var bytes = '';
+        for (var i = 0; i < len; i++) bytes += String.fromCharCode(HEAPU8[(data + i) | 0]);
+        localStorage.setItem(key, btoa(bytes));
+        localStorage.setItem(key + '#ts', String(Date.now()));
+        return 0;
+    } catch (e) { return 5; }
+});
+int PlatWriteFileExclusive(const char* path, const void* data, int len) {
+    if (!path || !path[0] || !data || len < 0) return 87;
+    return js_write_exclusive(BaseName(path), data, len);
+}
+
+EM_JS(int, js_set_file_time, (const char* name, double seconds), {
+    try {
+        var key = 'canity:' + UTF8ToString(name);
+        if (localStorage.getItem(key) === null) return 2;
+        localStorage.setItem(key + '#ts', String(seconds * 1000)); return 0;
+    } catch (e) { return 5; }
+});
+int PlatSetFileTime(const char* path, double seconds) {
+    if (!path || !isfinite(seconds) || seconds <= 0) return 87;
+    return js_set_file_time(BaseName(path), seconds);
+}
+
 int PlatCopyPath(const char* from, const char* to) {
     if (!from || !to) return -1;
     return js_file_copy(BaseName(from), BaseName(to));
+}
+
+int PlatCloudConflictChoice(int slot) {
+    /* PLATFORM_NOOP: Steam cloud consent is unavailable in the browser. */
+    (void)slot; return 0;
 }
 
 int PlatRenamePath(const char* from, const char* to) {

@@ -156,9 +156,26 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
        顺序很重要：必须在 LoadSettings() **之前**跑完，
        否则读到的还是旧档、云端赢的那份要等下次启动才生效。 */
     {  SaveBackendSyncAll(); }
+    int startupCloudError = g_saveState == 2 ? g_saveError : 0;
+    if (SteamZoneReady()) for (int slot = 0; slot < SAVE_SLOTS; slot++) {
+        if (!SaveBackendCloudBlocked(slot)) continue;
+        int choice = PlatCloudConflictChoice(slot);
+        if (choice) {
+            int error = SaveBackendResolveCloud(slot, choice);
+            SaveDiag("CLOUD explicit-choice slot=%d choice=%d error=%d", slot, choice, error);
+            if (error) startupCloudError = error;
+            else if (startupCloudError == SAVE_ERR_CLOUD_CONFLICT || startupCloudError == SAVE_ERR_CLOUD_BACKUP)
+                startupCloudError = 0;
+        }
+    }
+    if (SteamZoneReady()) for (int slot = 0; slot < SAVE_SLOTS; slot++)
+        if (SaveBackendCloudBlocked(slot) && !startupCloudError) startupCloudError = SAVE_ERR_CLOUD_CONFLICT;
     InitAchievements();
     SaveDiag("BOOT start exe=%s", (const char*)"");
     hasSave = LoadSettings();
+    if (startupCloudError && (g_saveState != 2 || !g_saveError)) {
+        g_saveState = 2; g_saveError = startupCloudError;
+    }
     SaveDiag("BOOT LoadSettings done hasSave=%d state=%d err=%d", hasSave, g_saveState, g_saveError);
 
     /* ==================================================================

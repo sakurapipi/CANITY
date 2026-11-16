@@ -281,7 +281,7 @@ static long ReadWholeFile(const char* path, void* buf, size_t cap) {
  *   生成 .dup-id-<hex>.bak、报明确错误。在处理玩家存档时静默挑一份
  *   等于替玩家做决定。
  * ================================================================ */
-#define SAVE_CARRY_MAX 64          /* 对齐 SaveContainerPack 的 n<=64 */
+#define SAVE_CARRY_MAX SAVE_MAX_CHUNKS          /* 对齐 SaveContainerPack 的 n<=64 */
 
 typedef struct {
     unsigned short id;
@@ -403,7 +403,7 @@ static int SaveFileBytes(const SaveBlob* blob, unsigned char** out) {
     long need = (long)sizeof(SaveEnvelope) + (long)SAVE_PAYLOAD_HEAD_SIZE
               + (long)n * (long)sizeof(SaveChunkDesc)
               + (long)sizeof(SaveBlob) + (long)SaveCarryBytes() + 128L;
-    if (need <= 0 || need > 64L * 1024L * 1024L) return SAVE_ERR_CAPACITY;
+    if (need <= 0 || need > (long)SAVE_MAX_FILE_BYTES) return SAVE_ERR_CAPACITY;
 
     unsigned char* buf = (unsigned char*)malloc((size_t)need);
     if (!buf) return SAVE_ERR_CAPACITY;
@@ -437,7 +437,11 @@ static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelo
      * 这个标志描述的是"当前载入的这份存档可疑"，所以每次读档都要重算。
      * ================================================================ */
     s_saveReadOnly = 0;
-    if (!buf || n <= 0 || !out) return 0;
+    if (!buf || n <= 0 || !out || !SaveValidateBytes(buf, (size_t)n)) {
+        s_saveReadOnly = 1;
+        g_saveError = SAVE_ERR_PAYLOAD;
+        return 0;
+    }
 
     const unsigned char* p = (const unsigned char*)buf;
 
@@ -531,9 +535,9 @@ static long ExtractLegacyPayload(const char* path, unsigned char* out, long cap,
     if (isEnvelope) *isEnvelope = 0;
     if (!path || !path[0] || !out || cap <= 0) return 0;
 
-    raw = (unsigned char*)malloc((size_t)cap);
+    raw = (unsigned char*)malloc(SAVE_MAX_FILE_BYTES);
     if (!raw) return 0;
-    n = ReadWholeFile(path, raw, (size_t)cap);
+    n = ReadWholeFile(path, raw, SAVE_MAX_FILE_BYTES);
     if (n <= 0) { free(raw); return 0; }
 
     /* ---- 信封档：只取 SC_LEGACY29 块 ---- */
@@ -579,7 +583,7 @@ static long s_lastPayloadLen = 0;
 
 static long ReadSaveFile(const char* path, SaveBlob* out) {
     if (!path || !out) return -1;
-    size_t cap = sizeof(SaveEnvelope) + sizeof(SaveBlob) + 65536;
+    size_t cap = SAVE_MAX_FILE_BYTES;
     unsigned char* raw = (unsigned char*)malloc(cap);
     if (!raw) return -1;
 
@@ -603,32 +607,13 @@ static long ReadSaveFile(const char* path, SaveBlob* out) {
     return ret;
 }
 
-static int SavePathValid(const char* path){
-    size_t cap=sizeof(SaveBlob)+sizeof(SaveEnvelope)+65536;
-    unsigned char* raw=malloc(cap);if(!raw)return 0;
-    long n=ReadWholeFile(path,raw,cap);int ok=0;
-    if(n>=8){
-        const void* blob=raw;int length=(int)n;unsigned magic=0;memcpy(&magic,raw,4);
-        if(magic==SAVE_ENVELOPE_MAGIC && n>(long)sizeof(SaveEnvelope)){
-            SaveEnvelope envelope;memcpy(&envelope,raw,sizeof(envelope));
-            const void* data=NULL;int size=0;
-            if(SaveEnvelopeValid(&envelope,raw+sizeof(envelope),(int)n-(int)sizeof(envelope)) &&
-               SaveContainerFind(raw+sizeof(envelope),(int)n-(int)sizeof(envelope),SC_LEGACY29,&data,&size)){
-                blob=data;length=size;
-                int count=SaveContainerCount(raw+sizeof(envelope),(int)n-(int)sizeof(envelope));
-                unsigned short ids[SAVE_CARRY_MAX];
-                if(count<1 || count>SAVE_CARRY_MAX)length=0;
-                else for(int i=0;i<count;i++){
-                    SaveChunkDesc desc;const void* chunk=NULL;
-                    if(!SaveContainerAt(raw+sizeof(envelope),(int)n-(int)sizeof(envelope),i,&desc,&chunk)){length=0;break;}
-                    for(int j=0;j<i;j++)if(ids[j]==desc.id)length=0;
-                    ids[i]=desc.id;
-                }
-            }else length=0;
-        }
-        if(length>=1024){int version;memcpy(&magic,blob,4);memcpy(&version,(const char*)blob+4,4);ok=magic==SAVE_MAGIC && version>=25 && version<=SAVE_VERSION;}
-    }
-    free(raw);return ok;
+static int SavePathValid(const char* path) {
+    unsigned char* data = malloc(SAVE_MAX_FILE_BYTES);
+    if (!data) return 0;
+    long length = ReadWholeFile(path, data, SAVE_MAX_FILE_BYTES);
+    int valid = length > 0 && SaveValidateBytes(data, (size_t)length);
+    free(data);
+    return valid;
 }
 static void BackupSavePath(const char* path){
     if(!SavePathValid(path))return;
@@ -1427,6 +1412,10 @@ typedef struct {
 
 static int forcedSaveSlot=-1;
 static int ReadSettingsCandidate(LoadedSaveInfo* info) {
+    for (int slot = 0; slot < SAVE_SLOTS; slot++) {
+        int error = SaveBackendRecoverDelete(slot);
+        if (error) { g_saveState = 2; g_saveError = error; s_saveReadOnly = 1; return 0; }
+    }
     char p[MAX_PATH],best[MAX_PATH]={0};double newest=-1;
     memset(&g_save,0,sizeof(g_save));
     if(forcedSaveSlot>=0)g_saveSlot=forcedSaveSlot;else FindNewestSaveSlot();
@@ -2238,27 +2227,8 @@ void ContinueRun(void) {
 }
 
 void DeleteSave(void) {
-    static const char* suffixes[] = { "", ".bak", ".tmp" };
-    int firstError = 0;
-    for (int i = 0; i < SAVE_CAND_COUNT; i++) {
-        char candidate[MAX_PATH];
-        SavePathCand(i, candidate, sizeof(candidate));
-        if (!candidate[0]) continue;
-        for (size_t side = 0; side < sizeof(suffixes) / sizeof(suffixes[0]); side++) {
-            char path[MAX_PATH + 8];
-            snprintf(path, sizeof(path), "%s%s", candidate, suffixes[side]);
-            int result = PlatDeletePath(path);
-            SaveDiag("DELETE path=%s result=%d", path, result);
-            if (result < 0 && !firstError) firstError = -result;
-        }
-    }
-    if (firstError) {
-        /* Partial cleanup is not success: retain the in-memory run and report
-           the first real error, while still attempting every candidate above. */
-        g_saveState = 2;
-        g_saveError = firstError;
-        return;
-    }
+    int error = SaveBackendDeleteSlot(g_saveSlot);
+    if (error) { g_saveState = 2; g_saveError = error; return; }
     g_save.hasRun = 0;
     hasSave = 0;
     runInProgress = 0;

@@ -134,8 +134,11 @@ int PlatExeDir(char* out, int cap);                                /* 返回写�
 int PlatReadFilePath(const char* path, void* buf, int cap);         /* 字节数，失败 <0 */
 /* 原子写：先写临时文件 + 落盘 + 改名。0 = 成功，否则平台错误码。 */
 int PlatWriteFileAtomic(const char* path, const void* data, int len);
+/* Durable new file: never replace an existing snapshot. 0=success, otherwise error. */
+int PlatWriteFileExclusive(const char* path, const void* data, int len);
 /* 文件最后修改时间（秒，越大越新）。取不到返回 0。 */
 double PlatFileTime(const char* path);
+int PlatSetFileTime(const char* path, double seconds); /* Restore original candidate ordering. */
 void PlatMakeDir(const char* path);                                 /* 失败静默 */
 /* Path status: 1 = exists, 0 = missing, negative = platform error. */
 int PlatPathExists(const char* path);
@@ -146,6 +149,7 @@ int PlatDeletePath(const char* path);
 /* 系统语言是否中文（首次运行时用来决定默认语言）。 */
 int  PlatSystemLanguageZh(void);
 int PlatCopyPath(const char* from, const char* to);                 /* 0 = 成功 */
+int PlatCloudConflictChoice(int slot); /* 0=defer, 1=local, 2=remote; native human choice. */
 int PlatRenamePath(const char* from, const char* to);               /* 0 = 成功 */
 
 /* ---------------------------------------------------------------------

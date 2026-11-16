@@ -53,63 +53,97 @@ long SaveBackendRead(const char* path, void* buf, size_t cap) {
 /* 云同步                                                              */
 /* ================================================================== */
 
-/* 把本地文件交给 Steam 专区上传。
-   **不合成信封** —— 文件本身就是信封格式（存档分区写盘时封好的）。 */
-void SaveBackendUpload(const char* path) {
-    if (!path || !path[0]) return;
-
-    size_t cap = 1024 * 1024;
-    unsigned char* buf = (unsigned char*)malloc(cap);
-    if (!buf) return;
-    long n = SaveBackendRead(path, buf, cap);
-    if (n <= (long)sizeof(SaveEnvelope)) { free(buf); return; }
-
-    SaveEnvelope h;
-    memcpy(&h, buf, sizeof(h));
-    if (h.magic != SAVE_ENVELOPE_MAGIC ||
-        !SaveEnvelopeValid(&h, buf + sizeof(h), (int)(n - (long)sizeof(h)))) {
-        /* 还是旧式裸档：本次不上传，等下一次 SaveGame 写成信封后再传。
-           这样不会把一份「没有云端身份」的字节推上去。 */
-        free(buf);
-        return;
+static unsigned char cloudBlocked[SAVE_SLOTS];
+static const char* CloudName(const char* path) {
+    const char* slash = strrchr(path, '/');
+    const char* back = strrchr(path, '\\');
+    const char* end = (!slash || (back && back > slash)) ? back : slash;
+    return end ? end + 1 : path;
+}
+static int CloudSlot(const char* path) {
+    for (int slot = 0; slot < SAVE_SLOTS; slot++) {
+        char name[32]; snprintf(name, sizeof(name), "canity%d.sav", slot);
+        if (!strcmp(CloudName(path), name)) return slot;
     }
-
-    const char* name = strrchr(path, '\\');
-    name = name ? name + 1 : path;
-    SteamZoneCloudUpload(name, buf, (int)n);
-    free(buf);
+    return -1;
 }
-
-static int CloudEnvelopeValid(const void* data, int len) {
-    if (!data || len <= (int)sizeof(SaveEnvelope)) return 0;
-    SaveEnvelope envelope;
-    memcpy(&envelope, data, sizeof(envelope));
-    return SaveEnvelopeValid(&envelope, (const unsigned char*)data + sizeof(envelope),
-                              len - (int)sizeof(envelope));
+static int CloudSaveValid(const void* data, int length) {
+    unsigned magic = 0;
+    if (data && length >= 4) memcpy(&magic, data, 4);
+    return magic == SAVE_ENVELOPE_MAGIC && length > 0 && SaveValidateBytes(data, (size_t)length);
 }
-
-static void CloudRecordError(int* firstError, const char* path, int error) {
+int SaveBackendCloudBlocked(int slot) {
+    if (slot < 0 || slot >= SAVE_SLOTS) return 1;
+    if (cloudBlocked[slot]) return 1;
+    for (int i = 0; i < SAVE_CAND_COUNT; i++) {
+        char base[MAX_PATH], path[MAX_PATH + 32];
+        SavePathForSlot(i, slot, base, sizeof(base)); if (!base[0]) continue;
+        snprintf(path, sizeof(path), "%s.cloud-block", base);
+        if (PlatPathExists(path) != 0) return 1;
+        snprintf(path, sizeof(path), "%s.delete-journal", base);
+        if (PlatPathExists(path) != 0) return 1;
+    }
+    return 0;
+}
+static int CloudBlock(int slot) {
+    cloudBlocked[slot] = 1; /* Fail closed even if every marker write fails. */
+    const unsigned marker[3] = { 0x43424c32u, 1, (unsigned)slot };
+    int first = 0;
+    for (int i = 0; i < SAVE_CAND_COUNT; i++) {
+        char base[MAX_PATH], path[MAX_PATH + 32];
+        SavePathForSlot(i, slot, base, sizeof(base)); if (!base[0]) continue;
+        snprintf(path, sizeof(path), "%s.cloud-block", base);
+        int error = SaveBackendWrite(path, marker, sizeof(marker));
+        if (!error) return 0;
+        if (!first) first = error;
+    }
+    return first ? first : 5;
+}
+static void CloudLocalPath(int slot, char* path, size_t cap) {
+    SavePathForSlot(0, slot, path, cap);
+    double newest = path[0] ? PlatFileTime(path) : 0;
+    for (int i = 1; i < SAVE_CAND_COUNT; i++) {
+        char candidate[MAX_PATH]; SavePathForSlot(i, slot, candidate, sizeof(candidate));
+        double stamp = candidate[0] ? PlatFileTime(candidate) : 0;
+        if (stamp > newest) { newest = stamp; snprintf(path, cap, "%s", candidate); }
+    }
+}
+/* Routine saves stay local until an explicit choice resolves the slot. */
+void SaveBackendUpload(const char* path) {
+    if (!path || !path[0] || !SteamZoneReady()) return;
+    int slot = CloudSlot(path);
+    if (slot < 0 || SaveBackendCloudBlocked(slot)) {
+        SaveDiag("CLOUD upload deferred slot=%d path=%s", slot, path); return;
+    }
+    unsigned char* data = malloc(SAVE_MAX_FILE_BYTES);
+    if (!data) return;
+    long n = SaveBackendRead(path, data, SAVE_MAX_FILE_BYTES);
+    if (n > 0 && CloudSaveValid(data, (int)n)) SteamZoneCloudUpload(CloudName(path), data, (int)n);
+    else SaveDiag("CLOUD upload rejected invalid-local path=%s", path);
+    free(data);
+}
+static void CloudRecordError(int* first, const char* path, int error) {
     if (!error) return;
-    if (!*firstError) *firstError = error;
+    if (!*first) *first = error;
     SaveDiag("CLOUD error=%d path=%s", error, path);
 }
-
-/* A fallback destination may contain another local copy. Never overwrite it
-   unless its pre-cloud backup was successfully created first. */
-static int CloudInstallAt(const char* path, const void* data, int len) {
+static int CloudInstallAt(const char* path, const void* data, int length) {
     int exists = PlatPathExists(path);
     if (exists < 0) return -exists;
     if (exists) {
-        char backup[MAX_PATH + 32];
-        snprintf(backup, sizeof(backup), "%s.pre-cloud.bak", path);
-        if (PlatCopyPath(path, backup)) return SAVE_ERR_CLOUD_BACKUP;
+        unsigned char* old = malloc(SAVE_MAX_FILE_BYTES);
+        if (!old) return 8;
+        long n = SaveBackendRead(path, old, SAVE_MAX_FILE_BYTES);
+        int error = n >= 0 ? SaveBackendKeepSnapshot(path, "pre-cloud", old, (size_t)n, NULL, 0)
+                            : SAVE_ERR_CLOUD_BACKUP;
+        free(old);
+        if (error) return SAVE_ERR_CLOUD_BACKUP;
     }
-    return SaveBackendWrite(path, data, (size_t)len);
+    return SaveBackendWrite(path, data, (size_t)length);
 }
-
-static int CloudInstall(int slot, const char* preferred, const void* data, int len) {
-    if (!CloudEnvelopeValid(data, len)) return SAVE_ERR_PAYLOAD;
-    int firstError = 0, tried = 0;
+static int CloudInstall(int slot, const char* preferred, const void* data, int length) {
+    if (!CloudSaveValid(data, length)) return SAVE_ERR_PAYLOAD;
+    int first = 0, tried = 0;
     char visited[SAVE_CAND_COUNT + 1][MAX_PATH];
     for (int i = -1; i < SAVE_CAND_COUNT; i++) {
         char path[MAX_PATH];
@@ -120,115 +154,135 @@ static int CloudInstall(int slot, const char* preferred, const void* data, int l
         for (int j = 0; j < tried; j++) if (!strcmp(visited[j], path)) duplicate = 1;
         if (duplicate) continue;
         snprintf(visited[tried++], sizeof(visited[0]), "%s", path);
-        int error = CloudInstallAt(path, data, len);
-        SaveDiag("CLOUD install path=%s bytes=%d error=%d", path, len, error);
-        if (!error) {
-            snprintf(g_savePath, sizeof(g_savePath), "%s", path);
-            return 0;
-        }
-        if (!firstError) firstError = error;
+        int existed = PlatPathExists(path);
+        if (existed < 0) return -existed;
+        int error = CloudInstallAt(path, data, length);
+        SaveDiag("CLOUD install path=%s bytes=%d error=%d", path, length, error);
+        if (!error) { snprintf(g_savePath, sizeof(g_savePath), "%s", path); return 0; }
+        /* Existing progress is authoritative on backup/write failure: never
+           activate a different cloud copy through a newer fallback candidate. */
+        if (existed || error == SAVE_ERR_CLOUD_BACKUP) return SAVE_ERR_CLOUD_BACKUP;
+        if (!first) first = error;
     }
-    return firstError ? firstError : 5;
+    return first ? first : 5;
 }
-
-/* Conflicting cloud bytes must not replace the local run or an older, distinct
-   conflict snapshot. The payload hash and bounded suffix distinguish snapshots. */
-static int CloudKeepConflict(const char* path, const void* data, int len) {
-    if (!CloudEnvelopeValid(data, len)) return SAVE_ERR_PAYLOAD;
-    unsigned hash = SaveFnv1a(data, len);
-    unsigned char* existing = malloc((size_t)len + 1);
-    if (!existing) return 8;
-    int error = SAVE_ERR_CAPACITY;
-    for (int i = 0; i < 32; i++) {
-        char target[MAX_PATH + 64];
-        if (!i) snprintf(target, sizeof(target), "%s.conflict-cloud.bak", path);
-        else snprintf(target, sizeof(target), "%s.conflict-cloud-%08x-%d.bak", path, hash, i);
-        int exists = PlatPathExists(target);
-        if (exists < 0) { error = -exists; break; }
-        if (exists) {
-            long n = SaveBackendRead(target, existing, (size_t)len + 1);
-            if (n == len && !memcmp(existing, data, (size_t)len)) { error = 0; break; }
-            continue;
-        }
-        error = SaveBackendWrite(target, data, (size_t)len);
-        SaveDiag("CLOUD conflict-copy path=%s bytes=%d error=%d", target, len, error);
-        break;
+static int CloudKeepConflict(int slot, const char* preferred, const void* data, int length) {
+    if (!CloudSaveValid(data, length)) return SAVE_ERR_PAYLOAD;
+    int error = SaveBackendKeepSnapshot(preferred, "conflict-cloud", data, (size_t)length, NULL, 0);
+    for (int i = 0; error && i < SAVE_CAND_COUNT; i++) {
+        char path[MAX_PATH]; SavePathForSlot(i, slot, path, sizeof(path));
+        if (path[0] && strcmp(path, preferred))
+            error = SaveBackendKeepSnapshot(path, "conflict-cloud", data, (size_t)length, NULL, 0);
     }
-    free(existing);
     return error;
 }
-
-static void CloudRestoreNew(int slot, const char* path, const char* name,
-                            void* data, int cap, int* firstError) {
-    if (!SteamZoneCloudExists(name)) return;
-    int remoteSize = SteamZoneCloudGetSize(name);
-    if (remoteSize <= (int)sizeof(SaveEnvelope) || remoteSize > cap) {
-        CloudRecordError(firstError, path, SAVE_ERR_CAPACITY);
-        return;
-    }
-    int pulled = 0;
-    if (!SteamZoneCloudPullNew(name, data, cap, &pulled)) {
-        CloudRecordError(firstError, path, SAVE_ERR_CLOUD_SYNC);
-        return;
-    }
-    CloudRecordError(firstError, path, CloudInstall(slot, path, data, pulled));
+static void CloudDefer(int slot, const char* path, const void* data, int length, int* first) {
+    int error = CloudBlock(slot);
+    if (!error) error = CloudKeepConflict(slot, path, data, length);
+    CloudRecordError(first, path, error ? error : SAVE_ERR_CLOUD_CONFLICT);
 }
-
-/* Cloud I/O is confined to this backend. Length and allocation capacity are
-   distinct, and any failed restore remains visible after all slots are tried. */
+static void CloudRestoreNew(int slot, const char* path, void* data, int* first) {
+    const char* name = CloudName(path);
+    if (!SteamZoneCloudExists(name)) return;
+    int size = SteamZoneCloudGetSize(name), pulled = 0;
+    if (size <= (int)sizeof(SaveEnvelope) || (unsigned)size > SAVE_MAX_FILE_BYTES) {
+        CloudRecordError(first, path, SAVE_ERR_CAPACITY); return;
+    }
+    if (!SteamZoneCloudPullNew(name, data, (int)SAVE_MAX_FILE_BYTES, &pulled)) {
+        CloudRecordError(first, path, SAVE_ERR_CLOUD_SYNC); return;
+    }
+    int error = CloudInstall(slot, path, data, pulled);
+    if (error == SAVE_ERR_CLOUD_BACKUP) CloudDefer(slot, path, data, pulled, first);
+    CloudRecordError(first, path, error);
+}
 void SaveBackendSyncAll(void) {
-    if (!SteamZoneReady()) return;
-    int firstError = 0;
+    int first = 0;
+    for (int slot = 0; slot < SAVE_SLOTS; slot++)
+        CloudRecordError(&first, "delete-journal", SaveBackendRecoverDelete(slot));
+    if (!SteamZoneReady()) {
+        if (first) { g_saveState = 2; g_saveError = first; }
+        return;
+    }
     for (int slot = 0; slot < SAVE_SLOTS; slot++) {
-        char path[MAX_PATH];
-        SavePathForSlot(0, slot, path, sizeof(path));
-        if (!path[0]) continue;
-        /* Follow the newest existing candidate for this slot, including a
-           previous cloud recovery that had to use a writable fallback. */
-        double newest = PlatFileTime(path);
-        for (int i = 1; i < SAVE_CAND_COUNT; i++) {
-            char candidate[MAX_PATH];
-            SavePathForSlot(i, slot, candidate, sizeof(candidate));
-            double modified = candidate[0] ? PlatFileTime(candidate) : 0;
-            if (modified > newest) {
-                newest = modified;
-                snprintf(path, sizeof(path), "%s", candidate);
-            }
-        }
-        const char* name = strrchr(path, '\\');
-        const char* slash = strrchr(path, '/');
-        if (!name || (slash && slash > name)) name = slash;
-        name = name ? name + 1 : path;
-        const int cap = 1024 * 1024;
-        unsigned char* data = malloc((size_t)cap);
-        if (!data) { CloudRecordError(&firstError, path, 8); continue; }
-        long localLen = SaveBackendRead(path, data, (size_t)cap);
-        if (localLen <= (long)sizeof(SaveEnvelope)) {
+        if (SaveBackendCloudBlocked(slot)) { SaveDiag("CLOUD blocked slot=%d", slot); continue; }
+        char path[MAX_PATH]; CloudLocalPath(slot, path, sizeof(path)); if (!path[0]) continue;
+        unsigned char* data = malloc(SAVE_MAX_FILE_BYTES);
+        if (!data) { CloudRecordError(&first, path, 8); continue; }
+        long n = SaveBackendRead(path, data, SAVE_MAX_FILE_BYTES);
+        if (n <= (long)sizeof(SaveEnvelope)) {
             int exists = PlatPathExists(path);
-            if (!exists) CloudRestoreNew(slot, path, name, data, cap, &firstError);
-            else CloudRecordError(&firstError, path, exists < 0 ? -exists :
-                                   localLen < 0 ? SAVE_ERR_CLOUD_SYNC : SAVE_ERR_PAYLOAD);
-            free(data);
-            continue;
+            if (!exists) CloudRestoreNew(slot, path, data, &first);
+            else CloudRecordError(&first, path, exists < 0 ? -exists : SAVE_ERR_PAYLOAD);
+        } else if (!SaveValidateBytes(data, (size_t)n)) {
+            CloudRecordError(&first, path, SAVE_ERR_PAYLOAD);
+        } else if (CloudSaveValid(data, (int)n)) {
+            int length = (int)SAVE_MAX_FILE_BYTES, conflictLength = 0;
+            void* conflict = NULL;
+            int result = SteamZoneCloudSyncEx(CloudName(path), data, (int)n, &length,
+                                              &conflict, &conflictLength);
+            if (result == STEAM_SYNC_CLOUDWIN) {
+                int error = CloudInstall(slot, path, data, length);
+                if (error == SAVE_ERR_CLOUD_BACKUP) CloudDefer(slot, path, data, length, &first);
+                CloudRecordError(&first, path, error);
+            } else if (result == STEAM_SYNC_CONFLICT) CloudDefer(slot, path, conflict, conflictLength, &first);
+            else if (result == STEAM_SYNC_ERROR) CloudRecordError(&first, path, SAVE_ERR_CLOUD_SYNC);
+            free(conflict);
         }
-        if (!CloudEnvelopeValid(data, (int)localLen)) { free(data); continue; }
-        int length = cap;
-        void* conflict = NULL;
-        int conflictLen = 0;
-        int result = SteamZoneCloudSyncEx(name, data, (int)localLen, &length,
-                                          &conflict, &conflictLen);
-        if (result == STEAM_SYNC_CLOUDWIN) {
-            CloudRecordError(&firstError, path, CloudInstall(slot, path, data, length));
-        } else if (result == STEAM_SYNC_CONFLICT) {
-            int error = CloudKeepConflict(path, conflict, conflictLen);
-            CloudRecordError(&firstError, path, error ? error : SAVE_ERR_CLOUD_CONFLICT);
-        } else if (result == STEAM_SYNC_ERROR) {
-            CloudRecordError(&firstError, path, SAVE_ERR_CLOUD_SYNC);
-        }
-        free(conflict);
         free(data);
     }
-    if (firstError) { g_saveState = 2; g_saveError = firstError; }
+    if (first) { g_saveState = 2; g_saveError = first; }
+}
+
+/* Resolving is explicit. Marker/tombstone history is archived before unblocking. */
+static int CloudClear(int slot) {
+    static const char* suffix[] = { ".cloud-block", ".delete-journal" };
+    for (int i = 0; i < SAVE_CAND_COUNT; i++) for (int j = 0; j < 2; j++) {
+        char base[MAX_PATH], path[MAX_PATH + 32];
+        SavePathForSlot(i, slot, base, sizeof(base)); if (!base[0]) continue;
+        snprintf(path, sizeof(path), "%s%s", base, suffix[j]);
+        int exists = PlatPathExists(path);
+        if (exists < 0) return -exists;
+        if (!exists) continue;
+        unsigned char* old = malloc(SAVE_MAX_FILE_BYTES);
+        if (!old) return 8;
+        long n = SaveBackendRead(path, old, SAVE_MAX_FILE_BYTES);
+        int error = n > 0 ? SaveBackendKeepSnapshot(path, "resolved", old, (size_t)n, NULL, 0)
+                          : SAVE_ERR_CLOUD_BACKUP;
+        free(old); if (error) return error;
+        error = PlatDeletePath(path); if (error < 0) return -error;
+    }
+    cloudBlocked[slot] = 0; return 0;
+}
+int SaveBackendResolveCloud(int slot, int choice) {
+    if (slot < 0 || slot >= SAVE_SLOTS || (choice != SAVE_CLOUD_USE_LOCAL && choice != SAVE_CLOUD_USE_REMOTE)) return 87;
+    int error = SaveBackendRecoverDelete(slot);
+    if (error || !SteamZoneReady()) return error ? error : SAVE_ERR_CLOUD_SYNC;
+    char path[MAX_PATH]; CloudLocalPath(slot, path, sizeof(path)); if (!path[0]) return 87;
+    unsigned char* data = malloc(SAVE_MAX_FILE_BYTES);
+    if (!data) return 8;
+    const char* name = CloudName(path);
+    if (choice == SAVE_CLOUD_USE_REMOTE) {
+        int n = 0;
+        if (!SteamZoneCloudPullNew(name, data, (int)SAVE_MAX_FILE_BYTES, &n)) error = SAVE_ERR_CLOUD_SYNC;
+        else error = CloudInstall(slot, path, data, n);
+    } else {
+        /* Preserve the latest remote too, even if it changed since the prompt. */
+        if (SteamZoneCloudExists(name)) {
+            int n = 0;
+            if (!SteamZoneCloudPullNew(name, data, (int)SAVE_MAX_FILE_BYTES, &n)) error = SAVE_ERR_CLOUD_SYNC;
+            else if (CloudSaveValid(data, n)) error = CloudKeepConflict(slot, path, data, n);
+            else error = SaveBackendKeepSnapshot(path, "invalid-cloud", data, (size_t)n, NULL, 0);
+        }
+        if (!error) {
+            long n = SaveBackendRead(path, data, SAVE_MAX_FILE_BYTES);
+            if (!CloudSaveValid(data, (int)n)) error = SAVE_ERR_PAYLOAD;
+            else if (!SteamZoneCloudUpload(name, data, (int)n)) error = SAVE_ERR_CLOUD_SYNC;
+        }
+    }
+    free(data);
+    if (!error) error = CloudClear(slot);
+    if (error) CloudBlock(slot);
+    return error;
 }
 
 /* Keep a byte-identical pre-migration copy. Existing backups are never overwritten. */
@@ -237,7 +291,7 @@ int SaveBackendPreserveVersion(const char* path,int version){
     unsigned char* original=malloc(cap);unsigned char* prior=malloc(cap);
     if(!original || !prior){free(original);free(prior);return 8;}
     long n=SaveBackendRead(path,original,cap);
-    if(n<=0 || n==(long)cap){free(original);free(prior);return SAVE_ERR_PAYLOAD;}
+    if(n<=0){free(original);free(prior);return SAVE_ERR_PAYLOAD;}
     char backup[MAX_PATH+64];unsigned hash=2166136261u;
     for(long i=0;i<n;i++)hash=(hash^original[i])*16777619u;
     snprintf(backup,sizeof(backup),"%s.v%d.bak",path,version);
@@ -252,3 +306,8 @@ int SaveBackendPreserveVersion(const char* path,int version){
     if(!code){old=SaveBackendRead(backup,prior,cap);if(old!=n || memcmp(original,prior,(size_t)n))code=SAVE_ERR_PAYLOAD;}
     free(original);free(prior);return code;
 }
+
+#ifdef SAVE_BACKEND_TEST
+/* Test-only restart model: durable fake files remain while volatile state is lost. */
+void SaveBackendTestResetCloudCache(void) { memset(cloudBlocked, 0, sizeof(cloudBlocked)); }
+#endif

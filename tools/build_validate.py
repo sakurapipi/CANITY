@@ -150,8 +150,8 @@ if run([GCC,*rule_sources,'-Iinclude','-std=c99','-Wall','-Wextra','-o',rules,'-
 # Real save-backend behavior with in-memory filesystem/Steam doubles. The
 # production backend handles the capacity, conflict and restore branches.
 cloud=cache/'test_save_cloud_backend.exe'
-cloud_sources=['tests/test_save_cloud_backend.c','src/save/save_backend.c','src/save/save_container.c']
-if run([GCC,*cloud_sources,'-Iinclude','-std=c99','-Wall','-Wextra','-o',cloud],label='compile cloud backend contracts'):
+cloud_sources=['tests/test_save_cloud_backend.c','src/save/save_backend.c','src/save/save_container.c','src/save/save_validate.c','src/save/save_snapshot.c','src/save/save_transaction.c']
+if run([GCC,*cloud_sources,'-DSAVE_BACKEND_TEST','-Iinclude','-std=c99','-Wall','-Wextra','-o',cloud],label='compile cloud backend contracts'):
     run([cloud],label='cloud backend contracts')
 
 # Run every runtime domain in its own process/directory so a failing assertion

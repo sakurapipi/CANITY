@@ -440,9 +440,50 @@ double PlatFileTime(const char* path) {
     return (double)u.QuadPart / 10000000.0;   /* 100ns -> 秒 */
 }
 
+int PlatWriteFileExclusive(const char* path, const void* data, int len) {
+    if (!path || !path[0] || !data || len < 0) return ERROR_INVALID_PARAMETER;
+    HANDLE file = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+                               FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return (int)GetLastError();
+    DWORD written = 0;
+    int error = 0;
+    if (!WriteFile(file, data, (DWORD)len, &written, NULL)) error = (int)GetLastError();
+    else if (written != (DWORD)len) error = ERROR_WRITE_FAULT;
+    if (!error && !FlushFileBuffers(file)) error = (int)GetLastError();
+    if (!CloseHandle(file) && !error) error = (int)GetLastError();
+    /* A failed partial snapshot is retained, but never treated as a good backup. */
+    return error;
+}
+
+int PlatSetFileTime(const char* path, double seconds) {
+    if (!path || !isfinite(seconds) || seconds <= 0) return ERROR_INVALID_PARAMETER;
+    long double ticks = (long double)seconds * 10000000.0L;
+    if (ticks > (long double)ULLONG_MAX) return ERROR_INVALID_PARAMETER;
+    ULARGE_INTEGER value; value.QuadPart = (ULONGLONG)ticks;
+    FILETIME stamp = { value.LowPart, value.HighPart };
+    HANDLE file = CreateFileA(path, FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    if (file == INVALID_HANDLE_VALUE) return (int)GetLastError();
+    int error = SetFileTime(file, NULL, NULL, &stamp) ? 0 : (int)GetLastError();
+    CloseHandle(file); return error;
+}
+
 int PlatCopyPath(const char* from, const char* to) {
     if (!from || !to) return -1;
     return CopyFileA(from, to, FALSE) ? 0 : -1;
+}
+
+int PlatCloudConflictChoice(int slot) {
+    wchar_t message[512];
+    if (PlatSystemLanguageZh()) {
+        swprintf(message, sizeof(message)/sizeof(message[0]),
+            L"存档槽 %d 的云同步已暂停。\n\n是：保留本地进度并恢复上传。\n否：备份本地后使用云端进度。\n取消：暂不处理，本地可继续保存，云端保持不变。", slot + 1);
+    } else {
+        swprintf(message, sizeof(message)/sizeof(message[0]),
+            L"Cloud sync for slot %d is paused.\n\nYes: keep local and resume uploads.\nNo: back up local and use cloud.\nCancel: defer; local saves continue, cloud stays unchanged.", slot + 1);
+    }
+    int result = MessageBoxW(NULL, message, L"CANITY - Cloud recovery", MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON3);
+    return result == IDYES ? 1 : result == IDNO ? 2 : 0;
 }
 
 int PlatRenamePath(const char* from, const char* to) {

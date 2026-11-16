@@ -57,6 +57,8 @@
  * ================================================================ */
 /* stdint.h 必须在垫片之前 —— 垫片里的 WPARAM/LPARAM 要用 uint64_t/int64_t */
 #include <stdint.h>
+#include <stddef.h>
+#include <wchar.h>
 #include <stdbool.h>   /* 2026-11-08：系统头统一从 common.h 出 */
 
 #ifdef CANITY_WEB
@@ -168,7 +170,7 @@ typedef struct { LONG x, y; } POINT;
 
 /* v2.4.2：双端稳定性补丁 —— 旧档迁移 / 运行段隔离 / 相位与舱门 /
    网页动作绑定与存档导出。存档结构**未变**（仍是 v34）。 */
-#define CANITY_VERSION_STR "2.4.6-RC"
+#define CANITY_VERSION_STR "2.4.6-RC2"
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {

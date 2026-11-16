@@ -1,8 +1,5 @@
-/* 2.4.6-RC backend regression with in-memory platform/Steam doubles.
- * Run by tools/build_validate.py using the real persistence backend.
- * gcc -Iinclude -std=c99 -Wall -Wextra tests/test_save_cloud_backend.c
- *     src/save/save_backend.c src/save/save_container.c -o cloud_cases.exe
- * This links the real save backend, not the real Steam client or player saves.
+/* RC2 regression specifications. Not run for this code-only revision.
+ * Links real persistence/validation/transaction code with in-memory OS/Steam I/O.
  */
 #include "common.h"
 #include "save.h"
@@ -10,63 +7,91 @@
 #include "plat.h"
 #include "steam_zone.h"
 #include <assert.h>
-
+#include <setjmp.h>
+void SaveBackendTestResetCloudCache(void);
 int g_saveState, g_saveError;
 char g_savePath[MAX_PATH];
-typedef struct { char path[MAX_PATH+64]; unsigned char data[512]; int len; } File;
-static File files[64];
-static int count, cloudLen, localLen, seenCapacity, failPrimary, failAll, failCopy;
-static int verdict;
-static unsigned char cloud[512], local[512];
-
+#define FIXTURE_CAP SAVE_MAX_FILE_BYTES
+typedef struct { char path[MAX_PATH+96]; unsigned char* data; int len, active; double stamp; } File;
+static File files[128];
+static int count, cloudLen, localLen, seenCapacity, failPrimary, failAll, failSnapshot;
+static int verdict, uploads, syncCalls, deleteCrash, failBackupDelete;
+static unsigned char cloud[FIXTURE_CAP], local[FIXTURE_CAP];
+static jmp_buf powerLoss;
 static File* find(const char* path) {
-    for(int i=0;i<count;i++)if(!strcmp(files[i].path,path))return &files[i];
+    for(int i=0;i<count;i++)if(files[i].active && !strcmp(files[i].path,path))return &files[i];
     return NULL;
 }
 static File* put(const char* path,const void* bytes,int len) {
-    assert(len>=0 && len<=512);
+    assert(len>=0 && (unsigned)len<=SAVE_MAX_FILE_BYTES);
+    unsigned char* copy=malloc((size_t)len+1);assert(copy);memcpy(copy,bytes,(size_t)len);
     File* file=find(path);
-    if(!file){assert(count<64);file=&files[count++];snprintf(file->path,sizeof(file->path),"%s",path);}
-    memcpy(file->data,bytes,(size_t)len);file->len=len;return file;
+    if(!file){assert(count<128);file=&files[count++];memset(file,0,sizeof(*file));snprintf(file->path,sizeof(file->path),"%s",path);}
+    free(file->data);file->data=copy;file->len=len;file->active=1;file->stamp=1;return file;
 }
-static int envelope(unsigned char* out,int payload,unsigned seed,unsigned stamp) {
-    for(int i=0;i<payload;i++)out[sizeof(SaveEnvelope)+i]=(unsigned char)(seed+(unsigned)i);
-    SaveEnvelope header;SaveEnvelopeSeal(&header,out+sizeof(header),payload,stamp);
-    memcpy(out,&header,sizeof(header));return (int)sizeof(header)+payload;
+static int envelope(unsigned char* out,int unknownBytes,unsigned seed,unsigned stamp) {
+    SaveBlob* blob=calloc(1,sizeof(*blob));assert(blob);
+    blob->magic=SAVE_MAGIC;blob->version=SAVE_VERSION;blob->hasRun=1;blob->level=(int)seed;
+    assert(unknownBytes>=0 && (unsigned)unknownBytes < SAVE_MAX_FILE_BYTES-sizeof(SaveBlob)-128);
+    unsigned char* unknown=malloc(unknownBytes?(size_t)unknownBytes:1);assert(unknown);
+    memset(unknown,(int)seed,(size_t)unknownBytes);
+    SaveChunkDesc chunks[2]={{SC_LEGACY29,1,sizeof(SaveBlob)},{0x7777,1,(unsigned)unknownBytes}};
+    const void* bodies[2]={blob,unknown};
+    int payload=SaveContainerPack(chunks,bodies,unknownBytes?2:1,out+sizeof(SaveEnvelope),
+                                 (int)FIXTURE_CAP-(int)sizeof(SaveEnvelope),NULL);
+    assert(payload>0);SaveEnvelope header;
+    SaveEnvelopeSeal(&header,out+sizeof(header),payload,stamp);memcpy(out,&header,sizeof(header));
+    free(unknown);free(blob);return (int)sizeof(header)+payload;
 }
 static void reset(int withLocal) {
+    for(int i=0;i<count;i++)free(files[i].data);
     memset(files,0,sizeof(files));count=0;
-    g_saveState=g_saveError=seenCapacity=failPrimary=failAll=failCopy=0;g_savePath[0]=0;
-    localLen=envelope(local,16,1,1000);cloudLen=envelope(cloud,80,7,2000);
+    g_saveState=g_saveError=seenCapacity=failPrimary=failAll=failSnapshot=0;
+    uploads=syncCalls=deleteCrash=failBackupDelete=0;g_savePath[0]=0;
+    SaveBackendTestResetCloudCache();
+    localLen=envelope(local,0,1,1000);cloudLen=envelope(cloud,80,7,2000);
     verdict=STEAM_SYNC_CLOUDWIN;
-    if(withLocal)put("slot0.sav",local,localLen);
+    if(withLocal)put("canity0.sav",local,localLen);
 }
 void SaveDiag(const char* fmt, ...) { (void)fmt; }
 const char* SavePathForSlot(int i,int slot,char* out,size_t cap) {
     if(slot){out[0]=0;return out;}
-    if(!i)snprintf(out,cap,"slot0.sav");else snprintf(out,cap,"fallback%d.sav",i);
+    if(!i)snprintf(out,cap,"canity0.sav");else snprintf(out,cap,"fallback%d/canity0.sav",i);
     return out;
 }
 int PlatPathExists(const char* path) { return find(path)!=NULL; }
-double PlatFileTime(const char* path) { return find(path)?1.0:0.0; }
+double PlatFileTime(const char* path) { File* file=find(path);return file?file->stamp:0; }
+int PlatSetFileTime(const char* path,double stamp) {
+    File* file=find(path);if(!file)return 2;file->stamp=stamp;return 0;
+}
 int PlatReadFilePath(const char* path,void* out,int cap) {
     File* file=find(path);if(!file || cap<file->len)return -1;
     memcpy(out,file->data,(size_t)file->len);return file->len;
 }
 int PlatWriteFileAtomic(const char* path,const void* bytes,int len) {
-    if(failAll || (failPrimary && !strcmp(path,"slot0.sav")))return 5;
+    if(failAll || (failPrimary && !strcmp(path,"canity0.sav")))return 5;
     put(path,bytes,len);return 0;
 }
+int PlatWriteFileExclusive(const char* path,const void* bytes,int len) {
+    if(find(path))return 80;
+    if(failAll || (failSnapshot && strstr(path,"pre-cloud")))return 5;
+    put(path,bytes,len);return 0;
+}
+int PlatDeletePath(const char* path) {
+    if(failBackupDelete && !strcmp(path,"canity0.sav.bak"))return -32;
+    File* file=find(path);if(!file)return 1;
+    free(file->data);file->data=NULL;file->active=0;
+    if(deleteCrash && !strcmp(path,"canity0.sav")){deleteCrash=0;longjmp(powerLoss,1);}
+    return 0;
+}
 int PlatCopyPath(const char* from,const char* to) {
-    File* file=find(from);if(failCopy || !file)return -1;
-    unsigned char copy[512];int len=file->len;memcpy(copy,file->data,(size_t)len);
-    put(to,copy,len);return 0;
+    File* file=find(from);if(!file)return -1;put(to,file->data,file->len);return 0;
 }
 int SteamZoneReady(void) { return 1; }
-int SteamZoneCloudExists(const char* name) { return !strcmp(name,"slot0.sav"); }
+int SteamZoneCloudExists(const char* name) { return !strcmp(name,"canity0.sav"); }
 int SteamZoneCloudGetSize(const char* name) { (void)name;return cloudLen; }
 int SteamZoneCloudUpload(const char* name,const void* bytes,int len) {
-    (void)name;(void)bytes;(void)len;return 1;
+    (void)name;(void)bytes;(void)len;uploads++;return 1;
 }
 int SteamZoneCloudPullNew(const char* name,void* out,int cap,int* len) {
     (void)name;if(cap<cloudLen)return 0;
@@ -74,65 +99,118 @@ int SteamZoneCloudPullNew(const char* name,void* out,int cap,int* len) {
 }
 int SteamZoneCloudSyncEx(const char* name,void* out,int bytes,int* capacity,
                          void** conflict,int* conflictLen) {
-    (void)name;assert(bytes==localLen);seenCapacity=*capacity;
+    (void)name;assert(bytes==localLen);seenCapacity=*capacity;syncCalls++;
     *conflict=NULL;*conflictLen=0;
     if(verdict==STEAM_SYNC_CONFLICT || *capacity<cloudLen){
         *conflict=malloc((size_t)cloudLen);assert(*conflict);
-        memcpy(*conflict,cloud,(size_t)cloudLen);*conflictLen=cloudLen;
-        return STEAM_SYNC_CONFLICT;
+        memcpy(*conflict,cloud,(size_t)cloudLen);*conflictLen=cloudLen;return STEAM_SYNC_CONFLICT;
     }
     memcpy(out,cloud,(size_t)cloudLen);*capacity=cloudLen;return verdict;
 }
-
+static void original_survives(void) {
+    File* file=find("canity0.sav");assert(file && file->len==localLen);
+    assert(!memcmp(file->data,local,(size_t)localLen));
+}
 static void test_larger_valid_cloud_uses_real_capacity(void) {
-    reset(1);SaveBackendSyncAll();
-    assert(seenCapacity==1024*1024);
-    File* file=find("slot0.sav");assert(file && file->len==cloudLen);
+    reset(1);assert(SaveValidateBytes(local,localLen));assert(SaveValidateBytes(cloud,cloudLen));
+    SaveBackendSyncAll();assert(seenCapacity==(int)SAVE_MAX_FILE_BYTES);
+    File* file=find("canity0.sav");assert(file && file->len==cloudLen);
     assert(!memcmp(file->data,cloud,(size_t)cloudLen));
-    File* backup=find("slot0.sav.pre-cloud.bak");
+    File* backup=find("canity0.sav.pre-cloud.bak");
     assert(backup && backup->len==localLen && !memcmp(backup->data,local,(size_t)localLen));
+}
+static void test_restore_failure_and_fallback(void) {
+    reset(0);failAll=1;SaveBackendSyncAll();assert(g_saveState==2 && g_saveError==5);
+    reset(0);failPrimary=1;SaveBackendSyncAll();assert(!find("canity0.sav"));
+    assert(find("fallback1/canity0.sav") && !strcmp(g_savePath,"fallback1/canity0.sav"));
+}
+static void test_backup_failure_does_not_activate_fallback(void) {
+    reset(1);failSnapshot=1;SaveBackendSyncAll();original_survives();
+    assert(!find("fallback1/canity0.sav"));assert(SaveBackendCloudBlocked(0));
+    assert(find("canity0.sav.conflict-cloud.bak"));
+}
+static void test_persistent_conflict_blocks_normal_upload(void) {
+    reset(1);verdict=STEAM_SYNC_CONFLICT;SaveBackendSyncAll();original_survives();
+    File* copy=find("canity0.sav.conflict-cloud.bak");assert(copy && copy->len==cloudLen);
+    assert(!memcmp(copy->data,cloud,(size_t)cloudLen));
+    SaveBackendTestResetCloudCache();assert(SaveBackendCloudBlocked(0));
+    assert(SaveBackendWrite("canity0.sav",local,localLen)==0);
+    SaveBackendUpload("canity0.sav");assert(uploads==0);
+    int before=syncCalls;SaveBackendSyncAll();assert(syncCalls==before);
+    assert(SaveBackendResolveCloud(0,SAVE_CLOUD_USE_LOCAL)==0);
+    assert(!SaveBackendCloudBlocked(0) && uploads==1);
+}
+static void test_invalid_internal_chunk_is_not_installed(void) {
+    reset(1);
+    /* Corrupt only the inner blob magic, then reseal a valid outer envelope. */
+    const void* blob=NULL;int bytes=0;
+    assert(SaveContainerFind(cloud+sizeof(SaveEnvelope),cloudLen-sizeof(SaveEnvelope),SC_LEGACY29,&blob,&bytes));
+    memset((void*)blob,0,4);SaveEnvelope header;
+    SaveEnvelopeSeal(&header,cloud+sizeof(header),cloudLen-sizeof(header),2000);
+    memcpy(cloud,&header,sizeof(header));assert(!SaveValidateBytes(cloud,cloudLen));
+    SaveBackendSyncAll();original_survives();assert(g_saveError==SAVE_ERR_PAYLOAD);
+}
+static void test_partial_delete_rolls_back_and_restart_recovers(void) {
+    reset(1);put("canity0.sav.bak",local,localLen);failBackupDelete=1;
+    assert(SaveBackendDeleteSlot(0)!=0);original_survives();
+    assert(find("canity0.sav.delete-journal"));failBackupDelete=0;
+    assert(SaveBackendRecoverDelete(0)==0);original_survives();
+    assert(!find("canity0.sav.delete-journal"));
+}
+static void test_power_loss_before_commit_restores_original(void) {
+    reset(1);put("canity0.sav.bak",local,localLen);deleteCrash=1;
+    /* longjmp models process termination: the process-private allocation is
+       deliberately abandoned; durable fake files survive for restart recovery. */
+    if(!setjmp(powerLoss)){(void)SaveBackendDeleteSlot(0);assert(0);}
+    assert(!find("canity0.sav") && find("canity0.sav.delete-journal"));
+    assert(SaveBackendRecoverDelete(0)==0);original_survives();
+}
+static void test_committed_delete_does_not_restore_from_cloud(void) {
+    reset(1);assert(SaveBackendDeleteSlot(0)==0);assert(!find("canity0.sav"));
+    SaveBackendTestResetCloudCache();SaveBackendSyncAll();
+    assert(!find("canity0.sav") && SaveBackendCloudBlocked(0));
+}
+static void test_valid_outer_invalid_directory_is_rejected(void) {
+    for(int kind=0;kind<4;kind++) {
+        reset(1);unsigned char* payload=cloud+sizeof(SaveEnvelope);
+        if(kind==0){int count=65;memcpy(payload+4,&count,4);}
+        else {
+            SaveChunkDesc desc;memcpy(&desc,payload+SAVE_PAYLOAD_HEAD_SIZE,sizeof(desc));
+            if(kind==1)desc.id=0x5555; /* No legacy block. */
+            if(kind==2)desc.schema=2; /* Unsupported legacy schema. */
+            if(kind==3)desc.id=0x7777; /* Duplicate unknown ID. */
+            memcpy(payload+SAVE_PAYLOAD_HEAD_SIZE,&desc,sizeof(desc));
+        }
+        SaveEnvelope header;SaveEnvelopeSeal(&header,payload,cloudLen-sizeof(header),2000);
+        memcpy(cloud,&header,sizeof(header));
+        assert(!SaveValidateBytes(cloud,cloudLen));SaveBackendSyncAll();original_survives();
+        assert(g_saveError==SAVE_ERR_PAYLOAD);
+    }
+}
+static void test_first_restore_above_one_megabyte(void) {
+    reset(0);cloudLen=envelope(cloud,1024*1024,9,2000);
+    assert(SaveValidateBytes(cloud,cloudLen));SaveBackendSyncAll();
+    File* file=find("canity0.sav");assert(file && file->len==cloudLen);
     assert(g_saveState!=2);
 }
-static void test_first_restore_reports_failed_writes(void) {
-    reset(0);failAll=1;SaveBackendSyncAll();
-    assert(g_saveState==2 && g_saveError==5 && count==0);
-}
-static void test_first_restore_can_use_writable_fallback(void) {
-    reset(0);failPrimary=1;SaveBackendSyncAll();
-    assert(!find("slot0.sav"));
-    File* file=find("fallback1.sav");assert(file && file->len==cloudLen);
-    assert(!strcmp(g_savePath,"fallback1.sav") && g_saveState!=2);
-}
-static void test_failed_backup_never_overwrites_primary(void) {
-    reset(1);failCopy=1;SaveBackendSyncAll();
-    File* file=find("slot0.sav");assert(file && file->len==localLen);
-    assert(!memcmp(file->data,local,(size_t)localLen));
-    assert(find("fallback1.sav"));
-}
-static void test_conflict_keeps_actual_cloud_and_local(void) {
-    reset(1);verdict=STEAM_SYNC_CONFLICT;SaveBackendSyncAll();
-    File* primary=find("slot0.sav"),*copy=find("slot0.sav.conflict-cloud.bak");
-    assert(primary && primary->len==localLen && !memcmp(primary->data,local,(size_t)localLen));
-    assert(copy && copy->len==cloudLen && !memcmp(copy->data,cloud,(size_t)cloudLen));
-    assert(g_saveState==2 && g_saveError==SAVE_ERR_CLOUD_CONFLICT);
-    unsigned char first[512];int firstLen=copy->len;memcpy(first,copy->data,(size_t)firstLen);
-    cloudLen=envelope(cloud,90,19,2000);int before=count;SaveBackendSyncAll();
-    copy=find("slot0.sav.conflict-cloud.bak");
-    assert(copy && copy->len==firstLen && !memcmp(copy->data,first,(size_t)firstLen));
-    assert(count==before+1);
-    File* later=&files[count-1];assert(later->len==cloudLen && !memcmp(later->data,cloud,(size_t)cloudLen));
-}
-static void test_corrupt_cloud_does_not_replace_local(void) {
-    reset(1);cloud[sizeof(SaveEnvelope)+1]^=0x80;SaveBackendSyncAll();
-    assert(g_saveState==2 && g_saveError==SAVE_ERR_PAYLOAD);
-    File* file=find("slot0.sav");assert(file && file->len==localLen && !memcmp(file->data,local,(size_t)localLen));
+static void test_precloud_history_is_immutable(void) {
+    reset(1);SaveBackendSyncAll();
+    File* first=find("canity0.sav.pre-cloud.bak");assert(first);
+    int firstLen=first->len;unsigned char* original=malloc((size_t)firstLen);assert(original);
+    memcpy(original,first->data,(size_t)firstLen);
+    localLen=cloudLen;memcpy(local,cloud,(size_t)localLen);
+    cloudLen=envelope(cloud,120,11,3000);SaveBackendSyncAll();
+    first=find("canity0.sav.pre-cloud.bak");
+    assert(first && first->len==firstLen && !memcmp(first->data,original,(size_t)firstLen));
+    int versions=0;for(int i=0;i<count;i++)if(files[i].active && strstr(files[i].path,"pre-cloud"))versions++;
+    assert(versions>=2);free(original);
 }
 int main(void) {
-    test_larger_valid_cloud_uses_real_capacity();
-    test_first_restore_reports_failed_writes();
-    test_first_restore_can_use_writable_fallback();
-    test_failed_backup_never_overwrites_primary();
-    test_conflict_keeps_actual_cloud_and_local();
-    test_corrupt_cloud_does_not_replace_local();
-    puts("cloud backend cases passed");return 0;
+    test_larger_valid_cloud_uses_real_capacity();test_restore_failure_and_fallback();
+    test_backup_failure_does_not_activate_fallback();test_persistent_conflict_blocks_normal_upload();
+    test_invalid_internal_chunk_is_not_installed();test_partial_delete_rolls_back_and_restart_recovers();
+    test_power_loss_before_commit_restores_original();test_committed_delete_does_not_restore_from_cloud();
+    test_valid_outer_invalid_directory_is_rejected();test_first_restore_above_one_megabyte();
+    test_precloud_history_is_immutable();
+    puts("RC2 cloud and deletion scenarios passed");return 0;
 }
