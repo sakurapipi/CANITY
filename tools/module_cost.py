@@ -29,6 +29,7 @@ DOCS = os.path.join(ROOT, 'docs', 'modules')
 # 域定义：域 -> (实现文件, 契约头, 卡片)
 DOMAINS = {
     'core':     (['core/tick.c', 'core/rng.c'], [], None),
+    'localization': (['lang.c', 'cjktext.c'], ['lang.h'], 'localization.md'),
     'phase':    (['domain/phase/phase.c'], ['phase.h'], 'phase.md'),
     'hatch':    (['hatch.c', 'domain/hatch/hatch_place.c'], ['hatch.h'], 'hatch.md'),
     'collapse': (['domain/collapse/collapse.c'], ['collapse.h'], 'collapse.md'),

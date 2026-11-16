@@ -156,7 +156,7 @@ if run([GCC,*cloud_sources,'-DSAVE_BACKEND_TEST','-Iinclude','-std=c99','-Wall',
 
 # Run every runtime domain in its own process/directory so a failing assertion
 # cannot hide another domain or contaminate its save state.
-suites=('base','phase','hatch','collapse','throwing','core','ui','update','progress','actors','world','save','delivery','existing_save','legacy_fixtures')
+suites=('base','phase','hatch','collapse','throwing','core','ui','localization','update','progress','actors','world','save','delivery','existing_save','legacy_fixtures')
 runtime=cache/'test_runtime.exe'
 test_srcs=['tests/test_runtime.c']+sorted(str(q) for q in (root/'tests/domains').glob('*.c'))
 if objects_ok and run([GCC,*test_srcs,*objects,'-Iinclude','-std=c99','-Wall','-Wextra',*libs,'-o',runtime],label='compile runtime domains'):
