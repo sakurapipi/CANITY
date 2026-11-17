@@ -43,7 +43,7 @@ EM_JS(void, js_plat_init, (void), {
                 Module._keys[c]=down?1:0;
             }
             /* 方向键/空格会滚动页面，游戏里必须吃掉 */
-            if (down && (c === 32 || (c >= 37 && c <= 40) || c === 9)) e.preventDefault();
+            if (down && (c === 32 || c === 33 || c === 34 || (c >= 37 && c <= 40) || c === 9)) e.preventDefault();
         }
         window.addEventListener('keydown', function (e) { setKey(e, true); }, false);
         window.addEventListener('keyup', function (e) { setKey(e, false); }, false);
@@ -594,7 +594,7 @@ EM_JS(int, js_write_exclusive, (const char* path, const void* data, int len), {
     try {
         var key = 'canity:' + UTF8ToString(path);
         if (localStorage.getItem(key) !== null) return 80;
-        var bytes = '';
+        var bytes = "";
         for (var i = 0; i < len; i++) bytes += String.fromCharCode(HEAPU8[(data + i) | 0]);
         localStorage.setItem(key, btoa(bytes));
         localStorage.setItem(key + '#ts', String(Date.now()));

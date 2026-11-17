@@ -23,6 +23,21 @@ void AudioBuildAtmosphere(short* output,int frames,int kind,int rate) {
         case 8:v=(sinf(2*pi*2131*t)+sinf(2*pi*2877*t)+high*.6f)*expf(-t*10)*.2f;break;
         case 9:v=(sinf(2*pi*(410*t+90*t*t))*.4f+high*.1f)*expf(-t*2);break;
         case 10:v=low*(.2f+.8f*sinf(pi*fminf(1,t)))*.9f;break;
+        case 11: {
+            /* Ragged inhale, inharmonic throat and a descending bone resonance.
+               Audible harmonics survive small phone speakers; no volume spike. */
+            float breath=sinf(pi*fminf(1,t/.9f));
+            float throat=sinf(2*pi*(153*t-26*t*t))*.22f+sinf(2*pi*(237*t-35*t*t))*.13f;
+            float flutter=.66f+.24f*sinf(2*pi*19*t)+.10f*sinf(2*pi*31*t);
+            v=(low*.9f+throat)*breath*flutter+high*.08f*expf(-t*10);break;
+        }
+        case 12: {
+            /* Exactly two short pulses inside one voice, with soft envelopes. */
+            float age=t<.22f?t:t-.22f;
+            if(t<.085f || (t>=.22f && t<.305f))
+                v=sinf(2*pi*1320*age)*.35f*sinf(pi*age/.085f);
+            break;
+        }
         }
         float end=(float)(frames-i)/rate;
         float envelope=fminf(1,t/.004f)*fminf(1,end/.04f);

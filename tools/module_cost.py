@@ -38,17 +38,32 @@ DOMAINS = {
     'lockbox':  (['lockbox.c'], ['lockbox.h'], 'lockbox.md'),
     'warden':   (['warden.c'], ['warden.h'], 'warden.md'),
     'shop':     (['shop.c'], ['shop.h'], 'shop.md'),
-    'map_rooms': (['map_rooms.c'], ['map_rooms.h'], 'map_rooms.md'),
+    'rooms': (['room_theme.c', 'domain/rooms/room_archetype.c',
+               'domain/rooms/room_actions.c', 'domain/rooms/room_labels.c', 'domain/rooms/room_vault.c'],
+               ['room_theme.h', 'room_archetype.h', 'room_template.h'], 'rooms.md'),
+    'map_rooms': (['map_rooms.c', 'domain/rooms/floor_routes.c'], ['map_rooms.h', 'floor_routes.h'], 'map_rooms.md'),
     'ui':       (['ui.c', 'domain/ui/ui_text.c', 'domain/ui/ui_pages.c',
-                 'domain/ui/ui_menu.c', 'domain/ui/ui_hud.c'],
-                 ['ui.h', 'ui_text.h', 'ui_pages.h', 'ui_menu.h'], 'ui.md'),
-    'render':   (['render.c', 'domain/render/render_map.c',
+                 'domain/ui/ui_menu.c', 'domain/ui/ui_hud.c',
+                 'domain/ui/ui_skilltree.c', 'domain/ui/ui_overlay.c', 'domain/ui/ui_archive.c', 'domain/ui/ui_calibration.c'],
+                 ['ui.h', 'ui_text.h', 'ui_pages.h', 'ui_menu.h',
+                  'src/domain/ui/ui_overlay.h', 'ui_archive.h'], 'ui.md'),
+    'sprites': (['sprites.c', 'domain/sprites/sprite_canvas.c',
+                 'domain/sprites/sprite_actors.c', 'domain/sprites/sprite_props.c',
+                 'domain/sprites/sprite_room_devices.c', 'domain/sprites/sprite_theme_props.c'],
+                 ['sprites.h', 'src/domain/sprites/sprite_bake.h'], 'sprites.md'),
+    'render':   (['render.c', 'domain/render/render_map.c', 'domain/render/map_markers.c',
                  'domain/render/render_decoy.c',
                  'domain/render/render_spritequeue.c',
                  'domain/render/render_viewmodel.c',
                  'domain/render/render_props.c',
-                 'domain/render/render_surface.c'], ['render.h'], 'render.md'),
+                 'domain/render/render_surface.c'], ['render.h', 'src/domain/render/map_markers.h'], 'render.md'),
 }
+
+
+def contract_path(name):
+    # Private source-directory contracts count toward the same domain budget.
+    return os.path.join(ROOT if name.startswith('src/') else INC,
+                        name.replace('/', os.sep))
 
 
 def count_lines(path):
@@ -83,7 +98,7 @@ def measure():
         sizes = [count_lines(find_c(c)) for c in cs]
         impl = sum(sizes)                       # 合计（信息列）
         biggest = max(sizes) if sizes else 0    # 单文件最大值（判预算用）
-        hdr = sum(count_lines(os.path.join(INC, h)) for h in hs)
+        hdr = sum(count_lines(contract_path(h)) for h in hs)
         card_lines = count_lines(os.path.join(DOCS, card)) if card else 0
         ext = sum(extern_count(find_c(c)) for c in cs)
         # 第 2 轮起：域专属测试也算"必读量" —— 改这个域要先看它的用例
@@ -100,7 +115,7 @@ def measure():
             'cost': biggest + hdr + card_lines + test_lines,
             'missing': [p for p in
                         ([find_c(c) for c in cs] +
-                         [os.path.join(INC, h) for h in hs] +
+                         [contract_path(h) for h in hs] +
                          ([os.path.join(DOCS, card)] if card else []))
                         if not os.path.exists(p)],
         })

@@ -47,65 +47,15 @@ const char* HatchTitle(int idx) {
  * 破墙 / 血祭加速 / 全场静止），问题是玩家看不到。
  * 这里给每种闸门一句**后果**描述，悬停时显示在标题下面一行。
  * ================================================================ */
-const char* HatchEffectLine(int idx){
-    static const char* en[7]={"ECHO EXCHANGE: 20 battery; footsteps originate here for 45s.","DEBT WINDOW: 100 gold; loot +35%, noise +25% for 75s.","LUMEN OVERLOAD: 25 battery; reveal routes for 35s; a loud beacon draws hunters.","EQUAL TRANSPLANT: trade battery for sanity, or sanity for battery.","RETURN SWITCH: 40 stamina; swap with a nearby hunter and stagger it.","MADNESS COVENANT: 100 gold; run-long pollution, loot +25%, noise +35%.","BORROWED TIME: one throwable; hunters freeze 20s, then the room screams."};
-    static const char* zh[7]={"声源置换：消耗20电量，45秒内脚步声从此处传出。","债务窗口：消耗100金币，75秒内搜刮+35%、噪音+25%。","光源过载：消耗25电量，35秒揭示路线，巨响引来听声鬼。","等价移植：电量较多时换理智，理智较多时换电量。","折返换位：消耗40体力，与附近听声鬼换位并使其硬直。","疯癫契约：消耗100金币，本局精神污染、搜刮+25%、噪音+35%。","借来的时间：消耗1投掷物，猎手静止20秒，随后房间发出尖啸。"};
-    if(idx<0 || idx>=hatchCount)return "";
-    int kind=hatches[idx].kind;return kind>=0 && kind<7?(g_lang==LANG_ZH?zh[kind]:en[kind]):"";
-}
-
-int HatchGateCheck(int idx,char* why,int cap){
-    if(idx<0 || idx>=hatchCount)return 0;
-    int kind=hatches[idx].kind,ok=0;const char* message="";
-    switch(kind){
-    case HATCH_BOILER:ok=battery>=20;message=g_lang==LANG_ZH?"需要20电量":"NEED 20 BATTERY";break;
-    case HATCH_STORAGE:case HATCH_HELL:ok=WalletCanPayRun(100);message=g_lang==LANG_ZH?"需要100局内金币":"NEED 100 RUN GOLD";break;
-    case HATCH_POWER:ok=battery>=25;message=g_lang==LANG_ZH?"需要25电量":"NEED 25 BATTERY";break;
-    case HATCH_WARD:ok=(sanity<SanityMax()-1 && battery>=20)||(battery<BatteryMax()-1 && sanity>=25);message=g_lang==LANG_ZH?"需要可交换的资源及恢复空间":"NEED SPARE SANITY OR BATTERY";break;
-    case HATCH_BRICK:ok=stamina>=40;message=g_lang==LANG_ZH?"需要40体力及附近可换位的听声鬼":"NEED 40 STAMINA AND A NEARBY HUNTER";
-        if(ok){ok=0;for(int i=0;i<MON_HUNTER_MAX;i++)if(monHunters[i].active && Dist2(posX,posY,monHunters[i].x,monHunters[i].y)>=4 && Dist2(posX,posY,monHunters[i].x,monHunters[i].y)<=100 && !Blocked(monHunters[i].x,monHunters[i].y))ok=1;}break;
-    case HATCH_FLESH:ok=flares+bottles+smokeBombs+gluePots+echoBolts>0;message=g_lang==LANG_ZH?"需要1个投掷物":"NEED ONE THROWABLE";break;
-    }
-    if(!ok && why && cap>0)snprintf(why,(size_t)cap,"%s",message);
-    return ok;
-}
-
-/* ==================================================================
- * 效果结算 —— 由 HatchTick 在**开门动画播完的那一帧**调用（AD-27）
- * ================================================================ */
-void HatchFireEffect(int idx){
-    if(!HatchGateCheck(idx,NULL,0))return;
-    Hatch* h=&hatches[idx];
-    switch(h->kind){
-    case HATCH_BOILER:battery-=20;RoomThemeStartEvent(0,45);MakeNoise(h->x,h->y,20);break;
-    case HATCH_STORAGE:if(!WalletSpendRun(100))return;RoomThemeStartEvent(1,75);MakeNoise(h->x,h->y,18);break;
-    case HATCH_POWER:
-        battery-=25;hatchLightsT=35;RoomThemeStartEvent(2,35);
-        for(int y=1;y<MAP_HEIGHT-1;y++)for(int x=1;x<MAP_WIDTH-1;x++)if(!worldMap[y][x])explored[y][x]=1;
-        MakeNoise(h->x,h->y,32);break;
-    case HATCH_WARD:
-        if(sanity/SanityMax()<battery/fmaxf(1,BatteryMax()) && battery>=20){battery-=20;sanity=fminf(SanityMax(),sanity+35);}
-        else if(sanity>=25 && battery<BatteryMax()-1){sanity-=20;battery=fminf((float)BatteryMax(),battery+50);}
-        else {battery-=20;sanity=fminf(SanityMax(),sanity+35);}break;
-    case HATCH_BRICK:{
-        int best=-1;float distance=101;
-        for(int i=0;i<MON_HUNTER_MAX;i++){float d=Dist2(posX,posY,monHunters[i].x,monHunters[i].y);if(monHunters[i].active && d>=4 && d<distance && !Blocked(monHunters[i].x,monHunters[i].y)){best=i;distance=d;}}
-        if(best<0)return;
-        Monster* m=&monHunters[best];float x=posX,y=posY;posX=m->x;posY=m->y;m->x=x;m->y=y;m->stun=2.5f;m->pathLen=m->pathIdx=0;m->repath=0;stamina-=40;MakeNoise(x,y,22);break;
-    }
-    case HATCH_HELL:if(!WalletSpendRun(100))return;RoomThemeSetMadness(1);MakeNoise(h->x,h->y,24);break;
-    case HATCH_FLESH:
-        if(flares>0)flares--;else if(bottles>0)bottles--;else if(smokeBombs>0)smokeBombs--;else if(gluePots>0)gluePots--;else echoBolts--;
-        MonsterStunAll(20);RoomThemeStartEvent(6,20);break;
-    }
-    PlaySfx(SFX_POWER,.7f);pickupMsg=g_lang==LANG_ZH?"主题回路已激活":"ROOM CIRCUIT ACTIVE";pickupMsgTimer=1.5f;
-}
+const char* HatchEffectLine(int idx){return RoomThemeEffectLine(idx);}
+int HatchGateCheck(int idx,char* why,int cap){return RoomThemeCanActivate(idx,why,cap);}
+int HatchFireEffect(int idx){return RoomThemeActivate(idx);}
 
 int HatchPlaceInRoom(int fx, int fy, int w, int h, int themeId) {
     /* 崩塌层**不生成舱门** —— 否则可以在崩塌层里再触发一次崩塌，
        无限重掷刷金币。这不是防玩家，是防机制本身。 */
     int i;
-    if (collapsedLevel) return -1;
+    if (collapsedLevel || hatchCount>0) return -1;
     int kind = HatchKindForTheme(themeId);
     if (kind < 0) return -1;
 

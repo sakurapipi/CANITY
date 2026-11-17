@@ -54,7 +54,6 @@ extern int showFps;
 extern int fpsCapIndex;             /* 30 / 60 / 120 / 144 / 不限制 */
 extern const int fpsCaps[5];
 extern int renderScaleIndex;        /* 0..3 = 100/75/50/25% */
-extern int dynamicRes;              /* 1 = 自动降分辨率 */
 extern const int renderScales[4];
 extern float mouseSens;             /* 0.2x - 3.0x */
 extern int vignetteOn;              /* 低理智红边特效 */

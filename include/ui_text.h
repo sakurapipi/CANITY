@@ -12,5 +12,6 @@
 
 /* UI 布局记录（原来在 ui.c 里是 static；拆出文本层后两边都要用） */
 void UiTrack(int x, int y, int w, int h, const char* label);
+int UiFindFreeBand(int x,int top,int width,int height,int bottom,int* y);
 
 #endif /* CANITY_UI_TEXT_H */

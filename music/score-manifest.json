@@ -6,11 +6,11 @@
     "menu": {
       "bpm": 72,
       "seconds": 80.0,
-      "wav_sha256": "f2beffcce1db90835b0a64d0b9a4e2fd9a0a985d80d8a5b1330b37e7b296fabf",
-      "rms_dbfs": -17.059,
-      "peak_dbfs": -1.0,
-      "notes": 94,
-      "mp3_sha256": "ec2d1cad842921824cfc8caa3052b7f71b02b40c6a66f546936cad59f53abce5",
+      "wav_sha256": "f1721afb939be95281382b72ac9c8c225e685e5c83475b427cea0ed5c6f7ef18",
+      "rms_dbfs": -17.0,
+      "peak_dbfs": -5.957,
+      "notes": 111,
+      "mp3_sha256": "9bb05ae3f282742438d441b85a931e6ce924fcc0c7a384961bf5bd787d1a42fb",
       "mp3_bytes": 1281087
     },
     "explore": {

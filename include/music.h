@@ -39,6 +39,7 @@ int MusicCanCalibrate(void);
    Unlike MusicCanCalibrate this may reload the track; call it on the
    "start minigame" action, not every frame. */
 int MusicPrepareForCalibration(void);
+void MusicEndCalibration(void);
 float MusicEffectiveGain(void);
 MusicScene MusicCurrentScene(void);
 MusicProviderId MusicCurrentProvider(void);

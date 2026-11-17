@@ -18,6 +18,7 @@ static MusicScene currentScene=MUSIC_MENU;
 static char tracks[MUSIC_SCENE_COUNT][MAX_PATH*3];
 static char loadedPcmTracks[MUSIC_SCENE_COUNT][MAX_PATH*3];
 static float master=0.5f,duckGain=1.0f,duckTime=0.0f,effective=0.5f,lastGain=-1.0f;
+static int calibrationMusic=0;
 static int ready=0,paused=0,localOpen=0,steamPausedByUs=0;
 static char errorText[128];
 static float clamp01(float v) { if(!(v>=0.0f)) return 0.0f;return v>1.0f?1.0f:v; }
@@ -106,8 +107,8 @@ int MusicSetTrack(MusicScene scene,const char* path) {
 }
 void MusicSetScene(MusicScene scene) {
     if(!ready)MusicInit();
-    if(scene<0 || scene>=MUSIC_SCENE_COUNT || scene==currentScene)return;
-    currentScene=scene;ProviderSlot* p=active();lastGain=-1;
+    if(scene<0 || scene>=MUSIC_SCENE_COUNT || scene==currentScene || calibrationMusic)return;
+    currentScene=scene;if(scene==MUSIC_MENU)MusicPcmMood(1);ProviderSlot* p=active();lastGain=-1;
     p->api.play(p->context,tracks[scene],1);if(p->api.scene)p->api.scene(p->context,scene);
     if(p->api.pause)p->api.pause(p->context,paused);
 }
@@ -131,10 +132,10 @@ void MusicNotify(MusicEvent event) {
 }
 void MusicTick(float dt) {
     if(!ready || !(dt>=0.0f))return;
-    MusicPcmMood(RoomThemeSanityRatio(sanity/fmaxf(1.0f,SanityMax())));
+    MusicPcmMood((calibrationMusic || currentScene==MUSIC_MENU)?1.0f:RoomThemeSanityRatio(sanity/fmaxf(1.0f,SanityMax())));
     if(dt>1.0f)dt=1.0f;
     if(duckTime>0.0f) {duckTime-=dt;if(duckTime<=0.0f){duckTime=0;duckGain=1;}}
-    float target=master*duckGain;if(paused)target=0;
+    float target=master*(calibrationMusic?1.0f:duckGain);if(paused)target=0;
     float step=dt*4.0f;if(effective<target)effective=fminf(target,effective+step);else effective=fmaxf(target,effective-step);
     ProviderSlot* p=active();
     if(p->api.gain && (fabsf(effective-lastGain)>0.005f || (lastGain!=target && effective==target))) {p->api.gain(p->context,effective);lastGain=effective;}
@@ -190,5 +191,11 @@ int MusicPrepareForCalibration(void) {
         strcmp(tracks[currentScene], loadedPcmTracks[currentScene]) != 0) {
         if (!localPlay(NULL, tracks[currentScene], 1)) return 0;
     }
-    return MusicCanCalibrate();
+    if(!MusicCanCalibrate())return 0;
+    /* A decoded cache entry is not proof that the mixer is playing it. */
+    MusicPcmSelect((int)currentScene);
+    calibrationMusic=1;duckTime=0;duckGain=1;
+    MusicSetPaused(0);localPause(NULL,0);localGain(NULL,master);lastGain=-1;
+    return 1;
 }
+void MusicEndCalibration(void) {calibrationMusic=0;}

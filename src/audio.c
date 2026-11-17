@@ -22,7 +22,7 @@
 #define AUDIO_BUFS 3
 #define AUDIO_SAMPLES 1024
 #define MAX_VOICES 8
-static short atmosphere[11][AUDIO_RATE];
+static short atmosphere[SFX_COUNT-SFX_IMPACT][AUDIO_RATE];
 
 /* 音乐总线输出的是 [-1,1] 浮点，留约 2dB 余量和音效叠加。
    采样率必须和 music_proc.c 一致，否则音高会整体跑调。 */
@@ -332,7 +332,7 @@ static void AudioStartVoice(const short* data, int len, float vol,
 
 /* 音效 id → 采样数据 */
 static int SfxLookup(int id, const short** data, int* len) {
-    if(id>=SFX_IMPACT && id<=SFX_BREATH){*data=atmosphere[id-SFX_IMPACT];*len=AUDIO_RATE;return 1;}
+    if(id>=SFX_IMPACT && id<SFX_COUNT){*data=atmosphere[id-SFX_IMPACT];*len=AUDIO_RATE;return 1;}
     switch (id) {
         case SFX_STEP:      *data = g_sndStep;      *len = (int)(sizeof(g_sndStep) / sizeof(short)); return 1;
         case SFX_HEART:     *data = g_sndHeart;     *len = (int)(sizeof(g_sndHeart) / sizeof(short)); return 1;
@@ -368,7 +368,7 @@ void PlaySfx(int id,float volume) {
     if(id==SFX_SCREAM || id==SFX_WARDEN || id==SFX_GLASS || id==SFX_IMPACT)MusicDuck(.8f,.3f);
     const short* data=NULL;int length=0;
     if(!SfxLookup(id,&data,&length))return;
-    AudioStartVoice(data,length,volume*volumeF,0,0,0,1,id==SFX_STEP?0:2);
+    AudioStartVoice(data,length,volume*volumeF,0,0,0,1,id==SFX_LOW_BATTERY?6:id==SFX_STEP?0:2);
 }
 
 
@@ -784,7 +784,7 @@ static void GenSounds(void) {
     GenItemSounds(&seed);
     GenThreatSounds();
     GenScavengerStepSound();
-    for(int kind=0;kind<11;kind++)AudioBuildAtmosphere(atmosphere[kind],AUDIO_RATE,kind,AUDIO_RATE);
+    for(int kind=0;kind<SFX_COUNT-SFX_IMPACT;kind++)AudioBuildAtmosphere(atmosphere[kind],AUDIO_RATE,kind,AUDIO_RATE);
 }
 
 void InitAudio(void) {

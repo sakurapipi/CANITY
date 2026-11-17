@@ -24,6 +24,8 @@
 #include "shop.h"
 #include "upgrade_run.h"
 #include "bestiary.h"
+#include "ui_archive.h"
+#include "room_theme.h"
 #include "sprites.h"
 #include "economy.h"
 #include "threat.h"
@@ -43,12 +45,11 @@ static int MainMenuRowCount(void);
 static const char* MenuLabel(int i);
 static const char* MainMenuVisibleLabel(int index);
 static void DrawMenuText(void);
-static void DrawBestiaryPage(MenuGeo g);
+
 static void DrawBenchTree(MenuGeo g);
 static void DrawBankPage(void);
 static void DrawSafehousePage(void);
 static void DrawTextInRowLeft(const char* text, RECT row, unsigned int color);
-static void DrawCalibStrip(MenuGeo g);
 
 /* 分支名表：原来在 ui.c 里是 static，菜单搬出来后自己留一份。
    只是显示名，重复定义比为了它开一个新接口更划算。 */
@@ -83,7 +84,7 @@ static int MenuItemIndex(void) {
     /* 2026-11-08：选武器流程已删（武器改扳手） */
     if (currentState == STATE_SAFEHOUSE) return shopRow;
     if (currentState == STATE_ACHIEVEMENTS) return achSelection;
-    if (currentState == STATE_BESTIARY) return bestiarySel;
+    if (currentState == STATE_BESTIARY) return UiArchiveSelection();
     return menuSelection;
 }
 
@@ -98,7 +99,8 @@ static const char* MenuLabel(int i) {
         }
         case STATE_BESTIARY: {
             static char bb[192];
-            if (i >= BESTIARY_COUNT) return "Back";
+            if (i >= UiArchiveEntryCount()) return "Back";
+            if (UiArchiveTab()==ARCHIVE_ROOMS) return RoomThemeName(i,g_lang==LANG_ZH);
             if (!BestiaryIsSeen(i)) {
                 sprintf(bb, "???   [LOCKED]");
             } else {
@@ -123,7 +125,7 @@ static const char* MenuLabel(int i) {
                                 VkName(g_bindings[ACT_MOVE_BACK]), VkName(g_bindings[ACT_MOVE_RIGHT])); break;
                 case 1: sprintf(kb, "%s: %s  (NOISE)", Tr("SPRINT","冲刺"), VkName(g_bindings[ACT_SPRINT])); break;
                 case 2: sprintf(kb, "%s: HOLD %s  (NOISE)", Tr("SEARCH","搜查"), VkName(g_bindings[ACT_INTERACT])); break;
-                case 3: sprintf(kb, "%s: HOLD %s  (+32)", Tr("CRANK","摇电"), VkName(g_bindings[ACT_CRANK])); break;
+                case 3: snprintf(kb,sizeof(kb),Tr("CRANK: HOLD %s / OUTSIDE HIDING ONLY","摇电：按住%s / 仅隐藏点外可用"),VkName(g_bindings[ACT_CRANK])); break;
                 case 4: sprintf(kb, "%s: %s", Tr("LIGHT","手电"), VkName(g_bindings[ACT_FLASHLIGHT])); break;
                 case 5: sprintf(kb, "%s: %s (FULL)  TAB (MINI)", Tr("MAP","地图"), VkName(g_bindings[ACT_MAP])); break;
                 case 6: sprintf(kb, "%s: %s", Tr("THROW","投掷"), VkName(g_bindings[ACT_THROW])); break;
@@ -306,6 +308,12 @@ static const char* MenuLabel(int i) {
             const char* label=Transl(it->name);
             if (IsKeyBindItem(it)) {
                 return label;
+            }
+            if (it->value == &pitchLookEnabled) {
+                snprintf(buf, sizeof(buf), "%s: %s (%s)", label,
+                         Tr(it->options[*it->value ? 1 : 0], it->options[*it->value ? 1 : 0]),
+                         Tr("Visual artifacts possible", "可能出现画面异常"));
+                return buf;
             }
             if (it->kind == SET_SLIDER) {
                 if (it->fvalue == &gammaValue) sprintf(buf, "%s: %.2f", label, *it->fvalue);
@@ -506,7 +514,6 @@ y - TH/2，主菜单第 10 行「Quit」正好被这条线横切
         }
     }
 
-    if (currentState == STATE_SAFEHOUSE) DrawCalibStrip(g);
 
     /* v1.22b：Hub 分页指示**挪到面板外**（屏幕右下角），
        原来画在面板里会和最后一行 Back 的高亮条重叠。 */
@@ -530,7 +537,6 @@ y - TH/2，主菜单第 10 行「Quit」正好被这条线横切
     /* v6：Hub 合并成一页后不再需要页码 */
     /* 弹窗开着时不再高亮背后的列表行 */
     int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
-    if (currentState == STATE_BESTIARY) { DrawBestiaryPage(g); return; }
     int sel = MenuItemIndex();
     /* v2 技能树不是行列表：选中框由 DrawSkillTree 自己画在节点上 */
     int rowHighlight = !(currentState == STATE_HUB ||
@@ -626,126 +632,13 @@ static void DrawGenericMenuTitle(MenuGeo g) {
 
 
 /* Wrap UTF-8 at complete codepoints. Every section has an explicit lower bound. */
-static int DossierText(const char* text,int x,int y,int width,int bottom,unsigned int color){
-    if(!text || width<=0)return y;
-    int height=TextMediumLiteralHeight(),step=height+UIS(4);
-    while(*text && y+height<=bottom){
-        char line[256];int used=0,fit=0;
-        if(*text=='\n'){text++;y+=step;continue;}
-        while(text[used] && text[used]!='\n' && used<240){
-            unsigned char c=(unsigned char)text[used];int n=c<128?1:c<224?2:c<240?3:4;
-            if(used+n>=250)break;
-            int valid=1;for(int i=1;i<n;i++)if(!text[used+i] || ((unsigned char)text[used+i]&0xC0)!=0x80)valid=0;
-            if(!valid)n=1;
-            memcpy(line+used,text+used,(size_t)n);used+=n;line[used]=0;
-            if(TextMediumLiteralWidth(line)>width)break;
-            fit=used;
-        }
-        if(!fit)break;
-        line[fit]=0;DrawTextMediumLiteralWin(x,y,line,color);text+=fit;y+=step;
-        if(*text=='\n')text++;
-    }
-    return y;
-}
+
 
 /* Use exactly the existing baked world sprite, cropped without stretching.
  * No game camera, light, sprite-accent or monster state is modified. */
-static void DrawDossierPortrait(int spriteId, RECT box, int identified) {
-    if (!SpritesReady() || !pixels || renderW <= 0 || renderH <= 0 || winW <= 0 || winH <= 0) return;
-    Sprite* sprite = SpriteGet(spriteId);
-    if (!sprite || !sprite->px) return;
-    int sx = sprite->bx0, sy = sprite->by0;
-    int sw = sprite->bx1-sx, sh = sprite->by1-sy;
-    if (sx < 0 || sy < 0 || sw <= 0 || sh <= 0 || sprite->bx1 > sprite->w || sprite->by1 > sprite->h) {
-        sx = sy = 0; sw = sprite->w; sh = sprite->h;
-    }
-    int left = box.left*renderW/winW, top = box.top*renderH/winH;
-    int bw = (box.right-box.left)*renderW/winW, bh = (box.bottom-box.top)*renderH/winH;
-    if (bw <= 0 || bh <= 0 || sw <= 0 || sh <= 0) return;
-    float k = (float)bw/sw; if ((float)bh/sh < k) k = (float)bh/sh;
-    int w = (int)(sw*k), h = (int)(sh*k);
-    if (w <= 0 || h <= 0) return;
-    left += (bw-w)/2; top += (bh-h)/2;
-    for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
-        unsigned int pixel = sprite->px[(sy+y*sh/h)*sprite->w + sx+x*sw/w];
-        float alpha = (float)(pixel >> 24)/255.0f;
-        if (alpha <= 0.0f) continue;
-        PutPixelBlend(left+x,top+y,identified ? (pixel&0xFFFFFFu) : 0x001C2935u,alpha);
-    }
-}
 
-static void DrawBestiaryPage(MenuGeo g) {
-    int th = TextHeightWin(), pad = UIS(16);
-    int split = g.panel.left + (g.panel.right-g.panel.left)*32/100;
-    int x = split+pad, right = g.panel.right-pad;
-    BlendRectWin(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,0x00090F17u,.99f);
-    FrameRectWin(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,0x00485668u,.95f,1);
-    DrawTextWin(g.panel.left+pad,g.titleY,Tr("FIELD ARCHIVE","怪物档案"),UI_ACCENT);
-    char text[160];
-    snprintf(text,sizeof(text),Tr("ACTIVE %d / %d","现行 %d / %d"),BestiaryCountSeen(bestiarySeen),BestiaryActiveCount());
-    DrawTextWin(right-TextWidthWin(text),g.titleY,text,0x008CCBD3u);
-    BlendRectWin(split,g.firstY-UIS(8),split+1,g.panel.bottom-pad,0x00404C60u,.9f);
-    for (int id = 0; id <= BESTIARY_COUNT; id++) {
-        RECT row = RowRect(g,id);
-        int selected = bestiarySel == id;
-        if (selected) BlendRectWin(row.left,row.top,row.right,row.bottom,0x002B394Bu,.95f);
-        if (id == BESTIARY_COUNT) snprintf(text,sizeof(text),"< %s",Tr("BACK","返回"));
-        else if (!BestiaryIsActive(id)) snprintf(text,sizeof(text),"%02d  %s",id+1,Tr("ARCHIVED","旧版记录"));
-        else snprintf(text,sizeof(text),"%02d  %s",id+1,BestiaryIsSeen(id) ? Tr(bestiary[id].nameEn,bestiary[id].nameZh) : "???");
-        ClampRowText(text,row.right-row.left-UIS(12));
-        DrawTextWin(row.left+UIS(6),row.top+(row.bottom-row.top-th)/2,text,selected?0x00FFE1A0u:0x0093A4B7u);
-    }
-    int id = bestiarySel;
-    if (id < 0 || id >= BESTIARY_COUNT) {
-        DossierText(Tr("Return to the main menu. Your archive is kept.","返回主菜单。已发现的档案会保留。"),x,g.firstY,right-x,g.panel.bottom-pad,0x0093A4B7u);
-        return;
-    }
-    const BestiaryEntry* entry = &bestiary[id];
-    int seen = BestiaryIsSeen(id), stage = BestiaryStage(id), active = BestiaryIsActive(id);
-    int y = DossierText(seen ? ((id==BST_ID_HUNTER)?Tr("SOUND HUNTERS / THREE FORMS","听声鬼 / 三种形态"):Tr(entry->nameEn,entry->nameZh)) : Tr("UNIDENTIFIED","未知生物"),x,g.firstY,right-x,g.panel.bottom-pad,0x00F0E1C8u);
-    snprintf(text,sizeof(text),"%s / %s",active ? Tr("ACTIVE","现行") : Tr("ARCHIVED","旧版记录"),seen?Tr(entry->tagEn,entry->tagZh):"???");
-    y = DossierText(text,x,y,right-x,g.panel.bottom-pad,0x007DA7BEu);
-    int bottom = g.panel.bottom-th-pad;
-    int imageSize = (right-x)*46/100;
-    if (imageSize > (bottom-y)*42/100) imageSize = (bottom-y)*42/100;
-    if (imageSize < 12) return;
-    RECT image = {x,y+UIS(6),x+imageSize,y+UIS(6)+imageSize};
-    BlendRectWin(image.left,image.top,image.right,image.bottom,0x00131C29u,1.0f);
-    FrameRectWin(image.left,image.top,image.right,image.bottom,0x00374B60u,.9f,1);
-    RECT inset = {image.left+UIS(5),image.top+UIS(5),image.right-UIS(5),image.bottom-UIS(5)};
-    if(id==BST_ID_HUNTER) {
-        static const int variants[3]={SPR_MON_HUNTER,SPR_MON_HUNTER2,SPR_MON_HUNTER3};
-        int width=(inset.right-inset.left)/3;
-        for(int variant=0;variant<3;variant++) {
-            RECT portrait={inset.left+variant*width,inset.top,inset.left+(variant+1)*width,inset.bottom};
-            DrawDossierPortrait(variants[variant],portrait,seen);
-        }
-    } else DrawDossierPortrait(entry->spriteId,inset,seen);
-    int sx = image.right+UIS(10), sy = image.top, sw = right-sx;
-    snprintf(text,sizeof(text),Tr("KNOWLEDGE %d / 3","认知 %d / 3"),stage);
-    sy = DossierText(text,sx,sy,sw,image.bottom,UI_ACCENT);
-    if (seen) {
-        snprintf(text,sizeof(text),Tr("RISK %d / 5","危险 %d / 5"),BestiaryDanger(id));
-        sy = DossierText(text,sx,sy,sw,image.bottom,0x00DB997Du);
-        snprintf(text,sizeof(text),Tr("ESCAPES %d","逃脱 %d"),bestiaryEscapes[id]);
-        sy = DossierText(text,sx,sy,sw,image.bottom,0x0095B5BCu);
-        snprintf(text,sizeof(text),Tr("CAUGHT %d","被抓 %d"),bestiaryCaught[id]);
-        sy = DossierText(text,sx,sy,sw,image.bottom,0x0095B5BCu);
-    }
-    y = image.bottom+UIS(10);
-    if (!active) {
-        DossierText(Tr("Legacy record. This creature no longer spawns and is excluded from completion.","历史记录：当前版本不生成，不计入现行全图鉴。"),x,y,right-x,bottom,0x0093A4B7u);
-    } else if (!seen) {
-        DossierText(Tr("Encounter this creature in a run to identify its portrait and behavior.","在局内遭遇后，解锁肖像与身份。研究逐层积累，逃脱能加速揭示。"),x,y,right-x,bottom,0x0093A4B7u);
-    } else {
-        int half = y + (bottom-y)/2;
-        y = DossierText(Tr("BEHAVIOR","行为"),x,y,right-x,half,UI_ACCENT);
-        DossierText(stage>=BST_BEHAVED?Tr(entry->behaviorEn,entry->behaviorZh):Tr("Study across 3 floors or escape twice.","累计遭遇三层，或逃脱两次后揭示。"),x,y,right-x,half,0x00B6C7D1u);
-        y = DossierText(Tr("COUNTERMEASURE","对策"),x,half+UIS(4),right-x,bottom,0x008CCBD3u);
-        DossierText(stage>=BST_COUNTER?Tr(entry->counterEn,entry->counterZh):Tr("Study across 5 floors or escape three times.","累计遭遇五层，或逃脱三次后揭示。"),x,y,right-x,bottom,0x00B6C7D1u);
-    }
-    DrawTextSmallWin(x,bottom,Tr("ARROWS / MOUSE   ESC BACK","方向键或鼠标选择  ESC返回"),0x006E8497u);
-}
+
+
 
 
 static void DrawGenericMenuRows(MenuGeo g, int sel, int popupOpen, const int* idx, int pageItemCount) {
@@ -961,7 +854,6 @@ static void DrawMenuText(void) {
        ShopPriceAt() 的递归修复而消失。 */
     MenuGeo g = GetMenuGeo();
     int popupOpen = (currentState == STATE_SETTINGS && settingsPopupOpen);
-    if (currentState == STATE_BESTIARY) { DrawBestiaryPage(g); return; }
 
     /* 成就页面：使用专用现代化渲染 */
     if (currentState == STATE_ACHIEVEMENTS) {
@@ -1033,44 +925,6 @@ static void DrawTextInRowLeft(const char* text, RECT row, unsigned int color) {
     DrawTextWin(row.left + UIS(8), y, text, color);
 }
 
-static void DrawCalibStrip(MenuGeo g) {
-    /* v2.4：画在面板内部的**底部空白区**（面板已为它加高）。
-       画在面板里才能保证每帧被不透明面板盖住，不会留残影。 */
-    int pad = UIS(34);
-    int barW = (g.panel.right - g.panel.left) - pad * 2;
-    if (barW < UIS(160)) return;
-    int bx = g.panel.left + pad;
-    int barH = UIS(16);
-    int by = g.panel.bottom - UIS(30) - barH;
-    char line[128];
-
-
-    /* v3.0：**安全屋里不再画校准条** ——
-       用户截图：底部那条 "CALIBRATION [SPACE]" 和 SAVE FAILED 横幅叠在一起，
-       还压着页签。
-       校准已经搬到藏身点里（60 秒冷却，主要奖励改成理智），
-       安全屋这条纯属残留。这里整段留空，只在**校准进行中**画一条提示
-       （因为小游戏本身是从安全屋也能开的，得让玩家知道进度）。 */
-    if (!calibActive) return;
-    {
-        sprintf(line, "%s", Tr("QWER NOTES  -  40s PROGRESS",
-                               "QWER 接音符  ·  40 秒进度"));
-    }
-    BlendRectWin(bx - UIS(8), by - TextHeightWin() - UIS(8),
-                 bx + barW + UIS(8), by + barH + UIS(6), 0x000A0E14, 0.96f);
-    DrawTextWin(bx, by - TextHeightWin() - UIS(4), line, 0x00FFE060u);
-    DrawCalibBar(bx, by, barW, barH);
-
-    /* 结果提示 */
-    if (calibResultTimer > 0.0f && calibResult) {
-        const char* msg = "";
-        unsigned int col = 0x00808080u;
-        if (calibResult == 1) { msg = Tr("PERFECT", "完美"); col = 0x00FFE060u; }
-        else if (calibResult == 2) { msg = Tr("CANCELLED", "已取消"); col = 0x0080E080u; }
-        else { msg = Tr("MISSED", "失手"); col = 0x00FF6040u; }
-        DrawTextWin(bx + barW - TextWidthWin(msg), by - TextHeightWin() - UIS(4), msg, col);
-    }
-}
 
 /* Bounded segment rasterization: diagonal graph edges never touch the chrome. */
 static void BenchGraphLink(int x0, int y0, int x1, int y1, unsigned int color, int solid) {
@@ -1144,7 +998,7 @@ static void DrawBenchTree(MenuGeo g) {
     while(text[0] && TextMediumLiteralWidth(text)>width){size_t n=strlen(text)-1;while(n && ((unsigned char)text[n]&0xC0)==0x80)n--;text[n]=0;}
     DrawTextMediumLiteralWin(x,y+UIS(5),text,UI_ACCENT);y+=TextMediumLiteralHeight()+UIS(10);
     snprintf(text,sizeof(text),Tr("COST %d / THREAT +%.1f","价格 %d金币 / 威胁 +%.1f"),benchNodes[id].cost,(double)BenchThreatCostOf(id));UiTrimSmallText(text,width);DrawTextSmallLiteralWin(x,y,text,UI_GOLD);y+=UIS(23);
-    y=DossierText(Tr(benchNodes[id].desc,benchNodes[id].descZh),x,y,width,bottom-UIS(27),UI_INK);
+    y=UiDossierText(Tr(benchNodes[id].desc,benchNodes[id].descZh),x,y,width,bottom-UIS(27),UI_INK);
     int parent=BenchPrereqId(id);
     snprintf(text,sizeof(text),Tr("FIRST: %s / %s","前置：%s / %s"),parent>=0?Tr(benchNodes[parent].name,benchNodes[parent].nameZh):Tr("START","起点"),BenchHas(id)?Tr("OWNED","已拥有"):BenchCanBuy(id)?Tr("CAN BUY","可购买"):Tr("CHECK FUNDS / PREREQUISITE","检查金币或前置"));
     UiTrimSmallText(text,width);DrawTextSmallLiteralWin(x,bottom-UIS(21),text,UI_INFO);
@@ -1183,7 +1037,7 @@ int SafehouseCardAt(int x,int y) {
 }
 static void DrawSupplyIcon(int row,RECT rect) {
     int sprite=ShopProductSprite(row);
-    if(sprite>=0) { DrawDossierPortrait(sprite,rect,1);
+    if(sprite>=0) { UiDossierPortrait(sprite,rect,1);
          return;
          }
     int x=(rect.left+rect.right)/2,y=(rect.top+rect.bottom)/2;
@@ -1205,10 +1059,10 @@ static void DrawSupplyCard(int row,RECT r) {
         char badge[48];
         snprintf(badge,sizeof(badge),Tr("SAVE %d%%","限时优惠 -%d%%"),(int)(shopDiscountPct*100.0f+.5f));
         BlendRectWin(r.left,r.top,r.right,r.top+th+UIS(6),UI_BG_SEL,1.0f);
-        DossierText(badge,r.left+pad,r.top+UIS(3),width,r.top+th+UIS(6),UI_ACCENT);
+        UiDossierText(badge,r.left+pad,r.top+UIS(3),width,r.top+th+UIS(6),UI_ACCENT);
         y=r.top+th+pad;
     }
-    y=DossierText(ShopProductName(row),r.left+pad,y,width,r.bottom-pad,UI_INK_TITLE);
+    y=UiDossierText(ShopProductName(row),r.left+pad,y,width,r.bottom-pad,UI_INK_TITLE);
     int available=r.bottom-y-th*3-pad;
     int side=available>UIS(28)?available:UIS(24);
     if(side>width)side=width;
@@ -1217,7 +1071,7 @@ static void DrawSupplyCard(int row,RECT r) {
     y=icon.bottom+UIS(4);
     char price[64];
     snprintf(price,sizeof(price),Tr("%d RUN GOLD","%d 局内金币"),ShopPriceAt(row));
-    y=DossierText(price,r.left+pad,y,width,r.bottom-th-pad,UI_GOLD);
+    y=UiDossierText(price,r.left+pad,y,width,r.bottom-th-pad,UI_GOLD);
     if(ShopIsDiscounted(row) && y+12<r.bottom-th-pad) {
         char base[48];
         snprintf(base,sizeof(base),Tr("WAS %d","原价 %d"),ShopBasePriceAt(row));
@@ -1246,20 +1100,20 @@ static void DrawRecoveryDetail(void) {
     int x=first.right+UIS(20),right=g.panel.right-UIS(28),bottom=g.panel.bottom-UIS(65),y=first.top;
     int row=shopRow<5?shopRow:0,w=right-x;char text[160];
     UiPanel(x-UIS(8),y,right+UIS(8),bottom,UI_PANEL_NORMAL);y+=UIS(12);
-    y=DossierText(ShopServiceName(row),x,y,w,bottom,UI_INK_TITLE)+UIS(18);
+    y=UiDossierText(ShopServiceName(row),x,y,w,bottom,UI_INK_TITLE)+UIS(18);
     if(row<3){float values[3]={sanity,battery,stamina};float maximum=row==0?SanityMax():row==1?(float)BatteryMax():StaminaMax();
         snprintf(text,sizeof(text),Tr("CURRENT %.0f / %.0f","当前 %.0f / %.0f"),(double)values[row],(double)maximum);
-        y=DossierText(text,x,y,w,bottom,UI_INK)+UIS(10);
+        y=UiDossierText(text,x,y,w,bottom,UI_INK)+UIS(10);
         UiBar(x,y,w,UIS(8),values[row]/fmaxf(1,maximum),UI_BAR_NORMAL,UI_ACCENT);y+=UIS(20);
         snprintf(text,sizeof(text),Tr("RESTORE +%.0f / PRICE %d GOLD","本次恢复 +%.0f / 当前价格 %d金币"),(double)ShopServiceGain(row),ShopServicePrice(row));
-        y=DossierText(text,x,y,w,bottom,UI_GOLD)+UIS(12);
-        y=DossierText(row==0?Tr("Unlimited recovery. Every use doubles this service price for the rest of the run.","无次数限制。每次使用后，本项服务本局价格翻倍。"):Tr("No cooldown or use limit; prices double per use and persist between floors.","无冷却、无次数限制；每次价格翻倍，跨层保留涨价。"),x,y,w,bottom,UI_INK_DIM)+UIS(14);
-    }else y=DossierText(row==3?Tr("Skip this non-boss floor. Requires the permanent SHORTCUT skill; once per run.","需要永久捷径技能，跳过当前非首领层，每局限一次。"):Tr("Each QWER hit restores sanity and battery; combos improve recovery. Six misses end the game. Finish for gold. Passive resource drain pauses during play.","每次QWER命中恢复理智和电量，连击提高恢复量；累计6次失误结束。完成可获金币，游玩期间暂停自然理智与电量消耗。"),x,y,w,bottom,UI_INK)+UIS(15);
-    DossierText(ShopServiceStatus(row),x,y,w,bottom-UIS(10),ShopServiceCanUse(row)?UI_OK:UI_INFO);
+        y=UiDossierText(text,x,y,w,bottom,UI_GOLD)+UIS(12);
+        y=UiDossierText(row==0?Tr("Unlimited recovery. Every use doubles this service price for the rest of the run.","无次数限制。每次使用后，本项服务本局价格翻倍。"):Tr("No cooldown or use limit; prices double per use and persist between floors.","无冷却、无次数限制；每次价格翻倍，跨层保留涨价。"),x,y,w,bottom,UI_INK_DIM)+UIS(14);
+    }else y=UiDossierText(row==3?Tr("Skip this non-boss floor. Requires the permanent SHORTCUT skill; once per run.","需要永久捷径技能，跳过当前非首领层，每局限一次。"):Tr("Each QWER hit restores sanity and battery; combos improve recovery. Six misses end the game. Finish for gold. Passive resource drain pauses during play.","每次QWER命中恢复理智和电量，连击提高恢复量；累计6次失误结束。完成可获金币，游玩期间暂停自然理智与电量消耗。"),x,y,w,bottom,UI_INK)+UIS(15);
+    UiDossierText(ShopServiceStatus(row),x,y,w,bottom-UIS(10),ShopServiceCanUse(row)?UI_OK:UI_INFO);
 }
 static void DrawUpgradeCard(int row,RECT r) {
     int pad=UIS(10),width=r.right-r.left-pad*2,y=r.top+pad;
-    y=DossierText(Tr(RunUpgName(row),RunUpgNameZh(row)),r.left+pad,y,width,r.bottom-pad,UI_INK_TITLE);
+    y=UiDossierText(Tr(RunUpgName(row),RunUpgNameZh(row)),r.left+pad,y,width,r.bottom-pad,UI_INK_TITLE);
     int level=RunUpgLevel(row),pip=UIS(10);
     for(int i=0;i<RUN_UPG_MAX;i++) {
         int x=r.left+pad+i*(pip+UIS(5));
@@ -1311,7 +1165,7 @@ static void DrawSafehousePage(void) {
             char footer[160];
             snprintf(footer,sizeof(footer),"%s",label);
             ClampRowText(footer,r.right-r.left-UIS(12));
-            DrawTextCenterWin((r.left+r.right)/2,(r.top+r.bottom-th)/2,footer,UI_INFO);
+            DrawTextCenterWin((r.left+r.right)/2,(r.top+r.bottom-th)/2,footer,UI_ACCENT);
         } else if(shopPage==SHP_SHOP)DrawSupplyCard(row,r);
         else if(shopPage==SHP_REST)DrawRecoveryCard(row,r);
         else DrawUpgradeCard(row,r);
@@ -1370,32 +1224,33 @@ static void DrawBankPage(void) {
         BlendRectWin(r.left,r.top,handle,r.bottom,UI_BG_SEL,1);
         FrameRectWin(r.left,r.top,r.right,r.bottom,slider==BankSelectedControl()?UI_EDGE_HOT:UI_EDGE,1,1);
         BlendRectWin(handle-UIS(4),r.top-UIS(4),handle+UIS(4),r.bottom+UIS(4),UI_ACCENT,1);
-        DossierText(slider?Tr("Higher risk raises awareness and extraction rewards.","提高风险会增加感知压力，也提高撤离收益。"):Tr("This amount leaves the bank only when a normal run starts.","只在普通对局开始时取出，不会因拖动立即扣款。"),r.left,r.bottom+UIS(20),r.right-r.left,winH*82/100,UI_INK_DIM);
+        UiDossierText(slider?Tr("Higher risk raises awareness and extraction rewards.","提高风险会增加感知压力，也提高撤离收益。"):Tr("This amount leaves the bank only when a normal run starts.","只在普通对局开始时取出，不会因拖动立即扣款。"),r.left,r.bottom+UIS(20),r.right-r.left,winH*82/100,UI_INK_DIM);
     }
     int x=winW*62/100,right=winW-pad,y=winH*26/100,bottom=winH*81/100;
     UiPanel(x-UIS(14),y-UIS(12),right+UIS(10),bottom,UI_PANEL_NORMAL);
-    y=DossierText(Tr("NEXT RUN","下局预测"),x,y,right-x,bottom,UI_INK_TITLE)+UIS(12);
+    y=UiDossierText(Tr("NEXT RUN","下局预测"),x,y,right-x,bottom,UI_INK_TITLE)+UIS(12);
     snprintf(text,sizeof(text),Tr("GOLD PRESSURE %d / 15","金币压力 %d / 15"),BankPreviewTier());
-    y=DossierText(text,x,y,right-x,bottom,UI_ACCENT)+UIS(12);
+    y=UiDossierText(text,x,y,right-x,bottom,UI_ACCENT)+UIS(12);
     snprintf(text,sizeof(text),Tr("AWARENESS x%.2f","感知倍率 x%.2f"),(double)BankPreviewHearing());
-    y=DossierText(text,x,y,right-x,bottom,UI_INK)+UIS(12);
+    y=UiDossierText(text,x,y,right-x,bottom,UI_INK)+UIS(12);
     snprintf(text,sizeof(text),Tr("EXIT REWARD x%.2f","撤离收益 x%.2f"),(double)BankRiskExitMul(bankRiskPlan));
-    y=DossierText(text,x,y,right-x,bottom,UI_INK)+UIS(12);
+    y=UiDossierText(text,x,y,right-x,bottom,UI_INK)+UIS(12);
     snprintf(text,sizeof(text),Tr("DEFEAT REFUND %d%%","失败本金返还 %d%%"),(int)(BANK_DEATH_REFUND*100+.5f));
-    DossierText(text,x,y,right-x,bottom,UI_INK_DIM);
-    DossierText(Tr("Drag sliders / Up-Down select / Left-Right adjust / Enter save / Esc back","拖动滑条；上下选择，左右调整；回车保存，ESC返回"),pad,winH*87/100,winW-pad*2,winH-UIS(10),UI_INK_DIM);
+    UiDossierText(text,x,y,right-x,bottom,UI_INK_DIM);
+    UiDossierText(Tr("Drag sliders / Up-Down select / Left-Right adjust / Enter save / Esc back","拖动滑条；上下选择，左右调整；回车保存，ESC返回"),pad,winH*87/100,winW-pad*2,winH-UIS(10),UI_INK_DIM);
 }
 
 
 /* 对外唯一入口：顺序与 RenderFrame 里原来那两行一致（面板 → 文字）。 */
 void UiDrawMenuPages(void) {
+    if(currentState==STATE_BESTIARY){UiDrawArchivePage(GetMenuGeo());return;}
     DrawMenuPanels();
     DrawMenuText();
 }
 
 static const char* MainMenuVisibleLabel(int index) {
-    static const char* primaryEn[]={"Continue","New Run","Skill Web","Threat Bank","Bestiary","Archives / Modes","Training Camp","Quit"};
-    static const char* primaryZh[]={"继续游戏","开始新局","局外技能网","威胁银行","怪物图鉴","档案与模式","自由训练营","退出游戏"};
+    static const char* primaryEn[]={"Continue","New Run","Skill Web","Threat Bank","Field Guide","Archives / Modes","Training Camp","Quit"};
+    static const char* primaryZh[]={"继续游戏","开始新局","局外技能网","威胁银行","图鉴","档案与模式","自由训练营","退出游戏"};
     static const char* moreEn[]={"Achievements","Help / Skill Index","Settings","Campaign","Daily Run","Endless","Back"};
     static const char* moreZh[]={"成就档案","帮助与技能索引","设置","战役","每日挑战","无尽模式","返回"};
     if(!mainMenuMore){index+=hasSave?0:1;return Tr(primaryEn[index],primaryZh[index]);}

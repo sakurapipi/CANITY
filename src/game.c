@@ -72,6 +72,7 @@
 #include "skills.h"
 #include "content_db.h"
 #include "bestiary.h"
+#include "ui_archive.h"
 #include "score.h"
 
 /* ------------------------------------------------------------------
@@ -471,46 +472,7 @@ void MonsterStunAll(float seconds) {
 
 /* ==================== 玩家 · 移动/手电 ==================== */
 
-void UpdateDynamicRes(double renderMs) {
-    static double acc = 0.0;
-    static int samples = 0;
-    static double lastAdjust = -10.0;
 
-    /* v2.9：**动态分辨率已禁用**。
-       它每 2 秒按 ±12% 调 pixelBudget 并调 InitPixels()，
-       而 renderW/renderH 一变，winW/winH 跟着变（SyncWindowSize），
-       整个 UI 的尺度和间距全部重排 —— 玩家看到的就是「UI 在逐渐放大」。
-       渲染尺寸必须在一局里保持稳定，宁可掉几帧也别让它漂。
-       需要恢复时把 dynamicRes 设成 1 即可。 */
-    if (1) return;              /* 强制关闭 */
-    if (!dynamicRes) return;
-    if (renderMs <= 0.0) return;
-    acc += renderMs;
-    samples++;
-    if (samples < 8) return;
-
-    double avg = acc / (double)samples;
-    acc = 0.0;
-    samples = 0;
-    if (g_timeSec - lastAdjust < 2.0) return;
-
-    long want = pixelBudget;
-    if (avg < 7.0 && pixelBudget < PIXEL_BUDGET_MAX) {
-        want = (long)(pixelBudget * 1.12);
-        if (want > PIXEL_BUDGET_MAX) want = PIXEL_BUDGET_MAX;
-    } else if (avg > 12.0 && pixelBudget > PIXEL_BUDGET_MIN) {
-        want = (long)(pixelBudget * 0.88);
-        if (want < PIXEL_BUDGET_MIN) want = PIXEL_BUDGET_MIN;
-    }
-
-    if (want != pixelBudget && (want > pixelBudget * 103 / 100 || want < pixelBudget * 97 / 100)) {
-        pixelBudget = (int)want;
-        InitPixels();
-        ApplyFov();
-        uiDirty = 1;
-        lastAdjust = g_timeSec;
-    }
-}
 
 /* ==================== 输入 ==================== */
 
@@ -1304,8 +1266,7 @@ void ActivateMenuItem(void) {
         } else if (sel == ixBest) {
             /* v1.8：怪物图鉴 */
             currentState = STATE_BESTIARY;
-            bestiarySel = 0;
-            menuScrollOffsets[STATE_BESTIARY] = 0;
+            UiArchiveOpen();
             uiDirty = 1;
         } else if (sel == ixHelp) {
             prevState = STATE_MAIN_MENU;
@@ -1569,7 +1530,7 @@ void HitTestMenu(int mx, int my) {
         for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
             RECT r = RowRect(g, i);
             if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
-                if (bestiarySel != i) { bestiarySel = i; uiDirty = 1; }
+                if (UiArchiveSelection() != i) UiArchiveSelect(i);
                 return;
             }
         }

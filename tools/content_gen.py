@@ -8,7 +8,7 @@
 
     common.h    SK_ 枚举 + SKILL_COUNT + SKILL_TOTAL_COST
     skills.c    表行 + 坐标 + 短名
-    ui.c        kSkillList
+    domain/ui/ui_skilltree.c kSkillList
 
 2026-11-08 我就漏了 kSkillList，界面显示 1/30、白加 10 个节点。
 
@@ -78,7 +78,7 @@ def plan_skill(a):
 
     common = read('include/common.h')
     skills = read('src/skills.c')
-    ui = read('src/ui.c')
+    ui = read('src/domain/ui/ui_skilltree.c')
 
     m = re.search(r'#define\s+SKILL_COUNT\s+(\d+)', common)
     if not m:
@@ -136,7 +136,7 @@ def plan_skill(a):
     edits.append(('src/skills.c', 'kShortNames', 'kShortNames', '短名 "%s"' % short))
 
     # ⑤ 绘制列表
-    edits.append(('ui.c' if False else 'src/ui.c', 'kSkillList', 'kSkillList',
+    edits.append(('src/domain/ui/ui_skilltree.c', 'kSkillList', 'kSkillList',
                   'kSkillList +%d' % count))
 
     return edits, None
@@ -218,7 +218,7 @@ def _apply_on(root, en, zh, short, branch, rank, cost):
 
     common = rd('include/common.h')
     skills = rd('src/skills.c')
-    ui = rd('src/ui.c')
+    ui = rd('src/domain/ui/ui_skilltree.c')
 
     m = re.search(r'#define\s+SKILL_COUNT\s+(\d+)', common)
     if not m:
@@ -261,7 +261,7 @@ def _apply_on(root, en, zh, short, branch, rank, cost):
 
     wr('include/common.h', common)
     wr('src/skills.c', skills)
-    wr('src/ui.c', ui)
+    wr('src/domain/ui/ui_skilltree.c', ui)
     return True, '插入完成'
 
 
@@ -270,7 +270,7 @@ def _verify(root):
     def rd(rel):
         return io.open(os.path.join(root, rel), encoding='utf-8', errors='replace').read()
 
-    common, skills, ui = rd('include/common.h'), rd('src/skills.c'), rd('src/ui.c')
+    common, skills, ui = rd('include/common.h'), rd('src/skills.c'), rd('src/domain/ui/ui_skilltree.c')
     count = int(re.search(r'#define\s+SKILL_COUNT\s+(\d+)', common).group(1))
 
     def n_items(src, name):
@@ -350,13 +350,13 @@ def apply_skill(a):
     cost, rank = int(a['cost']), int(a.get('rank', '1'))
     branch = int(a.get('branch', '4'))
 
-    files = ('include/common.h', 'src/skills.c', 'src/ui.c')
+    files = ('include/common.h', 'src/skills.c', 'src/domain/ui/ui_skilltree.c')
     orig = {f: io.open(os.path.join(ROOT, f), encoding='utf-8',
                        errors='replace').read() for f in files}
     try:
         common = orig['include/common.h']
         skills = orig['src/skills.c']
-        ui = orig['src/ui.c']
+        ui = orig['src/domain/ui/ui_skilltree.c']
 
         m = re.search(r'#define\s+SKILL_COUNT\s+(\d+)', common)
         count = int(m.group(1))
@@ -387,7 +387,7 @@ def apply_skill(a):
         ui = _append_to_array(ui, 'kSkillList', '%d,' % count)
 
         for rel, txt in (('include/common.h', common), ('src/skills.c', skills),
-                         ('src/ui.c', ui)):
+                         ('src/domain/ui/ui_skilltree.c', ui)):
             io.open(os.path.join(ROOT, rel), 'w', encoding='utf-8',
                     newline='\n').write(txt)
         print('  ✓ 已写入 7 处（SKILL_COUNT=%d, 坐标 %.4f,%.4f）' % (count + 1, nx, ny))

@@ -264,3 +264,16 @@ void PlayerApplyMovement(float dt, const PlayerFrameInput* input) {
     if (dy != 0.0f && !Blocked(posX, posY + dy)) posY += dy;
 
 }
+
+void PlayerTickBatteryWarning(float dt) {
+    static int warned=0,lastFloor=-1;
+    static float previous=100,rearm=0;
+    if(!(dt>0) || !isfinite(dt))return;
+    if(currentState!=STATE_PLAYING || trainingMode)return;
+    if(currentLevel!=lastFloor){warned=0;rearm=0;previous=100;lastFloor=currentLevel;}
+    if(!isfinite(battery))return;
+    if(battery>24){rearm+=dt;if(rearm>=3)warned=0;}
+    else rearm=0;
+    if(battery<=20 && previous>20 && !warned){PlaySfx(SFX_LOW_BATTERY,.6f);warned=1;}
+    previous=battery;
+}

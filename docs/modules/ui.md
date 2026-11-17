@@ -1,57 +1,35 @@
-# ui（界面：文本层 / 页面 / 菜单 / HUD）
+# ui：界面与最终合成
 
-## 职责
-所有 2D 覆盖层：点阵文字、主菜单（含改造树/银行页/校准条）、成就页、图鉴、
-设置、商店、技能树、HUD。
+## 状态归属
 
-## 结构（第 2 轮后）
-| 文件 | 行数 | 内容 |
-|---|---|---|
-| `domain/ui/ui_text.c` | ~250 | 点阵字 + 中文图集 + 宽度测量 |
-| `domain/ui/ui_pages.c` | ~285 | 成就页、AchCompute 几何、ClampRowText/WrapText |
-| `domain/ui/ui_menu.c` | ~1,410 | 主菜单整簇：面板/文字/改造树/银行页/校准条 |
-| `ui.c` | ~3,697 | HUD（1,299 行单函数，带段落索引）、商店、技能树页、设置、弹窗 |
+- `src/ui.c`：公共绘制原语、菜单几何、帧合成及最终呈现；拥有布局记录。
+- `src/domain/ui/ui_skilltree.c`：技能树节点列表、布局、绘制与命中测试；私有
+  `SkillTreeViewState` 统一管理缩放、平移、拖拽起点。调用方只用既有操作接口。
+- `src/domain/ui/ui_overlay.c`：教程面板、存档失败横幅、拾取及操作失败提示；
+  私有 `UiToastState` 复制消息文本并拥有过期时间，不借用调用方临时缓冲。
+- `ui_text.c`：文字测量与绘制；`ui_pages.c`：独立页面。
+- `ui_menu.c`：菜单页面；`ui_hud.c`：游戏 HUD。
 
 ## 契约
-`include/ui.h`（对外）+ `ui_text.h`（文本层）+ `ui_pages.h`（页面/几何）+
-`ui_menu.h`（菜单 + UI 内部契约：SkillTreeLayout / UiPanel9 / UiRowSel 等）。
 
-## 绝不做
-- 不在 UI 里算价格/可买性/伤害（调对应域的查询函数）
-- 不改 `UiTrack` / `AchCompute` 的几何语义 —— 菜单命中测试依赖同一份计算
-- 不把 `pixels` 写入顺序搞乱（HUD 必须最后画）
+公共接口在 `include/ui.h`、`ui_text.h`、`ui_menu.h`、`ui_pages.h`；
+通知层内部入口在 `src/domain/ui/ui_overlay.h`。
+绘制与输入共用技能树几何；禁止再复制一份缩放状态或节点表。
+最终层次由 `ui.c` 的帧合成顺序决定，移动实现不改变叠放次序。
+业务价格、购买条件、技能效果仍由对应玩法模块计算。
 
-## HUD 怎么改（第 3 轮补）
+## 维护
 
-`DrawHUD()` 是 1,299 行的单函数，**开头有一段"段落索引"**（14 个段落各画什么）。
-改 HUD 先看那张表，不要通读。
+技能表生成器、技能布局检查器和静态契约均读取 `ui_skilltree.c`。
+`tools/module_cost.py` 包含全部 UI 子模块；不提高历史预算来掩盖新增耦合。
+2.4.8-RC 本轮仅修改源码，未运行构建、检查或桌面验收。
 
-想再抽一块成函数：挑**只用 extern/公开函数、不引用外层局部变量**的段落，
-它才能整块搬走而不改变作用域。第 3 轮抽的第一块是 `DrawHudThemeRoom()`
-（右上角主题房间字幕）—— 它只依赖 `cellMeta` / `posX` / `posY` 与公开文本绘制。
+## 图鉴入口（RC2）
 
-其余段落大量互相引用外层局部变量（`labelX` / `barX` / `y1` / `hoverKind`…），
-机械抽函数会改变作用域，属于行为改动，需要单独一轮 + 逐段截图比对。
+`ui_archive.c` 负责共享图鉴入口的怪物、主题房间两个分类及其几何。
+怪物继续使用原来的 bestiarySel 和发现进度；房间独立记录浏览选择，七种全部可查。
+分类按钮、列表、详情翻页按钮共享绘制与点击几何，键盘和触控走同一入口。
+房间说明调用独立于运行态的 RoomThemeGuideEffect/Control，不伪造舱门或房间实体。
+七种房间肖像直接读取启动烘焙的模型，双布局示意调用纯模板函数，不消耗随机数。
 
-## 测试
-`python tools/build_validate.py` → PASS
-`tests/domains/test_ui.c`：成就页几何（3 种窗口）、文本截断、
-**菜单截图**（`shot_menu.ppm`）与 **HUD 截图**（`shot_hud.ppm`）——
-设 `CANITY_SHOT=<目录>` 跑 test_runtime 就会写出来。
-可见改动必须出图看 —— AD-66。
-
-## 常见改动
-| 想改什么 | 动哪里 |
-|---|---|
-| 菜单行/标题/页脚 | `ui_menu.c` 的 `MainMenuCompute` / `DrawMenuText` |
-| 改造树 | `ui_menu.c` 的 `DrawBenchTree` |
-| 成就页 | `ui_pages.c` 的 `UiDrawAchievementsPage` |
-| 字号/行高 | `ui_text.c` 的 `TextScale` / `TextHeightWin` |
-| HUD | `ui.c` 的 `DrawHUD`（1,299 行，改前先 grep 目标字符串） |
-
-## 历史坑
-- `TextScale` 原来固定 2 倍、测量又乘 `renderH/458` → 布局按大字排、实际画小字。
-- 标题被画两遍（+1px 同色偏移）→ 字发毛，`DrawTitleWin` 只画一遍。
-- **菜单搬出去时会连锁缺声明**：ui.c 从来没有"内部契约头"，
-  任何函数往外搬都会带上十几个私有助手（UiPanel9/UiRowSel/UiTitle/…）。
-  第 2 轮一次性把这张契约补进 `ui_menu.h`，以后搬 HUD 会容易得多。
+RC2的小游戏终端由 `src/domain/ui/ui_calibration.c`绘制；判定、收益与时间状态仍由 `loop_calibration.c`拥有，UI只读取，不推进谱面。

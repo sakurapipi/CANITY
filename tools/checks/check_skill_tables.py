@@ -48,7 +48,7 @@ def run():
     out = []
     common = _read('include/common.h')
     skills = _read('src/skills.c')
-    ui = _read('src/ui.c')
+    ui = _read('src/domain/ui/ui_skilltree.c')
 
     m = re.search(r'#define\s+SKILL_COUNT\s+(\d+)', common)
     if not m:

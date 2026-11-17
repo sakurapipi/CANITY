@@ -41,6 +41,9 @@ void TestSuite_update(void);
 void TestSuite_progress(void);
 void TestSuite_actors(void);
 void TestSuite_world(void);
+void TestSuite_warden(void);
+void TestSuite_map_rooms(void);
+void TestSuite_rooms(void);
 void TestSuite_save(void);
 void TestSuite_collapse(void);
 void TestSuite_hatch(void);
@@ -1042,6 +1045,9 @@ int main(int argc,char** argv) {
         else if(!strcmp(name,"progress"))TestSuite_progress();
         else if(!strcmp(name,"actors"))TestSuite_actors();
         else if(!strcmp(name,"world"))TestSuite_world();
+        else if(!strcmp(name,"warden"))TestSuite_warden();
+        else if(!strcmp(name,"map_rooms"))TestSuite_map_rooms();
+        else if(!strcmp(name,"rooms"))TestSuite_rooms();
         else if(!strcmp(name,"save"))TestSuite_save();
         else if(!strcmp(name,"delivery"))TestSuite_delivery();
         else if(!strcmp(name,"existing_save"))TestSuite_existing_save();
@@ -1051,6 +1057,6 @@ int main(int argc,char** argv) {
     }
     test_cloud_decide_length();test_sound_event_center();test_audio_pan_math();
     TestSuite_phase();TestSuite_hatch();TestSuite_collapse();TestSuite_throwing();
-    TestSuite_core();TestSuite_ui();TestSuite_localization();TestSuite_update();TestSuite_progress();TestSuite_actors();TestSuite_world();TestSuite_save();TestSuite_delivery();
+    TestSuite_core();TestSuite_ui();TestSuite_localization();TestSuite_update();TestSuite_progress();TestSuite_actors();TestSuite_world();TestSuite_warden();TestSuite_map_rooms();TestSuite_rooms();TestSuite_save();TestSuite_delivery();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

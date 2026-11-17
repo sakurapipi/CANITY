@@ -83,7 +83,7 @@ float CollectorY(void)        { return collector.y; }
 int   CollectorBounty(void)   { return collector.bounty; }
 
 /* v6：图鉴读这里，保证"改速度 → 图鉴自动变" */
-float CollectorSpeedNow(void) { return COLLECTOR_SPEED; }
+float CollectorSpeedNow(void) { return fminf(MonsterMovementCap(),COLLECTOR_SPEED*MonsterThreatScale(SPAWN_COLLECTOR)); }
 
 int   CollectorHasMoney(void) { return collector.bounty > 0; }
 
@@ -403,7 +403,7 @@ void UpdateCollector(float dt) {
        根因是原来「钱袋优先」的目标选择 —— 场上有钱袋时它会绕去找钱袋，
        而那套直线移动没有沿墙滑，撞墙就贴上去，读起来就是"钻墙"。
        现在**只锁玩家**，一路沿 BFS 梯度走过来。 */
-    colStepToPlayer(&collector.x, &collector.y, COLLECTOR_SPEED, dt);
+    colStepToPlayer(&collector.x, &collector.y, CollectorSpeedNow(), dt);
 
     /* 摸到你 → 偷钱 + 逃跑 */
     {

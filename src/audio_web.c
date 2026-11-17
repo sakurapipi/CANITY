@@ -141,6 +141,24 @@ EM_JS(void, js_play, (int id, float vol, float pan), {
         return s;
     }
 
+    if(id===27){
+        osc('triangle',153,101,.9,.18);
+        osc('sine',237,167,.8,.12);
+        noiseBurst(.78,750,260,.22,.04);
+        noiseBurst(.12,2200,1000,.08,0);
+        out.gain.setValueAtTime(peak,t0);setTimeout(function(){out.disconnect();},1500);return;
+    }
+    if(id===28){
+        /* Two bounded pulses share one graph and never borrow the world noise bus. */
+        for(var pulse=0;pulse<2;pulse++){
+            var begin=t0+pulse*.22,o=ctx.createOscillator(),g=ctx.createGain();
+            o.type='sine';o.frequency.value=1320;g.gain.setValueAtTime(.0001,begin);
+            g.gain.linearRampToValueAtTime(peak*.22,begin+.008);
+            g.gain.linearRampToValueAtTime(.0001,begin+.085);
+            o.connect(g);g.connect(out);o.start(begin);o.stop(begin+.09);
+        }
+        setTimeout(function(){out.disconnect();},700);return;
+    }
     if(id>=16 && id<=26){
         var kind=id-16;
         if(kind===0 || kind===1){osc('sine',kind===0?48:72,30,.7,.5);}

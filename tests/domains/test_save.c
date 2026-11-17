@@ -862,7 +862,7 @@ static void test_historical_v31_v32_layouts(void){
         CHECK(fixture_copy(source,target),"historical-header layout contract copied");
         SaveTestClearReadOnly();CHECK(LoadSettings(),"v31 and v32 layouts migrate with a resumable run");
         CHECK(SaveTestBlob()->version==SAVE_VERSION,"historical-header layout promotes to current save format");
-        CHECK(fabsf(musicVolumeF-.65f)<.001f && dynamicRes==0 && gameCleared==1,"post-repack presence flags preserve music display and completion settings");
+        CHECK(fabsf(musicVolumeF-.65f)<.001f && SaveTestBlob()->dynamicRes==0 && gameCleared==1,"post-repack presence flags preserve music display and completion settings");
         ContinueRun();
         CHECK(currentLevel==3 && containerCount==2 && fabsf(containers[0].x-8.5f)<.01f,"v31 container expansion preserves map and container positions");
         CHECK(fabsf(posX-3.5f)<.01f && fabsf(posY-3.5f)<.01f,"historical map coordinates survive migration");

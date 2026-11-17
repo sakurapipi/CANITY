@@ -22,7 +22,7 @@ def constant(source,name):
     return float(m[1])
 def main():
     skills=(ROOT/'src/skills.c').read_text(encoding='utf-8')
-    ui=(ROOT/'src/ui.c').read_text(encoding='utf-8')
+    ui=(ROOT/'src/domain/ui/ui_skilltree.c').read_text(encoding='utf-8')
     common=(ROOT/'include/common.h').read_text(encoding='utf-8')
     nx,ny=table(skills,'kNodeNX'),table(skills,'kNodeNY')
     count=int(constant(common,'SKILL_PLAYER_COUNT'))

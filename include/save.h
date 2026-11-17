@@ -218,12 +218,12 @@ typedef struct {
     /* v27：音乐音量独立于音效音量。追加在末尾，旧档读不到时回退到音效音量。 */
     float musicVolume;
     /* v28：这两个设置/进度原来根本没有进存档。
-       · dynamicRes —— 设置页里的 Dynamic Res，重启后总是回到默认 ON；
+       · dynamicRes —— 历史字段，保留布局及旧值，不再驱动分辨率；
        · gameClearedSave —— 「通关过一局」的持久记录。无尽模式的解锁条件是
          `bestLevel >= 10 || gameWon`，而 main 模式在第 8 层就结束、
          bestLevel 永远到不了 10，所以唯一解锁途径 gameWon 只是运行时变量，
          重启后 Endless 从菜单里消失。 */
-    int dynamicRes;
+    int dynamicRes; /* LEGACY_RESERVED: v45 offset retained, no runtime setting. */
     int gameClearedSave;
     /* v29：局内强化第 6 条（小地图省电）。
        **不能直接放大 runUpgSave[5] → [6]** —— 它在结构体中间，
@@ -244,7 +244,7 @@ typedef struct {
      *
      * 老档（v29）里这两个字段读成 0 → 当作"无房间层"，不崩、不丢进度。
      * ================================================================== */
-    int roomSeed;      /* 房间阶段的随机种子；0 = 这层没有房间 */
+    int roomSeed;      /* 0=无房间；正数=旧布局；负数按范围区分紧凑v2/宽敞v3。 */
     int roomCount;     /* 本层房间数 */
 
     /* ==================================================================

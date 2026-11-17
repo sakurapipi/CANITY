@@ -117,6 +117,22 @@ enum {
        扳手的"出招姿态"变体 —— 钳口张开、头部前探、握把压短，
        只在挥击的刺出帧使用。追加在末尾，不打乱任何已有 id。 */
     SPR_WRENCH_STRIKE,
+    SPR_ROOM_V2_BASE,                         /* 7 identities x 3 states */
+    SPR_ROOM_V2_LAST = SPR_ROOM_V2_BASE + 20,
+    SPR_ROOM_V2_PORTAL_BASE,                  /* 7 architectural door surrounds */
+    SPR_ROOM_V2_PORTAL_LAST = SPR_ROOM_V2_PORTAL_BASE + 6,
+    SPR_ROOM_V2_CONTROL_BASE,                 /* 7 pairs of labelled physical controls */
+    SPR_ROOM_V2_CONTROL_LAST = SPR_ROOM_V2_CONTROL_BASE + 13,
+    SPR_THEME_HIDE_BASE,                       /* material 0..6 */
+    SPR_THEME_HIDE_LAST = SPR_THEME_HIDE_BASE + 6,
+    SPR_THEME_CRATE_BASE,                      /* material x closed/open/locked */
+    SPR_THEME_CRATE_LAST = SPR_THEME_CRATE_BASE + 20,
+    SPR_THEME_BREAKER_BASE,                    /* material x off/on */
+    SPR_THEME_BREAKER_LAST = SPR_THEME_BREAKER_BASE + 13,
+    SPR_ROOM_CONTROL_READY_BASE,               /* two needle/lever states x 14 */
+    SPR_ROOM_CONTROL_READY_LAST = SPR_ROOM_CONTROL_READY_BASE + 27,
+    SPR_ROOM_MOTION_BASE,                      /* two extra running poses x seven */
+    SPR_ROOM_MOTION_LAST = SPR_ROOM_MOTION_BASE + 13,
     SPR_COUNT
 };
 

@@ -9,7 +9,7 @@
 却对新增的"藏身提示 / 敌人三态 / 噪音环"完全不知道。
 
 这个版本改成**从源码抽样**：
-  1. 扫 src/ui.c 里所有 DrawTextWin / DrawTextCenterWin / DrawTextInRow 调用
+  1. 扫 src/ui.c 和 src/domain/ui/*.c 里所有 DrawTextWin / DrawTextCenterWin / DrawTextInRow 调用
   2. 把 y 参数里的 UIS(n) / winH-n / TextHeightWin() 换算成"600 基准设计坐标"
   3. 同一个纵向带里若有两个文本，且 x 区间相交 → 判重叠
   4. 顺便检查是否越出屏幕
@@ -21,12 +21,15 @@
 """
 
 import io
+from pathlib import Path
 import os
 import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UI = os.path.join(ROOT, "src", "ui.c")
+UI_SOURCES = [os.path.join(ROOT, "src", "ui.c")]
+UI_SOURCES += sorted(str(p) for p in
+                     Path(ROOT, "src", "domain", "ui").glob("*.c"))
 
 # 设计基准：UIS(v) = v * renderH / 458，报表按 600 高（800x600 窗口）折算
 BASE_H = 600
@@ -89,7 +92,8 @@ def func_at(src, pos):
 
 def extract():
     """返回 [(函数名, x表达式, y坐标, 字符串字面量)]"""
-    src = io.open(UI, encoding="utf-8", errors="replace").read()
+    src = "\n".join(io.open(path, encoding="utf-8", errors="replace").read()
+                    for path in UI_SOURCES)
     out = []
     for m in CALL_RE.finditer(src):
         fn, xexpr, yexpr, rest = m.group(1), m.group(2), m.group(3), m.group(4)

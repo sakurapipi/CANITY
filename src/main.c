@@ -44,6 +44,17 @@
    离线自检程序会用 `#define WinMain CanityAppMain` 把本函数改名，
    这样它就能 include 整个 canity_unity.c 并自己定义 main() —— 但那不影响本文件的独立性，
    单独编译 main.c 依然得到完整的游戏。 */
+static void WaitForFrameOrInput(int playing, double interval, double deadline) {
+    if (!playing) { Sleep(uiDirty ? 0 : 4); return; }
+    if (interval <= 0.0) { Sleep(0); return; }
+    double remaining = deadline - PlatNow();
+    if (remaining <= 0.0) return;
+    /* Round up to avoid repeated zero-duration wakeups; re-check on the next loop. */
+    DWORD milliseconds = (DWORD)ceil(remaining * 1000.0);
+    if (milliseconds > 100) milliseconds = 100;
+    MsgWaitForMultipleObjectsEx(0, NULL, milliseconds, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+}
+
 static int FileExists(const char* path) {
     FILE* f = fopen(path, "rb");
     if (!f) return 0;
@@ -384,8 +395,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             }
         }
 
-        /* v1.9：把实测渲染耗时交给动态分辨率 */
-        if (playing) UpdateDynamicRes(lastRenderMs);
 
         fpsAcc += dt;
         if (fpsAcc >= 0.5) {
@@ -395,25 +404,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             frameMsMax = lastRenderMs;
         }
 
-        /* --- 让出 CPU：先睡大头，最后 3ms 自旋，避免 Sleep 粒度吃掉帧预算 --- */
-        if (playing) {
-            if (interval > 0.0) {
-                double remain = nextRender - clock;
-                if (remain > 0.007) {
-                    /* 2026-11-06（R1）：把阻塞睡眠交给平台层。
-                       网页后端里这是"让出一帧"，不能真睡。 */
-                    PlatSleepMs((int)((remain - 0.004) * 1000.0));
-                    clock = PlatNow();
-                }
-                while (clock < nextRender) {
-                    clock = PlatNow();
-                }
-            } else {
-                Sleep(0); /* 不限制帧数时也要让出时间片 */
-            }
-        } else {
-            Sleep(uiDirty ? 0 : 4);
-        }
+        /* Wake for input or the next frame; never burn the tail of a frame spinning. */
+        WaitForFrameOrInput(playing, interval, nextRender);
+
     }
 
     if (currentState == STATE_PLAYING || currentState == STATE_PAUSED) SaveGame();

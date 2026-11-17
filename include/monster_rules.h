@@ -9,4 +9,5 @@ float MonsterMovementCap(void);
 float HunterMoveSpeed(int index,int level,float modifier,float threat);
 int MonsterChaseActive(void);
 int MonsterEligible(int kind,int level);
+float MonsterThreatScale(int kind);
 #endif

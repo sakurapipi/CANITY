@@ -663,7 +663,7 @@ static void CopyDisplaySettings(SaveBlob* s) {
     s->fullscreen = isFullscreen;
     s->fpsCap = fpsCapIndex;
     s->scale = renderScaleIndex;
-    s->dynamicRes = dynamicRes;
+    s->dynamicRes = g_save.dynamicRes; /* v45 reserved: preserve historical bytes. */
     s->fov = fovIndex;
     s->vignette = vignetteOn;
     s->showFps = showFps;
@@ -761,9 +761,11 @@ static void RestoreSkillRanks(void) {
 
 static void CaptureSaveWorld(void) {
     int graduated=g_save.trainingGraduated;
+    int legacyDynamicRes=g_save.dynamicRes;
     int archive[4];memcpy(archive,g_save.archivedJumperKnowledge,sizeof(archive));
     memset(&g_save, 0, sizeof(g_save));
     memcpy(g_save.archivedJumperKnowledge,archive,sizeof(archive));
+    g_save.dynamicRes=legacyDynamicRes;
     g_save.trainingGraduated=graduated;g_save.runMadness=RoomThemeMadness();
     g_save.roomEventSpent=roomTheme.spent;
     g_save.restCooldownSave=ShopRestCooldown();g_save.refreshCooldownSave=ShopRefreshCooldown();
@@ -1606,8 +1608,7 @@ static void ApplyLoadedSettings(const LoadedSaveInfo* info) {
     fpsCapIndex = g_save.fpsCap;
     renderScaleIndex = g_save.scale;
     /* v28：Dynamic Res 以前完全没有进存档，重启后总是回到默认开。 */
-    dynamicRes = info->hasDynamicResField ? g_save.dynamicRes : 1;
-    if (dynamicRes < 0 || dynamicRes > 1) dynamicRes = 1;
+    /* dynamicRes remains serialized for compatibility; it no longer controls rendering. */
     fovIndex = g_save.fov;
     vignetteOn = g_save.vignette;
     showFps = g_save.showFps;
@@ -1866,8 +1867,10 @@ static void RestoreRunGeometry(void) {
       /* 第 6 轮：**先定引擎再重放** —— 老档（0）走 C 标准库 rand 序列，
          新档（2）走 xorshift32。顺序反了房间就会重放成另一套布局。 */
       rng_set_version(g_save.rngVersion);
+      roomSeedUsed = g_save.roomSeed;
       if(g_save.decorV43==1 && g_save.propCountV43>=0 && g_save.propCountV43<=MAX_ROOM_PROPS && g_save.hatchCountV43>=0 && g_save.hatchCountV43<=MAX_HATCHES){
           memcpy(cellMeta,g_save.cellsV43,sizeof(cellMeta));roomPropCount=g_save.propCountV43;memcpy(roomProps,g_save.propsV43,sizeof(roomProps));hatchCount=g_save.hatchCountV43;memcpy(hatches,g_save.hatchesV43,sizeof(hatches));
+          for(int prop=0;prop<roomPropCount;prop++)roomProps[prop].blocks=0;
           RoomSetCount(g_save.roomCount);RoomThemeBind();
       }else if (g_save.roomSeed != 0 && g_save.roomCount > 0)
           (void)RoomReplay(g_save.roomSeed, g_save.roomCount);
@@ -1992,7 +1995,10 @@ static void RestoreRunEquipment(void) {
                   ? g_save.runUltimate : -1;
 
     ApplyFov();
-    GenerateThemeTextures(themeId);   /* 主题变了，墙面/地板贴图要跟着重建 */
+    /* Preserve saved geometry, but use the room's own material for the whole floor. */
+    if(hatchCount==1 && hatches[0].active && hatches[0].themeId>=0 && hatches[0].themeId<THEME_COUNT)
+        themeId=hatches[0].themeId;
+    GenerateThemeTextures(themeId);
     SpawnMonster();
     SpawnLightBeast();
     SpawnLightBeast2();   /* 2026-11-06：追光怪两只 */

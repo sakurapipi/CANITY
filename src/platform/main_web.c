@@ -133,7 +133,7 @@ static void WebFrame(void) {
      * ================================================================ */
     {
         static int s_lockWanted = -1;   /* currentState 在 game.h 里已有正确类型 */
-        int want = (currentState == STATE_PLAYING && !calibActive && !lockActive && !(isMapOpen && mapFullScreen)) ? 1 : 0;
+        int want = (currentState == STATE_PLAYING && !calibActive && !lockActive && !exitChoiceOpen && !(isMapOpen && mapFullScreen)) ? 1 : 0;
         if (want != s_lockWanted) {
             PlatSetCursorLock(want);
             s_lockWanted = want;
@@ -144,7 +144,7 @@ static void WebFrame(void) {
         int mdx = 0, mdy = 0;
         PlatMouseDelta(&mdx, &mdy);
         /* 局内就转，不要求 Pointer Lock 已生效（见上面那段注释） */
-        if ((mdx || mdy) && currentState == STATE_PLAYING && !calibActive && !lockActive) {
+        if ((mdx || mdy) && currentState == STATE_PLAYING && !calibActive && !lockActive && !exitChoiceOpen) {
             CanityMouseLook(mdx, mdy);
         }
     }
@@ -394,7 +394,8 @@ int main(void) {
 
     InitAchievements();
     hasSave = LoadSettings();
-    if(dynamicRes)pixelBudget=emscripten_run_script_int("(Module._usingTouch ? 360000 : 540000)");
+    /* Fixed startup budget, not frame-by-frame dynamic resolution. */
+    pixelBudget=emscripten_run_script_int("(Module._usingTouch ? 360000 : 540000)");
     InitAudio();
     MusicInit();
     MusicLoadGameTracks();
@@ -481,7 +482,7 @@ int main(void) {
     return 0;
 }
 
-EMSCRIPTEN_KEEPALIVE int CanityUiFlags(void){return (currentState==STATE_PLAYING && !calibActive && !lockActive && !(isMapOpen && mapFullScreen)?1:0)|(calibActive?2:0)|(hiddenIn>=0?4:0)|((currentState==STATE_HUB || (currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE))?8:0);}
+EMSCRIPTEN_KEEPALIVE int CanityUiFlags(void){return (currentState==STATE_PLAYING && !calibActive && !lockActive && !exitChoiceOpen && !(isMapOpen && mapFullScreen)?1:0)|(calibActive?2:0)|(hiddenIn>=0?4:0)|((currentState==STATE_HUB || (currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE))?8:0);}
 EMSCRIPTEN_KEEPALIVE void CanityWebPointer(int phase,int x,int y){
     if(phase==0)CanityPointerDown(x,y);else if(phase==1)CanityPointerMove(x,y);else if(phase==2)CanityPointerUp(x,y);else CanityPointerCancel();
 }

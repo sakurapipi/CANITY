@@ -20,6 +20,7 @@
 #include "hatch.h"
 #include "cell_meta.h"
 #include "room_template.h"
+#include "floor_routes.h"
 #include "map_rooms.h"
 #include "core_rng.h"
 #include "loop_api.h"
@@ -85,13 +86,11 @@ extern int explored[MAP_HEIGHT][MAP_WIDTH];
 
 RoomProp roomProps[MAX_ROOM_PROPS];
 int roomPropCount = 0;
+/* Only legacy replay temporarily emulates the retired generation collision rule. */
+static int legacyDecorCollision = 0;
 
 void RoomPropReset(void) {
-    for (int i = 0; i < MAX_ROOM_PROPS; i++) {
-        roomProps[i].x = 0.0f; roomProps[i].y = 0.0f;
-        roomProps[i].kind = 0; roomProps[i].active = 0;
-        roomProps[i].searchLeft = 0; roomProps[i].searched = 0;
-    }
+    memset(roomProps, 0, sizeof(roomProps));
     roomPropCount = 0;
 }
 
@@ -101,8 +100,8 @@ int RoomPropAdd(float x, float y, int kind) {
     roomProps[roomPropCount].y = y;
     roomProps[roomPropCount].kind = kind;
     roomProps[roomPropCount].active = 1;
-    /* 家具是实体：挡住玩家和怪。高度按种类给，渲染层据此算投影。 */
-    roomProps[roomPropCount].blocks = 1;
+    /* Props are decorative. Only worldMap architecture blocks movement. */
+    roomProps[roomPropCount].blocks = legacyDecorCollision;
     roomProps[roomPropCount].height = 0.62f;
     /* 搜查次数：货架最多，箱子其次 */
     roomProps[roomPropCount].searchLeft =
@@ -111,6 +110,8 @@ int RoomPropAdd(float x, float y, int kind) {
     if(kind==ROOMPROP_CRATES)roomProps[roomPropCount].searchLeft=1;
     if(kind==6)roomProps[roomPropCount].height=.42f;
     else if(kind>=ROOMPROP_THEME_FIRST)roomProps[roomPropCount].height=.82f;
+    if(RoomPropIsLandmark(kind)){roomProps[roomPropCount].height=.94f;roomProps[roomPropCount].searchLeft=0;}
+    if(RoomPropIsControl(kind))roomProps[roomPropCount].height=.48f;
     roomProps[roomPropCount].searched = 0;
     roomPropCount++;
     return 1;
@@ -119,9 +120,7 @@ int RoomPropAdd(float x, float y, int kind) {
 void RoomPropRemoveLast(void) {
     if (roomPropCount <= 0) return;
     roomPropCount--;
-    roomProps[roomPropCount].active = 0;
-    roomProps[roomPropCount].x = 0.0f;
-    roomProps[roomPropCount].y = 0.0f;
+    memset(&roomProps[roomPropCount], 0, sizeof(roomProps[roomPropCount]));
 }
 
 int PropBlocksAt(int cx, int cy) {
@@ -263,6 +262,31 @@ static void FurnishRoom(const RoomTemplate* t, int fx, int fy) {
             }
         }
     }
+}
+
+/* V2 has one landmark and two physical controls; no random loot furniture. */
+static int AddCurrentFixture(const RoomTemplate* t,int fx,int fy,float tx,float ty,int kind) {
+    int bestX=-1,bestY=-1;float best=1e9f;
+    for(int y=fy+1;y<fy+1+t->h;y++)for(int x=fx+1;x<fx+1+t->w;x++) {
+        if(worldMap[y][x] || RoomPropAt(x+.5f,y+.5f)>=0)continue;
+        float d=Dist2(x+.5f,y+.5f,tx,ty);
+        if(d<best){best=d;bestX=x;bestY=y;}
+    }
+    if(bestX<0 || !RoomPropAdd(bestX+.5f,bestY+.5f,kind))return 0;
+    RoomProp* prop=&roomProps[roomPropCount-1];
+    prop->blocks=0;prop->height=RoomPropIsLandmark(kind)?.94f:.48f;
+    prop->searchLeft=RoomPropIsControl(kind)?1:0;prop->searched=0;
+    return 1;
+}
+static int FurnishCurrentRoom(const RoomTemplate* t,int fx,int fy) {
+    int theme=HatchKindForTheme(t->themeId);
+    const RoomArchetype* def=RoomArchetypeGet(theme);
+    if(!def)return 0;
+    float cx=fx+1+t->w*.5f,cy=fy+1+t->h*.5f;
+    if(!AddCurrentFixture(t,fx,fy,cx,cy,def->landmarkKind))return 0;
+    if(theme==HATCH_BRICK)return 1;
+    return AddCurrentFixture(t,fx,fy,fx+1.5f,fy+1.5f,ROOMPROP_CONTROL_FIRST+theme*2) &&
+           AddCurrentFixture(t,fx,fy,fx+t->w+.5f,fy+t->h+.5f,ROOMPROP_CONTROL_FIRST+theme*2+1);
 }
 
 /* 模板瓦片 → worldMap */
@@ -413,6 +437,11 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
     /* ---- ① 快照，失败要能整体回滚 ---- */
     static int savedMap[MAP_HEIGHT][MAP_WIDTH];
     static CellMeta savedMeta[MAP_HEIGHT][MAP_WIDTH];
+    static int savedExplored[MAP_HEIGHT][MAP_WIDTH];
+    RoomProp savedProps[MAX_ROOM_PROPS];Hatch savedHatches[MAX_HATCHES];
+    int savedPropCount=roomPropCount,savedHatchCount=hatchCount;
+    memcpy(savedProps,roomProps,sizeof(savedProps));memcpy(savedHatches,hatches,sizeof(savedHatches));
+    memcpy(savedExplored,explored,sizeof(savedExplored));
     memcpy(savedMap, worldMap, sizeof(savedMap));
     memcpy(savedMeta, cellMeta, sizeof(savedMeta));
 
@@ -465,6 +494,15 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
     if (!okA) { worldMap[doorAY][doorAX] = 1; explored[doorAY][doorAX] = 0; }
     if (!okB) { worldMap[doorBY][doorBX] = 1; explored[doorBY][doorBX] = 0; }
 
+    int spacious=RoomLayoutVersion(roomSeedUsed)>=ROOM_LAYOUT_CURRENT;
+    if(spacious && okA && okB) {
+        int ax=doorRot==0?fx:fx+midX,ay=doorRot==0?fy+midY:fy;
+        int bx=doorRot==0?fx+fw-1:fx+midX,by=doorRot==0?fy+midY:fy+fh-1;
+        worldMap[ay][ax]=0;worldMap[by][bx]=0;
+        if(!CarveDoorTunnel(ax,ay,doorRot==0?-1:0,doorRot==0?0:-1))worldMap[ay][ax]=1;
+        if(!CarveDoorTunnel(bx,by,doorRot==0?1:0,doorRot==0?0:1))worldMap[by][bx]=1;
+    }
+
     /* ---- ④ 登记属性（只登记内圈，外圈是普通墙）---- */
     CellMetaFillRoom(fx + ROOM_BORDER, fy + ROOM_BORDER, t->w, t->h, roomId,
                      t->themeId, ACOUSTIC_DEFAULT, FlagsFor(t->featureId));
@@ -472,6 +510,7 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
         for (int x = 0; x < t->w; x++) {
             int cx = fx + ROOM_BORDER + x, cy = fy + ROOM_BORDER + y;
             if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) continue;
+            if(RoomLayoutVersion(roomSeedUsed)>=ROOM_LAYOUT_COMPACT)cellMeta[cy][cx].flags|=CELLFLAG_ROOM_V2;
             cellMeta[cy][cx].acousticId =
                 (unsigned char)AcousticFor(t->tiles[y][x], t->featureId);
         }
@@ -493,6 +532,7 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
                 cellMeta[y][x].themeId =
                     (unsigned char)((t->themeId >= 0 && t->themeId < THEME_COUNT) ? t->themeId : 0);
                 cellMeta[y][x].flags |= (unsigned char)CELLFLAG_ROOMWALL;
+                if(RoomLayoutVersion(roomSeedUsed)>=ROOM_LAYOUT_COMPACT)cellMeta[y][x].flags|=CELLFLAG_ROOM_V2;
             }
         }
     }
@@ -500,9 +540,13 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
     /* ---- ⑤ 两个门都接不上，或者挖完发现房间走不到 → 全部回滚 ---- */
     /* 家具放在连通性检查**之后**：它会读 worldMap 找地板格，
        而这里已经确认房间是通的。 */
-    if ((!okA && !okB) || !RoomReachable()) {
+    int exitsOk=spacious?(okA && okB):(okA || okB);
+    int routesOk=exitsOk && (!spacious || FloorRoutesConnect(24));
+    if(spacious && routesOk)FloorRoutesBraid(3);
+    if (!routesOk || (spacious && !FloorRoutesWithinDeadEndLimit(3)) || !RoomReachable()) {
         memcpy(worldMap, savedMap, sizeof(savedMap));
         memcpy(cellMeta, savedMeta, sizeof(savedMeta));
+        memcpy(explored, savedExplored, sizeof(savedExplored));
         /* roomCount 可能被 CellMetaFillRoom 抬高过，重算 */
         roomCount = 0;
         for (int y = 0; y < MAP_HEIGHT; y++)
@@ -511,7 +555,9 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
         return 0;
     }
 
-    FurnishRoom(t, fx, fy);
+    int current=RoomLayoutVersion(roomSeedUsed)>=ROOM_LAYOUT_COMPACT;
+    int furnished=current?FurnishCurrentRoom(t,fx,fy):1;
+    if(!current)FurnishRoom(t, fx, fy);
 
     /* ==================================================================
      * 2026-11-06：**舱门** —— 一个房间一扇，门就是主题控制器
@@ -524,7 +570,16 @@ static int CarveRoomBordered(const RoomTemplate* t, int fx, int fy, int roomId, 
      * ================================================================ */
     {
 
-        if(!collapsedLevel && !s_collapseGen)HatchPlaceInRoom(fx + ROOM_BORDER, fy + ROOM_BORDER, t->w, t->h, t->themeId);
+        int hatch=-1;
+        if(!collapsedLevel && !s_collapseGen && furnished)
+            hatch=HatchPlaceInRoom(fx + ROOM_BORDER, fy + ROOM_BORDER, t->w, t->h, t->themeId);
+        if(current && (!furnished || hatch<0)) {
+            memcpy(worldMap,savedMap,sizeof(savedMap));memcpy(cellMeta,savedMeta,sizeof(savedMeta));
+            memcpy(explored,savedExplored,sizeof(savedExplored));
+            memcpy(roomProps,savedProps,sizeof(savedProps));roomPropCount=savedPropCount;
+            memcpy(hatches,savedHatches,sizeof(savedHatches));hatchCount=savedHatchCount;
+            roomCount=roomId-1;return 0;
+        }
     }
     return 1;
 }
@@ -643,7 +698,7 @@ static int TryPlace(int placed, int idMin, int idMax) {
 /* 前置声明：下面 GenerateThemeRooms 末尾要用（定义在本文件靠后） */
 static void RoomDumpIfRequested(int placed);
 
-int GenerateThemeRooms(int wantCount) {
+static int GenerateLegacyThemeRooms(int wantCount) {
     RoomPropReset();
     roomCount=0;
     if (wantCount <= 0){RoomThemeBind();return 0;}
@@ -671,6 +726,51 @@ int GenerateThemeRooms(int wantCount) {
     }
     RoomThemeBind();
     RoomDumpIfRequested(placed);
+    return placed;
+}
+
+static int GenerateCurrentThemeRooms(int wantCount) {
+    RoomPropReset();HatchReset();roomCount=0;
+    if(wantCount<=0 || collapsedLevel || s_collapseGen){RoomThemeBind();return 0;}
+    int version=RoomLayoutVersion(roomSeedUsed);
+    int theme=version>=ROOM_LAYOUT_CURRENT?RoomThemeForMaterial(RoomThemeMaterialForFloor(currentLevel)):RoomThemeForFloor(currentLevel);
+    int variant=RoomLayoutVariant(roomSeedUsed);
+    for(int attempt=0;attempt<360;attempt++) {
+        RoomTemplate t;
+        if(!RoomTemplateBuildVersion(theme,variant,(int)(RoomRand()%4u),version,&t))break;
+        int fw=FootprintW(&t),fh=FootprintH(&t);
+        int spanX=MAP_WIDTH-2-fw,spanY=MAP_HEIGHT-2-fh;
+        if(spanX<=0 || spanY<=0)break;
+        int fx=1+(int)(RoomRand()%(unsigned)spanX),fy=1+(int)(RoomRand()%(unsigned)spanY);
+        if(!ReservationsOk(fx,fy,fw,fh))continue;
+        if(CarveRoomBordered(&t,fx,fy,1,(int)(RoomRand()%2u))) {
+            RoomThemeBind();RoomDumpIfRequested(1);return 1;
+        }
+    }
+    if(version>=ROOM_LAYOUT_CURRENT) {
+        RoomTemplate t;
+        int rotation=(int)(((unsigned)roomSeedUsed>>5)&3u);
+        if(RoomTemplateBuildVersion(theme,variant,rotation,version,&t)) {
+            int fw=FootprintW(&t),fh=FootprintH(&t);
+            for(int fy=1;fy+fh<MAP_HEIGHT-1;fy++)for(int fx=1;fx+fw<MAP_WIDTH-1;fx++) {
+                if(!ReservationsOk(fx,fy,fw,fh))continue;
+                if(CarveRoomBordered(&t,fx,fy,1,rotation&1)) {
+                    RoomThemeBind();RoomDumpIfRequested(1);return 1;
+                }
+            }
+        }
+    }
+    RoomThemeBind();return 0;
+}
+int GenerateThemeRooms(int wantCount) {
+    if(wantCount>1)wantCount=1;
+    if(wantCount>0 && roomCount>0 && hatchCount>0)return 1;
+    int current=RoomLayoutVersion(roomSeedUsed)>=ROOM_LAYOUT_COMPACT;
+    legacyDecorCollision=!current;
+    int placed=current?GenerateCurrentThemeRooms(wantCount):GenerateLegacyThemeRooms(wantCount);
+    legacyDecorCollision=0;
+    /* Replay reproduces old placement decisions, then returns to the shared runtime policy. */
+    for(int i=0;i<roomPropCount;i++)roomProps[i].blocks=0;
     return placed;
 }
 
@@ -745,8 +845,8 @@ int RoomReplay(int seed, int wantCount) {
      * 一批：第二次读档时同一间房会同时存在两扇门，重叠在一起，
      * 而且上一层的门会残留到这一层。
      * ================================================================ */
-    HatchReset();
-    if (wantCount <= 0) { roomSeedUsed = 0; RoomPropReset(); return 0; }
+    HatchReset();CellMetaReset();RoomPropReset();roomCount=0;
+    if (wantCount <= 0) { roomSeedUsed = 0; RoomThemeBind(); return 0; }
     roomSeedUsed = seed;
     { 
       rng_world_seed((unsigned)seed); }

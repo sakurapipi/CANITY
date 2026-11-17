@@ -15,6 +15,7 @@ void  WardenSpawnIfPowered(void);
 void  UpdateWarden(float dt);
 
 /* Warden movement observations. */
+float WardenSpeedNow(void);
 float WardenChaseSpeedNow(void);
 
 int WardenChasing(void);

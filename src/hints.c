@@ -54,7 +54,7 @@ void HintOnce(int id) {
         zh = "金币会在结算时进银行。";        en = "GOLD GOES TO THE BANK WHEN YOU SETTLE.";
         break;
     case HINT_EXIT:
-        zh = "出口会让你选：撤离，或继续深入。"; en = "AT THE EXIT: LEAVE, OR GO DEEPER.";
+        zh = "出口：1或空格继续，2撤离；撤离前需要确认。"; en = "EXIT: 1 / SPACE CONTINUES; 2 EXTRACTS AFTER CONFIRMATION.";
         break;
     case HINT_CARRY_TIER:
         zh = "带的钱越多，怪物听得越清。";    en = "THE MORE YOU CARRY, THE BETTER THEY HEAR.";

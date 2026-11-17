@@ -44,7 +44,6 @@ static int resetDisplayFlag = 0;
 int sliderDragging = 0;
 float volumeF = 0.8f;     /* 0..1，音效音量，0 = 静音 */
 float musicVolumeF = 0.8f;/* 0..1，音乐音量，0 = 静音 */
-int dynamicRes = 1;               /* v1.9：自动画质开关 */
 float gammaValue = 1.0f;
 float gammaBuilt = -1.0f;
 
@@ -85,10 +84,6 @@ SettingItem settings[] = {
     {"Fullscreen",      SET_LIST,   optOnOff,    2, &isFullscreen,      NULL,      0,    0,    0, 1},
     {"Frame Limit",     SET_LIST,   optFps,      5, &fpsCapIndex,       NULL,      0,    0,    0, 1},
     {"Graphics Quality", SET_LIST,  optScale,    4, &renderScaleIndex,  NULL,      0,    0,    0, 1},
-    /* 2026-11-16（审计修复）：UpdateDynamicRes() 里 `if (1) return;` 是永久禁用，
-       菜单却还摆着开关 —— 点了没有任何效果。先隐藏，等 3D 分辨率与 UI 缩放
-       真正解耦（见 docs 报告）再放回来。 */
-    /* {"Dynamic Res",     SET_LIST,   optOnOff,   2, &dynamicRes,        NULL,      0,    0,    0, 1}, */
     {"Gamma",           SET_SLIDER, NULL,        0, NULL,               &gammaValue, 0.7f, 1.6f, 0.05f, 1},
     {"Field of View",   SET_LIST,   optFov,      5, &fovIndex,          NULL,      0,    0,    0, 1},
     /* Optional experimental +/-6 degree vertical shear; OFF preserves level rendering. */
@@ -216,7 +211,7 @@ void ApplySetting(int item, int value) {
 
 void SettingsResetDisplay(void) {
     /* Display-only reset never changes progress, slot, language, bindings or audio. */
-    resIndex=RES_AUTO;isFullscreen=0;fpsCapIndex=4;renderScaleIndex=0;dynamicRes=1;
+    resIndex=RES_AUTO;isFullscreen=0;fpsCapIndex=4;renderScaleIndex=0;
     fovIndex=2;gammaValue=1;gammaBuilt=-1;pitchLookEnabled=0;pitchRatio=0;horizon=0;
     settingsPopupOpen=0;sliderDragging=0;popupItem=-1;popupSelection=0;
     ApplyDisplayMode();

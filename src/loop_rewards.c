@@ -1,6 +1,8 @@
 /* Run draft selection and chained reward lifecycle. */
 #include "common.h"
 #include "wallet.h"
+#include "daily.h"
+#include "run_stats.h"
 #include "run_rewards.h"
 #include "loop_api.h"
 #include "loop_private.h"
@@ -284,3 +286,45 @@ void CloseSkillPick(void) {
 }
 
 void RewardResetPending(void) { pendingSkillDraft = 0; }
+
+/* One modal input path for desktop keys, mouse and mobile taps. */
+int exitChoiceConfirm=0,exitChoiceSelection=0;
+void RunExitChoiceOpen(void) {
+    exitChoiceOpen=1;exitChoiceConfirm=0;exitChoiceSelection=0;exitChoiceT=0;
+    memset(keyPressed,0,sizeof(keyPressed));ForceCursor(1);uiDirty=1;
+}
+static void ExtractCurrentRun(void) {
+    exitChoiceOpen=0;exitChoiceConfirm=0;
+    lastExtractDepthMul=ExtractDepthMul(currentLevel);runInProgress=0;
+    dailyEscapeCount++;DailyObserve(DQ_ESCAPE,dailyEscapeCount);
+    gameWon=1;gameCleared=1;LoopCheckAchievements();BankSettle(1);hasSave=0;
+    currentState=STATE_GAMEOVER;menuSelection=0;ForceCursor(1);uiDirty=1;
+    memset(keyPressed,0,sizeof(keyPressed));resetInputState=1;
+}
+void RunExitChoiceKey(int key) {
+    if(!exitChoiceOpen || currentState!=STATE_PLAYING || exitChoiceT<.18f)return;
+    if(key==VK_UP || key==VK_DOWN || key==VK_LEFT || key==VK_RIGHT || key==VK_TAB){exitChoiceSelection=1-exitChoiceSelection;uiDirty=1;return;}
+    if(exitChoiceConfirm) {
+        if(key=='2' || (key==VK_RETURN && exitChoiceSelection==1)){ExtractCurrentRun();return;}
+        if(key=='1' || key==VK_ESCAPE || key==VK_SPACE || key==VK_RETURN){
+            exitChoiceConfirm=0;exitChoiceSelection=0;exitChoiceT=0;uiDirty=1;
+        }
+        return;
+    }
+    if(key=='2' || (key==VK_RETURN && exitChoiceSelection==1)){
+        exitChoiceConfirm=1;exitChoiceSelection=0;exitChoiceT=0;uiDirty=1;return;
+    }
+    if(key=='1' || key==VK_SPACE || key==VK_RETURN){
+        exitChoiceOpen=0;exitChoiceConfirm=0;exitGoDeeper=1;
+        ForceCursor(0);firstMouseMove=1;resetInputState=1;uiDirty=1;
+        memset(keyPressed,0,sizeof(keyPressed));
+    }
+}
+void RunExitChoiceTick(float dt) {
+    if(!exitChoiceOpen)return;
+    exitChoiceT+=fmaxf(0,dt);
+    static const int keysToHandle[]={'1','2',VK_SPACE,VK_RETURN,VK_ESCAPE,VK_UP,VK_DOWN,VK_TAB};
+    for(unsigned i=0;i<sizeof(keysToHandle)/sizeof(keysToHandle[0]);i++)if(keyPressed[keysToHandle[i]]){
+        keyPressed[keysToHandle[i]]=0;RunExitChoiceKey(keysToHandle[i]);break;
+    }
+}

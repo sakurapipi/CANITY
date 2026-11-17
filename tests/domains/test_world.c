@@ -140,7 +140,7 @@ static void test_theme_depth_bands(void) {
         int allowed[7]={0};RoomTemplate selected;
         CHECK(RoomTemplateRotate(RoomThemeTemplateForFloor(lv),0,&selected),"floor selects a valid authored room template");
         CHECK(selected.themeId>=0 && selected.themeId<7,"selected template owns a valid theme");
-        allowed[selected.themeId]=1;
+        allowed[RoomThemeMaterialForFloor(lv)]=1;
 
         int bad = 0;
         for (int y = 1; y < MAP_HEIGHT - 1; y++)
@@ -772,6 +772,9 @@ static void test_room_props(void) {
     exitX=MAP_WIDTH-2.5f;exitY=MAP_HEIGHT-2.5f;currentLevel=1;
     CellMetaReset();
 
+    /* This contract covers searchable legacy furniture; current devices are
+       covered by the rooms suite and are deliberately not loot containers. */
+    roomSeedUsed=777;
     srand(777u);
     int placed = GenerateThemeRooms(2);
 
@@ -798,7 +801,8 @@ static void test_room_props(void) {
         int kindOk = 1;
         for (int i = 0; i < roomPropCount; i++) {
             if (!roomProps[i].active) continue;
-            if(roomProps[i].kind<ROOMPROP_SHELF || roomProps[i].kind>ROOMPROP_THEME_LAST)kindOk=0;   /* C：木箱堆 */
+            if(RoomPropIsLandmark(roomProps[i].kind) || RoomPropIsControl(roomProps[i].kind))continue;
+            if(roomProps[i].kind<ROOMPROP_SHELF || (roomProps[i].kind>ROOMPROP_THEME_LAST && !RoomPropIsLandmark(roomProps[i].kind) && !RoomPropIsControl(roomProps[i].kind)))kindOk=0;   /* C：木箱堆 */
         }
         CHECK(kindOk, "every room prop must have a known kind");
     }
@@ -814,6 +818,7 @@ static void test_room_props(void) {
         int bad = 0, zero = 0;
         for (int i = 0; i < roomPropCount; i++) {
             if (!roomProps[i].active) continue;
+            if(RoomPropIsLandmark(roomProps[i].kind) || RoomPropIsControl(roomProps[i].kind))continue;
             int k = roomProps[i].kind;
             int want=k>=ROOMPROP_THEME_FIRST || k==ROOMPROP_CRATES?1:k==ROOMPROP_SHELF?3:2;
             if (roomProps[i].searchLeft != want) bad++;
@@ -832,6 +837,7 @@ static void test_room_props(void) {
         int total = 0, corners = 0;
         for (int i = 0; i < roomPropCount; i++) {
             if (!roomProps[i].active) continue;
+            if(RoomPropIsLandmark(roomProps[i].kind) || RoomPropIsControl(roomProps[i].kind))continue;
             int cx = (int)roomProps[i].x, cy = (int)roomProps[i].y;
             if (cx < 1 || cy < 1 || cx >= MAP_WIDTH - 1 || cy >= MAP_HEIGHT - 1) continue;
             total++;
@@ -851,7 +857,7 @@ static void test_room_props(void) {
     /* Current theme-specific furnishing replaces the old mandatory crate/shelf pair. */
     {
         static const int themed[7]={5,4,7,6,2,8,9};int checked=0;
-        for(int i=0;i<roomPropCount;i++)if(roomProps[i].active){
+        for(int i=0;i<roomPropCount;i++)if(roomProps[i].active && !RoomPropIsLandmark(roomProps[i].kind) && !RoomPropIsControl(roomProps[i].kind)){
             int x=(int)roomProps[i].x,y=(int)roomProps[i].y;
             int theme=cellMeta[y][x].themeId;
             CHECK(theme>=0 && theme<7 && roomProps[i].kind==themed[theme],
@@ -1194,7 +1200,77 @@ static void test_collector_starts_inactive(void) {
     CHECK(CollectorY() == CollectorY(), "collector y must not be NaN");
 }
 
+/* Regression cases for single-use room commits and scalable admission fees.
+ * Written for the user's next validation run; not executed by this edit. */
+static void test_room_cost_and_single_commit(void) {
+    CHECK(RoomThemeGoldCost(HATCH_STORAGE,1000)==250,"debt admission scales with carried wealth");
+    CHECK(RoomThemeGoldCost(HATCH_HELL,1000)==350,"irreversible covenant charges a greater share");
+    CHECK(RoomThemeGoldCost(HATCH_STORAGE,201)==51,"percentage fees round up");
+    CHECK(RoomThemeGoldCost(HATCH_STORAGE,0)==40,"empty wallets do not get a free investment");
+    CHECK(RoomThemeGoldCost(HATCH_HELL,2147483647)==751619277,"large wallets cannot overflow percentage fees");
+    StartFreshTestRun();roomPropCount=0;HatchReset();
+    int index=HatchAdd(5.5f,5.5f,HATCH_WARD,3);
+    RoomThemeBind();hiddenIn=-1;battery=80;sanity=10;
+    HatchSetState(index,HATCH_OPENING);
+    CHECK(RoomThemeActivate(index),"a valid prepared activation commits");
+    float paid=battery,healed=sanity;
+    CHECK(hatches[index].state==HATCH_FIRED,"activation itself persists the terminal state");
+    CHECK(!RoomThemeActivate(index) && battery==paid && sanity==healed,"repeated direct activation grants no recovery and charges nothing");
+    RoomThemeBind();HatchSetState(index,HATCH_OPENING);
+    CHECK(!RoomThemeActivate(index) && battery==paid,"rebinding cannot reopen a spent room");
+    posX=25;posY=25;roomTheme.landmarkX=5;roomTheme.landmarkY=5;
+    RoomThemeStartEvent(HATCH_BOILER,45);
+    float x=posX,y=posY;RoomThemeRedirectNoise(&x,&y);
+    CHECK(x==5 && y==5,"sound well still relocates footsteps after leaving the room");
+    StartFreshTestRun();
+}
+/* Vault economics are a separate pool, not a multiplier on ordinary crates. */
+static void test_vault_pool_is_bounded_and_persistent(void) {
+    int loss=0,even=0,profit=0;
+    for(int roll=0;roll<5;roll++) {
+        int amount=RoomThemeVaultReturn(1000,roll);
+        CHECK(amount>=800 && amount<=1200,"completed vault pool stays inside the promised risk range");
+        loss+=amount<1000;even+=amount==1000;profit+=amount>1000;
+    }
+    CHECK(loss==2 && even==1 && profit==2,"five equal pool outcomes include loss, break-even and profit");
+    CHECK(RoomThemeVaultReturn(101,0)==81 && RoomThemeVaultReturn(101,4)==121,"integer rounding never increases the promised loss or gain cap");
+    StartFreshTestRun();RoomPropReset();HatchReset();
+    CHECK(RoomPropAdd(5.5f,5.5f,ROOMPROP_LANDMARK_FIRST+HATCH_STORAGE),"vault ledger landmark exists");
+    int hatch=HatchAdd(3.5f,3.5f,HATCH_STORAGE,1);RoomThemeBind();
+    containerCount=4;memset(containers,0,sizeof(containers));
+    for(int i=0;i<4;i++){
+        containers[i].active=1;containers[i].x=7.5f+i;containers[i].y=7.5f;
+        containers[i].content=i==3?1:10;cellMeta[7][7+i].roomId=1;
+    }
+    CHECK(!RoomThemeVaultChest(3),"progression fuse crate stays outside the betting pool");
+    CHECK(RoomThemeVaultPrepare(251,0),"investment creates a saved pool quote");
+    CHECK(RoomThemeVaultPrepare(251,4),"prepared investment can resume without rerolling");
+    HatchSetState(hatch,HATCH_FIRED);roomTheme.spent=1;
+    int total=0;
+    for(int i=2;i>=0;i--){
+        int amount=RoomThemeVaultReward(i);CHECK(amount>=0,"each allocated receipt is available after investment");
+        total+=amount;containers[i].searched=1;RoomThemeBind();
+    }
+    CHECK(total==201,"search order and rebinding preserve the originally rolled total");
+    int stake=0,paid=0;
+    CHECK(RoomThemeVaultResult(&stake,&paid) && stake==251 && paid==201,"final ledger reports the actual net loss");
+    CHECK(RoomThemeLootMul()<=1.25f,"vault pool does not retain the obsolete ordinary-loot multiplier");
+    StartFreshTestRun();
+}
+static void test_pressure_reaches_monster_rules(void) {
+    float previous=ThreatValue();ThreatReset();float calm[SPAWN_KIND_COUNT];
+    for(int i=0;i<SPAWN_KIND_COUNT;i++)calm[i]=MonsterThreatScale(i);
+    ThreatSet(THREAT_MAX);
+    for(int i=0;i<SPAWN_KIND_COUNT;i++) {
+        float high=MonsterThreatScale(i);
+        CHECK(isfinite(high) && high>=.7f && high<=1.3f,"live pressure modifiers remain bounded");
+        CHECK(i==SPAWN_WARDEN?high<calm[i]:high>calm[i],"pressure reaches each monster family with its intended direction");
+    }
+    CHECK(ThreatHearMul()>1,"hunter sensing uses an actual pressure hearing modifier");
+    ThreatSet(previous);
+}
 void TestSuite_world(void) {
+    test_pressure_reaches_monster_rules();
     test_global_balance_invariants();
     test_theme_depth_bands();
     test_rooms_stay_sealed();
@@ -1215,4 +1291,6 @@ void TestSuite_world(void) {
     test_rng_engines_are_deterministic_and_distinct();
     test_suspicion_best_uses_propagation();
     test_sound_propagation();
+    test_room_cost_and_single_commit();
+    test_vault_pool_is_bounded_and_persistent();
 }

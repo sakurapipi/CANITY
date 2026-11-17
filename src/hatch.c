@@ -73,8 +73,9 @@ void HatchTick(float dt) {
             if(!HatchGateCheck(i,NULL,0)){
                 HatchSetState(i,HATCH_SEALED);h->animT=0;continue;
             }
-            HatchSetState(i, HATCH_OPEN);
-            HatchFireEffect(i);
+            if(!HatchFireEffect(i)) {
+                HatchSetState(i,HATCH_SEALED);h->animT=0;continue;
+            }
             HatchSetState(i, HATCH_FIRED);
         }
     }

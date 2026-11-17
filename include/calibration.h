@@ -8,6 +8,12 @@ extern int calibActive, calibResult;
 extern float calibPos, calibZoneC, calibCooldown, calibResultTimer;
 float CalibZoneScale(void);
 float CalibSpeedScale(void);
+float CalibProgress(void);
+int CalibReadyState(void);
+float CalibLeadIn(void);
+float CalibLaneFlash(int lane);
+int CalibLaneJudgement(int lane); /* -1 miss, 1 good, 2 perfect */
+float CalibLastGain(int lane,int batteryGain);
 void CalibStart(void);
 void CalibLock(void);
 void CalibTick(float dt);

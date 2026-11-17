@@ -7,6 +7,8 @@
  * 后续：GenerateLevel 一系的函数会陆续搬进来。
  */
 #include "common.h"
+#include "hatch.h"
+#include "map_rooms.h"
 #include "loop_api.h"
 #include "entity.h"
 #include "state.h"
@@ -131,32 +133,8 @@ int Blocked(float x, float y) {
     for (int cy = y0; cy <= y1; cy++)
         for (int cx = x0; cx <= x1; cx++) {
             if (worldMap[cy][cx]) return 1;
-            /* ==================================================================
-             * 2026-11-06（v2.4-rc P2）：**房间家具是实体**
-             * ------------------------------------------------------------------
-             * 在此之前全工程没有任何物件参与碰撞 —— 渲染层自己的注释就写着
-             * 「箱子/配电箱没有碰撞，玩家可以站进模型里」。
-             * 那正是"没有实体模型"的根源：不是画得不像，是它本来就不是实体。
-             *
-             * 这里让家具进入**唯一**的碰撞入口，玩家和所有 AI 都自动生效。
-             * ================================================================== */
-            /* ==================================================================
-             * 2026-11-06（用户要求）：**取消伪实体阻挡**
-             * ------------------------------------------------------------------
-             * 用户实测：「伪实体堵路，堵住道路，导致出口进不去。
-             *           我觉得还是不要用伪实体了。」
-             *
-             * 家具（货架/木箱堆/控制台）是**摆件**，不是墙。
-             * 让它们参与碰撞会带来三个后果：
-             *   ① 1 格宽的过道被从中间截断（房间生成时已经尽力避让，
-             *      但模板尺寸固定，总有避不开的时候）
-             *   ② AI 的 A* 把家具当墙绕，寻路变得又贵又难看
-             *   ③ 最严重的：撤离点被堵死就等于这一层报废
-             *
-             * 所以它们全部改成**可穿透**。视觉上仍然有体量，
-             * 但玩家和怪都能走过去 —— 和箱子/配电箱原本的行为一致。
-             * ================================================================ */
-            (void)cx; (void)cy;
+            if (PropBlocksAt(cx, cy)) return 1;
+
         }
     return 0;
 }
@@ -167,6 +145,10 @@ int SpotClear(float x, float y, float minD, int selfKind, int selfIdx) {
         if (selfKind == 1 && i == selfIdx) continue;
         if (containers[i].active && Dist2(x, y, containers[i].x, containers[i].y) < m2) return 0;
     }
+    for(int i=0;i<roomPropCount;i++)if(roomProps[i].active &&
+       Dist2(x,y,roomProps[i].x,roomProps[i].y)<m2)return 0;
+    for(int i=0;i<hatchCount;i++)if(hatches[i].active &&
+       Dist2(x,y,hatches[i].x,hatches[i].y)<m2)return 0;
     if (selfKind != 2 && breaker.active && Dist2(x, y, breaker.x, breaker.y) < m2) return 0;
     if (selfKind != 3 && safeRoom.active && Dist2(x, y, safeRoom.x, safeRoom.y) < m2) return 0;
     /* v3.3 **修复藏身点被箱子压住** ——

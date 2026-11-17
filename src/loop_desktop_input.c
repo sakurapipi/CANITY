@@ -4,6 +4,7 @@
 #include "ui_menu.h"
 #include "echo_marks.h"
 #include "run_stats.h"
+#include "run_rewards.h"
 #include "threat.h"
 #include "threat_telegraph.h"
 #include "training_stations.h"
@@ -64,6 +65,7 @@
 #include "skills.h"
 #include "content_db.h"
 #include "bestiary.h"
+#include "ui_archive.h"
 #include "score.h"
 #include "loop_private.h"
 
@@ -203,12 +205,16 @@ if (currentState == STATE_HUB) {
     }
 
     if (currentState == STATE_BESTIARY) {
+        int tab=UiArchiveTabAt(mx,my);
+        if(tab>=0){UiArchiveSetTab(tab);return;}
+        int scroll=UiArchiveDetailButtonAt(mx,my);
+        if(scroll){UiArchiveScrollDetail(scroll*2);return;}
         MenuGeo g = GetMenuGeo();
         for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
             RECT r = RowRect(g, i);
             if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
-                bestiarySel = i;
-                if (i >= BESTIARY_COUNT) {
+                UiArchiveSelect(i);
+                if (i >= UiArchiveEntryCount()) {
                     /* 点 Back 直接退出 */
                     currentState = STATE_MAIN_MENU;
                     menuSelection = 0;
@@ -331,6 +337,16 @@ void CanityToggleFlashlight(void) {
 void CanityMouseWheel(int delta, int mx, int my) {
     if (delta == 0) return;
 
+    if(currentState==STATE_BESTIARY){
+        MenuGeo g=UiArchiveGeometry();
+        int split=g.panel.left+(g.panel.right-g.panel.left)*32/100;
+        if(UiArchiveTab()==ARCHIVE_ROOMS && mx>=split)UiArchiveScrollDetail(delta>0?-2:2);
+        else {
+            int count=UiArchiveEntryCount()+1;
+            UiArchiveSelect((UiArchiveSelection()+(delta>0?count-1:1))%count);
+        }
+        return;
+    }
     if (currentState == STATE_HUB) {
         float f = (delta > 0) ? 1.12f : (1.0f / 1.12f);
         SkillZoomAt(f, mx, my);
@@ -453,6 +469,9 @@ void CanityMouseMove(int mx, int my) {
 }
 
 void CanityMouseClick(int mx, int my) {
+    if(exitChoiceOpen && currentState==STATE_PLAYING){
+        for(int i=0;i<2;i++){RECT r;ExitChoiceButtonRect(i,&r);if(mx>=r.left && mx<r.right && my>=r.top && my<r.bottom){RunExitChoiceKey(i?'2':'1');break;}}return;
+    }
     if(LoopRunReplacementPending()){
         for(int i=0;i<2;i++){RECT r;RunReplacementButtonRect(i,&r);if(mx>=r.left && mx<r.right && my>=r.top && my<r.bottom){LoopResolveRunReplacement(i);return;}}return;
     }
@@ -903,24 +922,18 @@ static void KeyHandleBank(const MenuKeyInput* key) {
 
 
 static void KeyHandleBestiary(const MenuKeyInput* key) {
-    const int menuUp = key->up;
-    const int menuDown = key->down;
-    const int menuConfirm = key->confirm;
-    const int menuCancel = key->cancel;
-
-            int bn = BESTIARY_COUNT + 1;
-            if (menuUp) { bestiarySel = (bestiarySel + bn - 1) % bn; uiDirty = 1; }
-            if (menuDown) { bestiarySel = (bestiarySel + 1) % bn; uiDirty = 1; }
-            MenuGeo bg = GetMenuGeo();
-            if (bestiarySel < bg.scrollOffset) menuScrollOffsets[STATE_BESTIARY] = bestiarySel;
-            else if (bestiarySel >= bg.scrollOffset + bg.maxVisibleRows)
-                menuScrollOffsets[STATE_BESTIARY] = bestiarySel - bg.maxVisibleRows + 1;
-            if (menuCancel || (menuConfirm && bestiarySel == BESTIARY_COUNT)) {
-                currentState = STATE_MAIN_MENU;
-                menuSelection = 0;
-                uiDirty = 1;
-            }
-
+    if(key->cancel){currentState=STATE_MAIN_MENU;menuSelection=0;uiDirty=1;return;}
+    if(!key->repeat && key->vk==VK_TAB){UiArchiveSetTab(1-UiArchiveTab());return;}
+    if(key->left){UiArchiveSetTab(ARCHIVE_MONSTERS);return;}
+    if(key->right){UiArchiveSetTab(ARCHIVE_ROOMS);return;}
+    if(key->vk==VK_PRIOR){UiArchiveScrollDetail(-2);return;}
+    if(key->vk==VK_NEXT){UiArchiveScrollDetail(2);return;}
+    int count=UiArchiveEntryCount()+1,selected=UiArchiveSelection();
+    if(key->up)UiArchiveSelect((selected+count-1)%count);
+    if(key->down)UiArchiveSelect((selected+1)%count);
+    if(key->confirm && UiArchiveSelection()==UiArchiveEntryCount()){
+        currentState=STATE_MAIN_MENU;menuSelection=0;uiDirty=1;
+    }
 }
 
 static void KeyHandleAchievements(const MenuKeyInput* key) {
@@ -1235,6 +1248,7 @@ int CanityKeyDown(int vk, int repeat) {
     }
     /* Reject invalid public/platform input before locks, rebinding or indexing. */
     if (vk <= 0 || vk >= 256) return 0;
+    if(exitChoiceOpen && currentState==STATE_PLAYING){if(!repeat)RunExitChoiceKey(vk);return 0;}
     if(calibActive && (currentState==STATE_PLAYING || currentState==STATE_SAFEHOUSE)) {
         if(!repeat)CalibInputKey(vk);
         return 0;
@@ -1428,6 +1442,12 @@ static LRESULT WindowMouseMove(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 static LRESULT WindowMouseWheel(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     (void)hwnd; (void)uMsg; (void)wParam; (void)lParam;
 
+    if(currentState==STATE_BESTIARY){
+        POINT point={(short)LOWORD(lParam),(short)HIWORD(lParam)};
+        ScreenToClient(g_hwnd,&point);
+        int x=point.x,y=point.y;MouseToLogical(&x,&y);
+        CanityMouseWheel(GET_WHEEL_DELTA_WPARAM(wParam),x,y);return 0;
+    }
             /* v6：**技能树页用滚轮缩放**（和改造树同一套锚点逻辑） */
             if (currentState == STATE_HUB) {
                 int wx = (short)LOWORD(lParam), wy = (short)HIWORD(lParam);
@@ -1705,7 +1725,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 /* 游戏中（含小窗地图）隐藏光标 —— 鼠标是锁定的。
                    只有全屏地图才显示箭头光标。 */
                 int mouseFree = (currentState != STATE_PLAYING) ||
-                                (isMapOpen && mapFullScreen) || lockActive;
+                                (isMapOpen && mapFullScreen) || lockActive || exitChoiceOpen || calibActive;
                 if (!mouseFree) SetCursor(NULL);
                 else /* 2026-11-06（R4）：光标样式归平台层；ForceCursor(1) 已处理可见性 */
                 return TRUE;

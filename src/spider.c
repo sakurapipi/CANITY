@@ -194,7 +194,7 @@ void SpiderTick(float dt) {
         /* 发现玩家：距离够近 + 有视线 + 不在藏身 */
         if (!playerHidden) {
             float d2 = Dist2(s_spider.x, s_spider.y, posX, posY);
-            if (d2 <= SPIDER_RANGE * SPIDER_RANGE &&
+            if (d2 <= SPIDER_RANGE * SPIDER_RANGE * MonsterThreatScale(SPAWN_SPIDER)*MonsterThreatScale(SPAWN_SPIDER) &&
                 HasLOS(s_spider.x, s_spider.y, posX, posY)) {
                 s_spider.state = SPIDER_AIM;
                 s_spider.aimT  = SPIDER_AIM_TIME;
@@ -208,7 +208,7 @@ void SpiderTick(float dt) {
         s_spider.aimT -= dt;
         {
             float d2 = Dist2(s_spider.x, s_spider.y, posX, posY);
-            if (playerHidden || d2 > SPIDER_RANGE * SPIDER_RANGE ||
+            if (playerHidden || d2 > SPIDER_RANGE * SPIDER_RANGE * MonsterThreatScale(SPAWN_SPIDER)*MonsterThreatScale(SPAWN_SPIDER) ||
                 !HasLOS(s_spider.x, s_spider.y, posX, posY)) {
                 s_spider.state = SPIDER_COOLDOWN;
                 s_spider.cdT   = SPIDER_COOLDOWN_TIME * 0.5f;
@@ -222,7 +222,7 @@ void SpiderTick(float dt) {
         /* 命中判定：仍在射程与视线内才算命中 */
         float d2 = Dist2(s_spider.x, s_spider.y, posX, posY);
         int hit = (!playerHidden) &&
-                  (d2 <= SPIDER_RANGE * SPIDER_RANGE) &&
+                  (d2 <= SPIDER_RANGE * SPIDER_RANGE * MonsterThreatScale(SPAWN_SPIDER)*MonsterThreatScale(SPAWN_SPIDER)) &&
                   HasLOS(s_spider.x, s_spider.y, posX, posY);
         if (hit) {
             /* 交给控制层。被拒（抱脸虫正在生效 / 免疫中）就直接进冷却，

@@ -6,8 +6,6 @@ static void RenderFloorBandLegacy246(int y0, int y1) {
     int centery = halfH + 0;
     /* v1.13：真俯仰后不再需要这两个端点射线（逐行按角度求交） */
     (void)0;
-    int exitBX = (int)(exitX * 4.0f), exitBY = (int)(exitY * 4.0f);
-    int safeBX = (int)(safeRoom.x * 4.0f), safeBY = (int)(safeRoom.y * 4.0f);
     int lightOnF = (flashlightOn && battery > 0.0f);
 
     /* v1.12：y-shear 之后地板与天花板**不再是镜像关系**（镜像只在 0==0 时成立），
@@ -100,7 +98,7 @@ static void RenderFloorBandLegacy246(int y0, int y1) {
                 if (roomCount > 0 &&
                     (unsigned)cX < (unsigned)MAP_WIDTH && (unsigned)cY < (unsigned)MAP_HEIGHT) {
                     unsigned char rid = cellMeta[cY][cX].roomId;
-                    if (rid != 0) {
+                    if (rid != 0 && !(cellMeta[cY][cX].flags&CELLFLAG_ROOM_V2)) {
                         int t = cellMeta[cY][cX].themeId;
                         if (t < 0 || t >= THEME_COUNT) t = 0;
                         int tr = CellThemeTintR(t), tg = CellThemeTintG(t), tb = CellThemeTintB(t);
@@ -128,43 +126,8 @@ static void RenderFloorBandLegacy246(int y0, int y1) {
                     }
                 }
 
-                /* 安全屋花圃 */
-                if (safeRoom.active) {
-                    int bx = (int)(fx * 4.0f), by = (int)(fy * 4.0f);
-                    int sbx = bx - safeBX, sby = by - safeBY;
-                    if (sbx >= -2 && sbx <= 2 && sby >= -2 && sby <= 2) {
-                        float d2s = (float)(sbx * sbx + sby * sby) / 8.0f;
-                        float gs = 1.0f - d2s;
-                        if (gs > 0.0f) {
-                            int r2 = (int)(70 * gs), g2 = (int)(48 * gs), b2 = (int)(58 * gs);
-                            color = (unsigned int)((r2 << 16) | (g2 << 8) | b2);
-                        }
-                    }
-                }
-
-                /* 出口光池 */
-                {
-                    int bx = (int)(fx * 4.0f), by = (int)(fy * 4.0f);
-                    int dbx = bx - exitBX, dby = by - exitBY;
-                    if (dbx >= -3 && dbx <= 3 && dby >= -3 && dby <= 3) {
-                        float d2 = (float)(dbx * dbx + dby * dby) / 9.0f;
-                        float glow = 1.0f - d2;
-                        if (glow > 0.0f) {
-                            float k = (shadow * 0.45f + 0.60f) * glow;
-                            if (breakerOpen) {
-                                int r2 = (int)(40 * k), g2 = (int)(235 * k), b2 = (int)(105 * k);
-                                if (r2 > 255) r2 = 255;
-                                if (g2 > 255) g2 = 255;
-                                if (b2 > 255) b2 = 255;
-                                color = (unsigned int)((r2 << 16) | (g2 << 8) | b2);
-                            } else {
-                                int r2 = (int)(120 * k), g2 = (int)(24 * k);
-                                if (r2 > 255) r2 = 255;
-                                color = (unsigned int)((r2 << 16) | (g2 << 8));
-                            }
-                        }
-                    }
-                }
+                if(safeRoom.active)color=SafetyFloorMarker(color,fx,fy,safeRoom.x,safeRoom.y,1);
+                color=SafetyFloorMarker(color,fx,fy,exitX,exitY,breakerOpen);
 
                 /* 雾 + 光球的暖光（简化：只按距离加暖色） */
                 if (fogR | fogG | fogB) {

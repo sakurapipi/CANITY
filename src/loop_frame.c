@@ -163,7 +163,7 @@ static int UpdatePreflight(float dt) {
     { 
       AudioUpdateListener(posX, posY, dirX, dirY); }
     DailyTick();   /* Calendar rollover also applies while in menus. */
-    if(currentState==STATE_PLAYING && exitChoiceOpen && !keyPressed['1'] && !keyPressed['2']) return 0;
+    if(currentState==STATE_PLAYING && exitChoiceOpen){RunExitChoiceTick(dt);return 0;}
     if(currentState==STATE_PLAYING && !trainingMode) {
         unsigned int chasing=0u; int soundHunters=0;
         for(int i=0;i<MON_HUNTER_MAX;i++) {
@@ -352,6 +352,7 @@ static int UpdateSurvival(float dt, int inSafe) {
 }
 
 static int UpdateCoverInput(void) {
+    if(!ActionIsDown(ACT_INTERACT))roomTheme.awaitingRelease=0;
     if(calibActive){CalibHandleInput(0);return 0;}
     /* 先判断交互目标，决定这一帧能不能移动 */
     /* ===== v3.3 交互目标优先级重排 =====
@@ -470,7 +471,9 @@ static int UpdateCoverInput(void) {
                 }
                 uiDirty = 1;
             }
-        } else if (hideSpotNear >= 0 && (hoverKind == 0 || hoverKind == 3 || hoverKind == 4) && hideBlockTimer <= 0.0f) {
+        } else if (hideSpotNear >= 0 && (hoverKind == 0 || hoverKind == 3 || hoverKind == 4) && hideBlockTimer <= 0.0f &&
+                   !(hoverKind==3 && hoverIndex>=0 && hoverIndex<roomPropCount && RoomPropIsControl(roomProps[hoverIndex].kind)) &&
+                   !(hoverKind==4 && RoomThemeIsCurrent(hoverIndex))) {
             /* v3.0 修复：**附近有可交互的箱子时，藏身点不抢 E** ——
                原来藏身点无条件抢在容器前面消费按键
                （用户实测：箱子和躲藏点刷在一起时箱子开不了）。 */
@@ -511,7 +514,7 @@ static int UpdateCoverInput(void) {
         }
     }
 
-    holdingNow = (!calibActive && hiddenIn < 0 && hoverKind != 0 && ActionIsDown(ACT_INTERACT));
+    holdingNow = (!roomTheme.awaitingRelease && !calibActive && hiddenIn < 0 && hoverKind != 0 && ActionIsDown(ACT_INTERACT));
     }
 
     return 1;
@@ -529,46 +532,6 @@ static int UpdateEarlyActions(float dt) {
        1 = 撤离（立刻按 携带倍数 × 深度倍数 结算，本局结束）
        2 = 深入（继续下一层）
        ESC 不生效 —— 必须选一个。 */
-    if (exitChoiceOpen && currentState == STATE_PLAYING) {
-        if (keyPressed['1']) {
-            keyPressed['1'] = 0;
-            {
-
-                float dm = ExtractDepthMul(currentLevel);
-                /* v7 第 ㊿ 轮：**这里原来自己减自己**
-                   profit = carryGold - carry，而 carry 就是 carryGold
-                   → 恒 0 → 深度倍数一分不加 → 「越深撤离越值钱」不存在。 */
-                int profit = carryGold - carryAtRunStart;
-                if (profit < 0) profit = 0;
-                int extra=0; /* Depth and contract are applied once by BankSettle. */
-                WalletAddRun(extra);
-                exitChoiceOpen = 0;
-                lastExtractDepthMul = dm;
-                /* v6 **必须先清 runInProgress** —— BankSettle 内部会 SaveGame，
-                   原来在它之后才清零，存出一份「钱已进银行、人还站在出口」
-                   的僵尸档，下次启动会出现假的 Continue。 */
-                runInProgress = 0;
-                dailyEscapeCount++; DailyObserve(DQ_ESCAPE,dailyEscapeCount);
-                gameWon=1; gameCleared=1; LoopCheckAchievements();
-                BankSettle(1); hasSave=0;
-            }
-            gameWon = 1;
-            currentState = STATE_GAMEOVER;
-            menuSelection = 0;
-            ForceCursor(1);
-            uiDirty = 1;
-            return 0;
-        }
-        if (keyPressed['2']) {
-            keyPressed['2'] = 0;
-            exitChoiceOpen = 0;
-            exitGoDeeper = 1;      /* v6：下一帧走「换下一层」那段 */
-            uiDirty = 1;
-            return 0;
-        }
-        return 0;   /* 弹窗期间冻结其它一切操作 */
-    }
-
     /* v3.3：T 键在不能开店的地方也要给一句反馈 ——
        试玩实测：「T 在走廊里按没反应，也没有『此处不能开商店』的提示」。
        静默是最糟糕的反馈，玩家会以为按键坏了。 */
@@ -858,7 +821,7 @@ static void UpdatePhaseAndCrank(float dt) {
 
     /* 手摇发电：站着摇，摇满一次回一截电；期间不能移动 */
     cranking = 0;
-    if (!calibActive && ActionIsDown(ACT_CRANK) && battery < (float)BatteryMax() - 0.1f && !holdingNow) {
+    if (hiddenIn<0 && !calibActive && ActionIsDown(ACT_CRANK) && battery < (float)BatteryMax() - 0.1f && !holdingNow) {
         cranking = 1;
         crankTimer += dt;
         crankClick += dt;
@@ -895,7 +858,7 @@ static void UpdatePhaseAndCrank(float dt) {
            现在按比例结算：攒了 1.5 秒就给 1.5/2.4 × 32 ≈ 20 点。
            ≥ 0.3 秒才给，避免「点一下就白送」。 */
         float full = 2.4f * RunCrankTimeMul() * SkillCrankTimeMul() * BenchCrankTimeMul();
-        if (crankTimer >= 0.3f && full > 0.01f) {
+        if (hiddenIn<0 && crankTimer >= 0.3f && full > 0.01f) {
             int wasDeadPart = (battery <= 0.5f);   /* v6：早松手也判断是否没电 */
             float part = crankTimer / full;
             if (part > 1.0f) part = 1.0f;
@@ -958,6 +921,7 @@ static int UpdateMovementAndHatches(float dt, const PlayerFrameInput* movement) 
 }
 
 static void CompleteHeldHatch(void) {
+    if(RoomThemeSelectCentralTarget(hoverIndex)){hoverKind=0;return;}
 
                 /* ================================================================
                  * 舱门：门槛判定 → 开门动画
@@ -968,17 +932,17 @@ static void CompleteHeldHatch(void) {
                 why[0] = 0;
                 if (HatchGateCheck(hoverIndex, why, (int)sizeof(why))) {
                     HatchSetState(hoverIndex, HATCH_OPENING);
-                    pickupMsg = (g_lang == LANG_ZH) ? "舱门开启中…" : "HATCH CYCLING...";
-                    pickupMsgTimer = 1.2f;
+                    RoomThemeNotify(Tr("CENTRAL DEVICE STARTING...","中央装置启动中…"));
                 } else {
-                    pickupMsg = why[0] ? why : ((g_lang == LANG_ZH) ? "条件不满足" : "NOT YET");
-                    pickupMsgTimer = 2.0f;
+                    RoomThemeNotify(why[0]?why:Tr("NOT READY","条件不满足"));
                 }
                 uiDirty = 1;
                 hoverKind = 0;
 }
 
 static void CompleteHeldFurniture(void) {
+    if(hoverIndex>=0 && hoverIndex<roomPropCount && RoomPropIsLandmark(roomProps[hoverIndex].kind))return;
+    if(RoomThemeInteractFixture(hoverIndex)){hoverKind=0;uiDirty=1;return;}
 
                 /* ================================================================
                  * 家具搜查结算（长按完成后）
@@ -1036,8 +1000,29 @@ static void CompleteHeldContainer(void) {
 
                 Container* c = &containers[hoverIndex];
                 if(c->searched)return;
+                int vault=RoomThemeVaultChest(hoverIndex);
+                int vaultReward=vault?RoomThemeVaultReward(hoverIndex):-1;
+                if(vault && vaultReward<0){RoomThemeNotify(Tr("INVEST AT THE CENTRAL VAULT FIRST", "先在中央密库装置确认投资"));return;}
                 c->searched = 1;
                 for(int ei=0;ei<ECHO_MARK_MAX;ei++)if(echoMarkActive[ei] && echoMarkKind[ei]!=0 && Dist2(echoMarkX[ei],echoMarkY[ei],c->x,c->y)<.1f)echoMarkActive[ei]=0;
+                if(vault) {
+                    hideStreak=0;searchedCount++;runSearched++;
+                    SpawnParticles(c->x,c->y,2);WalletAddRun(vaultReward);totalGoldEarned+=vaultReward;
+                    PlaySfx(SFX_PICKUP,.55f);MakeNoise(posX,posY,8.0f*SkillSearchNoiseMul());
+                    static char vaultMessage[128];
+                    snprintf(vaultMessage,sizeof(vaultMessage),Tr("VAULT CHEST: +%d GOLD / EXCLUSIVE POOL", "密库宝箱：金币+%d / 独立奖池"),vaultReward);
+                    int bonus=RoomThemeVaultBonus(hoverIndex),supply=0;
+                    if((bonus&1) && flares<BottleCap()){flares++;supply=1;}
+                    if((bonus&2) && bottles<BottleCap()){bottles++;supply=1;}
+                    if((bonus&4) && smokeBombs<BottleCap()){smokeBombs++;supply=1;}
+                    if(bonus&8){battery=fminf((float)BatteryMax(),battery+8);supply=1;}
+                    if(bonus&16){fusesHeld++;fusesCollectedRun++;supply=1;}
+                    int stake=0,total=0;
+                    if(RoomThemeVaultResult(&stake,&total))
+                        snprintf(vaultMessage,sizeof(vaultMessage),Tr("VAULT SETTLED: %d RETURN / NET %+d GOLD", "密库结算：总回款%d / 净盈亏%+d金币"),total,total-stake);
+                    if(supply){size_t used=strlen(vaultMessage);snprintf(vaultMessage+used,sizeof(vaultMessage)-used,"%s",Tr(" / +SUPPLIES"," / 获得物资"));}
+                    RoomThemeNotify(vaultMessage);uiDirty=1;return;
+                }
                 if(!trainingMode && CellMetaAt((int)c->x,(int)c->y)->roomId){int reward=(int)((45+fminf(70,currentLevel*5))*EndlessDepthBonus(currentLevel));WalletAddRun(reward);totalGoldEarned+=reward;}
                 if(!trainingMode){int stipend=(int)((8+fminf(20,currentLevel*2))*BenchCrateGoldMul());WalletAddRun(stipend);totalGoldEarned+=stipend;}
         {  hideStreak = 0; }   /* v7：搜过箱子，连躲计数清零 */
@@ -1201,7 +1186,9 @@ static void UpdateHeldInteraction(float dt) {
                v2.4-rc：家具（货架/木箱堆/控制台）也走这条 ——
                用户实测"搜这种大容器的时候搜索进度条失效、不发声"，
                因为第一版用的是**按一下**而不是**长按**。 */
-            PlaySfx(SFX_SEARCH, 0.55f);  /* 专用翻箱声：金属刮擦+木板闷响 */
+            if(hoverKind==3 && hoverIndex>=0 && hoverIndex<roomPropCount && RoomPropIsControl(roomProps[hoverIndex].kind))
+                AudioPlayWorld(SFX_CRANK,roomProps[hoverIndex].x,roomProps[hoverIndex].y,.3f,9,2);
+            else PlaySfx(SFX_SEARCH, 0.55f);
             MakeNoise(posX, posY, 10.0f * SkillSearchNoiseMul() * RunSearchNoiseMul2());   /* v2.2：FAST SEARCH 的 +10% */  /* 比走路大一点，比跑步小 */
         }
         /* 2026-11-05：宝箱怪在翻找进度 60% 时咬人。
@@ -1222,8 +1209,7 @@ static void UpdateHeldInteraction(float dt) {
             /* v3.0：翻完箱也上 0.4 秒封锁 ——
                否则 E 还按着，同一帧/下一帧就会被旁边的藏身点吸进去。 */
             hideBlockTimer = 0.4f;
-            if (hoverKind == 5) RoomThemeUseSwitch();
-            else if (hoverKind == 4) CompleteHeldHatch();
+            if (hoverKind == 4) CompleteHeldHatch();
             else if (hoverKind == 3) CompleteHeldFurniture();
             else if (hoverKind == 1) CompleteHeldContainer();
             else if (hoverKind == 2) CompleteHeldBreaker();
@@ -1769,7 +1755,7 @@ static void UpdateExitProgression(float dt) {
     /* v6 **出口二选一：弹窗** ——
        只有「还没弹过、也不是刚选了深入」才弹。 */
     if (!trainingMode && !isFinalFloor && !exitChoiceOpen && !exitGoDeeper && atExit) {
-        exitChoiceOpen = 1;
+        RunExitChoiceOpen();
             {  HintOnce(3); }   /* v7 B4 */
         exitChoiceT = 0.0f;
         MusicNotify(MUSIC_EVENT_GATE);
@@ -1921,6 +1907,7 @@ static void UpdateExitProgression(float dt) {
 
 void Update(float dt) {
     int inSafe;
+    PlayerTickBatteryWarning(dt);
     if (!UpdatePreflight(dt)) return;
     if (!UpdatePlayableTimers(dt, &inSafe)) return;
     if (!UpdateSurvival(dt, inSafe)) return;

@@ -16,6 +16,7 @@
  */
 #include "common.h"
 #include "monster_rules.h"
+#include "monster_rules.h"
 #include "item_effects.h"
 #include "mimic.h"
 #include "bestiary.h"
@@ -315,7 +316,7 @@ void MimicTick(float dt) {
             if (m->stun <= 0.0f && d2 > 0.01f) {
                 float sp = playerMoveSpeedNow;
                 if (sp < 1.6f) sp = 1.6f;              /* 走路基准 */
-                sp *= MIM_SPEED_MUL;
+                sp=fminf(MonsterMovementCap(),sp*MIM_SPEED_MUL*MonsterThreatScale(SPAWN_MIMIC));
                 float len = sqrtf(d2);
                 m->x += dx / len * sp * dt;
                 m->y += dy / len * sp * dt;

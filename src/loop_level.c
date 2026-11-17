@@ -3,6 +3,7 @@
  */
 #include "common.h"
 #include "room_theme.h"
+#include "floor_routes.h"
 #include "map_topology.h"
 #include "control_effect.h"
 #include "echo_marks.h"
@@ -292,47 +293,7 @@ static void ApplyLockboxes(void) {
  * 原来这段只在**房间生成之前**跑，房间门外挖出来的新死路没人处理。
  * ================================================================ */
 static void BraidDeadEnds(void) {
-    /* Collapse maps obey the same connectivity/dead-end bounds. */
-    for (int pass = 0; pass < 8; pass++) {
-        for (int y = 1; y < MAP_HEIGHT - 1; y++) {
-            for (int x = 1; x < MAP_WIDTH - 1; x++) {
-                if (worldMap[y][x]) continue;
-                int openN = 0;
-                if (!worldMap[y][x - 1]) openN++;
-                if (!worldMap[y][x + 1]) openN++;
-                if (!worldMap[y - 1][x]) openN++;
-                if (!worldMap[y + 1][x]) openN++;
-                if (openN != 1) continue;
-                /* 2026-11-06：**房间内外一律不动**。
-                   第二次 braid 跑在房间生成之后，如果不设这条保护，
-                   房间角上的凹角会被当成死路 → 打穿房间外墙，
-                   房间直接漏到迷宫里（而且主题色的"内侧面"判定也会失效）。 */
-                if (cellMeta[y][x].roomId != 0) continue;
-                static const int dxs[4] = { 1, -1, 0, 0 };
-                static const int dys[4] = { 0, 0, 1, -1 };
-                int done = 0;
-                for (int k = 0; k < 4 && !done; k++) {
-                    int wx = x + dxs[k], wy = y + dys[k];
-                    if (wx < 1 || wy < 1 || wx >= MAP_WIDTH - 1 || wy >= MAP_HEIGHT - 1) continue;
-                    if (!worldMap[wy][wx]) continue;
-                    if (cellMeta[wy][wx].flags & CELLFLAG_ROOMWALL) continue;   /* 房间外墙不许穿 */
-                    if (cellMeta[wy][wx].roomId != 0) continue;
-                    int bx = wx + dxs[k], by = wy + dys[k];
-                    if (bx < 1 || by < 1 || bx >= MAP_WIDTH - 1 || by >= MAP_HEIGHT - 1) continue;
-                    if (!worldMap[by][bx]) {
-                        worldMap[wy][wx] = 0;
-                        done = 1;
-                    } else {
-                        int c2x = bx + dxs[k], c2y = by + dys[k];
-                        if (c2x < 1 || c2y < 1 || c2x >= MAP_WIDTH - 1 || c2y >= MAP_HEIGHT - 1) continue;
-                        if (worldMap[c2y][c2x]) continue;
-                        worldMap[by][bx] = 0;
-                        done = 1;
-                    }
-                }
-            }
-        }
-    }
+    FloorRoutesBraid(3);
 }
 
 int ThemeRoomBudgetForLevel(int level,int training) {(void)level;return training?0:1;}
@@ -416,6 +377,7 @@ static void ResetFloorSystems(void) {
 }
 
 static void GenerateMazeTopology(void) {
+    CellMetaReset();RoomPropReset();HatchReset();
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++) { worldMap[y][x] = 1; explored[y][x] = 0; }
 
@@ -519,7 +481,7 @@ static void GenerateMazeTopology(void) {
          * 而且房间的墙在地图种子里是**后期覆盖**上去的，
          * 教程那种小块地图上覆盖很容易压到关键格。
          *
-         * 上限：前两层 1 间，之后 2 间，硬上限 MAX_THEME_ROOMS_PER_FLOOR。
+         * 单层只有一种主题，最多一间特殊房；新布局至少保留双向出口。
          * ================================================================ */
         int want = ThemeRoomBudgetForLevel(currentLevel, trainingMode);
         /* v2.4-rc：记下这一阶段的种子。读档后用它重放，
@@ -528,7 +490,7 @@ static void GenerateMazeTopology(void) {
            老存档读进来时 SaveLoad 会把版本设回 0/1，所以那里的重放仍走 rand()。
            这里显式设 2，确保新档的房间布局跨平台一致。 */
         {  rng_set_version(2); }
-        roomSeedUsed = (int)(rng_world_next() & 0x7FFFFFFF);
+        roomSeedUsed = RoomLayoutSeed(rng_world_next());
         if (want > 0) {
             { 
               rng_world_seed((unsigned)roomSeedUsed); }
@@ -1159,7 +1121,7 @@ static void DistributeFloorLoot(void) {
 
 static void SpawnFloorPopulation(void) {
         {
-        GenerateThemeTextures(campaignMode?CampaignThemeNow():dailyMode?DailyVisualThemeNow():RoomThemeForFloor(currentLevel));
+        GenerateThemeTextures(RoomThemeMaterialForFloor(currentLevel));
     }
     SpawnMonster();
     /* ================================================================
@@ -1214,16 +1176,8 @@ static void SpawnFloorPopulation(void) {
     {  
       SpiderReset(); SpiderTrySpawn(currentLevel); }
 
-    /* v1.8 偷电怪：第 3 层起出现。主线每层 1 只；无尽每 5 层 +1，最多 3 只。 */
+    /* Battery leech is retired; clear any previous-floor transient state. */
     ResetLeeches();
-    if (currentLevel >= LEECH_MIN_LEVEL) {
-        int n = 1;
-        if (isEndlessRun) {
-            n = 1 + (currentLevel - LEECH_MIN_LEVEL) / 5;
-            if (n > LEECH_MAX) n = LEECH_MAX;
-        }
-        for (int i = 0; i < n; i++) SpawnLeech(i);
-    }
     /* v1.8：随机事件（第 2 层起，按概率） */
     /* 先生成基础游荡怪，再应用 MIRROR 的额外刷怪；否则事件刚加的怪会被
        后面的 ExtrasSpawnForLevel() 清空，玩家只能看到速度/理智修正。 */
@@ -1433,7 +1387,7 @@ void GenerateLevel(void) {
         TrainingBuildArena();
         return;
     }
-    GenerateThemeTextures(campaignMode?CampaignThemeNow():dailyMode?DailyVisualThemeNow():RoomThemeForFloor(currentLevel));
+    GenerateThemeTextures(RoomThemeMaterialForFloor(currentLevel));
     GenerateMazeTopology();
     if(campaignMode)CampaignBuildFloor();
     /* Pure topology gate. An invalid random layout falls back to a connected

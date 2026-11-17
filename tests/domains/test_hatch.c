@@ -182,12 +182,13 @@ static void hatch_effect_scene(int kind){
     clear_meta();BenchResetRun();trainingMode=0;dailyMode=0;collapsedLevel=0;
     for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)
         worldMap[y][x]=(x==0 || y==0 || x==MAP_WIDTH-1 || y==MAP_HEIGHT-1);
-    roomPropCount=0;posX=3.5f;posY=3.5f;sanity=60;battery=150;stamina=100;carryGold=500;
+    roomPropCount=0;containerCount=0;posX=3.5f;posY=3.5f;sanity=60;battery=150;stamina=100;carryGold=500;
     flares=2;bottles=smokeBombs=gluePots=echoBolts=0;
     memset(monHunters,0,sizeof(monHunters));
-    monHunters[0].active=1;monHunters[0].x=7.5f;monHunters[0].y=3.5f;
+    monHunters[0].active=1;monHunters[0].x=12.5f;monHunters[0].y=3.5f;
     RoomThemeSetMadness(0);RoomThemeLoadEvent(-1,0);HatchReset();
     HatchAdd(2.5f,2.5f,kind,kind);
+    roomSeedUsed=1;hiddenIn=-1;RoomThemeBind();
 }
 static void fire_test_hatch(void){
     CHECK(HatchGateCheck(0,NULL,0),"effect fixture supplies current gate requirements");
@@ -201,9 +202,12 @@ static void test_all_hatch_effects(void){
     CHECK(battery==130 && kind==0 && time==45,"echo exchange pays 20 battery for a 45-second event");
     CHECK(CollapseRerollCount()==rerolls,"echo exchange does not secretly reroll the floor");
 
-    hatch_effect_scene(HATCH_STORAGE);fire_test_hatch();RoomThemeSaveEvent(&kind,&time);
-    CHECK(carryGold==400 && kind==1 && time==75,"debt window pays 100 gold for its 75-second effect");
-    CHECK(fabsf(RoomThemeLootMul()-1.35f)<.001f && fabsf(RoomThemeNoiseMul()-1.25f)<.001f,"debt window applies its declared reward and risk");
+    hatch_effect_scene(HATCH_STORAGE);
+    containerCount=3;memset(containers,0,sizeof(containers));
+    for(int i=0;i<3;i++){containers[i].active=1;containers[i].x=10.5f+i;containers[i].y=10.5f;containers[i].content=10;cellMeta[10][10+i].roomId=1;}
+    fire_test_hatch();RoomThemeSaveEvent(&kind,&time);
+    CHECK(carryGold==375 && kind==1 && time==75,"debt vault pays 25 percent of current gold for its 75-second risk window");
+    CHECK(fabsf(RoomThemeLootMul()-1.0f)<.001f && fabsf(RoomThemeNoiseMul()-1.25f)<.001f,"vault uses its independent bounded payout, without multiplying ordinary crate rewards");
 
     hatch_effect_scene(HATCH_POWER);fire_test_hatch();
     CHECK(battery==125 && hatchLightsT>34 && hatchLightsT<=35,"lumen overload pays 25 battery and lasts 35 seconds");
@@ -215,11 +219,11 @@ static void test_all_hatch_effects(void){
     CHECK(sanity==60 && battery==70,"ward can trade 20 sanity for 50 battery");
 
     hatch_effect_scene(HATCH_BRICK);fire_test_hatch();
-    CHECK(posX==7.5f && posY==3.5f && monHunters[0].x==3.5f && monHunters[0].y==3.5f,"return switch swaps actual player and hunter positions");
+    CHECK(posX==12.5f && posY==3.5f && monHunters[0].x==3.5f && monHunters[0].y==3.5f,"return switch swaps actual player and hunter positions");
     CHECK(stamina==60 && monHunters[0].stun>=2.5f,"return switch pays 40 stamina and staggers the swapped hunter");
 
     hatch_effect_scene(HATCH_HELL);fire_test_hatch();
-    CHECK(carryGold==400 && RoomThemeMadness(),"madness covenant pays 100 gold and persists in the run");
+    CHECK(carryGold==325 && RoomThemeMadness(),"madness covenant pays 35 percent of current gold and persists in the run");
     CHECK(RoomThemeSanityRatio(1)<=.12f && RoomThemeLootMul()>=1.25f && RoomThemeNoiseMul()>=1.35f,"madness covenant exposes pollution/reward/noise tradeoff");
 
     hatch_effect_scene(HATCH_FLESH);fire_test_hatch();RoomThemeSaveEvent(&kind,&time);
@@ -281,6 +285,10 @@ static void test_hatch_end_to_end(void) {
         for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++)
             roomProps[i].searchLeft = 0;
     }
+    /* Current central devices require explicit preparation, not looting furniture. */
+    for(int i=0;i<roomPropCount;i++)if(RoomPropIsControl(roomProps[i].kind))
+        (void)RoomThemeInteractFixture(i);
+    if(roomTheme.theme==HATCH_BRICK)(void)RoomThemeSelectCentralTarget(0);
     {
         int gateFails = 0;
         for (int i = 0; i < hatchCount; i++) {

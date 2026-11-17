@@ -46,3 +46,9 @@ int MonsterEligible(int kind,int level){
     static const float threshold[SPAWN_KIND_COUNT]={0,1.4f,3,4,2.5f,6,7};
     return strength>=threshold[kind];
 }
+
+float MonsterThreatScale(int kind) {
+    static const float gain[SPAWN_KIND_COUNT]={.27f,.20f,.30f,.15f,.12f,.20f,-.30f};
+    if(kind<0 || kind>=SPAWN_KIND_COUNT)return 1;
+    return 1+gain[kind]*fmaxf(0,fminf(1,ThreatValue()/THREAT_MAX));
+}

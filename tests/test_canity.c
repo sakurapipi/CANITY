@@ -114,6 +114,28 @@ static char* read_loop_sources(void) {
     return result;
 }
 
+static char* read_ui_sources(void) {
+    static const char* paths[] = {
+        "src/ui.c", "src/domain/ui/ui_skilltree.c", "src/domain/ui/ui_overlay.c"
+    };
+    size_t length = 0;
+    char* result = (char*)malloc(1);
+    if (!result) fail("out of memory");
+    result[0] = 0;
+    for (unsigned i = 0; i < sizeof(paths)/sizeof(paths[0]); i++) {
+        char* part = read_file(paths[i]);
+        size_t size = strlen(part);
+        char* next = (char*)realloc(result, length + size + 2);
+        if (!next) { free(part); free(result); fail("out of memory"); }
+        result = next;
+        memcpy(result + length, part, size);
+        length += size;
+        result[length++] = '\n'; result[length] = 0;
+        free(part);
+    }
+    return result;
+}
+
 static int contains(const char* text, const char* needle) {
     return strstr(text, needle) != NULL;
 }
@@ -234,7 +256,7 @@ static void test_no_unwired_api(void) {
         /* 战绩 / 图鉴 */
         { "BestiaryMarkEscaped",     "src/run_economy.c" },
         { "BestiaryMarkCaught",      "src/entity.c" },
-        { "BestiaryDanger",          "src/domain/ui/ui_menu.c" },   /* 第 2 轮：图鉴页随菜单搬走 */
+        { "BestiaryDanger",          "src/domain/ui/ui_archive.c" },   /* RC2: dossier rendering is owned by ui_archive.c. */
         /* 每日修正上一条遥测 */
         { "CatchCountThisRun",       "src/game.c" },
         /* 战役 5 关的规则（第 ⑧ 轮写好，第 ㉓ 轮才接上） */
@@ -602,7 +624,7 @@ static void test_tune_geometry(void) {
 
 static void test_stable_visuals_and_input(void) {
     const char* game = read_loop_sources();
-    const char* ui = read_file("src/ui.c");
+    const char* ui = read_ui_sources();
     const char* render = read_file("src/render.c");
     /* v3.3：合并上游后，锁盘的按键守卫改成 lockIgnoreVK ——
        打开锁盘的那次交互键自动重复不会立刻把它关掉。
@@ -680,7 +702,7 @@ static void test_save_persist_contract(void) {
     const char* savec = read_file("src/save.c");
     const char* game  = read_loop_sources();
     const char* gameh = read_file("include/game.h");
-    const char* uic   = read_file("src/ui.c");
+    const char* uic   = read_ui_sources();
     /* 第 2 轮：主菜单整簇搬到 domain/ui/ui_menu.c，菜单相关断言要看新文件 */
     char* uim = read_file("src/domain/ui/ui_menu.c");
 
@@ -753,8 +775,8 @@ static void test_save_persist_contract(void) {
     check(contains(saveh, "int roomCount;"), "v30 must carry the room count");
     check(contains(savec, "g_lang = (g_save.lang == LANG_ZH)"),
           "language is saved but never restored at startup");
-    check(contains(savec, "s->dynamicRes = dynamicRes"),
-          "Dynamic Res is still not written to the save blob");
+    check(contains(savec, "s->dynamicRes = g_save.dynamicRes"),
+          "retired Dynamic Res slot must retain its historical value");
     check(contains(savec, "g_save.gameClearedSave = gameCleared"),
           "clear record is not written to the save blob");
     /* 2026-11-06（P0-1 + 36x36）：**v27/v28 不再是"按前缀读"了**。

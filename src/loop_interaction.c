@@ -10,12 +10,35 @@
 #include "map_rooms.h"
 #include "room_theme.h"
 
+/* Devices cannot be operated through the enclosing room wall. */
+static int RoomDeviceVisible(float x,float y) {
+    float dx=x-posX,dy=y-posY;
+    int steps=(int)(sqrtf(dx*dx+dy*dy)*12)+1;
+    if(steps>64)return 0;
+    for(int i=1;i<=steps;i++) {
+        int cx=(int)floorf(posX+dx*i/steps),cy=(int)floorf(posY+dy*i/steps);
+        if(cx<0 || cy<0 || cx>=MAP_WIDTH || cy>=MAP_HEIGHT || worldMap[cy][cx])return 0;
+    }
+    return 1;
+}
+
 void InteractionRefreshTargets(void) {
     hoverKind = 0;
     hoverIndex = -1;
-    /* Special rooms use the existing hatch target (kind 4), never a prop target. */
+    /* The saved hatch controller is co-located with the central mechanism. */
+    float deviceDistance=INTERACT_RANGE*INTERACT_RANGE;
+    for(int i=0;i<hatchCount;i++)if(RoomThemeIsCurrent(i) && hatches[i].state==HATCH_SEALED && RoomDeviceVisible(hatches[i].x,hatches[i].y)) {
+        float d=Dist2(posX,posY,hatches[i].x,hatches[i].y);
+        if(d<deviceDistance){deviceDistance=d;hoverKind=4;hoverIndex=i;}
+    }
+    for(int i=0;i<roomPropCount;i++)if(roomProps[i].active && RoomPropIsControl(roomProps[i].kind) &&
+        (roomProps[i].kind-ROOMPROP_CONTROL_FIRST)/2!=HATCH_BRICK && hatchCount &&
+        hatches[0].state==HATCH_SEALED && RoomDeviceVisible(roomProps[i].x,roomProps[i].y)) {
+        float d=Dist2(posX,posY,roomProps[i].x,roomProps[i].y);
+        if(d<deviceDistance){deviceDistance=d;hoverKind=3;hoverIndex=i;}
+    }
 
-    if (!breakerOpen && breaker.active && (!guideMode || tutorialStep>=TUT_BREAKER)) {
+    if (hoverKind==0 && !breakerOpen && breaker.active && (!guideMode || tutorialStep>=TUT_BREAKER)) {
         float d = Dist2(posX, posY, breaker.x, breaker.y);
         if (d < INTERACT_RANGE * INTERACT_RANGE) {
             hoverKind = 2;
@@ -59,7 +82,8 @@ void InteractionRefreshTargets(void) {
     /* 2026-11-06：舱门（主题控制器）—— **排在最后**，不抢箱子和家具的 E */
     if (hoverKind == 0) {
         int hi = HatchNearest(posX, posY, INTERACT_RANGE * INTERACT_RANGE);
-        if (hi >= 0 && hatches[hi].state == HATCH_SEALED) {
+        if (hi >= 0 && hatches[hi].state == HATCH_SEALED &&
+            (!RoomThemeIsCurrent(hi) || RoomDeviceVisible(hatches[hi].x,hatches[hi].y))) {
             hoverKind = 4;
             hoverIndex = hi;
         }
@@ -70,7 +94,10 @@ void InteractionRefreshTargets(void) {
         
         float bestD = INTERACT_RANGE * INTERACT_RANGE;
         for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++) {
-            if (!roomProps[i].active || roomProps[i].searchLeft <= 0) continue;
+            if (!roomProps[i].active || roomProps[i].searchLeft <= 0 || RoomPropIsLandmark(roomProps[i].kind)) continue;
+            if(RoomPropIsControl(roomProps[i].kind) && (roomProps[i].kind-ROOMPROP_CONTROL_FIRST)/2==HATCH_BRICK)continue;
+            if(RoomPropIsControl(roomProps[i].kind) &&
+               (!hatchCount || hatches[0].state!=HATCH_SEALED || !RoomDeviceVisible(roomProps[i].x,roomProps[i].y)))continue;
             float d = Dist2(posX, posY, roomProps[i].x, roomProps[i].y);
             if (d >= INTERACT_RANGE * INTERACT_RANGE) continue;
             if (d < bestD) { bestD = d; hoverKind = 3; hoverIndex = i; }

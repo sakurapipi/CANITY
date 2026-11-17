@@ -10,6 +10,8 @@
 
 /* 整帧合成 + 呈现（场景 → 菜单/HUD → StretchBlt/StretchDIBits） */
 void RenderFrame(void);
+void UiThreatNotice(int kind);
+void ExitChoiceButtonRect(int index,RECT* rect);
 
 /* 菜单几何：game.c 的命中测试与鼠标拖拽也要用 */
 MenuGeo GetMenuGeo(void);
@@ -54,6 +56,9 @@ int  TextHeightWin(void);
 int  TextWidthWin(const char* t);
 
 /* Input hit testing and skill-tree viewport operations. */
+void HubBackButtonRect(int* x0, int* y0, int* x1, int* y1);
+void HubZoomButtonRect(int which, int* x0, int* y0, int* x1, int* y1);
+void DrawHubZoomButtons(void);
 int HubBackButtonAt(int mx, int my);
 
 int ShopBackButtonAt(int mx, int my);

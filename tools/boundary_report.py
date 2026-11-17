@@ -88,7 +88,7 @@ def main(argv):
         'P3 实体/AI': ('entity.c', 'warden.c', 'collector.c', 'scavenger.c',
                        'spider.c', 'mimic.c', 'flank.c', 'ai_common.c'),
         'P4 玩家': ('throwing.c', 'money.c', 'lockbox.c'),
-        'P5 呈现': ('render.c', 'ui.c'),
+        'P5 呈现': ('render.c', 'ui.c', 'domain/render/', 'domain/ui/', 'sprites.c', 'domain/sprites/'),
     }
     print(' [五块归属粗估（按文件名）]')
     for name, pats in blocks.items():

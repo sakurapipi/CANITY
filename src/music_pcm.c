@@ -116,11 +116,13 @@ void MusicPcmMix(float* left,float* right,int count) {
         busGain+=(desired-busGain)*.002f;
         if(playingScene!=target && busGain<.0001f) {
             playingScene=target;cursor=0;filterL=filterR=0;busGain=0;
-            if(seek>=0 && playingScene>=0 && pcmTracks[playingScene].frames>0)cursor=seek%pcmTracks[playingScene].frames;
+            if(seekPending>=0 && playingScene>=0 && pcmTracks[playingScene].frames>0){
+                cursor=seekPending%pcmTracks[playingScene].frames;seekPending=-1;seekFade=0;
+            }
         }
         if(playingScene<0 || (gain<=0 && busGain<.0001f))continue;
         if(playingScene>=MUSIC_SCENE_COUNT || !pcmTracks[playingScene].samples || pcmTracks[playingScene].frames<2)continue;
-        if(seekPending>=0){
+        if(seekPending>=0 && playingScene==target){
             seekFade-=1.0f/128;
             if(seekFade<=0){cursor=seekPending%pcmTracks[playingScene].frames;seekPending=-1;seekFade=0;}
         }else if(seekFade<1){seekFade+=1.0f/128;if(seekFade>1)seekFade=1;}

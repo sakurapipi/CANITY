@@ -45,6 +45,7 @@
  * （否则"房间地面"的统计和可达性检查会把墙算进去）。
  * ================================================================ */
 #define CELLFLAG_ROOMWALL (1u << 4)
+#define CELLFLAG_ROOM_V2 (1u << 5) /* Versioned architecture, never applied to old rooms. */
 
 typedef struct {
     unsigned char roomId;      /* 0 = 普通区；1..n = 第 n 个房间 */

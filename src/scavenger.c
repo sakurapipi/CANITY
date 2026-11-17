@@ -24,6 +24,7 @@
 #include "state.h"
 #include "economy.h"
 #include "common.h"
+#include "ui.h"
 #include "monster_rules.h"
 #include "bestiary.h"
 #include "hints.h"
@@ -151,7 +152,7 @@ static float scavCooldown = 0.0f;   /* 走掉之后的冷却 */
 
 /* Live state queries. SpeedNow exposes the shared movement tuning constant. */
 int   ScavengerActive(void)   { return scavenger.active; }
-float ScavengerSpeedNow(void) { return SCAV_SPEED; }
+float ScavengerSpeedNow(void) { return fminf(MonsterMovementCap(),SCAV_SPEED*MonsterThreatScale(SPAWN_SCAVENGER)); }
 int   ScavengerRifling(void) { /* FIXED_RESULT: Crate rifling is retired; legacy callers always receive false. */ return 0; }
 float ScavengerX(void)       { return scavenger.x; }
 float ScavengerY(void)       { return scavenger.y; }
@@ -422,7 +423,7 @@ void ScavengerTickTrigger(float dt) {
 
     {  BestiaryMarkSeen(BST_ID_SCAVENGER); BestiaryNoteFloor(BST_ID_SCAVENGER, currentLevel); }
     PlaySfx(SFX_GLASS, 0.45f);
-    (void)0; /* Enemy encounter narration removed. */
+    UiThreatNotice(1); /* The requested rare threat warning, not routine encounter narration. */
     (void)0; /* No encounter-toast timer. */
 }
 
@@ -665,7 +666,7 @@ static void ScavengerMove(float dt) {
          · 有 5% 的随机跳过，让节奏不机械 */
     {
         float oxp = scavenger.x, oyp = scavenger.y;
-        stepAlongBfs(&scavenger.x, &scavenger.y, SCAV_SPEED, dt);
+        stepAlongBfs(&scavenger.x, &scavenger.y, ScavengerSpeedNow(), dt);
 
         float mdx = scavenger.x - oxp, mdy = scavenger.y - oyp;
         float moved = sqrtf(mdx * mdx + mdy * mdy);

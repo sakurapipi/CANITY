@@ -11,6 +11,7 @@
 #include "player_api.h"
 #include "player_tick.h"
 #include "game.h"
+#include "run_rewards.h"
 #include "entity.h"
 #include "throwing.h"
 
@@ -449,6 +450,27 @@ static void test_pitch_gate_and_near_wall_input(void) {
     posX=oldX;posY=oldY;pitchRatio=oldPitch;pitchLookEnabled=oldFlag;UpdatePitch();
 }
 
+static void test_exit_choices_require_confirmation(void) {
+    StartFreshTestRun();currentState=STATE_PLAYING;trainingMode=0;runInProgress=1;exitGoDeeper=0;
+    int bank=bankGold;
+    RunExitChoiceOpen();exitChoiceT=.25f;RunExitChoiceKey('2');
+    CHECK(exitChoiceOpen && exitChoiceConfirm && runInProgress && bankGold==bank,"extract opens confirmation without ending the run or settling gold");
+    exitChoiceT=.25f;RunExitChoiceKey(VK_SPACE);
+    CHECK(exitChoiceOpen && !exitChoiceConfirm,"space safely cancels extraction confirmation");
+    exitChoiceT=.25f;RunExitChoiceKey(VK_SPACE);
+    CHECK(!exitChoiceOpen && exitGoDeeper && currentState==STATE_PLAYING,"space on the main exit panel continues the run");
+    exitGoDeeper=0;RunExitChoiceOpen();exitChoiceT=.25f;
+    RECT row;ExitChoiceButtonRect(1,&row);CanityMouseClick((row.left+row.right)/2,(row.top+row.bottom)/2);
+    CHECK(exitChoiceConfirm && runInProgress,"mouse extraction also needs the same confirmation");
+    exitChoiceT=.25f;ExitChoiceButtonRect(0,&row);CanityMouseClick((row.left+row.right)/2,(row.top+row.bottom)/2);
+    CHECK(!exitChoiceConfirm && exitChoiceOpen,"mouse can return safely from extraction confirmation");
+    exitChoiceT=.25f;RunExitChoiceKey('1');
+    CHECK(exitGoDeeper && !exitChoiceOpen && runInProgress,"option one is always continue, never immediate extraction");
+    exitGoDeeper=0;RunExitChoiceOpen();exitChoiceT=.25f;RunExitChoiceKey('2');
+    exitChoiceT=.25f;RunExitChoiceKey('2');
+    CHECK(currentState==STATE_GAMEOVER && !runInProgress && !exitChoiceOpen,"only explicit confirmed extraction ends and settles the run");
+    StartFreshTestRun();
+}
 void TestSuite_update(void) {
     test_comfortable_vertical_projection();
     test_pitch_gate_and_near_wall_input();
@@ -512,6 +534,7 @@ void TestSuite_update(void) {
             free(sbuf);
         }
     }
+    test_exit_choices_require_confirmation();
     test_stable_rhythm_gold_cap();
     test_shared_map_release_and_tree_drag();
     test_invalid_action_and_key_indices();

@@ -32,6 +32,7 @@
  */
 #include "difficulty.h"
 #include "common.h"
+#include "ui.h"
 #include "monster_rules.h"
 #include "bestiary.h"
 #include "item_effects.h"
@@ -110,9 +111,10 @@
 static float wdSpotTimeNow(void) {
 
     int lv = currentLevel > 0 ? currentLevel : 1;
-    float t = WARDEN_SPOT_MAX - WARDEN_SPOT_STEP * (float)(lv - 1);
-    if (t > WARDEN_SPOT_MAX) t = WARDEN_SPOT_MAX;
-    if (t < WARDEN_SPOT_MIN) t = WARDEN_SPOT_MIN;
+    float base=fmaxf(WARDEN_SPOT_MIN,WARDEN_SPOT_MAX-WARDEN_SPOT_STEP*(float)(lv-1));
+    float t=base*MonsterThreatScale(SPAWN_WARDEN);
+    if(t>WARDEN_SPOT_MAX)t=WARDEN_SPOT_MAX;
+    if(t<.7f)t=.7f;
     return t;
 }
 
@@ -648,7 +650,7 @@ static int WardenPreflight(float dt) {
         float tdx = posX - warden.x, tdy = posY - warden.y;
         if (tdx * tdx + tdy * tdy < WARDEN_TOUCH_R * WARDEN_TOUCH_R) {
             SendPlayerToStart();
-            (void)0; /* Enemy encounter narration removed. */
+            (void)0; /* No contact narration. */
             (void)0; /* No encounter-toast timer. */
             return 0;
         }
@@ -931,6 +933,7 @@ static int WardenObservePlayer(float dt) {
              * 那个已经改成按文档取值了，所以追是追，但不会隔着半张图锁人。
              * ============================================================ */
             warden.state = WD_CHASE;
+            UiThreatNotice(2);
             {   /* 锁定完成时把脸转过来，视觉上"他终于盯上你了" */
                 float fdx = posX - warden.x, fdy = posY - warden.y;
                 if (fdx * fdx + fdy * fdy > 0.01f) warden.facing = atan2f(fdy, fdx);

@@ -7,6 +7,7 @@
  */
 #include "common.h"
 #include "wallet.h"
+#include "room_theme.h"
 #include "lockbox.h"
 #include "loop_api.h"
 #include "player_api.h"
@@ -199,8 +200,8 @@ static void LockUnlock(int idx) {
     g_lockType_[idx] = LOCK_TYPE_DIAL;      /* 开了就不必再留着谜题参数 */
     g_lockCode_[idx] = 0;
     locksOpened++;              /* LOCKSMITH 成就 */
-    /* v3.4：解谜给金币 —— 40 + 层数×5。解谜是主动技能，比搜箱子值钱。 */
-    {
+    /* Vault receipts already include the puzzle: no extra gold outside its pool. */
+    if(!RoomThemeVaultChest(idx)) {
 
         int gld = (int)(GOLD_LOCK_BASE + GOLD_LOCK_STEP * (float)currentLevel + 0.5f);
         WalletAddRun(gld);

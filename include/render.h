@@ -14,7 +14,6 @@ extern int pixelBudget;      /* v1.9：动态像素预算 */
 extern int pitchLookEnabled;  /* Optional vertical look; disabled by default. */
 extern float pitchRatio;     /* [-1, 1], comfortable vertical shear up to +/-6 degrees. */
 extern int horizon;          /* Signed pixel offset, published before render workers run. */
-extern int dynamicRes;       /* v1.9：自动画质开关 */
 extern unsigned int* pixels;
 extern unsigned char* vignetteMask;
 
@@ -91,7 +90,6 @@ static inline void PutPixelAdd(int x, int y, unsigned int color, float a) {
 /* ---- 生命周期 ---- */
 void GenerateVignette(void);
 void InitPixels(void);
-void UpdateDynamicRes(double renderMs);   /* v1.9：动态分辨率 */
 void GenerateThemeTextures(int id);
 void BuildShadeTables(void);
 void ApplyFov(void);

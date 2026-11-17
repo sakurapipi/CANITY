@@ -2,6 +2,7 @@
 #define CANITY_MAP_ROOMS_H
 
 #include "common.h"
+#include "room_archetype.h"
 
 /* ==================================================================
  * 主题房间放置（v2.4-rc C3）

@@ -79,15 +79,15 @@ def compose(name):
             continue
         if name == "safe" and index % 2:
             continue
-        kind = "pulse" if index % 4 != 3 else "metal"
+        kind = "pulse" if name=="menu" or index % 4 != 3 else "metal"
         gain = .22 if name == "chase" else .13
         put(score, at, hit(rng, kind, .45, fundamental*1.5), gain,
             (-.35,.25,.1,-.2)[index % 4])
-        if index % (6 if name == "chase" else 11) == 4:
+        if name!="menu" and index % (6 if name == "chase" else 11) == 4:
             put(score, at + beat*.37, hit(rng,"metal",1.2,373+index*3),.08,.65)
     # Quiet -> metal slash / sub impact / glass-like dissonant attack.
     for bar, kind, pitch in ((6,"scrape",1700), (12,"impact",34), (18,"metal",2381)):
-        if bar >= bars:
+        if name=="menu" or bar >= bars:
             continue
         start = int((bar-1)*4*beat*RATE)
         stop = int(bar*4*beat*RATE)

@@ -23,7 +23,8 @@
         "src/monster_rules.c",
         "src/entity.c",
         "src/bestiary.c",
-        "src/sprites.c",
+        "src/domain/sprites/sprite_actors.c",
+        "src/domain/sprites/sprite_bake.h",
         "include/entity.h",
         "include/monster_rules.h"
       ],
@@ -62,7 +63,8 @@
         "src/throwing.c",
         "src/item_effects.c",
         "include/throwing.h",
-        "src/sprites.c"
+        "src/domain/sprites/sprite_props.c",
+        "src/domain/sprites/sprite_bake.h"
       ],
       "contracts": [
         "single termination/settlement owner",
@@ -196,7 +198,9 @@
         "src/ui.c",
         "src/loop_desktop_input.c",
         "src/ui_palette.c",
-        "web/shell.html"
+        "web/shell.html",
+        "src/domain/ui/ui_skilltree.c",
+        "src/domain/ui/ui_overlay.c"
       ],
       "contracts": [
         "one geometry contract for drawing and hit tests",
@@ -210,6 +214,56 @@
         "update registration, bilingual text and lifecycle",
         "compile and package only when requested",
         "user acceptance and user push"
+      ]
+    },
+    "theme_room": {
+      "required": [
+        "theme_id",
+        "layout_version",
+        "two_layouts",
+        "entrance_identity",
+        "landmark",
+        "two_controls",
+        "cost",
+        "risk",
+        "duration",
+        "feedback",
+        "save_policy"
+      ],
+      "entry_files": [
+        "include/room_archetype.h",
+        "src/domain/rooms/room_archetype.c",
+        "src/map_rooms.c",
+        "src/room_theme.c",
+        "src/domain/rooms/room_actions.c",
+        "src/domain/rooms/room_labels.c",
+        "src/domain/sprites/sprite_room_devices.c",
+        "src/render.c",
+        "tests/domains/test_rooms.c",
+        "src/domain/ui/ui_archive.c",
+        "src/domain/rooms/floor_routes.c",
+        "include/floor_routes.h",
+        "src/room_material.c"
+      ],
+      "contracts": [
+        "one room per floor; one landmark and two controls",
+        "actual geometry alone blocks paths; no decorative collision mismatch",
+        "disjoint negative ranges preserve compact v2 and spacious v3; positive seeds retain legacy replay",
+        "special hatch alone charges and commits once after its animation",
+        "snapshot controls persist in existing prop records; no SaveBlob layout change",
+        "no camera rotation, pitch or FOV mutation",
+        "no build, test or publication unless requested",
+        "room catalog reads shared descriptions and baked images without mutating live events or discovery flags",
+        "floor material selects exactly one matching room identity",
+        "spacious rooms need two connected exits; route repairs cannot cross protected room walls"
+      ],
+      "workflow": [
+        "define identity, cost and counterplay",
+        "author both small walkable layouts",
+        "implement prepare -> activate -> active -> spent",
+        "wire bilingual keyboard/mouse/touch prompts",
+        "write failure-path cases",
+        "user acceptance and publication"
       ]
     }
   },

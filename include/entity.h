@@ -53,7 +53,6 @@ extern float jumperTrigger;     /* 本关什么时候触发（秒）；<0 = 本�
 
 /* ---- v1.8 偷电怪 ---- */
 void ResetLeeches(void);
-void SpawnLeech(int index);
 void UpdateLeech(float dt);
 int  LeechNearestDist2(void);      /* 最近偷电怪的距离平方，-1 = 没有 */
 

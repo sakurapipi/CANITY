@@ -313,7 +313,8 @@ void SpawnMonster(void) {
         int x = 1 + rand() % (MAP_WIDTH - 2);
         int y = 1 + rand() % (MAP_HEIGHT - 2);
         if (worldMap[y][x]) continue;
-        if (Dist2(x + 0.5f, y + 0.5f, posX, posY) < 100.0f) continue;
+        float spawnDistance=Dist2(x+.5f,y+.5f,posX,posY);
+        if(spawnDistance<64.0f || (currentLevel==1 && t<384 && spawnDistance>196.0f))continue;
         if (!SpotClear(x + 0.5f, y + 0.5f, 1.4f, 4, -1)) continue;
         Hunter0()->x = x + 0.5f;
         Hunter0()->y = y + 0.5f;
@@ -547,7 +548,7 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
     /* 目标：看得见的玩家（手电开着）优先，其次是地上的荧光棒 */
     float tx = 0.0f, ty = 0.0f;
     int has = 0;
-    if (hiddenIn<0 && flashlightOn && battery > 0.0f && Dist2(posX, posY, L->x, L->y) < 256.0f &&
+    if (hiddenIn<0 && flashlightOn && battery > 0.0f && Dist2(posX, posY, L->x, L->y) < 256.0f*MonsterThreatScale(SPAWN_LIGHT)*MonsterThreatScale(SPAWN_LIGHT) &&
         HasLOS(L->x, L->y, posX, posY)) {
         tx = posX; ty = posY; has = 1;
     } else {
@@ -1017,7 +1018,7 @@ static void HunterPerceive(Monster* M, float dt) {
             /* v2.4-beta B03：隔墙的线索有效强度会掉下来。
                距离也用路径步数，所以"绕一大圈"的点不会被选中。 */
             float reach = 0.0f;
-            int idx = SuspicionBestReach(M->x, M->y, 0.9f, 22.0f, &reach);
+            int idx = SuspicionBestReach(M->x, M->y, 0.9f, 22.0f*ThreatHearMul(), &reach);
 #else
             int idx = SuspicionBest(M->x, M->y, 0.9f);
             float reach = 1.0f;
@@ -1047,7 +1048,7 @@ static void HunterPerceive(Monster* M, float dt) {
              *   第 3 只  阈 30  → **正常走路听不见**，只有摇电/玩偶
              * 这才是「第一只听力最好」，而且第 3 只靠速度而不是耳朵。
              * ============================================================ */
-            float need = 15.0f / HunterHearMulAt(HunterIndex(M));
+            float need = 15.0f / (HunterHearMulAt(HunterIndex(M))*ThreatHearMul());
             /* B03：比较的是**有效强度**（强度 × 可达度），不是原始强度 */
             float effStrength = (idx >= 0) ? susp[idx].strength * reach : 0.0f;
             if (idx >= 0 && effStrength > need) {
@@ -1266,8 +1267,8 @@ static int HunterResolveContact(Monster* M, float dt) {
     float pd2 = Dist2(M->x, M->y, posX, posY);
     if(pd2<MONSTER_CATCH_R*MONSTER_CATCH_R && !HasLOS(M->x,M->y,posX,posY))return 1;
     if (pd2 < 36.0f && M->growlTimer <= 0.0f) {
-        M->growlTimer = 2.6f;
-        if (!monsterMuted) PlaySfx(SFX_SCREAM, pd2 < 9.0f ? 0.55f : 0.28f);
+        M->growlTimer = 3.8f+(M==&monHunters[1]?.45f:M==&monHunters[2]?.9f:0);
+        if (!monsterMuted) AudioPlayWorld(SFX_HUNTER_VOICE,M->x,M->y,pd2<9?.62f:.45f,10,3);
     }
 
     /* 抓到玩家：掉理智 + 怪被弹开（以后可以换成真正的地图事件） */
@@ -1340,7 +1341,7 @@ static int HunterResolveContact(Monster* M, float dt) {
         {  floorTookDamage = 1; }
         tookDamage = 1;
         healFlash = 0.18f;
-        if (!monsterMuted) PlaySfx(SFX_SCREAM, 1.0f);
+        if (!monsterMuted) AudioPlayWorld(SFX_HUNTER_VOICE,M->x,M->y,.85f,10,4);
         if (M == &monHunters[0]) {
             SpawnMonster();          /* 第一只：重生并换位置（老行为） */
         } else {
@@ -1507,34 +1508,7 @@ void ResetLeeches(void) {
     }
 }
 
-/* 随机挑一个地图空地生成 */
-void SpawnLeech(int index) {
-    /* ===== v7 **电池水蛭已删除** =====
-       它偷的是「电量焦虑」，而现在：
-         · 藏身点能回电（4.0/秒）
-         · 摇电早松手也给电
-         · 电池包 60 金币一个
-       电量焦虑已经被削光了，它跟着一起废掉。
-       保留函数壳子，让 game.c 的调用点不用改。 */
-    (void)index;
-    if (1) return;
-
-    if (index < 0 || index >= LEECH_MAX) return;
-    for (int attempt = 0; attempt < 200; attempt++) {
-        int x = 1 + rand() % (MAP_WIDTH - 2);
-        int y = 1 + rand() % (MAP_HEIGHT - 2);
-        if (worldMap[y][x]) continue;
-        float cx = x + 0.5f, cy = y + 0.5f;
-        if (Dist2(cx, cy, posX, posY) < 9.0f) continue;      /* 别贴脸出生 */
-        leeches[index].x = cx;
-        leeches[index].y = cy;
-        leeches[index].age = 0.0f;
-        leeches[index].repelTimer = 0.0f;
-        leeches[index].litTimer = 0.0f;
-        leeches[index].active = 1;
-        return;
-    }
-}
+/* Battery leech spawning is retired. Legacy state can still be cleared/read. */
 
 /* 最近偷电怪的距离平方（HUD / 声音提示用） */
 int LeechNearestDist2(void) {

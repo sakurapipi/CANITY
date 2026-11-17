@@ -41,7 +41,6 @@ extern int showFps;
 extern int fpsCapIndex;
 extern const int fpsCaps[5];
 extern int renderScaleIndex;
-extern int dynamicRes;
 extern const int renderScales[4];
 extern float mouseSens;
 extern int vignetteOn;
@@ -128,7 +127,7 @@ void AddHitFlash(float amount);
 extern float gameTime;
 void CanityMouseLook(int dx, int dy);
 
-/* 技能树拖拽/复位（定义在 ui.c，第 31 轮补声明） */
+/* 技能树拖拽/复位（由 domain/ui/ui_skilltree.c 拥有） */
 void SkillDragStart(int mx, int my);
 void SkillDragMove(int mx, int my);
 void SkillDragEnd(void);

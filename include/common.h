@@ -99,6 +99,8 @@ typedef struct { LONG x, y; } POINT;
 #define VK_MENU      0x12
 #define VK_ESCAPE    0x1B
 #define VK_SPACE     0x20
+#define VK_PRIOR     0x21
+#define VK_NEXT      0x22
 #define VK_HOME      0x24
 #define VK_LEFT      0x25
 #define VK_UP        0x26
@@ -128,7 +130,7 @@ typedef struct { LONG x, y; } POINT;
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 40         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_NUM 43         /* 整数版本，进存档做记录 */
 /* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
    置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
    置 0 = 回到旧的战斗版本。 */
@@ -150,7 +152,7 @@ typedef struct { LONG x, y; } POINT;
 #define CANITY_SOUND_PROP 1
 
 /* v2.4-rc C3：**主题房间**
-   置 1 = 生成时放置 1~2 个主题房间（旧 2x2 小房间照旧保留作兜底）。
+   置 1 = 每层最多放置 1 个同风格主题房间（旧 2x2 小房间照旧保留作兜底）。
    置 0 = 完全不碰地图 —— 与 v2.4-beta 逐位相同，用于二分定位回归。
    默认 1。 */
 #ifndef CANITY_ROOMS
@@ -170,7 +172,7 @@ typedef struct { LONG x, y; } POINT;
 
 /* v2.4.2：双端稳定性补丁 —— 旧档迁移 / 运行段隔离 / 相位与舱门 /
    网页动作绑定与存档导出。存档结构**未变**（仍是 v34）。 */
-#define CANITY_VERSION_STR "2.4.7"
+#define CANITY_VERSION_STR "2.4.8"
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -183,7 +185,7 @@ typedef enum {
     STATE_HELP,
     STATE_ACHIEVEMENTS,
     STATE_SKILL_PICK,     /* v1.8：局内技能三选一 */
-    STATE_BESTIARY,       /* v1.8：怪物图鉴 */
+    STATE_BESTIARY,       /* Shared guide: independent monster / theme-room tabs. */
     STATE_WEAPON_PICK,    /* v2.0：开局选初始武器 */
     STATE_SAFEHOUSE,      /* v2.0：安全屋（商店/改装台/休息） */
     STATE_BANK            /* v6：**独立的银行页** —— 和 HUB（属性页）分开。

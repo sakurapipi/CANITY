@@ -147,7 +147,7 @@ void UpdateSmokes(float dt) {
     if (flashlightOn) runLightUse = 1;
 
     /* v6：出口弹窗的淡入计时 */
-    if (exitChoiceOpen) exitChoiceT += dt;
+    /* Exit modal time is advanced in RunExitChoiceTick while gameplay is frozen. */
 
     /* v3.4：商店每行的补货倒计时 */
     {

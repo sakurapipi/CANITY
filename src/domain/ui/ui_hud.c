@@ -66,31 +66,6 @@ static const char* themeNames[THEME_COUNT] = {
     "BRICK", "PRISON", "HELL", "WARD", "ICE VAULT", "RUST WORKS", "FLESH CAVE"
 };
 
-static void DrawHudThemeRoom(void) {
-            /* ==================================================================
-             * 2026-11-06（用户要求）：**右上角显示当前主题房间**
-             * ------------------------------------------------------------------
-             * 用户原话：「右上角新增一行字幕，告诉我当前的主题房间是什么」。
-             *
-             * 只在玩家**站在房间内部**时显示（roomId != 0）——
-             * 站在走廊里写"砖墙"没有意义，反而像是坏了。
-             * 画在敌人状态那一行**上面**，两者互不遮挡。
-             * ================================================================ */
-
-
-                int cxp = (int)posX, cyp = (int)posY;
-                if (cxp >= 0 && cyp >= 0 && cxp < MAP_WIDTH && cyp < MAP_HEIGHT &&
-                    cellMeta[cyp][cxp].roomId != 0) {
-                    const char* tn = ThemeName((int)cellMeta[cyp][cxp].themeId,
-                                               g_lang == LANG_ZH);
-                    if (tn && tn[0]) {
-                        int tw4 = TextWidthWin(tn);
-                        DrawTextWin(winW - UIS(24) - tw4, winH - UIS(394) - UIS(30),
-                                    tn, 0x00C090E0u);
-                    }
-                }
-}
-
 typedef struct HudBarLayout {
     int barW, barH, labelX, barX, rowGap, y1, y2;
 } HudBarLayout;
@@ -965,7 +940,7 @@ static void DrawHudCoverAndThreat(void) {
     }
 
     /* 主题房间字幕同样会被藏身遮罩吃掉，藏身时不画 */
-    if (hiddenIn < 0) DrawHudThemeRoom();   /* 第 3 轮：主题房间字幕抽成函数 */
+    /* Room identity and effects are composed by UiDrawRoomHint after the HUD. */
         
     }
 
@@ -1210,11 +1185,12 @@ static void DrawHudInteractionHints(const HudBarLayout* layout) {
     }
 
     /* 交互提示 + 长按进度 */
-    if (hoverKind != 0) {
+    int roomDevice=(hoverKind==4 && RoomThemeIsCurrent(hoverIndex)) ||
+        (hoverKind==3 && hoverIndex>=0 && hoverIndex<roomPropCount && RoomPropIsControl(roomProps[hoverIndex].kind));
+    if (hoverKind != 0 && !roomDevice) {
         char pbuf[192];   /* 2026-11-06：舱门门槛文案最长（含数字）要 96 字节，64 会溢出 */
         /* v2.7：提示要用当前绑定，改过键之后写死 E 就是骗人 */
-        if (hoverKind == 5)snprintf(pbuf,sizeof(pbuf),"%s",Tr("HOLD E: MASTER SWITCH / REROLL FLOOR","按住E：总控闸／重掷整层"));
-        else if (hoverKind == 1)
+        if (hoverKind == 1)
             sprintf(pbuf, "HOLD %s  SEARCH", VkName(g_bindings[ACT_INTERACT]));
         else if (hoverKind == 4) {
             /* AD-46：舱门提示**独占一行**，不和时间/搜索提示抢坐标 */
@@ -1223,6 +1199,10 @@ static void DrawHudInteractionHints(const HudBarLayout* layout) {
                 sprintf(pbuf, "HOLD %s  %s", VkName(g_bindings[ACT_INTERACT]), HatchTitle(hoverIndex));
             else
                 sprintf(pbuf, "%s  -  %s", HatchTitle(hoverIndex), why);
+        }
+        else if (hoverKind == 3 && hoverIndex>=0 && hoverIndex<roomPropCount &&
+                 RoomPropIsControl(roomProps[hoverIndex].kind)) {
+            snprintf(pbuf,sizeof(pbuf),"%s  %s",VkName(g_bindings[ACT_INTERACT]),RoomThemeFixtureLine(hoverIndex));
         }
         else if (hoverKind == 3) {
             /* 2026-11-06：家具可以搜（货架 3 次 / 木箱堆 2 次 / 控制台 2 次）。
@@ -1246,12 +1226,14 @@ static void DrawHudInteractionHints(const HudBarLayout* layout) {
 
             const char* eff = HatchEffectLine(hoverIndex);
             if (eff && eff[0]) {
-                int tw2 = TextWidthWin(eff);
-                DrawTextWin((winW - tw2) / 2, winH - UIS(214) + UIS(46),
-                            eff, 0x00E0B050u);
+                char line[320];snprintf(line,sizeof(line),"%s",eff);
+                ClampRowText(line,winW-UIS(24));
+                int tw2=TextWidthWin(line);
+                DrawTextWin((winW-tw2)/2,winH-UIS(214)+UIS(46),line,0x00E0B050u);
             }
         }
 
+        ClampRowText(pbuf,winW-UIS(24));
         int tw = TextWidthWin(pbuf);
         int px = (winW - tw) / 2;
         /* 2026-11-05：原来和「拾取 / 藏身」提示同在 winH-150，会叠字。

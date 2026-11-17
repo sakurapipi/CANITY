@@ -1,0 +1,11 @@
+#ifndef CANITY_MAP_MARKERS_H
+#define CANITY_MAP_MARKERS_H
+enum {
+    MAP_ICON_CRATE, MAP_ICON_FUSE, MAP_ICON_BREAKER, MAP_ICON_SAFE,
+    MAP_ICON_HIDE, MAP_ICON_BROKEN, MAP_ICON_DEVICE, MAP_ICON_SPENT,
+    MAP_ICON_EXIT, MAP_ICON_THREAT, MAP_ICON_MIMIC, MAP_ICON_COUNT
+};
+unsigned MapIconColor(int kind);
+int MapIconPixel(int kind,int x,int y);
+void DrawMapMarkers(int originX,int originY,int cellSize);
+#endif

@@ -7,7 +7,7 @@
 static MusicScene webScene=MUSIC_MENU;
 static MusicProviderId webProvider=MUSIC_LOCAL;
 static float webMaster=.5f,webGain=0,webDuck=1,webDuckTime=0;
-static int webPaused=0;
+static int webPaused=0,calibrationMusic=0;
 static MusicProvider webCustom[MUSIC_PROVIDER_COUNT];
 static void* webContexts[MUSIC_PROVIDER_COUNT];
 static char webTracks[MUSIC_SCENE_COUNT][MAX_PATH*3];
@@ -130,12 +130,12 @@ int MusicUseProvider(MusicProviderId id){
 }
 EM_JS(int,js_music_track,(int scene,const char* path),{var m=Module._musicBus;if(!m)return 0;m.paths[scene]=UTF8ToString(path);delete m.buffers[scene];delete m.loading[scene];if(m.scene===scene)Module._musicPlay(scene,0);return 1;});
 int MusicSetTrack(MusicScene scene,const char* path){if(scene<0 || scene>=MUSIC_SCENE_COUNT || !path || !path[0] || strlen(path)>=sizeof(webTracks[0]))return 0;strcpy(webTracks[scene],path);if(WebCustomActive() && scene==webScene)return webCustom[webProvider].play(webContexts[webProvider],path,1);return js_music_track(scene,path);}
-void MusicSetScene(MusicScene scene){if(scene<0 || scene>=MUSIC_SCENE_COUNT || scene==webScene)return;webScene=scene;if(WebCustomActive()){MusicProvider* p=&webCustom[webProvider];p->play(webContexts[webProvider],webTracks[scene],1);if(p->scene)p->scene(webContexts[webProvider],scene);}else js_music_scene(scene);}
+void MusicSetScene(MusicScene scene){if(scene<0 || scene>=MUSIC_SCENE_COUNT || scene==webScene || calibrationMusic)return;webScene=scene;if(WebCustomActive()){MusicProvider* p=&webCustom[webProvider];p->play(webContexts[webProvider],webTracks[scene],1);if(p->scene)p->scene(webContexts[webProvider],scene);}else js_music_scene(scene);}
 void MusicSetMasterVolume(float volume){webMaster=isfinite(volume)?fmaxf(0,fminf(1,volume)):0;}
 void MusicSetPaused(int paused){webPaused=!!paused;if(!paused && WebCustomActive() && webCustom[webProvider].pause)webCustom[webProvider].pause(webContexts[webProvider],0);}
 void MusicDuck(float seconds,float gain){if(seconds<=0)return;if(webDuckTime<=0 || gain<webDuck)webDuck=fmaxf(0,gain);if(seconds>webDuckTime)webDuckTime=seconds;}
 void MusicNotify(MusicEvent event){MusicDuck(event==MUSIC_EVENT_GATE?2:1.5f,event==MUSIC_EVENT_CAUGHT?.15f:.35f);}
-void MusicTick(float dt){js_music_init();if(!(dt>=0))return;webDuckTime=fmaxf(0,webDuckTime-dt);if(webDuckTime<=0)webDuck=1;float target=webPaused?0:webMaster*webDuck;webGain+=(target-webGain)*fminf(1,dt*4);if(WebCustomActive()){MusicProvider* p=&webCustom[webProvider];if(p->gain)p->gain(webContexts[webProvider],webGain);if(p->tick)p->tick(webContexts[webProvider],dt);if(webPaused && webGain<.0002f && p->pause)p->pause(webContexts[webProvider],1);}else js_music_tick(webGain,RoomThemeSanityRatio(sanity/fmaxf(1,SanityMax())),webPaused);}
+void MusicTick(float dt){js_music_init();if(!(dt>=0))return;webDuckTime=fmaxf(0,webDuckTime-dt);if(webDuckTime<=0)webDuck=1;float target=webPaused?0:webMaster*(calibrationMusic?1:webDuck);webGain+=(target-webGain)*fminf(1,dt*4);if(WebCustomActive()){MusicProvider* p=&webCustom[webProvider];if(p->gain)p->gain(webContexts[webProvider],webGain);if(p->tick)p->tick(webContexts[webProvider],dt);if(webPaused && webGain<.0002f && p->pause)p->pause(webContexts[webProvider],1);}else js_music_tick(webGain,(calibrationMusic || webScene==MUSIC_MENU)?1:RoomThemeSanityRatio(sanity/fmaxf(1,SanityMax())),webPaused);}
 void MusicSeekSeconds(float seconds){if(seconds>=0 && !WebCustomActive())js_music_seek(seconds);}
 float MusicEffectiveGain(void){return webGain;}
 MusicScene MusicCurrentScene(void){return webScene;}
@@ -144,4 +144,13 @@ const char* MusicLastError(void){return "";}
 
 EM_JS(int,js_music_calibratable,(void),{var m=Module._musicBus;return m && !m.builtin && m.buffers[m.scene]?1:0;});
 int MusicCanCalibrate(void){return !WebCustomActive() && js_music_calibratable();}
-int MusicPrepareForCalibration(void){js_music_init();return MusicCanCalibrate();}
+EM_JS(void,js_music_unlock,(void),{
+    if(Module._actx && Module._actx.state==='suspended')Module._actx.resume().catch(function(){});
+});
+int MusicPrepareForCalibration(void){
+    js_music_init();js_music_unlock();
+    if(!MusicCanCalibrate())return 0;
+    calibrationMusic=1;webPaused=0;webDuck=1;webDuckTime=0;
+    js_music_tick(webMaster,1,0);return 1;
+}
+void MusicEndCalibration(void){calibrationMusic=0;}

@@ -30,13 +30,13 @@ enum {
 };
 
 enum {
-    HATCH_BOILER = 0,   /* 锅炉房 · 崩塌 */
-    HATCH_STORAGE,      /* 仓储室 · 开仓 */
-    HATCH_POWER,        /* 供电室 · 全灯清雾 */
-    HATCH_WARD,         /* 病房   · 包扎 */
-    HATCH_BRICK,        /* 砖墙   · 拆墙开捷径 */
-    HATCH_HELL,         /* 地狱   · 血祭 */
-    HATCH_FLESH,        /* 血肉洞窟 · 喂食 */
+    HATCH_BOILER = 0,   /* 声源置换井 */
+    HATCH_STORAGE,      /* 债务密库 */
+    HATCH_POWER,        /* 过载灯塔 */
+    HATCH_WARD,         /* 等价移植舱 */
+    HATCH_BRICK,        /* 折返换位门 */
+    HATCH_HELL,         /* 疯癫契约 */
+    HATCH_FLESH,        /* 借时心室 */
     HATCH_KIND_COUNT
 };
 
@@ -93,7 +93,7 @@ void HatchApplyUsedMask(int mask);           /* 读档后把对应种类标成�
 
 /* ---- 由 game.c 提供（门槛与效果都在那边）---- */
 int  HatchGateCheck(int idx, char* why, int cap);   /* 1 = 可以开 */
-void HatchFireEffect(int idx);
+int HatchFireEffect(int idx); /* 1 only after a successful, charged commit. */
 const char* HatchTitle(int idx);
 
 /* Room placement and player-facing effect description. */

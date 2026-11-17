@@ -212,8 +212,8 @@ static void SetThemeLight(int id);   /* v2.1 主题光色（雾/手电），定�
 static void DrawGroundShadow(int cx, int cyFloor, int halfW, float ty);   /* v2.1 落地阴影 */
 
 void GenerateThemeTextures(int id) {
-    SetThemeLight(id);      /* v2.1：连雾色和手电色一起换 */
     if (id < 0 || id >= THEME_COUNT) id = 0;
+    SetThemeLight(id);      /* Material, fog and flashlight share one validated identity. */
     themeId = id;
 
     floorBaseA=ArtDollGrade(RoomMaterialSample(id,8,8,1));
@@ -318,6 +318,24 @@ static float SpriteShade(float ty, float minK) {
     return k;
 }
 
+static int PropCoversThreat(const SpriteBox* prop,float x,float y) {
+    if(!HasLOS(posX,posY,x,y))return 0;
+    SpriteBox actor=ProjectSprite(x,y,0,.8f);
+    return actor.ok && actor.ty>prop->ty+.1f && actor.ty<18 &&
+           abs(actor.centerX-prop->centerX)<(prop->width+actor.width)/2 &&
+           actor.baseY>prop->baseY-prop->height && actor.baseY-actor.height<prop->baseY;
+}
+static float PropThreatAlpha(const SpriteBox* prop) {
+    if(prop->height<renderH/8 || prop->ty>8)return 1;
+    Monster* actors[MON_HUNTER_MAX+LIGHTBEAST_MAX];
+    int count=MonsterCollect(actors,MON_HUNTER_MAX+LIGHTBEAST_MAX,1);
+    for(int i=0;i<count;i++)if(PropCoversThreat(prop,actors[i]->x,actors[i]->y))return .38f;
+    if(WardenActive() && PropCoversThreat(prop,WardenX(),WardenY()))return .38f;
+    if(ScavengerActive() && PropCoversThreat(prop,ScavengerX(),ScavengerY()))return .38f;
+    if(CollectorActive() && PropCoversThreat(prop,CollectorX(),CollectorY()))return .38f;
+    if(SpiderActive() && PropCoversThreat(prop,SpiderX(),SpiderY()))return .38f;
+    return 1;
+}
 void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float lightK);
 void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, float lightK);   /* v2.1 */
 
@@ -399,10 +417,10 @@ static void SetThemeLight(int id) {
     case 0: themeFogR=22; themeFogG=24; themeFogB=28; themeLitR=104; themeLitG=100; themeLitB=92;  break; /* BRICK    暖灰 */
     case 1: themeFogR=18; themeFogG=22; themeFogB=30; themeLitR=86;  themeLitG=92;  themeLitB=104; break; /* PRISON   冷灰 */
     case 2: themeFogR=40; themeFogG=14; themeFogB=8;  themeLitR=130; themeLitG=80;  themeLitB=60;  break; /* HELL     暖红 */
-    case 3: themeFogR=20; themeFogG=28; themeFogB=36; themeLitR=96;  themeLitG=108; themeLitB=112; break; /* WARD     青白 */
+    case 3: themeFogR=20; themeFogG=29; themeFogB=24; themeLitR=96;  themeLitG=112; themeLitB=96; break; /* WARD     青白 */
     case 4: themeFogR=16; themeFogG=30; themeFogB=44; themeLitR=80;  themeLitG=120; themeLitB=140; break; /* ICE      冰蓝 */
     case 5: themeFogR=28; themeFogG=22; themeFogB=16; themeLitR=120; themeLitG=96;  themeLitB=70;  break; /* RUST     锈黄 */
-    default:themeFogR=26; themeFogG=8;  themeFogB=16; themeLitR=124; themeLitG=72;  themeLitB=84;  break; /* FLESH    暗紫 */
+    default:themeFogR=30; themeFogG=10; themeFogB=8;  themeLitR=124; themeLitG=76;  themeLitB=60;  break; /* FLESH    暗紫 */
     }
 }
 
@@ -414,15 +432,9 @@ static void DrawCrateSprite(int i) {
     /* 2026-11-05：这个槽被宝箱怪占着 —— 它由 DrawMimicSprite 自己画。
        这里再画一次就会出现「箱子上叠一个箱子」。 */
     if (c->mimicHost) return;
-    if (c->searched) {
-        /* 翻过：盖子掀开、里面黑 */
-        DrawBakedPropArt(SPR_PROP_CRATE_OPEN, c->x, c->y, 0.0f, 0.48f, 0.75f);
-    } else if (c->locked) {
-        /* 未解锁：正常木箱 + 金锁 */
-        DrawBakedPropArt(SPR_PROP_CRATE_LOCKED, c->x, c->y, 0.0f, 0.34f, 1.0f);
-    } else {
-        DrawBakedPropArt(SPR_PROP_CRATE, c->x, c->y, 0.0f, 0.34f, 1.0f);
-    }
+    int material=themeId>=0 && themeId<7?themeId:0;
+    int state=c->searched?1:c->locked?2:0;
+    DrawBakedPropArt(SPR_THEME_CRATE_BASE+material*3+state,c->x,c->y,0,.34f,c->searched?.78f:1.0f);
 }
 
 /* 2026-11-05：宝箱怪。
@@ -451,12 +463,14 @@ static void DrawHideSpotSprite(int i) {
     HideSpot* h = &hideSpots[i];
     if (!h->active) return;
     float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.90f : 0.82f);
-    DrawBakedProp(SPR_PROP_TRASH, h->x, h->y, 0.0f, 0.46f, 0.72f * k);
+    int material=themeId>=0 && themeId<7?themeId:0;
+    DrawBakedPropArt(SPR_THEME_HIDE_BASE+material,h->x,h->y,0,.62f,.9f*k);
 }
 static void DrawBreakerSprite(void) {
     if (!breaker.active) return;
     float k = breakerOpen ? 1.15f : 0.95f;
-    DrawBakedPropArt(breakerOpen?SPR_PROP_BREAKER_ON:SPR_PROP_BREAKER, breaker.x, breaker.y, 0.0f, 0.58f, k);
+    int material=themeId>=0 && themeId<7?themeId:0;
+    DrawBakedPropArt(SPR_THEME_BREAKER_BASE+material*2+!!breakerOpen,breaker.x,breaker.y,0,.58f,k);
 }
 
 /* ------------------------------------------------------------------ */
@@ -503,7 +517,7 @@ void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float 
     {
         int x = s.centerX - size / 2;
         int y = s.baseY - size;
-        DrawSprite(spr, x, y, size, size, light * lightK, 1.0f, 1, s.ty);
+        DrawSprite(spr, x, y, size, size, light * lightK, PropThreatAlpha(&s), 1, s.ty);
         return;
     }
 }
@@ -552,12 +566,12 @@ void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, flo
             float localLight=light*lightK+FlareLightAt(wx,wy)*.8f;
             DrawSpriteCreature(spr,dx-(int)(sp->bx0*scale),dy-(int)(sp->by0*scale),fullW,fullH,localLight,1,1,s.ty,0,0,&pose);
         }else{
-            DrawSpriteSubZ(spr, sp->bx0, sp->by0, bw, bh, dx, dy, dw, h,light*lightK,1,s.ty);
+            DrawSpriteSubZ(spr, sp->bx0, sp->by0, bw, bh, dx, dy, dw, h,light*lightK,PropThreatAlpha(&s),s.ty);
         }
     } else {
         /* 包围盒无效（全透明）：退回正方形绘制 */
         int x = s.centerX - h / 2;
-        DrawSprite(spr, x, s.baseY - h, h, h, light * lightK, 1.0f, 1, s.ty);
+        DrawSprite(spr, x, s.baseY - h, h, h, light * lightK, PropThreatAlpha(&s), 1, s.ty);
     }
 }
 /* v2.1：怪物改用烘焙精灵                                              */
@@ -650,13 +664,8 @@ static void DrawBeastSprite(Monster* m,unsigned int eyeColor,int baseSpr){
     if(!m->active)return;
     int sprite=baseSpr>0?baseSpr:(eyeColor==0xC8F0FF?SPR_MON_LIGHT:SPR_MON_HUNTER);
     float halfH=.86f,tintMix=0;unsigned int tint=0;
-    if(bossLevel && m==Hunter0()){halfH=1.45f;tint=0xFF2010;tintMix=.35f;}
+    if(bossLevel && m==Hunter0())halfH=1.45f;
     if(m->stun>0){tint=0xFFFFFF;tintMix=fminf(.75f,m->stun/MONSTER_STUN*.75f);}
-    else if(m->state==1 && Dist2(m->x,m->y,posX,posY)<2.4f*2.4f){
-        /* 听声鬼贴近时的攻击前摇提示：没有眼睛可发光，就用一层血墨色
-           把轮廓压红；不改变位置、判定或 AI。 */
-        tint=0x00C03020u;tintMix=.18f;
-    }
     DrawCreatureActor(sprite,m->x,m->y,halfH,1,1,m->facing,m->walkPhase,tint,tintMix,m->stun>0?0:m->state==1?1:.35f);
 }
 
@@ -1116,6 +1125,7 @@ int DebugHatchScreenBox(int idx, float hx, float hy, int* x0, int* y0, int* x1, 
 
 
 static void DrawListedHatch(int hi) {
+    if(RoomThemeIsCurrent(hi))return; /* Central device is the only visible activator. */
     /* 2026-11-06：舱门（两扇对开，4 帧） */
     if (hi >= 0 && hi < MAX_HATCHES && hatches[hi].active) {
         /* 帧号由开门进度决定；SEALED=0，OPEN/FIRED=3 */
@@ -1192,6 +1202,34 @@ static void DrawListedRoomProp(int ri) {
          * 现在**每个家具只画 1 个精灵**，改由 searchLeft 承担内容量：
          *   货架 3 次 / 木箱堆 2 次 / 控制台 2 次
          * ================================================================ */
+        RoomProp* prop=&roomProps[ri];
+        if(RoomPropIsLandmark(prop->kind)) {
+            int theme=prop->kind-ROOMPROP_LANDMARK_FIRST,stage=RoomThemeVisualStage();
+            float height=prop->height;
+            /* Only the mechanical heart moves, and only its world sprite. */
+            if(theme==6 && !(RoomThemeEventKind()==6 && RoomThemeEventRemaining()>0))
+                height*=1.0f+.012f*sinf((float)g_timeSec*1.8f);
+            int sprite=SPR_ROOM_V2_BASE+theme*3+stage;
+            if(stage==1) {
+                int phase=(int)(fmod(g_timeSec*4.0+(double)theme,3.0));
+                if(phase>0)sprite=SPR_ROOM_MOTION_BASE+theme*2+phase-1;
+            }
+            DrawBakedPropArt(sprite,prop->x,prop->y,0,height,
+                            stage==1?1.08f+.06f*sinf((float)g_timeSec*2.0f+theme):1.0f);
+            return;
+        }
+        if(RoomPropIsControl(prop->kind)) {
+            int offset=prop->kind-ROOMPROP_CONTROL_FIRST;
+            if(offset/2==HATCH_BRICK)return;
+            int sprite=SPR_ROOM_V2_CONTROL_BASE+offset;
+            if(prop->searched && !roomTheme.spent) {
+                int phase=sinf((float)g_timeSec*2.4f+offset)>0;
+                sprite=SPR_ROOM_CONTROL_READY_BASE+phase*14+offset;
+            }
+            DrawBakedPropArt(sprite,prop->x,prop->y,0,prop->height,
+                            roomTheme.spent?.65f:prop->searched?1.08f+RoomThemeControlPulse()*.18f:.8f);
+            return;
+        }
         int oneSpr = roomProps[ri].kind>=3 && roomProps[ri].kind<=9?SPR_ROOM_BOILER+roomProps[ri].kind-3:SPR_PROP_SHELF;
         if (roomProps[ri].kind == ROOMPROP_CONSOLE)     oneSpr = SPR_PROP_CONSOLE;
         else if (roomProps[ri].kind == ROOMPROP_CRATES) oneSpr = SPR_PROP_CRATE;
@@ -1490,11 +1528,16 @@ static unsigned int SampleSmoothFloor(float wx,float wy,int level) {
 }
 
 /* 地板：棋盘只有两种底色，亮度查表；出口发光只在出口所在格判断 */
+/* Thin world-space corner brackets replace flat coloured safety carpets. */
+static unsigned SafetyFloorMarker(unsigned color,float fx,float fy,float wx,float wy,int open) {
+    float ax=fabsf(fx-wx),ay=fabsf(fy-wy),edge=fmaxf(ax,ay),inner=fminf(ax,ay);
+    if(edge>=.76f && edge<=.83f && inner>.43f)
+        return open?0xA8BEC7u:0xAA8560u;
+    return color;
+}
 #include "domain/render/legacy/render_246_floor.inc"
 static void RenderFloorBand(int y0, int y1) {
     if(!pitchLookEnabled) { RenderFloorBandLegacy246(y0,y1); return; }
-    int exitBX = (int)(exitX * 4.0f), exitBY = (int)(exitY * 4.0f);
-    int safeBX = (int)(safeRoom.x * 4.0f), safeBY = (int)(safeRoom.y * 4.0f);
     int lightOnF = (flashlightOn && battery > 0.0f);
     /* Fade in spatial filtering while looking down, instead of snapping between
        2-texel blocks as the horizon moves. OFF/level retains the original texture. */
@@ -1589,7 +1632,7 @@ static void RenderFloorBand(int y0, int y1) {
                 if (roomCount > 0 &&
                     (unsigned)cX < (unsigned)MAP_WIDTH && (unsigned)cY < (unsigned)MAP_HEIGHT) {
                     unsigned char rid = cellMeta[cY][cX].roomId;
-                    if (rid != 0) {
+                    if (rid != 0 && !(cellMeta[cY][cX].flags&CELLFLAG_ROOM_V2)) {
                         int t = cellMeta[cY][cX].themeId;
                         if (t < 0 || t >= THEME_COUNT) t = 0;
                         int tr = CellThemeTintR(t), tg = CellThemeTintG(t), tb = CellThemeTintB(t);
@@ -1617,43 +1660,8 @@ static void RenderFloorBand(int y0, int y1) {
                     }
                 }
 
-                /* 安全屋花圃 */
-                if (safeRoom.active) {
-                    int bx = (int)(fx * 4.0f), by = (int)(fy * 4.0f);
-                    int sbx = bx - safeBX, sby = by - safeBY;
-                    if (sbx >= -2 && sbx <= 2 && sby >= -2 && sby <= 2) {
-                        float d2s = (float)(sbx * sbx + sby * sby) / 8.0f;
-                        float gs = 1.0f - d2s;
-                        if (gs > 0.0f) {
-                            int r2 = (int)(70 * gs), g2 = (int)(48 * gs), b2 = (int)(58 * gs);
-                            color = (unsigned int)((r2 << 16) | (g2 << 8) | b2);
-                        }
-                    }
-                }
-
-                /* 出口光池 */
-                {
-                    int bx = (int)(fx * 4.0f), by = (int)(fy * 4.0f);
-                    int dbx = bx - exitBX, dby = by - exitBY;
-                    if (dbx >= -3 && dbx <= 3 && dby >= -3 && dby <= 3) {
-                        float d2 = (float)(dbx * dbx + dby * dby) / 9.0f;
-                        float glow = 1.0f - d2;
-                        if (glow > 0.0f) {
-                            float k = (shadow * 0.45f + 0.60f) * glow;
-                            if (breakerOpen) {
-                                int r2 = (int)(40 * k), g2 = (int)(235 * k), b2 = (int)(105 * k);
-                                if (r2 > 255) r2 = 255;
-                                if (g2 > 255) g2 = 255;
-                                if (b2 > 255) b2 = 255;
-                                color = (unsigned int)((r2 << 16) | (g2 << 8) | b2);
-                            } else {
-                                int r2 = (int)(120 * k), g2 = (int)(24 * k);
-                                if (r2 > 255) r2 = 255;
-                                color = (unsigned int)((r2 << 16) | (g2 << 8));
-                            }
-                        }
-                    }
-                }
+                if(safeRoom.active)color=SafetyFloorMarker(color,fx,fy,safeRoom.x,safeRoom.y,1);
+                color=SafetyFloorMarker(color,fx,fy,exitX,exitY,breakerOpen);
 
                 /* 雾 + 光球的暖光（简化：只按距离加暖色） */
                 if (fogR | fogG | fogB) {
@@ -1729,6 +1737,9 @@ static void RenderWallSurface(int x, const WallRay* ray) {
     float rayDirY = ray->rayDirY;
     int mapX = ray->mapX;
     int mapY = ray->mapY;
+    int architectureMaterial=-1;
+    if(mapX>=0 && mapY>=0 && mapX<MAP_WIDTH && mapY<MAP_HEIGHT &&
+       (cellMeta[mapY][mapX].flags&CELLFLAG_ROOM_V2))architectureMaterial=cellMeta[mapY][mapX].themeId;
     int side = ray->side;
     float perpWallDist = ray->perpWallDist;
     /* Both endpoints share forward depth. Pitch cannot turn one of them
@@ -1826,92 +1837,15 @@ static void RenderWallSurface(int x, const WallRay* ray) {
     {
 
         int tr = 0, tg = 0, tb = 0;
-        if (CellTintRGB(mapX, mapY, &tr, &tg, &tb)) {
+        if (architectureMaterial<0 && CellTintRGB(mapX, mapY, &tr, &tg, &tb)) {
             float k = smokeDim;          /* 浓烟里补光同样被压 */
             addR += (int)(tr * k);
             addG += (int)(tg * k);
             addB += (int)(tb * k);
         }
     }
-    /* ==================================================================
-     * 2026-11-06（用户要求）：**房间外墙要有"装修过"的样子**
-     * ------------------------------------------------------------------
-     * 只有色调变化不够 —— 玩家还是分不出"这是房间"和"这是走廊"。
-     * 这里取出房间外墙的标记与主题色，在下面的像素循环里画一条**腰线**：
-     * 墙面 26%~34% 高度处一条横向色带（主题色偏亮），
-     * 上下各留一格暗边。现实里那是瓷砖腰线 / 护墙板的分界。
-     *
-     * 每列算一次，不进像素循环 —— 循环里只多两次比较。
-     * ================================================================ */
-    int bandR = 0, bandG = 0, bandB = 0, hasBand = 0;
-    int bandLo1 = 17, bandHi1 = 22, bandLo2 = -1, bandHi2 = -1;
-    {
 
-
-        int tr2 = 0, tg2 = 0, tb2 = 0;
-        /* ==================================================================
-         * 2026-11-06（用户实测）：**只有房间**内**侧该是主题色**
-         * ------------------------------------------------------------------
-         * 用户原话：「房间里面是蓝的，然后外墙什么都看不出来，跟普通墙差不多」，
-         * 并且指出「有一部分墙体是双面墙体，里面是蓝色的，外面是迷宫的时候
-         * 也可以看到里面是蓝色的」。
-         *
-         * 根因：房间外墙是**一格**，从房间内和从迷宫里看到的是同一格。
-         * 现在按"观察者那一侧"判断：只有视点这一侧的邻格是房间内部
-         * （roomId != 0）时才上主题色，外面看就是普通墙。
-         * ================================================================ */
-        int nbX = mapX, nbY = mapY;
-        /* Use the caster's exact steps; do not infer a second sign convention. */
-        int stepX = ray->stepX;
-        int stepY = ray->stepY;
-        if (side == 0) nbX -= stepX; else nbY -= stepY;
-        int fromInsideRoom = 0;
-        if (nbX >= 0 && nbY >= 0 && nbX < MAP_WIDTH && nbY < MAP_HEIGHT)
-            fromInsideRoom = (cellMeta[nbY][nbX].roomId != 0);
-        if (fromInsideRoom && CellIsRoomWall(mapX, mapY, &tr2, &tg2, &tb2)) {
-            /* ==================================================================
-             * 2026-11-06（用户要求）：**七种主题不能长一个样**
-             * ------------------------------------------------------------------
-             * 用户原话：「大多数都长得差不多……每一个特色也不是很明确，
-             *           里面的设计审美概念都不是很明确」。
-             *
-             * 之前所有主题共用同一条腰线（vy 17..22）。现在按主题给
-             * **不同的腰线剖面**：位置、宽度、条数都不同，
-             * 于是站在房间里一眼能分清这是哪种空间。
-             *
-             * vy 是 0..63 的墙面竖直坐标（0 = 天花，63 = 地面）：
-             *   砖墙   踢脚线：低、窄           (54..58)
-             *   监狱   两道横栏：中上 + 中下    (14..17, 34..37)
-             *   地狱   顶部压边：高、厚         (6..14)
-             *   病房   腰线 + 踢脚：双细线      (28..31, 56..58)
-             *   冰窖   细腰线：极高             (20..23)
-             *   锈工厂 粗腰带：中、最宽         (26..36)
-             *   血肉   无腰线，改成底部渐暗     (56..63)
-             * ================================================================ */
-
-            int th = (int)cellMeta[mapY][mapX].themeId;
-            if (th < 0 || th >= THEME_COUNT) th = 0;
-            bandLo1 = 54; bandHi1 = 58; bandLo2 = -1; bandHi2 = -1;
-            switch (th) {
-            case 0: bandLo1 = 54; bandHi1 = 58; break;            /* 砖墙：踢脚 */
-            case 1: bandLo1 = 14; bandHi1 = 17;                   /* 监狱：双横栏 */
-                    bandLo2 = 34; bandHi2 = 37; break;
-            case 2: bandLo1 = 6;  bandHi1 = 14; break;            /* 地狱：顶部压边 */
-            case 3: bandLo1 = 28; bandHi1 = 31;                   /* 病房：双细线 */
-                    bandLo2 = 56; bandHi2 = 58; break;
-            case 4: bandLo1 = 20; bandHi1 = 23; break;            /* 冰窖：高细线 */
-            case 5: bandLo1 = 26; bandHi1 = 36; break;            /* 锈工厂：宽腰带 */
-            case 6: bandLo1 = 56; bandHi1 = 63; break;            /* 血肉：底部压暗 */
-            default: break;
-            }
-            /* 腰线色 = 主题色 × 3.2，并给一个下限，暗主题也能看出来 */
-            bandR = tr2 * 26 / 10; if (bandR < 26) bandR = 26;
-            bandG = tg2 * 26 / 10; if (bandG < 22) bandG = 22;
-            bandB = tb2 * 26 / 10; if (bandB < 22) bandB = 22;
-            hasBand = 1;
-        }
-    }
-
+    /* Room walls use the floor material; no screen-relative decorative bands. */
     int k8 = (int)(lit * 256.0f);
     if (k8 < 0) k8 = 0;
     else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;
@@ -1921,8 +1855,8 @@ static void RenderWallSurface(int x, const WallRay* ray) {
 
     /* v1.9：墙脚 / 墙顶 AO —— 沿墙面上下各压暗 16 像素，
        墙角有了"厚度"，不再是均匀一片贴图 */
-    int aoBot = drawEnd - 16;
-    int aoTop = drawStart + 16;
+    int aoBot = (architectureMaterial>=0?yBottom:drawEnd) - 16;
+    int aoTop = (architectureMaterial>=0?yTop:drawStart) + 16;
 
     /* v2.1：竖直方向的光斑。
        原来亮度只按 x 算（flashTab[x]），同一列从上到下完全一样，
@@ -1945,6 +1879,9 @@ static void RenderWallSurface(int x, const WallRay* ray) {
         /* v2.0：走了 mip 就按低位采样（lod 0 时与原路径完全等价） */
         unsigned int t = mipSrc[((texY >> mipShift) & mipMaskY) * mipW + (texX >> mipShift)];
         int vy = (int)(((float)(y - drawStart) * 64.0f) / (float)(drawEnd - drawStart + 1));
+        /* The current room's lighting is attached to the actual wall, not
+           the clipped viewport span: walking closer cannot stretch the wash. */
+        if(architectureMaterial>=0)vy=texY*64/TEX_HEIGHT;
         if (vy < 0) vy = 0;
         if (vy > 63) vy = 63;
         int k8v = (k8 * vLut[vy]) >> 8;              /* 竖直光斑 */
@@ -1957,20 +1894,7 @@ static void RenderWallSurface(int x, const WallRay* ray) {
 
         r += addR; g += addG; b += addB;
 
-        /* 房间腰线：vy 0..63 的竖直坐标，26%~34% 处一条亮带，
-           紧贴它上下各一格暗边 —— 有明暗对比才读得出"这是装饰" */
-        if (hasBand) {
-            int inBand = (vy >= bandLo1 && vy <= bandHi1);
-            if (bandLo2 >= 0 && vy >= bandLo2 && vy <= bandHi2) inBand = 1;
-            if (inBand) {
-                r += bandR; g += bandG; b += bandB;
-            } else if (vy == bandLo1 - 1 || vy == bandHi1 + 1) {
-                r -= 18; g -= 18; b -= 18;
-                if (r < 0) r = 0;
-                if (g < 0) g = 0;
-                if (b < 0) b = 0;
-            }
-        }
+
 
         if (r > 255) r = 255;
         if (g > 255) g = 255;
@@ -1983,7 +1907,8 @@ static void RenderWallSurface(int x, const WallRay* ray) {
        热点循环里少两次比较 + 三次乘法，而这两段只有 32 行。 */
     {
         int yb0 = aoBot > drawStart ? aoBot : drawStart;
-        unsigned int* p = pixels + (size_t)yb0 * renderW + x;
+        if(yb0>drawEnd)yb0=drawEnd;
+        unsigned int* p = pixels + (size_t)(yb0<drawEnd?yb0:drawStart) * renderW + x;
         for (int y = yb0; y < drawEnd; y++, p += renderW) {
             int f = 256 - (y - aoBot) * 13;
             if (f < 116) f = 116;

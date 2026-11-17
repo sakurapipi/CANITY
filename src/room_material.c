@@ -1,51 +1,60 @@
 #include "common.h"
 #include "room_material.h"
-/* Bake-time material functions; not called from the frame rasterizer. */
-unsigned RoomMaterialSample(int theme,int x,int y,int surface) {
-    unsigned hash=(unsigned)(x*1973+y*9277+theme*26699+surface*31847);hash^=hash>>7;
-    int noise=(int)(hash%9),r=18+noise,g=27+noise,b=39+noise,mark=0;
-    if(surface==1){
-        switch(theme){
-        case 0:mark=(x%16<2 || y%16<2 || ((x+y)%29<2));break;
-        case 1:mark=(x%12<2 || y%32<2);break;
-        case 2:mark=(y%10<3);break;
-        case 3:mark=(x%24<2 || y%24<2);break;
-        case 4:mark=((x-y+128)%31<2);break;
-        case 5:mark=((x%16<2 && y%32<20) || (y%16<2 && x%32<20));break;
-        case 6:mark=((x*x+y*y)%67<5);break;
-        }
-        r=10+noise;g=19+noise;b=27+noise;if(mark){r+=7;g+=15;b+=20;}
-    }else if(surface==2){r=7+noise/2;g=11+noise/2;b=18+noise/2;}
-    else {
-        switch(theme){
-        case 0:mark=((x*x+3*y*y)%211<12 || x%32==0);r=16+noise;g=29+noise;b=42+noise;break;
-        case 1:mark=(x%16<3 || y%12<2);r=23+noise;g=27+noise;b=38+noise;break;
-        case 2:mark=(y%8<3 || (x+y)%43<2);r=16+noise;g=33+noise;b=36+noise;break;
-        case 3:mark=(x%16<2 || y%16<2 || ((x*3+y)%47<2));r=29+noise;g=40+noise;b=45+noise;break;
-        case 4:mark=((x+y)%23<2 || (x-y+128)%37<2);r=20+noise;g=35+noise;b=48+noise;break;
-        case 5:mark=(x%24<3 || y%24<3 || (x%24==12 && y%24<12));r=26+noise;g=22+noise;b=44+noise;break;
-        case 6:mark=((x*x+(y%16)*(y%16))%79<8);r=31+noise;g=19+noise;b=37+noise;break;
-        }
-        if(mark){r/=2;g/=2;b/=2;}
-        if((hash%251)==0){r+=25;g+=32;b+=35;}
-    }
+/* Shared floor/ceiling/wall materials, baked once. Coarse, static detail avoids shimmer. */
+unsigned RoomMaterialSample(int theme,int x,int y,int surface){
     static const int palette[7][3][3]={
-        {{83,61,48},{54,45,32},{29,26,23}},
-        {{72,78,77},{42,47,44},{24,27,26}},
-        {{91,35,29},{55,26,23},{34,16,18}},
-        {{104,115,109},{57,66,62},{36,42,41}},
-        {{65,106,130},{35,67,86},{23,40,57}},
-        {{99,65,36},{59,45,30},{33,28,24}},
-        {{103,46,66},{57,32,43},{32,20,29}}};
+        {{92,87,78},{70,65,55},{35,37,37}},
+        {{69,86,91},{43,57,61},{24,35,39}},
+        {{105,42,29},{59,26,23},{35,18,20}},
+        {{125,139,122},{65,84,72},{39,51,45}},
+        {{67,121,150},{31,68,89},{23,44,61}},
+        {{123,89,49},{71,52,30},{42,34,27}},
+        {{115,57,41},{68,37,29},{42,25,24}}
+    };
     if(theme<0 || theme>=7)theme=0;
-    int side=surface>=0 && surface<=2?surface:0;
-    int shade=noise+(mark?-12:0);
-    r=palette[theme][side][0]+shade;g=palette[theme][side][1]+shade;b=palette[theme][side][2]+shade;
-    if(theme==4 && mark){r+=18;g+=22;b+=26;}
+    if(surface<0 || surface>2)surface=0;
+    x&=63;y&=63;
+    unsigned hash=(unsigned)((x/2)*1973+(y/2)*9277+theme*26699+surface*31847);
+    hash^=hash>>7;
+    int noise=(int)(hash%7)-3,edge=0,mark=0,stain=0;
+    if(surface==0){
+        switch(theme){
+        case 0:edge=(y%16<2 || (x+(y/16)*16)%32<2);mark=0;break;
+        case 1:edge=(x%32<2 || y%16<2);mark=(x%32>6 && x%32<14 && y%16>10 && y%16<13);break;
+        case 2:edge=(x%32<3 || y%32<3);stain=((x*3+y*5)%61<8 && y>24);mark=(y<7 && x%16<6);break;
+        case 3:edge=(x%16<2 || y%16<2);mark=(y>27 && y<31);stain=(hash%31<2);break;
+        case 4:edge=(x%16<3);mark=(y%16<3 && x%16>4 && x%16<13);break;
+        case 5:edge=(x%32<3);mark=(y%16<3 && x%32<8);stain=(hash%19<2);break;
+        case 6:edge=((x*x/16+y)%22<3);stain=((x/3+y/5)%13<3);mark=(y>52 && (x+y)%17<4);break;
+        }
+    }else if(surface==1){
+        switch(theme){
+        case 0:edge=(y%32<2 || (x+(y/32)*16)%32<2);mark=0;break;
+        case 1:edge=(x%16<2 || y%32<2);mark=(x>27 && x<36);break;
+        case 2:edge=(x%32<3 || y%16<2);stain=(hash%17<3);mark=(y%32<5 && (x+y)%16<8);break;
+        case 3:edge=(x%16<2 || y%16<2);mark=(x%32>27 && y%32>27);break;
+        case 4:edge=((x+y)%32<3);mark=(x%32>27 || y%32>27);break;
+        case 5:edge=(x%16<2 || y%16<2);mark=((x/4+y/4)%2==0 && y>25 && y<35);break;
+        case 6:edge=((x*x/24+y)%24<3);stain=((x/4-y/8+64)%11<3);break;
+        }
+    }else{
+        edge=(theme==6)?((x*x/16+y)%24<4):(x%32<5 || y%32<3);
+        mark=(theme==4 && x>28 && x<35) || (theme==3 && y>27 && y<34);
+        stain=(theme==2 || theme==5) && hash%23<3;
+    }
+    int r=palette[theme][surface][0]+noise,g=palette[theme][surface][1]+noise,b=palette[theme][surface][2]+noise;
+    if(edge){r=r*2/3;g=g*2/3;b=b*2/3;}
+    if(stain){r=r*4/5;g=g*3/5;b=b*3/5;}
+    if(mark){
+        if(theme==2 || theme==6){r+=23;g+=3;b+=1;}
+        else if(theme==4){r+=8;g+=21;b+=29;}
+        else {r+=17;g+=18;b+=10;}
+    }
     if(r<0)r=0;
     if(g<0)g=0;
     if(b<0)b=0;
-    /* Eight-level quantization matches the existing premultiplied lookup table. */
-    r=(r>>3)<<3;g=(g>>3)<<3;b=(b>>3)<<3;
-    return (unsigned)(r<<16|g<<8|b);
+    if(r>255)r=255;
+    if(g>255)g=255;
+    if(b>255)b=255;
+    return (unsigned)(((r>>3)<<3)<<16|((g>>3)<<3)<<8|((b>>3)<<3));
 }

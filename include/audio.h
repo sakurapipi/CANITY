@@ -19,6 +19,7 @@ enum { SFX_STEP = 0, SFX_HEART, SFX_PICKUP, SFX_POWER, SFX_GATE, SFX_CRANK,
        SFX_SCAV_STEP,/* v2.4.92 清道夫：走路的高速摩擦 */
        SFX_IMPACT, SFX_HEARTBEAT, SFX_METAL_SCRAPE, SFX_DRIP, SFX_STEAM, SFX_HUM,
        SFX_WRIGGLE, SFX_BONE, SFX_GLASS_CRACK, SFX_HINGE, SFX_BREATH,
+       SFX_HUNTER_VOICE, SFX_LOW_BATTERY,
        SFX_COUNT };
 void AudioBuildAtmosphere(short* output,int frames,int kind,int rate);
 
