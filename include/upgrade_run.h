@@ -15,6 +15,7 @@
 #define RUN_UPG_MAX   3
 
 void  RunUpgReset(void);
+void RunUpgSetLevel(int kind,int level); /* Deterministic state fixture hook. */
 int   RunUpgLevel(int kind);
 int   RunUpgCost(int kind);          /* -1 = 满级 */
 int   RunUpgTryBuy(int kind);        /* 0=成功 2=满级 4=金币不够 */
@@ -30,8 +31,7 @@ float RunUpgStaminaMul(void);        /* 冲刺消耗倍率 */
 float RunUpgFlashMul(void);          /* 手电耗电倍率 */
 /* v7：扳手击退（常驻能力，等级由商店升级） */
 int   RunUpgWrenchLevel(void);       /* 0..3 */
-float RunUpgWrenchCooldown(void);    /* <0 = 用次数制，>=0 = 冷却秒数 */
-int   RunUpgWrenchCharges(void);     /* 每层可用次数（冷却制时无意义） */
+float RunUpgWrenchCooldown(void);    /* Always cooldown; final minimum 5 seconds. */
 float RunUpgWrenchRange(void);       /* 推开几格 */
 float RunUpgWrenchStun(void);        /* 硬直秒数 */
 int   RunUpgCarryBonus(void);        /* v3.0：投掷物携带上限 +2/级 */

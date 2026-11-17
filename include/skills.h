@@ -50,6 +50,9 @@ int SkillIsPlayerFacing(int id);
 const char* SkillDisplayName(int id);
 const char* SkillDisplayDescription(int id);
 int SkillFindByName(const char* query);
+int SkillHearing(void);
+int SkillPremonition(void);
+int SkillInnerEye(void);
 float SkillCounterCooldownRate(void);
 float SkillDecoyHoldSeconds(void);
 int SkillClampRank(int id, int rank);
@@ -96,7 +99,6 @@ float SkillQuietMul(void);      /* QUIET LID   -15% 噪声/级 */
 float SkillEcoMul(void);        /* GHOST STEP  -12% 手电耗电/级 */
 float SkillCalmMul(void);       /* REST        -10% 理智流失/级 */
 int   SkillsAllMaxed(void);     /* 所有普通节点满级（成就用） */         /* 安全屋回智加成 */
-float SkillStunAdd(void);         /* 硬直加成 */
 
 /* ---- 机制型技能（v2.5：替换掉原来的纯数值样板节点） ---- */
 int   SkillPwrSiphonAdd(void);        /* 低电涓流：每秒回电，0 = 没这技能 */
@@ -105,21 +107,16 @@ float SkillPwrSiphonSanityMul(void);  /* 低电期间理智流失倍率 */
 float SkillCrankWalkPenalty(void);    /* 边摇边走时的移速惩罚，0 = 不能边摇边走 */
 float SkillGhostStepNoiseMul(void);   /* 关灯时脚步噪声倍率（0 = 完全无声） */
 float SkillGhostStepDrainMul(void);   /* 该技能带来的额外耗电倍率 */
-int   SkillHeavyHand(void);           /* 满蓄力投掷的额外伤害 */
-float SkillHeavyHandChargeMul(void);  /* 蓄力变慢倍率 */
 int   SkillScavenger(void);           /* 翻箱额外掉投掷物 */
 float SkillScavengerShardMul(void);   /* 金币收入倍率 */
 
 int   HasKeystone(int id);
 
 /* v2.0 新节点效果 */
-float SkillExecuteMul(int hp, int maxHp);
 
 int   SkillCartoUnlock(void);
 int   SkillShortcutAvailable(void);
 /* SECOND WIND grants sprint grace; the retired revival hook is removed. */
-int   SkillTypeWorkRank(void);
-int   SkillRhythmActive(int hitCounter);            /* 是否持有某个 keystone */
 
 /* ------------------------------------------------------------------ */
 /* 局内技能                                                            */
@@ -152,20 +149,17 @@ void RunSkillTake(int id);
 
 /* 局内技能的效果倍率（没拿就是 1.0 / 0） */
 float RunNoiseMul(void);
-float RunDamageMul(void);      /* v2.0 STEADY HAND */
 float RunSpeedMul(void);       /* v2.2 技能的移速代价 */
 float RunCrankNoiseMul(void);
 float RunSearchNoiseMul2(void);
 int   RunBatteryCapDelta(void);
-float RunThrowDmgMul(void);
-float RunCooldownMul(void);   /* v2.0 SWIFT RELOAD */
+float RunWrenchCooldownMul(void); /* Cooling rig; final wrench floor remains 5s. */
 float RunCrankTimeMul(void);
 float RunSearchTimeMul(void);
 float RunBatteryDrainMul(void);
 int   RunStaminaAdd(void);
 float RunDamageTakenMul(void);
 float RunSanityGainMul(void);
-int   RunBottleSilent(void);
 float RunDarkSpeedAdd(void);
 int   RunFuseLess(void);
 
@@ -181,12 +175,10 @@ int   SkillCartoMaxed(void);       /* 制图满级：开局标出安全屋+配�
 
 /* ==================== v3.0 逃生向效果（统一入口） ==================== */
 float HideStealthMul(void);      /* 屏息：藏身被发现概率 */
-float StillFaceMul(void);        /* 静面：追捕者放弃速度 */
 float SlipAwaySeconds(void);     /* 脱身：隐身所需脱战秒数 */
 int   PlayDeadAvailable(void);   /* 假死可用（技能树或改造树） */
 int   SilentRunOwned(void);      /* 静音冲刺 keystone */
 float QuietSoleMul(void);        /* 静底：走路噪音 */
-float ColdBloodMul(void);        /* 冷血：理智流失 */
 float ThickHideMul(void);        /* 厚皮：被抓扣理智 */
 
 /* Additional progression queries implemented by skills.c. */

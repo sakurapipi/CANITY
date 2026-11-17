@@ -279,7 +279,7 @@ static void test_trees_shop(void) {
     CHECK(ThreatValue()==18.0f,"max build reaches capped threat 18");
     CHECK(BenchStaminaMul()>1 && BenchMoveMul()>1 && BenchBatteryCapMul()>1 && BenchLightRangeMul()>1,"body and light attributes affect runtime getters");
     CHECK(BenchSanityAdd()>=20 && BenchHealMul()>1 && BenchFearDamageMul()<1,"mind attributes affect real survival stats");
-    CHECK(BenchKnockCharges()==1 && BenchKnockExtra()==2.5f && BenchShock(),"gear line upgrades charges, push and memory wipe");
+    CHECK(BenchWrenchCooldownMul()<1 && BenchKnockExtra()==2.5f && BenchShock(),"gear line upgrades cooldown, push and memory wipe");
     CHECK(BankPreviewGain(1)>=carryGold,"exit previews a valid settlement");
     int carry=carryGold;BenchRefundRun();CHECK(carryGold>carry && ThreatValue()==0 && !BenchHas(0),"run respec refunds money and removes added threat");
     SafeLevelReset();open_shop_from_test_cover(1);int offers[4],prices[4];

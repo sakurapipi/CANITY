@@ -1,3 +1,4 @@
+#include "room_theme.h"
 /* 2026-11-16：从 render.c 拆出的**地图渲染**（域内解耦，行为不变）。
    为什么单独成文件：render.c 已到 4200 行，超出模块预算（2500）；
    地图/图例这一簇只依赖公共绘制 API 与 MAP_* 常量，边界干净，
@@ -189,6 +190,8 @@ void RenderMap(void) {
         static char labelBuf[80];
         if (mapFullScreen)
             snprintf(labelBuf, sizeof(labelBuf), "MAP FREE  M: CLOSE");
+        else if (RoomThemeFreeMapRemaining()>0)
+            snprintf(labelBuf,sizeof(labelBuf),"MAP FREE %.1fs / GRID LINK",(double)RoomThemeFreeMapRemaining());
         else
             snprintf(labelBuf, sizeof(labelBuf), "MAP  -%d/S   HOLD TAB   M: FULL",
                      (int)(RunUpgMapDrainPct() + 0.5f));

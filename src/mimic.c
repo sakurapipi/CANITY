@@ -1,3 +1,6 @@
+#include "monster_evolution.h"
+#include "threat_tier.h"
+#include "tactical_tools.h"
 /*
  * Canity — 宝箱怪 MIMIC 实现
  *
@@ -253,6 +256,7 @@ void MimicTick(float dt) {
         }
 
         if (m->state == MIM_DISGUISED) {
+            (void)EvolutionMimicUpdate(i,dt);
             /* ============================================================
              * 2026-11-05 修：**这里原来会把宝箱怪变成死箱子**
              * ------------------------------------------------------------
@@ -284,6 +288,8 @@ void MimicTick(float dt) {
         if (m->state == MIM_SEEN) continue;
 
         if (m->state == MIM_ANGRY) {
+            if(m->timer>=(MonsterTierAtLeast(2)?8.4f:MIM_CHASE_TIME)){MimicVanish(m);continue;}
+            if(EvolutionMimicUpdate(i,dt))continue;
             /* 抓中判定 */
             float dx = posX - m->x, dy = posY - m->y;
             float d2 = dx * dx + dy * dy;
@@ -310,7 +316,7 @@ void MimicTick(float dt) {
             if (d2 > MIM_LOSE_DIST * MIM_LOSE_DIST) { MimicVanish(m); continue; }
 
             /* 超时 */
-            if (m->timer > MIM_CHASE_TIME) { MimicVanish(m); continue; }
+            if (m->timer >= (MonsterTierAtLeast(2)?8.4f:MIM_CHASE_TIME)) { MimicVanish(m); continue; }
 
             /* 追击移动（硬直时不走） */
             if (m->stun <= 0.0f && d2 > 0.01f) {

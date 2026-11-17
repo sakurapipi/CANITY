@@ -240,9 +240,17 @@ static void ApplyInstantSkill(int id) {
     case IR_MISDIRECT: {
         /* 大招：把最近的怪瞬移走 */
         if (Hunter0()->active) {
-            int x = 1 + rand() % (MAP_WIDTH - 2), y = 1 + rand() % (MAP_HEIGHT - 2);
-            Hunter0()->x = x + 0.5f; Hunter0()->y = y + 0.5f;
-            Hunter0()->state = 0; Hunter0()->pathLen = 0; Hunter0()->pathIdx = 0;
+            for(int attempt=0;attempt<MAP_WIDTH*MAP_HEIGHT;attempt++) {
+                int x=1+rand()%(MAP_WIDTH-2),y=1+rand()%(MAP_HEIGHT-2);
+                if(Blocked(x+.5f,y+.5f) || Dist2(posX,posY,x+.5f,y+.5f)<64)continue;
+                int occupied=0;
+                for(int actor=1;actor<MON_HUNTER_MAX;actor++)
+                    occupied|=monHunters[actor].active && Dist2(monHunters[actor].x,monHunters[actor].y,x+.5f,y+.5f)<1;
+                if(occupied)continue;
+                Hunter0()->x=x+.5f;Hunter0()->y=y+.5f;
+                Hunter0()->state=0;Hunter0()->pathLen=Hunter0()->pathIdx=0;
+                break;
+            }
         }
         decoySelfTimer = 3.0f;
         break;

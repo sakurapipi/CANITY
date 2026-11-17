@@ -1,3 +1,6 @@
+#include "monster_evolution.h"
+#include "threat_tier.h"
+#include "tactical_tools.h"
 /*
  * Canity — THE WARDEN 守门人（v2.4.42 机制修缮）
  *
@@ -796,7 +799,8 @@ static int WardenTickState(float dt) {
             /* **真正站到位了才开计时** —— 这是修 bug① 的关键 */
             warden.state = WD_BLOCK;
             warden.blockCount++;
-            warden.blockT = WARDEN_BLOCK_TIME;
+            warden.blockT = fminf(24,WARDEN_BLOCK_TIME+(MonsterTierAtLeast(2)?2:0));
+            evolution.actors[EVO_WARDEN].flags&=~2u;evolution.actors[EVO_WARDEN].phase=0;
             PlaySfx(SFX_HEART, 0.8f);
             (void)0; /* Enemy encounter narration removed. */
             (void)0; /* No encounter-toast timer. */
@@ -819,6 +823,7 @@ static int WardenTickState(float dt) {
 }
 
 static int WardenObservePlayer(float dt) {
+    if((evolution.actors[EVO_WARDEN].flags&8u) && evolution.actors[EVO_WARDEN].signal>0)return 1;
     if (warden.coolT <= 0.0f) {
            /* 视野半径 / 听觉半径都按它分档 */
         float mdx = posX - warden.x, mdy = posY - warden.y;
@@ -1138,12 +1143,82 @@ static int WardenPatrol(float dt) {
     return 1;
 }
 
+/* Evolution only extends patrol/block; base navigation and block count stay authoritative. */
+static int WardenEvolution(float dt) {
+    EvoActor *a = &evolution.actors[EVO_WARDEN];
+    if (!MonsterTierAtLeast(1)) {
+        a->phase = 0;
+        return 0;
+    }
+    if (warden.state != WD_BLOCK && a->phase == 2) {
+        a->phase = 0;
+        EvolutionRelease(EVO_WARDEN);
+    }
+    if (warden.state != WD_PATROL && a->phase == 1)
+        a->phase = 0;
+    if ((a->flags & 8u) && a->signal > 0) {
+        a->phase = 0;
+        EvolutionRelease(EVO_WARDEN);
+        return warden.state == WD_PATROL;
+    }
+    a->flags &= ~8u;
+    if (a->phase == 1) {
+        a->timer -= dt;
+        warden.facing = a->aimX + (.45f - a->timer) * 1.16355f;
+        if (a->timer <= 0) {
+            a->phase = 0;
+            warden.facing = a->aimX;
+        }
+        return 1;
+    }
+    int moving = playerMoveSpeedNow > WARDEN_MOVE_EPS && hiddenIn < 0 && !playerInSafe;
+    float dx = posX - warden.x, dy = posY - warden.y, d2 = dx * dx + dy * dy;
+    if (a->phase == 2 && !EvolutionPermit(EVO_WARDEN, warden.x, warden.y, 1.8f)) {
+        a->phase = 0;
+        return 0;
+    }
+    if (a->phase == 2) {
+        a->timer -= dt;
+        a->signal = fmaxf(.1f, a->timer);
+        if (a->timer <= 0) {
+            float len = sqrtf(d2);
+            if (moving && d2 <= 49 && len > .01f && (dx * a->aimX + dy * a->aimY) / len > .9f &&
+                HasLOS(warden.x, warden.y, posX, posY) &&
+                !SegmentInSmoke(warden.x, warden.y, posX, posY))
+                stamina = fmaxf(0, stamina - 10);
+            a->phase = 0;
+            EvolutionRelease(EVO_WARDEN);
+        }
+        return 0;
+    }
+    if (warden.state == WD_BLOCK && MonsterTierAtLeast(3) && !(a->flags & 2u) && moving &&
+        d2 > .01f && d2 <= 49 && HasLOS(warden.x, warden.y, posX, posY) &&
+        !SegmentInSmoke(warden.x, warden.y, posX, posY) &&
+        EvolutionPermit(EVO_WARDEN, warden.x, warden.y, 1.8f)) {
+        float len = sqrtf(d2);
+        a->aimX = dx / len;
+        a->aimY = dy / len;
+        a->flags |= 2;
+        a->phase = 2;
+        a->timer = 1.2f;
+        a->signal = 1.2f;
+        AudioPlayWorld(SFX_WARDEN, warden.x, warden.y, .7f, 12, 3);
+    }
+    return 0;
+}
+
 void UpdateWarden(float dt) {
     if (!WardenPreflight(dt)) return;
+    int heading=warden.headingToExit;
+    int hold=WardenEvolution(dt);
     if (!WardenTickState(dt)) return;
     if (!WardenObservePlayer(dt)) return;
+    if(hold)return;
     if (!WardenSteerToTarget(dt)) return;
     (void)WardenPatrol(dt);
+    EvoActor* a=&evolution.actors[EVO_WARDEN];
+    if(warden.state==WD_PATROL && heading!=warden.headingToExit && MonsterTierAtLeast(1) && a->cooldown<=0){a->phase=1;a->timer=.9f;a->aimX=warden.facing;a->cooldown=20;a->signal=.9f;AudioPlayWorld(SFX_STEP,warden.x,warden.y,.55f,10,2);AudioPlayWorld(SFX_ECHO,warden.x,warden.y,.25f,10,1);}
+
 }
 
 

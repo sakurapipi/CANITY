@@ -14,6 +14,8 @@ int UiArchiveTabAt(int x,int y);
 void UiArchiveScrollDetail(int lines);
 int UiArchiveDetailButtonAt(int x,int y);
 void UiDrawArchivePage(MenuGeo geometry);
+int UiArchiveTierKey(int key);
+int UiArchiveTierClick(int x,int y);
 /* Shared dossier presentation also used by shop, bank and upgrade pages. */
 int UiDossierText(const char* text,int x,int y,int width,int bottom,unsigned int color);
 void UiDossierPortrait(int spriteId,RECT box,int identified);

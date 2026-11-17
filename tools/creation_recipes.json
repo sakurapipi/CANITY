@@ -265,6 +265,44 @@
         "write failure-path cases",
         "user acceptance and publication"
       ]
+    },
+    "tactical_tool": {
+      "required": [
+        "stable_item_id",
+        "stable_shot_id",
+        "target_mode",
+        "consume_policy",
+        "effect_owner",
+        "limits",
+        "resistance",
+        "save_schema",
+        "bilingual_description",
+        "failure_cases"
+      ],
+      "entry_files": [
+        "src/domain/evolution/tool_catalog.c",
+        "src/domain/evolution/tool_impact.c",
+        "src/content/content_shots.c",
+        "src/domain/ui/ui_tactical.c",
+        "src/save/evolution_wire.c",
+        "tests/domains/test_evolution.c"
+      ],
+      "invariants": [
+        "never reuse old shot IDs",
+        "allocation or valid direct effect before debit",
+        "no vault payout changes",
+        "no camera changes",
+        "one source bounty ledger",
+        "explicit little-endian wire layout",
+        "user owns verification and publication"
+      ],
+      "workflow": [
+        "define source-based counterplay",
+        "add catalog and fixed-pool effect",
+        "wire inventory/shop/input/art",
+        "add versioned persistence and failure cases",
+        "document unexecuted acceptance scope"
+      ]
     }
   },
   "invariants": {

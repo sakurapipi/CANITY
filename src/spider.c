@@ -1,3 +1,7 @@
+#include "world_api.h"
+#include "monster_evolution.h"
+#include "threat_tier.h"
+#include "tactical_tools.h"
 /*
  * Canity — 缚丝蛛实现（v2.4.1 第 5~6 轮）
  * 头部注释见 include/spider.h。
@@ -51,6 +55,10 @@ void SpiderReset(void) {
  *           蜘蛛会消失，然后 30 秒之内都不会刷新在场上」。
  * ================================================================== */
 void SpiderDispel(void) {
+    for (int i = 0; i < 2; i++) {
+        evolution.zones[i].ttl = 0;
+    }
+    EvolutionRelease(EVO_SPIDER);
     if (!s_spider.active) return;
     BestiaryMarkEscaped(BST_ID_SPIDER);
     s_spider.active = 0;
@@ -198,6 +206,9 @@ void SpiderTick(float dt) {
                 HasLOS(s_spider.x, s_spider.y, posX, posY)) {
                 s_spider.state = SPIDER_AIM;
                 s_spider.aimT  = SPIDER_AIM_TIME;
+                EvoActor* a=&evolution.actors[EVO_SPIDER];a->count++;a->phase=0;a->aimX=posX;a->aimY=posY;
+                if(MonsterTierAtLeast(3) && a->count%3==0 && !Blocked(posX-1,posY) && !Blocked(posX+1,posY) && !Blocked(posX,posY-1) && !Blocked(posX,posY+1) && EvolutionPermit(EVO_SPIDER,s_spider.x,s_spider.y,3.8f)){a->phase=1;s_spider.aimT=1;a->signal=1;}
+
                 PlaySfx(SFX_SCREAM, 0.45f);   /* 前摇听得见 */
             }
         }
@@ -210,6 +221,9 @@ void SpiderTick(float dt) {
             float d2 = Dist2(s_spider.x, s_spider.y, posX, posY);
             if (playerHidden || d2 > SPIDER_RANGE * SPIDER_RANGE * MonsterThreatScale(SPAWN_SPIDER)*MonsterThreatScale(SPAWN_SPIDER) ||
                 !HasLOS(s_spider.x, s_spider.y, posX, posY)) {
+                EvoActor* a=&evolution.actors[EVO_SPIDER];
+                if(HasLOS(s_spider.x,s_spider.y,a->aimX,a->aimY))EvolutionWebMiss(a->aimX,a->aimY,0);
+                EvolutionRelease(EVO_SPIDER);a->phase=0;
                 s_spider.state = SPIDER_COOLDOWN;
                 s_spider.cdT   = SPIDER_COOLDOWN_TIME * 0.5f;
                 break;
@@ -224,7 +238,9 @@ void SpiderTick(float dt) {
         int hit = (!playerHidden) &&
                   (d2 <= SPIDER_RANGE * SPIDER_RANGE * MonsterThreatScale(SPAWN_SPIDER)*MonsterThreatScale(SPAWN_SPIDER)) &&
                   HasLOS(s_spider.x, s_spider.y, posX, posY);
-        if (hit) {
+        EvoActor* a=&evolution.actors[EVO_SPIDER];
+        if(a->phase==1){if(HasLOS(s_spider.x,s_spider.y,a->aimX,a->aimY))EvolutionWebMiss(a->aimX,a->aimY,1);a->phase=0;EvolutionRelease(EVO_SPIDER);}
+        else if (hit) {
             /* 交给控制层。被拒（抱脸虫正在生效 / 免疫中）就直接进冷却，
                **绝不**再排队等下一次。 */
             /* 第 5 轮：这是现在唯一的"限时按键"事件，难度也要作用于它
@@ -246,8 +262,9 @@ void SpiderTick(float dt) {
                 (void)0; /* No encounter-toast timer. */
             }
         }
+        else if(HasLOS(s_spider.x,s_spider.y,a->aimX,a->aimY))EvolutionWebMiss(a->aimX,a->aimY,0);
         s_spider.state = SPIDER_COOLDOWN;
-        s_spider.cdT   = SPIDER_COOLDOWN_TIME;
+        s_spider.cdT   = MonsterTierAtLeast(2)?7.5f:SPIDER_COOLDOWN_TIME;
         break;
     }
 

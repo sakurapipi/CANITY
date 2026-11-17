@@ -14,28 +14,30 @@
 #define CANITY_SHOT_SPEC_H
 
 typedef enum {
-    FX_SHARDS = 0,     /* 只碎（默认） */
-    FX_SMOKE,          /* 生成烟云 */
-    FX_GLUE,           /* 生成胶水区 */
-    FX_ECHO_SCAN,      /* 声呐扫描（揭地形 + 标资源） */
-    FX_PHASE           /* 交给 phase 域处理 */
+    FX_SHARDS = 0, /* 只碎（默认） */
+    FX_SMOKE,      /* 生成烟云 */
+    FX_GLUE,       /* 生成胶水区 */
+    FX_ECHO_SCAN,  /* 声呐扫描（揭地形 + 标资源） */
+    FX_PHASE       /* 交给 phase 域处理 */
+    ,
+    FX_TACTICAL
 } ShotEffect;
 
 typedef struct {
-    int         kind;        /* shot[].kind */
-    const char* name;        /* 日志/测试用 */
-    ShotEffect  effect;      /* 落点效果（落地与撞墙共用同一份） */
-    float       noise;       /* 落地噪音半径；0 = 静音 */
-    int         noiseScaled; /* 1 = 噪音随蓄力增加（投石） */
-    int         dmg;         /* 撞怪基础伤害（0 = 不造成伤害） */
-    int         dmgType;     /* DT_* 常量 */
-    int         ignoresArmor;
-    int         rare;        /* 1 = 库存上限 4，0 = 8 */
-    int         pierce;      /* 1 = 穿过怪物继续飞（投石是工具不是武器） */
+    int kind;          /* shot[].kind */
+    const char *name;  /* 日志/测试用 */
+    ShotEffect effect; /* 落点效果（落地与撞墙共用同一份） */
+    float noise;       /* 落地噪音半径；0 = 静音 */
+    int noiseScaled;   /* 1 = 噪音随蓄力增加（投石） */
+    int dmg;           /* 撞怪基础伤害（0 = 不造成伤害） */
+    int dmgType;       /* DT_* 常量 */
+    int ignoresArmor;
+    int rare;   /* 1 = 库存上限 4，0 = 8 */
+    int pierce; /* 1 = 穿过怪物继续飞（投石是工具不是武器） */
 } ShotSpec;
 
 /* 按 kind 取规格；未知 kind 返回默认行（碎片，静音，不穿透）。 */
-const ShotSpec* ShotSpecFor(int kind);
+const ShotSpec *ShotSpecFor(int kind);
 
 /* 表里有多少行（测试用） */
 /* 2026-11-09：登记进内容中枢（幂等） */
@@ -44,6 +46,6 @@ void ShotRegister(void);
 int ShotSpecCount(void);
 
 /* 第 i 行（测试用；越界返回 0） */
-const ShotSpec* ShotSpecAt(int i);
+const ShotSpec *ShotSpecAt(int i);
 
 #endif /* CANITY_SHOT_SPEC_H */

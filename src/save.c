@@ -1,3 +1,6 @@
+#include "evolution_save.h"
+#include "threat_tier.h"
+#include "evolution_art.h"
 /*
  * Canity — 存档层实现：SaveBlob 读写 / 版本迁移 / 继续游戏
  *
@@ -363,10 +366,22 @@ static int SaveCarryCapture(const void* payload, int payLen) {
  * 成功返回总字节数，*out 由 malloc 分配（调用方 free）。
  * 失败返回 SAVE_ERR_*（负数）。
  * ================================================================ */
+/* A future known extension can be preserved, but cannot be played or rewritten
+ * by this executable. This applies to settings-only writes as well. */
+static int SaveEvolutionSchemaSupported(void) {
+    for (int i = 0; i < s_carryCount; i++) {
+        if ((s_carry[i].id == SC_EVOLUTION_V1 ||
+             s_carry[i].id == SC_TACTICAL_ITEMS_V1) && s_carry[i].schema != 1)
+            return 0;
+    }
+    return 1;
+}
+
 static int SaveFileBytes(const SaveBlob* blob, unsigned char** out) {
     if (!blob || !out) return SAVE_ERR_CAPACITY;
     *out = NULL;
     if (s_saveReadOnly) return SAVE_ERR_DUP_CHUNK;   /* 结构异常，拒绝改写 */
+    if (!SaveEvolutionSchemaSupported()) return SAVE_ERR_PAYLOAD;
 
     int containsLegacy = 0;
     for (int i = 0; i < s_carryCount; i++)
@@ -707,7 +722,7 @@ static void SaveSettingsOnly(void) {
         unsigned char* wbuf = NULL;
         int wn = SaveFileBytes(&tmp, &wbuf);
         if(wn>0)BackupSavePath(p);
-        int werr = (wn > 0) ? WriteWholeFile(p, wbuf, (size_t)wn) : SAVE_ERR_CAPACITY;
+        int werr = (wn > 0) ? WriteWholeFile(p, wbuf, (size_t)wn) : wn;
         int wok = (wn > 0) && werr == 0;
         if (wbuf) { free(wbuf); wbuf = NULL; }
         SaveDiag("SETTINGS cand[%d]=%s bytes=%d err=%d ok=%d", i, p, wn, werr, wok);
@@ -979,7 +994,132 @@ static void CaptureSaveProgress(void) {
     g_save.gameClearedSave = gameCleared;
 }
 
+/* Replace both known extension chunks atomically in the carry directory.
+ * Opaque chunks keep their original order/bytes, including future schemas. */
+int SaveEvolutionCanPersist(void) {
+    int missing = 2, legacy = 0;
+    for (int i = 0; i < s_carryCount; i++) {
+        if (s_carry[i].id == SC_LEGACY29)
+            legacy = 1;
+        if (s_carry[i].id == SC_EVOLUTION_V1 || s_carry[i].id == SC_TACTICAL_ITEMS_V1) {
+            if (s_carry[i].schema != 1)
+                return 0;
+            missing--;
+        }
+    }
+    return s_carryCount + missing + !legacy <= SAVE_CARRY_MAX;
+}
+static int CaptureEvolutionChunks(void) {
+    if (!SaveEvolutionSchemaSupported()) return 0;
+    if (!g_save.hasRun || !runInProgress)
+        return 1;
+    if (!SaveEvolutionCanPersist()) {
+        if (CurrentRunThreatTier() != 0)
+            return 0;
+        for (int i = 0; i < TOOL_COUNT; i++)
+            if (tactical.inventory[i] > 0)
+                return 0;
+        return 1; /* Retain all 64 old chunks; legacy play remains saveable. */
+    }
+
+    unsigned char evo[EVOLUTION_WIRE_BYTES], items[TACTICAL_WIRE_BYTES];
+    EvolutionSnapshot snapshot = {currentLevel, CurrentRunThreatTier(), ThreatTierCommittedPlan(),
+                                  evolution};
+    int sizes[2] = {EvolutionWireEncode(&snapshot, evo, sizeof(evo)),
+                    TacticalWireEncode(&tactical, shot, items, sizeof(items))};
+    unsigned short ids[2] = {SC_EVOLUTION_V1, SC_TACTICAL_ITEMS_V1};
+    const unsigned char *bytes[2] = {evo, items};
+    int positions[2] = {-1, -1}, needed = 0;
+    for (int k = 0; k < 2; k++) {
+        if (sizes[k] <= 0 || !EvolutionChunkValid(ids[k], 1, bytes[k], sizes[k]))
+            return 0;
+        for (int i = 0; i < s_carryCount; i++)
+            if (s_carry[i].id == ids[k]) {
+                if (s_carry[i].schema != 1)
+                    return 0;
+                positions[k] = i;
+            }
+        needed += positions[k] < 0;
+    }
+    int legacy = 0;
+    for (int i = 0; i < s_carryCount; i++)
+        legacy |= s_carry[i].id == SC_LEGACY29;
+    if (s_carryCount + needed + !legacy > SAVE_CARRY_MAX)
+        return 0;
+    unsigned char *allocated[2] = {NULL, NULL};
+    for (int k = 0; k < 2; k++) {
+        allocated[k] = (unsigned char *)malloc((size_t)sizes[k]);
+        if (!allocated[k]) {
+            free(allocated[0]);
+            free(allocated[1]);
+            return 0;
+        }
+        memcpy(allocated[k], bytes[k], (size_t)sizes[k]);
+    }
+    for (int k = 0; k < 2; k++) {
+        int index = positions[k];
+        if (index < 0)
+            index = s_carryCount++;
+        else
+            free(s_carry[index].data);
+        s_carry[index] = (SaveCarryChunk){ids[k], 1, (unsigned)sizes[k], allocated[k]};
+    }
+    return 1;
+}
+static void RestoreEvolutionChunks(int tierOnly) {
+    int restored = 0;
+    EvolutionSnapshot snapshot;
+    for (int i = 0; i < s_carryCount; i++)
+        if (s_carry[i].id == SC_EVOLUTION_V1 && s_carry[i].schema == 1 &&
+            EvolutionWireDecode(&snapshot, s_carry[i].data, (int)s_carry[i].size) &&
+            snapshot.floor == g_save.level) {
+            restored = 1;
+            break;
+        }
+    ThreatTierRestore(restored ? snapshot.floor : g_save.level, restored ? snapshot.tier : 0,
+                      restored ? snapshot.plan : 0);
+    if (tierOnly)
+        return;
+    EvolutionResetFloor();
+    TacticalResetRun();
+    if (restored) {
+        evolution = snapshot.state;
+        for (int i = 0; i < EVO_ACTORS; i++) {
+            EvoActor *a = &evolution.actors[i];
+            if (a->phase && i >= EVO_LIGHT && i < EVO_LIGHT + 2)
+                a->cooldown = fmaxf(a->cooldown, 14);
+            int disrupted = (a->flags & 8u) &&
+                ((i >= EVO_LIGHT && i < EVO_LIGHT + 2) || i == EVO_WARDEN);
+            a->phase = 0;
+            a->aux = 0;
+            if (!disrupted) a->signal = 0;
+        }
+        evolution.previousHide = hiddenIn;
+        for (int i = 0; i < EVO_ZONES; i++)
+            if (evolution.zones[i].ttl > 0 && Blocked(evolution.zones[i].x, evolution.zones[i].y))
+                evolution.zones[i].ttl = 0;
+    }
+    for (int i = 0; i < s_carryCount; i++)
+        if (s_carry[i].id == SC_TACTICAL_ITEMS_V1 && s_carry[i].schema == 1) {
+            TacticalState state;
+            Shot flying[MAX_SHOTS];
+            if (TacticalWireDecode(&state, flying, s_carry[i].data, (int)s_carry[i].size)) {
+                tactical = state;
+                for (int k = 0; k < 2; k++)
+                    if (tactical.acoustic[k].ttl > 0 &&
+                        Blocked(tactical.acoustic[k].x, tactical.acoustic[k].y))
+                        tactical.acoustic[k].ttl = 0;
+                for (int k = 0; k < MAX_SHOTS; k++)
+                    if (flying[k].active && !Blocked(flying[k].x, flying[k].y))
+                        shot[k] = flying[k];
+            }
+            break;
+        }
+    SpritesSetEvolutionTier(CurrentRunThreatTier());
+}
+
 static void WriteSaveCandidates(void) {
+    if(!CaptureEvolutionChunks()){g_saveState=2;g_saveError=SaveEvolutionSchemaSupported()?SAVE_ERR_CAPACITY:SAVE_ERR_PAYLOAD;return;}
     /* 逐个候选试写，第一个成功的就用它 */
     char p[MAX_PATH];
     int firstErr = 0;
@@ -994,7 +1134,7 @@ static void WriteSaveCandidates(void) {
             BackupSavePath(p);
             err = WriteWholeFile(p, wbuf2, (size_t)wn2);
         } else {
-            err = SAVE_ERR_CAPACITY;
+            err = wn2;
             g_saveError = wn2;
         }
         if (wbuf2) { free(wbuf2); wbuf2 = NULL; }
@@ -1782,6 +1922,7 @@ int LoadSettings(void) {
     info.hasGameClearedField=info.fileSize>=offsetof(SaveBlob,gameClearedSave)+sizeof(int);
     ApplyLoadedSettings(&info);
     RestoreLoadedProgress(&info);
+    RestoreEvolutionChunks(1);
     return g_save.hasRun;
 }
 
@@ -2096,6 +2237,11 @@ static void ResumeRestoredRun(void) {
 }
 
 void ContinueRun(void) {
+    if (!SaveEvolutionSchemaSupported()) {
+        g_saveState = 2;
+        g_saveError = SAVE_ERR_PAYLOAD;
+        return;
+    }
     LoopResetHuntAchievements();
     /* ==================================================================
      * 2026-11-06（审计补）：**读档要清掉"场上的临时系统"**
@@ -2233,6 +2379,7 @@ void ContinueRun(void) {
      DailyLoadFrom(data);}
     CalibResetRun();
     ShopRestoreServices(g_save.serviceUsesV42);RunEconomyRestore(g_save.rewardFloorV42,g_save.escapeRewardMaskV42,g_save.rhythmGoldV42);
+    RestoreEvolutionChunks(0);
     ResumeRestoredRun();
 }
 

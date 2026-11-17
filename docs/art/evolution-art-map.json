@@ -1,0 +1,130 @@
+{
+  "runtime_source": "procedural model geometry; no imported pixels",
+  "geometry": "src/domain/sprites/sprite_evolved_models.c",
+  "portrait_renderer": "src/domain/evolution/evolution_art.c",
+  "reference_hashes": {
+    "327dd594f51b0d0b28268fdbb4ee73c6.jpg": "cd67a35d7a52a680eb1f55ae62c06e89085be13305ea5fcd87191a9b123d4e41",
+    "七只图鉴怪_第一档_精修.jpg": "53a1f49e9f778dd08d2664226a54ca855ef6cf392c91ac56d4a01872ebb603a6",
+    "2935e36e48481b154d9a0e5315172b83.jpg": "96d099c0210043ad9010787e4930921d72607fca916f51f127dc8cb9a7e4dcfa",
+    "七只图鉴怪_第二档_精修.jpg": "a397f24835221d0dba4b29141842e7915df7d4c401c2930641a8c243b2d5f661",
+    "cc137670aae05c1381c0dbb568cfa630.jpg": "dbb0036137f90d25f2a85b331651735310e245a6c23c8d90cf621e61196d2925",
+    "七只图鉴怪_第三档_精修.jpg": "e6838c82796366bdd4d2c68fc72106353009d57e34f47776abf2100f79919b61",
+    "3ddf2b913e62b5613907201fcb7820d9.jpg": "400df5e9846fc1cc9ed0cfd663bd68e825066ae284d0e7f96729f58b9e9e306e",
+    "七只图鉴怪_第四档_精修.jpg": "ef842d433afe717ae34279b6a7d205ddf041e518c17c8107ec803ff8239e2d21"
+  },
+  "tiers": [
+    "I cold blue",
+    "II blue violet",
+    "III amber",
+    "IV blood red"
+  ],
+  "families": [
+    {
+      "family": "hunter0",
+      "bake_kind": 0,
+      "stages": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "portrait": "same world-model baking path; lazy three-slot cache"
+    },
+    {
+      "family": "hunter1",
+      "bake_kind": 11,
+      "stages": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "portrait": "same world-model baking path; lazy three-slot cache"
+    },
+    {
+      "family": "hunter2",
+      "bake_kind": 12,
+      "stages": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "portrait": "same world-model baking path; lazy three-slot cache"
+    },
+    {
+      "family": "light",
+      "bake_kind": 1,
+      "stages": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "portrait": "same world-model baking path; lazy three-slot cache"
+    },
+    {
+      "family": "spider",
+      "bake_kind": 16,
+      "stages": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "portrait": "same world-model baking path; lazy three-slot cache"
+    },
+    {
+      "family": "collector",
+      "bake_kind": 7,
+      "stages": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "portrait": "same world-model baking path; lazy three-slot cache"
+    },
+    {
+      "family": "scavenger",
+      "bake_kind": 8,
+      "stages": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "portrait": "same world-model baking path; lazy three-slot cache"
+    },
+    {
+      "family": "warden",
+      "bake_kind": 9,
+      "stages": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "portrait": "same world-model baking path; lazy three-slot cache"
+    },
+    {
+      "family": "mimic",
+      "bake_kind": 13,
+      "stages": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "portrait": "same world-model baking path; lazy three-slot cache"
+    }
+  ],
+  "revision": "reference-base-continuity-2026-11-18",
+  "stage_design": [
+    "intact first-reference rig",
+    "added resonators and conduits",
+    "broken armour and exposed inner cage",
+    "same rig with hanging cables, torn plates and ragged strips"
+  ],
+  "material": "model-authored metal and cloth, bypasses generic doll postgrade"
+}

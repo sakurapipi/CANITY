@@ -27,7 +27,7 @@ enum {
     SPIDER_COOLDOWN
 };
 
-#define SPIDER_MIN_LEVEL      4
+#define SPIDER_MIN_LEVEL      2 /* Authority: MonsterMinimumFloor(SPAWN_SPIDER). */
 /* ==================================================================
  * 2026-11-06（用户要求）：**蜘蛛正式入局，频率按深度走**
  * ------------------------------------------------------------------

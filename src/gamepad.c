@@ -1,3 +1,4 @@
+#include "tactical_tools.h"
 #include "entity.h"
 #include "common.h"
 #include "gamepad.h"
@@ -50,6 +51,19 @@ void GamepadPoll(void) {
     if (pGetState(0, &st) != 0) { gpConnected = 0; return; }
     gpConnected = 1;
     XGPAD* g = &st.Gamepad;
+    int packButtons=g->wButtons,packEdges=packButtons & ~prevBtn;
+    if((packEdges&0x0020) && currentState==STATE_PLAYING)TacticalInputKey('I',0);
+    if(TacticalPanelOpen()){
+        if(packEdges&0x0001)TacticalInputKey(VK_UP,0);
+        if(packEdges&0x0002)TacticalInputKey(VK_DOWN,0);
+        if(packEdges&0x0004)TacticalInputKey(VK_LEFT,0);
+        if(packEdges&0x0008)TacticalInputKey(VK_RIGHT,0);
+        if(packEdges&0x1000)TacticalInputKey(VK_RETURN,0);
+        if(packEdges&0x2000)TacticalInputKey(VK_ESCAPE,0);
+        if(packEdges&0x4000)TacticalInputKey(VK_SPACE,0);
+        prevBtn=packButtons;return;
+    }
+
 
     /* 移动：写到 keys[]，和键盘完全同一套逻辑 */
     /* v2.2 修复：只在摇杆/扳机真的被推动时才写 keys[]。

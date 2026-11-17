@@ -79,5 +79,6 @@ float       ControlImmune(void);
 
 /* Timeout the active control interaction. */
 void ControlTimeout(void);
+int ControlUseSolvent(float seconds);
 
 #endif /* CANITY_CONTROL_EFFECT_H */

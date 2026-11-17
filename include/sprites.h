@@ -133,12 +133,18 @@ enum {
     SPR_ROOM_CONTROL_READY_LAST = SPR_ROOM_CONTROL_READY_BASE + 27,
     SPR_ROOM_MOTION_BASE,                      /* two extra running poses x seven */
     SPR_ROOM_MOTION_LAST = SPR_ROOM_MOTION_BASE + 13,
+    SPR_TOOL_BASE,
+    SPR_TOOL_LAST=SPR_TOOL_BASE+6,
+    SPR_GUIDE_CACHE_BASE,
+    SPR_GUIDE_CACHE_LAST=SPR_GUIDE_CACHE_BASE+2,
     SPR_COUNT
 };
 
 void   SpritesInit(void);                       /* 启动时烘一次 */
 Sprite* SpriteGet(int id);
 int    SpritesReady(void);
+void SpritesSetEvolutionTier(int tier);
+int SpritesEvolutionPortrait(int family,int variant,int tier);
 
 /* 运行时绘制：双线性采样 + 亮度查表 + alpha + 可选深度测试 */
 /* 2026-11-16: rotated blit for the first-person weapon (angle in radians,

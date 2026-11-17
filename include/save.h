@@ -366,6 +366,7 @@ void SaveGame(void);
 /* 启动时只读设置；返回是否还有可继续的进度 */
 int LoadSettings(void);
 int SaveSelectSlot(int slot);
+int SaveEvolutionCanPersist(void);
 /* 把存档里的进度灌回运行时 */
 void ContinueRun(void);
 /* 存档里是否还有一局可继续（训练局退出后恢复菜单用） */

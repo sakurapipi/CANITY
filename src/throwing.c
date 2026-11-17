@@ -1,3 +1,4 @@
+#include "tactical_tools.h"
 /*
  * Canity — 投掷物系统（v8 重构第六刀 C）
  *
@@ -322,6 +323,7 @@ static void ShotImpact(int i, float x, float y) {
     int kind = shot[i].kind;
 
     /* 任何投掷物落点都留一个"可疑位置"给听声怪 */
+    if(sp->effect==FX_TACTICAL){TacticalImpact(kind,x,y);return;}
     EchoTryTrigger(x, y);
 
     if (sp->effect == FX_SMOKE) {
@@ -375,6 +377,60 @@ static void ShotImpact(int i, float x, float y) {
     SpawnShards(x, y, shot[i].vx, shot[i].vy, shot[i].charge);
 }
 
+/* One collision adapter per tactical trigger; ShotImpact remains the sole
+ * effect dispatcher for timeout, ground, wall and actor impacts. */
+static int TacticalWallHit(int index,float x,float y) {
+    if(ShotSpecFor(shot[index].kind)->effect!=FX_TACTICAL)return 0;
+    shot[index].x=x;shot[index].y=y;
+    ShotImpact(index,x,y);shot[index].active=0;
+    return 1;
+}
+static int TacticalPrismHit(int index) {
+    Shot *projectile=&shot[index];
+    if(projectile->kind!=TOOL_SHOT_FIRST+TOOL_PRISM || projectile->z>=2.6f)return 0;
+    for(int i=0;i<LIGHTBEAST_MAX;i++) {
+        Monster *target=&lightBeasts[i];
+        if(!target->active || Dist2(projectile->x,projectile->y,target->x,target->y)>=.36f ||
+           !HasLOS(projectile->x,projectile->y,target->x,target->y))continue;
+        ShotImpact(index,projectile->x,projectile->y);projectile->active=0;
+        return 1;
+    }
+    return 0;
+}
+
+static void StoneGroundReaction(int index) {
+if (shot[index].kind == 1) {
+
+    if (CollectorActive()) {
+        float cdx = CollectorX() - shot[index].x;
+        float cdy = CollectorY() - shot[index].y;
+        if (cdx * cdx + cdy * cdy < 1.44f) {      /* 1.2 格 */
+            CollectorBurstBounty();
+        }
+    }
+    /* v2.4.58 瓶子增强：落点附近的普通怪被震一下（硬直 0.35 秒） */
+    {
+
+
+        if (!trainingMode) {
+            /* 落点 1.5 格内的**所有**猎手都被震一下。
+               原来只判 monster，第 2、3 只完全免疫。 */
+
+            /* 变量名别叫 near —— 那是 Windows 的宏（__near） */
+            Monster* inRange[MON_HUNTER_MAX + 1];
+            int nn = MonsterCollect(inRange, MON_HUNTER_MAX + 1, 1);
+            for (int q = 0; q < nn; q++) {
+                float mdx = inRange[q]->x - shot[index].x;
+                float mdy = inRange[q]->y - shot[index].y;
+                if (mdx * mdx + mdy * mdy < 2.25f) {  /* 1.5 格 */
+                    if (inRange[q]->stun < 0.35f) inRange[q]->stun = 0.35f;
+                }
+            }
+        }
+    }
+}
+}
+
 /* 推进所有飞行中的玻璃瓶，结算命中 + 抛物线 + 金币 */
 void UpdateShots(float dt) {
     /* v2.3.2：8 秒不扔就断链 */
@@ -397,8 +453,12 @@ void UpdateShots(float dt) {
         /* v1.18：重力 + 落地。
            之前 shot 完全没有 z 积分 —— 砖头/酸瓶/烟雾弹都是
            从胸口直线飞出去、而且永远不落地（烟雾弹自然出不了烟）。 */
-        shot[i].vz -= 16.0f * dt;
-        shot[i].z += shot[i].vz * dt;
+        /* Legacy projectiles retain their original integration. New tactical
+         * objects integrate once, in substeps, rather than falling twice. */
+        if (ShotSpecFor(shot[i].kind)->effect != FX_TACTICAL) {
+            shot[i].vz -= 16.0f * dt;
+            shot[i].z += shot[i].vz * dt;
+        }
         if (shot[i].z <= 0.0f && shot[i].age > 0.02f) {
             shot[i].z = 0.0f;
             /* ---- v3.3 落地效果分派 ----
@@ -420,36 +480,7 @@ void UpdateShots(float dt) {
                瓶子本来就该是"从远处打断它"的手段 —— 比扳手安全得多，
                代价是瓶子要花一个投掷格。
                命中半径 1.2 格（比扳手的 0.7 宽），因为瓶子有溅射。 */
-            if (shot[i].kind == 1) {
-
-                if (CollectorActive()) {
-                    float cdx = CollectorX() - shot[i].x;
-                    float cdy = CollectorY() - shot[i].y;
-                    if (cdx * cdx + cdy * cdy < 1.44f) {      /* 1.2 格 */
-                        CollectorBurstBounty();
-                    }
-                }
-                /* v2.4.58 瓶子增强：落点附近的普通怪被震一下（硬直 0.35 秒） */
-                {
-
-
-                    if (!trainingMode) {
-                        /* 落点 1.5 格内的**所有**猎手都被震一下。
-                           原来只判 monster，第 2、3 只完全免疫。 */
-
-                        /* 变量名别叫 near —— 那是 Windows 的宏（__near） */
-                        Monster* inRange[MON_HUNTER_MAX + 1];
-                        int nn = MonsterCollect(inRange, MON_HUNTER_MAX + 1, 1);
-                        for (int q = 0; q < nn; q++) {
-                            float mdx = inRange[q]->x - shot[i].x;
-                            float mdy = inRange[q]->y - shot[i].y;
-                            if (mdx * mdx + mdy * mdy < 2.25f) {  /* 1.5 格 */
-                                if (inRange[q]->stun < 0.35f) inRange[q]->stun = 0.35f;
-                            }
-                        }
-                    }
-                }
-            }
+            StoneGroundReaction(i);
             {
                 /* 2026-11-08（第 6 轮）：噪音也读表 —— 不再按 kind 写死 */
                 const ShotSpec* nsp = ShotSpecFor(shot[i].kind);
@@ -469,10 +500,11 @@ void UpdateShots(float dt) {
         float sdz = shot[i].vz * dt / (float)steps;
 
         for (int s = 0; s < steps && shot[i].active; s++) {
+            float beforeX = shot[i].x, beforeY = shot[i].y;
             shot[i].x += sdx;
             shot[i].y += sdy;
-            shot[i].z += sdz;
-            shot[i].vz -= GRAVITY * dt / (float)steps;  /* 重力 */
+            shot[i].z += ShotSpecFor(shot[i].kind)->effect == FX_TACTICAL ? shot[i].vz * dt / (float)steps : sdz;
+            shot[i].vz -= GRAVITY * (shot[i].kind == TOOL_SHOT_FIRST + TOOL_PRISM ? .08f : 1.0f) * dt / (float)steps;  /* 重力 */
 
             /* 撞地面：碎裂生成金币 */
             if (shot[i].z <= 0.0f) {
@@ -484,11 +516,11 @@ void UpdateShots(float dt) {
                    和"全局落地"两套分派就是用户说的"有时候不生效"。
                    现在统一走 ShotImpact。 */
                 ShotImpact(i, shot[i].x, shot[i].y);
-                PlaySfx(SFX_GLASS, 0.7f);
+                if (ShotSpecFor(shot[i].kind)->effect != FX_TACTICAL) PlaySfx(SFX_GLASS, 0.7f);
                 /* v2.4-alpha：**一次物理撞击只结算一次逻辑噪音**。
                    破锁时 StoneBreakLockAt 已经发过 20 格冲击声，
                    这里不能再叠一次 15 格落地声 —— 那是同一块石头。 */
-                if (!brokeGround) MakeNoise(shot[i].x, shot[i].y, 15.0f);
+                if (!brokeGround && ShotSpecFor(shot[i].kind)->effect != FX_TACTICAL) MakeNoise(shot[i].x, shot[i].y, 15.0f);
                 shot[i].active = 0;
                 break;
             }
@@ -502,6 +534,7 @@ void UpdateShots(float dt) {
             if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
                 /* 2026-11-05：**破门石** —— 锁箱贴着墙时，瓶子会先撞墙，
                    所以撞墙分支也要试一次，否则「贴着墙的锁箱永远砸不开」。 */
+                if(TacticalWallHit(i,beforeX,beforeY))break;
                 int brokeWall = 0;
                 if (shot[i].kind == 1) brokeWall = StoneBreakLockAt(shot[i].x, shot[i].y);
                 /* 2026-11-07：撞墙也走 ShotImpact —— 原来这里的回声只做了半套
@@ -513,6 +546,8 @@ void UpdateShots(float dt) {
                 shot[i].active = 0;
                 break;
             }
+
+            if(TacticalPrismHit(i))break;
 
             /* 撞怪：按 kind 分派（1 玻璃瓶 / 2 砖头 / 3 酸瓶 / 4 烟雾弹） */
             float r = SHOT_RADIUS + 0.24f;
@@ -530,6 +565,7 @@ void UpdateShots(float dt) {
                     /* 默认值来自规格表；下面的特殊分支仍按需要覆盖
                        （烟雾/胶水/镜片/信号枪的行为差异太大，函数指针表不划算） */
                     const ShotSpec* msp = ShotSpecFor(shot[i].kind);
+                    if(msp->effect==FX_TACTICAL){shot[i].active=0;ShotImpact(i,shot[i].x,shot[i].y);break;}
                     int base = msp->dmg > 0 ? msp->dmg : 1;
                     int type = (msp->dmgType < 0) ? DT_SHARD : msp->dmgType;
                     g_dmgIgnoreArmor = msp->ignoresArmor;

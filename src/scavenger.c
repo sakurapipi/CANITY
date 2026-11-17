@@ -1,3 +1,6 @@
+#include "monster_evolution.h"
+#include "threat_tier.h"
+#include "tactical_tools.h"
 /*
  * Canity — THE SCAVENGER 清道夫（v2.4.18 机制修缮）
  *
@@ -417,6 +420,7 @@ void ScavengerTickTrigger(float dt) {
     scavenger.lastX = x;
     scavenger.lastY = y;
     scavenger.stuckT = 0.0f;
+    memset(&evolution.actors[EVO_SCAV],0,sizeof(EvoActor));
     scavenger.active = 1;
     s_quietT = 0.0f;          /* 2026-11-08：出场即重置安静计时 */
     retargetToPlayer();
@@ -691,8 +695,109 @@ static void ScavengerMove(float dt) {
     }
 }
 
+/* Search only a remembered, currently visible, reachable old hide point.
+ * It never replaces witnessed hiding or the original grab warning. */
+static int ScavengerOldHide(float dt) {
+    EvoActor *a = &evolution.actors[EVO_SCAV];
+    if (!MonsterTierAtLeast(1) || scavenger.warnT > 0 || hiddenIn >= 0) {
+        a->phase = 0;
+        return 0;
+    }
+    /* Direct sight resumes the original pursuit immediately; old-hide searches
+     * must never make a visible player temporarily safe. */
+    if (HasLOS(scavenger.x, scavenger.y, posX, posY)) {
+        a->phase = 0;
+        return 0;
+    }
+    if (a->phase) {
+        int spot = (int)a->event - 1;
+        if (spot < 0 || spot >= hideSpotCount || !EvolutionHideRemembered(spot)) {
+            a->phase = 0;
+            return 0;
+        }
+        float tx = a->x, ty = a->y;
+        if (a->phase == 3) {
+            tx = a->aimX;
+            ty = a->aimY;
+        }
+        float dx = tx - scavenger.x, dy = ty - scavenger.y, len = sqrtf(dx * dx + dy * dy);
+        if (a->phase == 2 || a->phase == 4) {
+            a->timer -= dt;
+            if (a->timer > 0)
+                return 1;
+            if (a->phase == 4) {
+                a->phase = 5;
+                return 1;
+            }
+            if (MonsterTierAtLeast(3) && !(a->flags & 1u)) {
+                static const int vx[4] = {1, -1, 0, 0}, vy[4] = {0, 0, 1, -1};
+                for (int i = 0; i < 4; i++) {
+                    float x = a->x + vx[i] * 2.5f, y = a->y + vy[i] * 2.5f;
+                    if (!Blocked(x, y) && HasLOS(a->x, a->y, x, y)) {
+                        a->flags |= 1;
+                        a->aimX = x;
+                        a->aimY = y;
+                        a->phase = 3;
+                        a->signal = .7f;
+                        AudioPlayWorld(SFX_SCAV_STEP, scavenger.x, scavenger.y, .65f, 10, 2);
+                        return 1;
+                    }
+                }
+            }
+            a->phase = 0;
+            a->count++;
+            return 0;
+        }
+        if (len < .35f) {
+            if (a->phase == 3) {
+                a->phase = 4;
+                a->timer = .6f;
+            } else {
+                a->phase = 2;
+                a->timer = MonsterTierAtLeast(2) ? 1.5f : 1.2f;
+                a->signal = a->timer;
+                AudioPlayWorld(SFX_METAL_SCRAPE, scavenger.x, scavenger.y, .35f, 8, 1);
+            }
+            return 1;
+        }
+        if (!HasLOS(scavenger.x, scavenger.y, tx, ty)) {
+            a->phase = 0;
+            return 0;
+        }
+        float step = fminf(len, ScavengerSpeedNow() * dt), x = scavenger.x + dx / len * step,
+              y = scavenger.y + dy / len * step;
+        if (!Blocked(x, y)) {
+            scavenger.x = x;
+            scavenger.y = y;
+            return 1;
+        }
+        a->phase = 0;
+        return 0;
+    }
+    if (a->count >= 2 || HasLOS(scavenger.x, scavenger.y, posX, posY))
+        return 0;
+    for (int i = 0; i < EVO_HIDE_MEMORIES; i++) {
+        EvoHideMemory *h = &evolution.hides[i];
+        int spot = h->spot;
+        if (h->ttl <= 0 || spot < 0 || spot >= hideSpotCount || !hideSpots[spot].active ||
+            spot >= 24 || (a->flags & (1u << (spot + 4))))
+            continue;
+        float x = hideSpots[spot].x, y = hideSpots[spot].y;
+        if (!Blocked(x, y) && HasLOS(scavenger.x, scavenger.y, x, y)) {
+            a->event = (unsigned)spot + 1;
+            a->x = x;
+            a->y = y;
+            a->phase = 1;
+            a->flags |= 1u << (spot + 4);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void UpdateScavenger(float dt) {
     if (!ScavengerPreflight(dt)) return;
+    if(ScavengerOldHide(dt))return;
     /* ---- ② **每帧**锁定玩家当前位置 ---- */
     retargetToPlayer();
 
@@ -718,6 +823,7 @@ void ScavengerForceLeaveTest(void) { scavengerLeave(); }
 float ScavengerQuietTTest(void) { return s_quietT; }
 
 void ScavengerGrabTest(int spot) {
+    memset(&evolution.actors[EVO_SCAV],0,sizeof(EvoActor));
     scavenger.active = 1;
     scavenger.warnT = SCAV_GRAB_WARN;
     scavenger.grabSpot = spot;
@@ -731,6 +837,7 @@ int ScavengerWarnExpireTest(void) {
 }
 
 void ScavengerForcePlace(float x, float y) {
+    memset(&evolution.actors[EVO_SCAV],0,sizeof(EvoActor));
     scavenger.active = 1;
     scavenger.x = x;
     scavenger.y = y;

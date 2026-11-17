@@ -1,3 +1,4 @@
+#include "tactical_tools.h"
 /* 2026-11-16：从 render.c 拆出的**世界道具/投掷物绘制**（域内解耦，行为不变）。
    这一簇包含投影工具 ProjectPoint、染色怪物、怪物列表、投掷物与胶水坑。
    它们之间只互相调用，不引用 render.c 的其他 static。 */
@@ -215,6 +216,38 @@ void DrawNewMonsters(void) {
    用最小的箱子道具当模型，但外面套一圈金色脉冲，
    肉眼一眼能认出「那是钱」。金额越大脉冲越亮。 */
 
+/* Rotating model-space sampling, with the same column depth test as props.
+ * Rendering uses the catalog sprite, so no unknown-kind blue-ball fallback. */
+static void DrawTacticalShot(int index,int cx,int cy,float unit,float depth) {
+    Shot *projectile=&shot[index];
+    int tool=projectile->kind-TOOL_SHOT_FIRST;
+    Sprite *model=SpriteGet(SPR_TOOL_BASE+tool);
+    if(!model || model->bx1<model->bx0 || model->by1<model->by0)return;
+    int sw=model->bx1-model->bx0+1,sh=model->by1-model->by0+1;
+    float h=fminf(renderH*.20f,fmaxf(5,unit*(tool==TOOL_PRISM?.45f:.27f)));
+    float w=h*sw/sh,angle=projectile->age*4;
+    if(tool==TOOL_PRISM) {
+        int nx,ny;float nu,nd;
+        if(ProjectPoint(projectile->x+projectile->vx*.05f,projectile->y+projectile->vy*.05f,
+                        projectile->z+projectile->vz*.05f,&nx,&ny,&nu,&nd) && (nx!=cx || ny!=cy))
+            angle=atan2f((float)(ny-cy),(float)(nx-cx))+1.5707963f;
+        else angle=-.4f;
+    }
+    float co=cosf(angle),si=sinf(angle);
+    int bound=(int)(fmaxf(w,h)*.72f)+2;
+    for(int y=-bound;y<=bound;y++) {
+        int py=cy+y;if(py<0 || py>=renderH)continue;
+        for(int x=-bound;x<=bound;x++) {
+            int px=cx+x;if(px<0 || px>=renderW || depth>=zBuffer[px])continue;
+            float u=(co*x+si*y)/w+.5f,v=(-si*x+co*y)/h+.5f;
+            if(u<0 || u>=1 || v<0 || v>=1)continue;
+            int sx=model->bx0+(int)(u*sw),sy=model->by0+(int)(v*sh);
+            unsigned c=model->px[sy*model->w+sx];
+            if(c>>24)PutPixelBlend(px,py,c&0xFFFFFF,((c>>24)&255)/255.0f);
+        }
+    }
+}
+
 void DrawShotModel(int idx) {
     float wx = shot[idx].x, wy = shot[idx].y, z = shot[idx].z;
     int cx, cy;
@@ -224,6 +257,11 @@ void DrawShotModel(int idx) {
     if (ty * 0.85f >= zBuffer[occ]) return;
 
     int kind = shot[idx].kind;
+    if(kind>=TOOL_SHOT_FIRST && kind<TOOL_SHOT_FIRST+TOOL_COUNT) {
+        DrawTacticalShot(idx,cx,cy,unit,ty);
+        return;
+    }
+
     if (kind == 6) {
         /* v2.0 信号枪弹：一小团明黄的光点 + 外晕 */
         int r = (int)(unit * 0.05f); if (r < 2) r = 2;

@@ -150,13 +150,13 @@ if run([GCC,*rule_sources,'-Iinclude','-std=c99','-Wall','-Wextra','-o',rules,'-
 # Real save-backend behavior with in-memory filesystem/Steam doubles. The
 # production backend handles the capacity, conflict and restore branches.
 cloud=cache/'test_save_cloud_backend.exe'
-cloud_sources=['tests/test_save_cloud_backend.c','src/save/save_backend.c','src/save/save_container.c','src/save/save_validate.c','src/save/save_snapshot.c','src/save/save_transaction.c']
+cloud_sources=['tests/test_save_cloud_backend.c','src/save/save_backend.c','src/save/save_container.c','src/save/save_validate.c','src/save/save_snapshot.c','src/save/save_transaction.c','src/save/evolution_wire.c']
 if run([GCC,*cloud_sources,'-DSAVE_BACKEND_TEST','-Iinclude','-std=c99','-Wall','-Wextra','-o',cloud],label='compile cloud backend contracts'):
     run([cloud],label='cloud backend contracts')
 
 # Run every runtime domain in its own process/directory so a failing assertion
 # cannot hide another domain or contaminate its save state.
-suites=('base','phase','hatch','collapse','throwing','core','ui','localization','update','progress','actors','world','warden','map_rooms','rooms','save','delivery','existing_save','legacy_fixtures')
+suites=('base','evolution','phase','hatch','collapse','throwing','core','ui','localization','update','progress','actors','world','warden','map_rooms','rooms','save','delivery','existing_save','legacy_fixtures')
 runtime=cache/'test_runtime.exe'
 test_srcs=['tests/test_runtime.c']+sorted(str(q) for q in (root/'tests/domains').glob('*.c'))
 if objects_ok and run([GCC,*test_srcs,*objects,'-Iinclude','-std=c99','-Wall','-Wextra',*libs,'-o',runtime],label='compile runtime domains'):

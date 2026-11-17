@@ -139,8 +139,6 @@ int WeaponDamageNow(int id, float charge) {
     float base = (float)w->damage * (0.7f + 0.6f * charge);   /* 蓄力 70% ~ 130% */
     /* 熟练度：每级 +8% 伤害 */
     base *= (1.0f + 0.08f * (float)WeaponRankOf(id));
-    base *= RunDamageMul();          /* v2.0 STEADY HAND */
-    base *= (1.0f + 0.08f * (float)SkillHeavyHand());   /* v2.0：HEAVY HAND 现在对武器生效 */
     int v = (int)(base * d + 0.5f);
     if (v < 1) v = 1;
     return v;
@@ -150,7 +148,7 @@ float WeaponCdNow(int id) {
     const WeaponDef* w = WeaponGet(id);
     float d, c, r, k; int p, kn, si;
     attach_mul(id, &d, &c, &r, &k, &p, &kn, &si);
-    float v = w->cooldown * k * RunCooldownMul();   /* v2.0 SWIFT RELOAD */
+    float v = w->cooldown * k;   /* v2.0 SWIFT RELOAD */
     if (v < 0.15f) v = 0.15f;
     return v;
 }

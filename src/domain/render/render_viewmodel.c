@@ -1,3 +1,4 @@
+#include "tactical_tools.h"
 /* 2026-11-16：从 render.c 拆出的**第一人称手持模型**（域内解耦，行为不变）。 */
 #include "threat_telegraph.h"
 #include "room_theme.h"
@@ -196,6 +197,7 @@ void DrawViewModel(void) {
         }
     }
 
+    if(tactical.prismFlicker>0 && flashlightOn){int size=renderH/24;if(size<4)size=4;for(int y=0;y<size;y++)for(int x=0;x<size;x++)PutPixelBlend(renderW/2+x,renderH-size*2+y,0x10202A,.7f);}
     /* 左手：托着当前选中的投掷物 */
     {
 
@@ -203,8 +205,7 @@ void DrawViewModel(void) {
         /* v6 **槽位表必须和 ITEM_SLOT_COUNT(6) 一致** ——
            原来用旧的 8 个变量初始化 6 元素数组：多出初值被丢弃，
            索引整体错位（槽 2..5 读到砖头/酸液/燃烧瓶等已删除物品）。 */
-        int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs,
-                                        gluePots, echoBolts, decoys, phaseBeacons };
+        int counts[ITEM_SLOT_COUNT];InventoryCounts(counts);
         int sel = throwSelected;
         if (sel >= 0 && sel < ITEM_SLOT_COUNT && counts[sel] > 0) {
             /* v2.9：按报告重算 —— 原来 100px 大、落进枪模框内、亮度 0.55，
@@ -230,7 +231,7 @@ void DrawViewModel(void) {
                 SPR_ITEM_GLUE,  SPR_ITEM_ECHO,  SPR_ITEM_DECOY,
                 SPR_PHASE_HAND   /* 相位信标：复用手持模型 */
             };
-            DrawSprite(slotSpr[sel], ix, iy - isize, isize, isize,
+            DrawSprite(sel>=7?SPR_TOOL_BASE+sel-7:slotSpr[sel], ix, iy - isize, isize, isize,
                        0.92f, 1.0f, 0, 0.0f);
         }
     }

@@ -87,6 +87,7 @@ void MonsterSearchAround(Monster* m, float cx, float cy);
 /* ---- 感知 / 受击 ---- */
 int HasLOS(float x0, float y0, float x1, float y1);
 void MakeNoise(float x, float y, float radius);
+void MakeFootstepNoise(float x,float y,float radius);
 extern float noiseDisplay;        /* v3.0：HUD 噪音条 0..1 */
 extern float noiseDisplayTimer;
 extern float noiseSrcX, noiseSrcY;

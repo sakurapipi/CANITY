@@ -1,3 +1,7 @@
+#include "progression.h"
+#include "monster_evolution.h"
+#include "threat_tier.h"
+#include "tactical_tools.h"
 /*
  * Canity — THE COLLECTOR 拾荒者（v2.4.64 重写）
  *
@@ -328,6 +332,9 @@ void UpdateCollector(float dt) {
     }
 
     if (collector.fleeTimer > 0.0f) {
+        EvoActor* a=&evolution.actors[EVO_COLLECTOR];
+        if(a->phase==1){a->timer-=dt;if(a->timer>0)return;a->phase=0;}
+
         collector.fleeTimer -= dt;
         if (collector.fleeTimer <= 0.0f) {
             collector.active = 0;
@@ -353,14 +360,20 @@ void UpdateCollector(float dt) {
                 if (d < 0) continue;
                 if (d > bestD) { bestD = d; bestI = i; }
             }
+            if(MonsterTierAtLeast(1) && !(a->flags&1u) && Dist2(collector.x,collector.y,posX,posY)<=5.76f && bestI>=0){
+                int alternate=-1;for(int i=0;i<4;i++){int nx=cx+dxs[i],ny=cy+dys[i];if(nx>0 && ny>0 && nx<MAP_WIDTH-1 && ny<MAP_HEIGHT-1 && i!=bestI && colB[ny][nx]>=here && colB[ny][nx]>=bestD-1 && !Blocked(nx+.5f,ny+.5f))alternate=i;}
+                if(alternate>=0){a->flags|=1;a->phase=1;a->timer=.18f;a->signal=.5f;a->event=(unsigned)alternate;
+                    if(MonsterTierAtLeast(3)){evolution.zones[2]=(EvoZone){collector.x,collector.y,.6f,2.5f,EVO_ZONE_COINS};SuspicionAdd(collector.x,collector.y,18,12,2.5f,SUSP_THROW);AudioPlayWorld(SFX_GLASS,collector.x,collector.y,.22f,6,1);}return;}
+            }
+            if((a->flags&1u) && !(a->flags&4u) && a->event<4){int i=(int)a->event,nx=cx+dxs[i],ny=cy+dys[i];if(nx>0 && ny>0 && nx<MAP_WIDTH-1 && ny<MAP_HEIGHT-1 && colB[ny][nx]>=here && !Blocked(nx+.5f,ny+.5f))bestI=i;a->flags|=4;}
             if (bestI >= 0) {
                 float tx = (float)(cx + dxs[bestI]) + 0.5f;
                 float ty = (float)(cy + dys[bestI]) + 0.5f;
                 float ddx = tx - collector.x, ddy = ty - collector.y;
                 float dd = sqrtf(ddx * ddx + ddy * ddy);
                 if (dd > 0.001f) {
-                    float nx = collector.x + (ddx / dd) * COLLECTOR_FLEE_SPEED * dt;
-                    float ny = collector.y + (ddy / dd) * COLLECTOR_FLEE_SPEED * dt;
+                    float nx = collector.x + (ddx / dd) * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
+                    float ny = collector.y + (ddy / dd) * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
                     if (!Blocked(nx, ny)) { collector.x = nx; collector.y = ny; moved = 1; }
                     else if (!Blocked(nx, collector.y)) { collector.x = nx; moved = 1; }
                     else if (!Blocked(collector.x, ny)) { collector.y = ny; moved = 1; }
@@ -373,8 +386,8 @@ void UpdateCollector(float dt) {
             float dx = collector.x - posX, dy = collector.y - posY;
             float d = sqrtf(dx * dx + dy * dy);
             if (d > 0.001f) {
-                float nx = collector.x + (dx / d) * COLLECTOR_FLEE_SPEED * dt;
-                float ny = collector.y + (dy / d) * COLLECTOR_FLEE_SPEED * dt;
+                float nx = collector.x + (dx / d) * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
+                float ny = collector.y + (dy / d) * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
                 if (!Blocked(nx, ny)) { collector.x = nx; collector.y = ny; }
                 else if (!Blocked(nx, collector.y)) collector.x = nx;
                 else if (!Blocked(collector.x, ny)) collector.y = ny;
@@ -383,8 +396,8 @@ void UpdateCollector(float dt) {
                     static const float ax4[4] = { 1, -1, 0, 0 };
                     static const float ay4[4] = { 0, 0, 1, -1 };
                     for (int i = 0; i < 4; i++) {
-                        float tx2 = collector.x + ax4[i] * COLLECTOR_FLEE_SPEED * dt;
-                        float ty2 = collector.y + ay4[i] * COLLECTOR_FLEE_SPEED * dt;
+                        float tx2 = collector.x + ax4[i] * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
+                        float ty2 = collector.y + ay4[i] * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
                         if (!Blocked(tx2, ty2)) { collector.x = tx2; collector.y = ty2; break; }
                     }
                 }
@@ -435,6 +448,7 @@ void UpdateCollector(float dt) {
             }
             /* 得手 → 转身逃 */
             if(stealsThisRun<3)stealsThisRun++;
+            memset(&evolution.actors[EVO_COLLECTOR],0,sizeof(EvoActor));
             collector.fleeTimer = COLLECTOR_FLEE_TIME;
             if (d > 0.001f) {
                 float bx = collector.x - (dx / d) * 1.2f;
@@ -449,4 +463,26 @@ void CollectorForcePlace(float x, float y) {
     collector.active = 1;
     collector.x = x;
     collector.y = y;
+}
+
+int CollectorMagneticPull(int apply) {
+    EvoActor *a = &evolution.actors[EVO_COLLECTOR];
+    if (!collector.active || collector.fleeTimer <= 0 || collector.bounty <= 0 || (a->flags & 2u) ||
+        Dist2(posX, posY, collector.x, collector.y) > ProgressionToolValue(PG_TETHER_RANGE)*ProgressionToolValue(PG_TETHER_RANGE) ||
+        !HasLOS(posX, posY, collector.x, collector.y))
+        return 0;
+    int amount = collector.bounty / 4;
+    if (amount < 1)
+        return 0;
+    if (!apply)
+        return MoneyBagCanDrop(amount);
+    float bagX=collector.x,bagY=collector.y;
+    ProgressionTetherLanding(&bagX,&bagY);
+    if (!MoneyBagTryDropAt(bagX, bagY, amount))
+        return 0;
+    collector.bounty -= amount;
+    collector.stunT = fmaxf(collector.stunT, .75f);
+    a->flags |= 2;
+    a->signal = .75f;
+    return 1;
 }

@@ -228,7 +228,7 @@ void cvGlow(float cx, float cy, float r, unsigned int col, float a) {
 void cvFinish(Sprite* s) {
     int outputScale=canvas.scale;
     int ow=SPR_W*outputScale,oh=SPR_H*outputScale;
-    int dollStyle=ArtStyleDoll();      /* 循环外取一次 */
+    int dollStyle=ArtStyleDoll() && !SpriteBakeReferenceModel(SpriteBakeIndex(s));      /* 循环外取一次 */
     unsigned int* resized=(unsigned int*)realloc(s->px,(size_t)ow*oh*sizeof(unsigned int));
     if(resized)s->px=resized;
     else {outputScale=1;ow=SPR_W;oh=SPR_H;}

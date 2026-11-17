@@ -30,7 +30,7 @@ static const char* roomControlZh[7][2]={
 static const char* roomEffectEn[7]={
         "20 BATTERY / 45s: SOUND DECOY ATTRACTS HUNTERS WITHIN 28 CELLS, EVEN AFTER YOU LEAVE.",
         "25% CARRIED GOLD (MIN 40): VAULT CHESTS RETURN 80-120% OF STAKE IN TOTAL. 40% LOSS / 20% EVEN / 40% PROFIT.",
-        "25 BATTERY / 35s: REVEAL ROUTES; THE BEACON LOUDLY BROADCASTS YOUR LOCATION.",
+        "25 BATTERY / REVEAL ROUTES 35s / FIRST 15s: MINIMAP USES NO BATTERY. THE TOWER IS LOUD.",
         "SELECT AN EXCHANGE AT EITHER SIDE POD; ACTIVATE HERE TO PAY ONCE.",
         "40 STAMINA: SWAP WITH THE SELECTED SAFE HUNTER; STAGGER 5s / 6-28 CELLS / ONCE PER FLOOR. NO CAMERA ROTATION.",
         "IRREVERSIBLE THIS RUN: 35% CARRIED GOLD (MIN 80) / POLLUTION / LOOT +25% / NOISE +35%.",
@@ -39,7 +39,7 @@ static const char* roomEffectEn[7]={
 static const char* roomEffectZh[7]={
         "20电量：井口持续45秒诱导二十八格内猎手；离开后仍有效，替你制造逃离窗口。",
         "携带金币25%（至少40）：独立宝箱总回款为本金80%至120%；四成亏损、两成回本、四成盈利。",
-        "25电量：35秒揭示路线，灯塔的巨响会暴露位置。",
+        "25电量：35秒揭示路线，前15秒小地图免耗电；电塔巨响会暴露位置。",
         "在两侧装置选择转换方向，在此启动并一次结算。",
         "40体力：与安全目标交换位置，使其硬直5秒，六至二十八格，每层一次，不改变视角。",
         "本局不可撤销：携带金币35%（至少80），持续精神污染、搜刮+25%、噪音+35%。",
@@ -76,6 +76,10 @@ const char* RoomThemeEffectLine(int index) {
     int kind=hatches[index].kind;
     if(kind<0 || kind>=7)return "";
     static char dynamic[320];
+    if(kind==HATCH_POWER && roomTheme.spent && RoomThemeFreeMapRemaining()>0) {
+        snprintf(dynamic,sizeof(dynamic),Tr("GRID LINK / MINIMAP FREE %.1fs / FLASHLIGHT STILL DRAINS", "电网链路 / 小地图免耗电剩余%.1f秒 / 手电正常耗电"),(double)RoomThemeFreeMapRemaining());
+        return dynamic;
+    }
     if(kind==HATCH_STORAGE && roomTheme.spent) {
         int stake=0,total=0;
         if(RoomThemeVaultResult(&stake,&total)) {

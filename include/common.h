@@ -110,6 +110,9 @@ typedef struct { LONG x, y; } POINT;
 #define VK_NUMPAD9   0x69
 #define VK_F5        0x74
 #define VK_F9        0x78
+#define VK_F1        0x70
+#define VK_F12       0x7B
+#define VK_DELETE    0x2E
 #define VK_F11       0x7A
 #define VK_LSHIFT    0xA0
 #define VK_RSHIFT    0xA1
@@ -130,7 +133,7 @@ typedef struct { LONG x, y; } POINT;
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 43         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_NUM 44         /* 整数版本，进存档做记录 */
 /* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
    置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
    置 0 = 回到旧的战斗版本。 */
@@ -172,7 +175,7 @@ typedef struct { LONG x, y; } POINT;
 
 /* v2.4.2：双端稳定性补丁 —— 旧档迁移 / 运行段隔离 / 相位与舱门 /
    网页动作绑定与存档导出。存档结构**未变**（仍是 v34）。 */
-#define CANITY_VERSION_STR "2.4.8"
+#define CANITY_VERSION_STR "2.4.9-RC1"
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -830,7 +833,7 @@ typedef struct { float x, y; int active; } Breaker;
 /* 2026-11-06（用户要求）：只留一个相位装置。
    原来做了两个（信标 + 锚），用户说"把那个传送的小图也删掉，只留一个信标"。
    现在 7 槽：6 个旧物品 + 1 个相位信标。 */
-#define ITEM_SLOT_COUNT 7
+#define ITEM_SLOT_COUNT 14
 
 /* ---- v3.3 投掷物重做：粘胶区域 + 回声扫描 ----
    胶水：落地生成一滩，半径 2.5 格、持续 6 秒、区域内移速 -80%
@@ -992,11 +995,11 @@ enum {
 enum {
     IR_BATTERYPACK = 0, IR_BOTTLE, IR_FLARE, IR_MEDKIT, IR_SHARDBAG,
     IR_LIGHTFOOT, IR_FASTCRANK, IR_FASTSEARCH, IR_SAVER, IR_LONGWIND, IR_ARMOR,
-    IR_SILENTBOTTLE, IR_DARKWALK, IR_LIGHTFUSE,
+    IR_WIDEPULSE, IR_DARKWALK, IR_LIGHTFUSE,
     IR_STATICFIELD, IR_MISDIRECT,
     /* v2.0 新增 8 张（16 -> 24） */
     IR_FIELDREPAIR, IR_NERVESHOT, IR_PACKRAT, IR_OILCAN, IR_LUCKYFUSE,
-    IR_STEADYHAND, IR_SWIFTRELOAD, IR_TIMESTOP,
+    IR_DUSTCOAT, IR_TOOLCOOLING, IR_TIMESTOP,
     /* v2.4.1（第 10 轮）：道具流的核心卡 —— 照明棒变成生存资源。
        枚举追加在**末尾**，旧存档的 runSkillMask 位含义不变。 */
     IR_BIOLUM

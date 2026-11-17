@@ -50,6 +50,7 @@ int RoomThemeVaultPrepare(int stake,unsigned roll);
 int RoomThemeGoldCost(int kind,int gold);
 float RoomThemeControlPulse(void);
 float RoomThemeEventRemaining(void);
+float RoomThemeFreeMapRemaining(void);
 int RoomThemeEventKind(void);
 int RoomThemeVisualStage(void);
 void RoomThemeRebuildControls(void);

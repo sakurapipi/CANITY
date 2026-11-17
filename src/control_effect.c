@@ -154,3 +154,5 @@ void ControlTimeout(void) {
     ControlRelease(0);
     s_result = 2;
 }
+
+int ControlUseSolvent(float seconds){if(s_type!=CTRL_SPIDER_WEB || !isfinite(seconds) || seconds<=0 || s_timeLeft<=s_minTime)return 0;s_timeLeft=fmaxf(s_minTime,s_timeLeft-fminf(2.0f,seconds));return 1;}

@@ -13,6 +13,5 @@ void WrenchKnockUpdate(float dt);
 
 
 /* Per-floor wrench usage state. */
-extern int wrenchLastUsed;
 
 #endif

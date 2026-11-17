@@ -1,3 +1,6 @@
+#include "monster_evolution.h"
+#include "threat_tier.h"
+#include "tactical_tools.h"
 /* Orchestration ownership split; stage ordering remains in the entry point. */
 #include "common.h"
 #include "echo_marks.h"
@@ -226,7 +229,7 @@ static int UpdatePreflight(float dt) {
        · **大地图不耗电**（全屏规划路线是免费的）
        · 小地图耗电，且可以被局内强化「小地图省电」降低（10 → 4 /秒） */
     if (isMapOpen && !mapFullScreen && currentState == STATE_PLAYING) {
-        battery -= RunUpgMapDrainPct() * dt;
+        battery -= RunUpgMapDrainPct() * fmaxf(0, dt - RoomThemeFreeMapRemaining());
         if (battery <= 0.0f) {
             battery = 0.0f;
             isMapOpen = 0;
@@ -1284,24 +1287,28 @@ static int UpdateThrowInput(float dt) {
             mouseCharge = 0.0f;
         } else if (mouseLeftNow) {
             /* 持续按住：累积蓄力（仅当选中道具有库存时） */
-            int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys, phaseBeacons };
+            int counts[ITEM_SLOT_COUNT]; InventoryCounts(counts);
             int sel = throwSelected;
             if (sel < 0 || sel >= ITEM_SLOT_COUNT) sel = 0;
             if (counts[sel] > 0) {
                 /* v3.4：STEADY HAND（局内树 id 9）满蓄力 0.5s → 0.32s */
-                mouseCharge += dt / (TUNE_CHARGE_FULL_SECONDS * SkillHeavyHandChargeMul());
+                mouseCharge += dt / (TUNE_CHARGE_FULL_SECONDS);
                 if (mouseCharge > 1.0f) mouseCharge = 1.0f;
             }
         } else {
             /* 松开左键：发射（v1.16：0..4 = 荧光棒/瓶/砖/酸/烟） */
             isCharging = 0;
-            int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys, phaseBeacons };
+            int counts[ITEM_SLOT_COUNT]; InventoryCounts(counts);
             int sel = throwSelected;
             if (sel < 0 || sel >= ITEM_SLOT_COUNT) sel = 0;
             /* ===== v3.3 六槽位的右键行为 =====
                0 光球 / 1 投石 / 2 烟雾 / 3 胶水 / 4 回声  → 投掷
                5 诱饵                                     → **放在脚下**（不投）
                诱饵放下后要按 C 才激活（用户要求：C 是激活，右键才是放置）。 */
+            if(sel>=TOOL_FIRST_ITEM){
+                (void)TacticalTryUse(sel,mouseCharge);mouseCharge=0;throwCd=.45f;
+                mouseLeftPrev=mouseLeftNow;mouseRightPrev=mouseRightNow;return 0;
+            }
             if (sel == 5) {
                 if (decoys > 0) {
                     PlaceDecoy(posX, posY);
@@ -1328,6 +1335,7 @@ static int UpdateThrowInput(float dt) {
                     else if (sel == 1) bottles--;
                     else if (sel == 2) smokeBombs--;
                     else if (sel == 3) gluePots--;
+                    else if (sel == 6) phaseBeacons--;
                     else if (sel == 4) { echoBolts--; {  echoCellsTotalRun += 15; } }
                     totalThrown++;   /* v3.3：逃生向成就用（整条链之后加） */
                     throwCd = 0.45f;
@@ -1392,7 +1400,7 @@ static void UpdatePlayerAudio(float dt, const PlayerFrameInput* movement) {
                         inSmoke = PlayerInSmoke();
                     }
                     if (!SilentRunOwned() && !inSmoke)
-                        MakeNoise(posX, posY, 9.0f * noiseMul * BenchWalkNoiseMul()
+                        MakeFootstepNoise(posX, posY, 9.0f * noiseMul * BenchWalkNoiseMul()
                                   * QuietSoleMul());   /* 轻步 + 静底 */
                 }
             }
@@ -1415,7 +1423,7 @@ static void UpdatePlayerAudio(float dt, const PlayerFrameInput* movement) {
             int silentLand = (SkillGhostLandOwned() && ghostStillT >= 3.0f
                               && ghostStillT <= 6.0f);
             if (!(SkillGhostSilent() && !flashlightOn) && !silentLand)
-                MakeNoise(posX, posY, WALK_NOISE_RADIUS * noiseMul
+                MakeFootstepNoise(posX, posY, WALK_NOISE_RADIUS * noiseMul
                                   * BenchWalkNoiseMul() * QuietSoleMul());;
         }
     }   /* 轻步 + 静底 */
@@ -1505,6 +1513,9 @@ static void UpdateWorldThreats(float dt, const PlayerFrameInput* movement) {
     {
 
         if (ControlActive()) {
+            if(IsActionPressed(ACT_THROW) && TacticalEmergencySolvent())keyPressed[g_bindings[ACT_THROW]]=0;
+            static float heldEscape=0;
+            if(tactical.assistEscape && ActionIsDown(ACT_DODGE)){heldEscape+=dt;if(heldEscape>=.5f){ControlPress();heldEscape-=.5f;}}else heldEscape=0;
             if (IsActionPressed(ACT_DODGE)) {
                 ControlPress();
                 /* ================================================================
@@ -1908,11 +1919,13 @@ static void UpdateExitProgression(float dt) {
 void Update(float dt) {
     int inSafe;
     PlayerTickBatteryWarning(dt);
+    if (TacticalPanelOpen()) return;
     if (!UpdatePreflight(dt)) return;
     if (!UpdatePlayableTimers(dt, &inSafe)) return;
     if (!UpdateSurvival(dt, inSafe)) return;
     if (!UpdateCoverInput()) return;
     if (!UpdateEarlyActions(dt)) return;
+    EvolutionTick(dt);TacticalTick(dt);
     UpdateTimers(dt);   /* v8: 回声扫描 / 锁定窗口 / 周期自动存档（src/uptimers.c） */
     /* v3.0 改造树「消失」：脱离视线 3 秒后完全隐身。
        判据用「怪物是否在追捕状态」——它没在追（游荡/搜寻）就算脱离视线。 */

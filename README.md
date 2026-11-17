@@ -4,7 +4,13 @@
 
 一款以探索、声音、光线与资源取舍为核心的第一人称像素恐怖逃生游戏，使用 C99 编写。
 
-**当前源码版本：2.4.8 · 存档格式：v45 · 地图：36×36 · 容器槽：12。**
+**当前候选版：v2.4.9-RC1。存档主体：v45；地图：36×36；容器槽：12。RC 为预发布，稳定版仍是 v2.4.8。**
+
+本轮加入冷蓝／蓝紫／琥珀黄／血红四色进化、七种战术工具、四个快捷槽，以及从游戏模型生成的分档图鉴。两棵技能树同步更新：局外侧重声障连线、偏振引导、反制断线等机制；局内侧重工具范围、时长和恢复数值。旧扳手次数制及相关技能已移除，所有等级统一冷却。
+
+[下载 v2.4.9-RC1 预发布](https://github.com/sakurapipi/CANITY/releases/tag/v2.4.9-RC1) · [完整更新与兼容说明](docs/RELEASE-v2.4.9-RC1.md)
+
+幽灵、掠夺者、反击者仍朝北、西南、东南展开，通用技能位于内侧。保留51个局外存储位（50个玩家节点含起点）、40个局内购买节点和25张局内技能卡，避免旧存档乱序。局外花银行金币，局内花本局金币。
 
 Windows 桌面版与 WebAssembly 网页版共用游戏规则。射线投射、纹理采样、深度遮挡与后处理由 CPU 软件渲染完成，无需 OpenGL 或 DirectX 图形接口。怪物造型与场景贴图使用程序化生成；配乐随包提供 MP3，另有内置合成回退。
 
@@ -138,7 +144,7 @@ python -X utf8 tools/build_web.py --single
 先完成对应平台构建，再打包；下列命令使用最近一次完整验证报告：
 
 ```sh
-python -X utf8 tools/package_playable.py --include-web --label CANITY_v2.4.8 --notes docs/RELEASE-v2.4.8.md --acceptance-report work/codex-build/validation-summary.json --source-commit <完整提交SHA>
+python -X utf8 tools/package_playable.py --include-web --label CANITY_v2.4.9-RC1 --notes docs/RELEASE-v2.4.9-RC1.md --acceptance-report work/codex-build/validation-summary.json --source-commit <完整提交SHA>
 ```
 
 `--include-web` 要求网页构建已存在。默认打包 **Lite**：复制 EXE 与 `music/`、谱面和清单；只有用 `--embed-music` 构建 Full 版后，才可加 `--single-exe --embed-music` 打单文件 EXE 包。运行包记录源码、资源和验证摘要；报告与当前验证输入不匹配时拒绝套用。生成安装包不等于已经完成真实桌面或手机验收。

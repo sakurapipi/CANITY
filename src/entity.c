@@ -1,3 +1,6 @@
+#include "monster_evolution.h"
+#include "threat_tier.h"
+#include "tactical_tools.h"
 /*
  * Canity — 实体层实现：玩家状态 / 状态效果 / 三种怪物 + 跳脸虫 QTE
  *
@@ -353,9 +356,12 @@ float noiseSrcX = 0.0f, noiseSrcY = 0.0f;   /* v3.0：听觉用 */
    有的话，躲在里面更难被搜到 —— 柜门缝隙被外面的光晃着，怪不容易注意到。 */
 
 
-void MakeNoise(float x, float y, float radius) {
+static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
+    int walkingSource = footsteps || radius <= 14.0f;
     if(radius<=14)RoomThemeRedirectNoise(&x,&y);
-    if(radius<=14 && Dist2(x,y,posX,posY)<.16f)radius*=HushNoiseMul()*RoomThemeNoiseMul();
+    if(footsteps)radius*=HushNoiseMul()*TacticalFootstepMul(x,y,HushNoiseMul())*RoomThemeNoiseMul();
+    else if(radius<=14 && Dist2(x,y,posX,posY)<.16f)radius*=HushNoiseMul()*RoomThemeNoiseMul();
+    if (!footsteps) radius *= TacticalNoiseMul(x, y);
     /* ==================================================================
      * v7 第 ㊿ 轮：**事件的「怪物听觉」倍率一直是死的**
      * ==================================================================
@@ -414,7 +420,7 @@ void MakeNoise(float x, float y, float radius) {
     {
         SoundEvent ev;
         memset(&ev, 0, sizeof(ev));
-        ev.kind  = (radius <= 14.0f) ? SK_WALK : SK_SEARCH;
+        ev.kind  = walkingSource ? SK_WALK : SK_SEARCH;
         ev.x = x; ev.y = y;
         ev.strength = radius * 2.6f;          /* 半径 14 → 36；半径 20 → 52 */
         ev.maxRadius = radius;
@@ -426,7 +432,7 @@ void MakeNoise(float x, float y, float radius) {
     {
         float st = radius * 2.6f;              /* 半径 14 → 36；半径 20 → 52 */
         if (st > 100.0f) st = 100.0f;
-        int srcS = (radius <= 14.0f) ? SUSP_WALK : SUSP_SEARCH;
+        int srcS = walkingSource ? SUSP_WALK : SUSP_SEARCH;
         /* 走路噪音衰减快、寿命短；翻箱/敲击衰减慢、寿命长 */
         float decS = (srcS == SUSP_WALK) ? 14.0f : 8.0f;
         float ttlS = (srcS == SUSP_WALK) ? 3.0f : 6.0f;
@@ -471,10 +477,14 @@ void MakeNoise(float x, float y, float radius) {
         noiseSrcX = x; noiseSrcY = y;
     }
 }
+void MakeNoise(float x,float y,float radius){MakeNoiseTagged(x,y,radius,0);}
+void MakeFootstepNoise(float x,float y,float radius){MakeNoiseTagged(x,y,radius,1);}
+
 
 
 /* 2026-11-06：参数化成"生成到指定那只"，供 SpawnLightBeast / SpawnLightBeast2 复用 */
 static void SpawnOneLightBeast(Monster* L) {
+    int evolutionIndex=(int)(L-lightBeasts);if(evolutionIndex>=0 && evolutionIndex<LIGHTBEAST_MAX){memset(&evolution.actors[EVO_LIGHT+evolutionIndex],0,sizeof(EvoActor));EvolutionRelease(EVO_LIGHT+evolutionIndex);}
     /* 注意：不要整体拷贝 monster —— 那会把寻声怪的旧路径、旧命中冷却
        一并带过来，光敏怪会开局就沿着别人的路走、还带着别人的无敌时间。
        这里只借用它的类型，清干净状态再重置。 */
@@ -540,6 +550,7 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
 
     /* 硬直：被玻璃瓶砸中后短暂不能动 */
     if (L->stun > 0.0f) {
+        EvoActor* a=&evolution.actors[EVO_LIGHT+(int)(L-lightBeasts)];if(a->phase){a->phase=0;a->aux=0;a->cooldown=fmaxf(a->cooldown,14);EvolutionRelease(EVO_LIGHT+(int)(L-lightBeasts));}
         L->stun -= dt;
         if (L->stun < 0.0f) L->stun = 0.0f;
         return;
@@ -547,20 +558,23 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
 
     /* 目标：看得见的玩家（手电开着）优先，其次是地上的荧光棒 */
     float tx = 0.0f, ty = 0.0f;
-    int has = 0;
-    if (hiddenIn<0 && flashlightOn && battery > 0.0f && Dist2(posX, posY, L->x, L->y) < 256.0f*MonsterThreatScale(SPAWN_LIGHT)*MonsterThreatScale(SPAWN_LIGHT) &&
+    int has = 0,lightSource=0;
+    if (hiddenIn<0 && flashlightOn && battery > 0.0f && Dist2(posX, posY, L->x, L->y) < EvolutionLightRange()*EvolutionLightRange() &&
         HasLOS(L->x, L->y, posX, posY)) {
-        tx = posX; ty = posY; has = 1;
+        tx = posX; ty = posY; has = 1;lightSource=1;
     } else {
         for (int i = 0; i < MAX_THROWN; i++) {
             if (!thrown[i].active || (thrown[i].type != 0 && thrown[i].type != 9)) continue;
             if (Dist2(thrown[i].x, thrown[i].y, L->x, L->y) < 256.0f &&
                 HasLOS(L->x, L->y, thrown[i].x, thrown[i].y)) {
-                tx = thrown[i].x; ty = thrown[i].y; has = 1; break;
+                tx = thrown[i].x; ty = thrown[i].y; has = 1;lightSource=i+2; break;
             }
         }
     }
 
+    int evolutionAction=EvolutionLightUpdate(L,&has,lightSource,&tx,&ty,dt);
+    if(evolutionAction==1)return;
+    if(evolutionAction==2)goto LightContact;
     if (has) {
         float side=L==&lightBeasts[0]?-.28f:.28f;
         float ax=tx+side,ay=ty-side;
@@ -603,6 +617,7 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
         }
     }
 
+LightContact: ;
     float pd2 = Dist2(L->x, L->y, posX, posY);
     /* v3.3：诱饵同样能替玩家挡追光鬼这一下 */
     if (L->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R && DecoyIntercept()) {
@@ -1018,7 +1033,7 @@ static void HunterPerceive(Monster* M, float dt) {
             /* v2.4-beta B03：隔墙的线索有效强度会掉下来。
                距离也用路径步数，所以"绕一大圈"的点不会被选中。 */
             float reach = 0.0f;
-            int idx = SuspicionBestReach(M->x, M->y, 0.9f, 22.0f*ThreatHearMul(), &reach);
+            int idx = SuspicionBestReach(M->x, M->y, 0.9f, EvolutionHearingRange(22.0f*ThreatHearMul()), &reach);
 #else
             int idx = SuspicionBest(M->x, M->y, 0.9f);
             float reach = 1.0f;
@@ -1053,6 +1068,7 @@ static void HunterPerceive(Monster* M, float dt) {
             float effStrength = (idx >= 0) ? susp[idx].strength * reach : 0.0f;
             if (idx >= 0 && effStrength > need) {
                 M->state = 1;
+                EvolutionHunterHeard(HunterIndex(M),idx);
                 M->tx = susp[idx].x;
                 M->ty = susp[idx].y;
                 M->repath = 0.0f;
@@ -1418,6 +1434,7 @@ static void HunterUpdateFacing(Monster* M, float dt) {
 static void UpdateOneHunter(Monster* M, float dt) {
     if (M->active) M->speed = HunterMoveSpeed((int)(M-monHunters),currentLevel,modSpeedMul,ThreatValue());
     HunterPerceive(M, dt);
+    if(M->stun<=0 && EvolutionHunterOverride(M,dt))return;
     if (!HunterUpdateState(M, dt)) return;
     HunterFollowPath(M, dt);
     if (!HunterResolveContact(M, dt)) return;
@@ -1456,7 +1473,7 @@ static void KnockbackMonster(Monster* m) {
     }
     /* v2.7：接上 STAGGER（瓶子硬直 +0.2s/级）。原来这里写死 MONSTER_STUN，
        导致技能树里买了 STAGGER 完全没反应。 */
-    m->stun = MONSTER_STUN + SkillStunAdd();
+    m->stun = MONSTER_STUN;
     {  knockCountRun++; }   /* v7：DISRUPTOR 成就用 */
     m->pathLen = 0;
     m->pathIdx = 0;

@@ -13,5 +13,4 @@ float BenchRestPriceMul(void);
 float BenchRhythmHealBonus(void);
 float BenchSearchTimeMul(void);
 float BenchCrankTimeMul(void);
-float BenchSanityDrainMul(void);
 #endif

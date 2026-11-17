@@ -1,3 +1,8 @@
+#include "save.h"
+#include "evolution_art.h"
+#include "monster_evolution.h"
+#include "threat_tier.h"
+#include "tactical_tools.h"
 /* Level generation owns its temporary workspace and private generation rules.
  * Keep stage order and random-number consumption unchanged during refactoring.
  */
@@ -355,11 +360,9 @@ static void ResetFloorSystems(void) {
     {   /* v7：拾荒者按强度档决定是否出现 */
         CollectorReset();
     }
-    {   /* v7：扳手次数每层补满 */
+    {   /* Reset the per-floor wrench cooldown. */
 
 
-        wrenchCharges = RunUpgWrenchCharges();
-        wrenchLastUsed = 0;
         wrenchCd = 0.0f;
     }
     /* v2.0 修复：Boss 标记必须在**任何 SpawnMonster() 之前**设置。
@@ -715,7 +718,7 @@ static int ConfigureFloorResources(void) {
         int cf = CampaignFusesNow();
         if (cf >= 2 && cf <= MAX_CONTAINERS) {
             fusesNeeded = cf;
-            fusesNeeded -= (HasKeystone(SK_FUSE_LESS) ? 1 : 0) + RunFuseLess() + SkillOwned(SK_SHORTCUTJR);
+            fusesNeeded -= (HasKeystone(SK_FUSE_LESS) ? 1 : 0) + RunFuseLess();
             if (fusesNeeded < 2) fusesNeeded = 2;
         } else {
             fusesNeeded = 2 + currentLevel / 3;
@@ -731,7 +734,7 @@ static int ConfigureFloorResources(void) {
            给电池/药/投掷物留出货位（原来无尽第 18 层 8 根 = 全箱都是保险丝）。 */
         fusesNeeded = 2 + currentLevel / 3;
         if (fusesNeeded > 6) fusesNeeded = 6;
-        fusesNeeded -= (HasKeystone(SK_FUSE_LESS) ? 1 : 0) + RunFuseLess() + SkillOwned(SK_SHORTCUTJR);
+        fusesNeeded -= (HasKeystone(SK_FUSE_LESS) ? 1 : 0) + RunFuseLess();
         if (fusesNeeded < 2) fusesNeeded = 2;
     }
 
@@ -1382,6 +1385,7 @@ static void PlaceFloorBreaker(const LevelBuildWorkspace* work) {
 void GenerateLevel(void) {
     static LevelBuildWorkspace work;
     ResetFloorSystems();
+    CommitThreatTierForFloor(currentLevel);if(!SaveEvolutionCanPersist())ThreatTierRestore(currentLevel,0,0);EvolutionResetFloor();TacticalResetFloor();SpritesSetEvolutionTier(CurrentRunThreatTier());
     memset(&roomTheme,0,sizeof(roomTheme));
     if (trainingMode) {
         TrainingBuildArena();

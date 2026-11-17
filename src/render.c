@@ -1,3 +1,6 @@
+#include "skills.h"
+#include "threat_tier.h"
+#include "monster_evolution.h"
 /*
  * Canity — 渲染层实现：像素缓冲 / 贴图与查表 / 多线程光栅 / 3D / 精灵 / 地图
  *
@@ -638,7 +641,7 @@ void DrawCreatureActor(int spr,float wx,float wy,float halfH,float lightK,
     light+=FlareLightAt(wx,wy)*.85f;
     if(light>1.2f)light=1.2f;
     DrawGroundShadow(box.centerX,box.baseY,w/3,box.ty);
-    SpritePose pose={(float)g_timeSec+spr*.27f,stride,activity,mirror};
+    SpritePose pose={(float)g_timeSec+spr*.27f,stride,fminf(1,activity+EvolutionPoseSignal(spr)*.4f),mirror};
     DrawSpriteCreature(use,box.centerX-size/2,box.baseY-size,size,size,light,1,zTest,box.ty,tint,tintMix,&pose);
 }
 static void DrawBakedMonster(int spr,float wx,float wy,float halfH,float lightK,int zTest,float facing,float walkPhase){
@@ -1093,7 +1096,7 @@ static void DrawHideSpotHighlight(void) {
 }
 
 static void DrawHearingMarker(void) {
-    if (!BenchHearing()) return;
+    if (!SkillHearing()) return;
 
     if (noiseDisplay <= 0.01f) return;
     float dx = noiseSrcX - posX, dy = noiseSrcY - posY;
@@ -2058,6 +2061,7 @@ static void DrawGroundShadow(int cx, int cyFloor, int halfW, float ty) {
 /* ------------------------------------------------------------------ */
 
 void Render3D(void) {
+    SpritesSetEvolutionTier(CurrentRunThreatTier());
     PerceptionUpdate(RoomThemeSanityRatio(sanity/fmaxf(1,SanityMax())),g_timeSec);
     int halfH = renderH / 2;
 

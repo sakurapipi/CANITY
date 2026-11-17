@@ -27,6 +27,13 @@
 #include "content_db.h"
 
 static const ShotSpec kShotSpecs[] = {
+    { 32, "dampener", FX_TACTICAL, 0,0,0,-1,0,1,0 },
+    { 33, "prism", FX_TACTICAL, 0,0,0,-1,0,1,0 },
+    { 34, "solvent", FX_TACTICAL, 0,0,0,-1,0,1,0 },
+    { 35, "tether", FX_TACTICAL, 0,0,0,-1,0,1,0 },
+    { 36, "reveal", FX_TACTICAL, 0,0,0,-1,0,1,0 },
+    { 37, "trace", FX_TACTICAL, 0,0,0,-1,0,1,0 },
+    { 38, "jammer", FX_TACTICAL, 0,0,0,-1,0,1,0 },
 /* dmgType = -1 表示"这种投掷物不造成伤害"。
    注意 common.h 里只有 DT_SLASH/BLUNT/SHARD 三种，没有 -1 —— 
    第一次写这张表时我用了 -1，编译直接报未声明。 */

@@ -12,6 +12,7 @@
 #include "lang.h"
 #include "audio.h"
 #include "bench.h"
+#include "skills.h"
 
 static int upg[RUN_UPG_COUNT];
 
@@ -85,7 +86,7 @@ const char* RunUpgDesc(int kind) {
     case 1: return "Lose 10% less sanity when grabbed";
     case 2: return "Sprint stamina -15% / lv";
     case 3: return "Flashlight drain -15% / lv";
-    case 4: return "Push monsters back. Lv2+ becomes cooldown.";
+    case 4: return "Cooldown 8/7/6/5s; knockback and stagger improve.";
     default: return "Minimap drain -2% / lv (10 to 4 per second)";
     }
 }
@@ -96,7 +97,7 @@ const char* RunUpgDescZh(int kind) {
     case 1: return "被抓时少掉 10% 理智 / 级";
     case 2: return "冲刺体力消耗 -15% / 级";
     case 3: return "手电耗电 -15% / 级";
-    case 4: return "推开怪物。2 级起改为冷却制。";
+    case 4: return "冷却8/7/6/5秒；逐级提升击退与硬直。";
     default: return "小地图每秒耗电 -2%（10 → 4）";
     }
 }
@@ -165,11 +166,9 @@ float RunUpgWrenchCooldown(void) {
     int lv = RunUpgWrenchLevel();
     float cd = 8.0f - (float)lv;    /* 每级 -1 秒 */
     if (cd < 5.0f) cd = 5.0f;       /* 冷却上限（最短）5 秒 */
-    return cd*BenchWrenchCooldownMul();
+    return fmaxf(5.0f,cd*BenchWrenchCooldownMul()*RunWrenchCooldownMul());
 }
-int RunUpgWrenchCharges(void) {
-    return ((RunUpgWrenchLevel() <= 0) ? 2 : 4)+BenchKnockCharges();
-}
+
 float RunUpgWrenchRange(void) {
     int lv = RunUpgWrenchLevel();
     return (lv >= 3) ? 4.0f : (lv >= 1 ? 3.0f : 2.0f);

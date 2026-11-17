@@ -1,3 +1,6 @@
+#include "tactical_tools.h"
+#include "skills.h"
+#include "save.h"
 /* Room controls prepare a choice; only the special hatch charges and commits it. */
 #include "common.h"
 #include "room_theme.h"
@@ -169,6 +172,7 @@ int RoomThemeActivate(int idx) {
     }
     case HATCH_POWER:
         battery-=25;hatchLightsT=35;RoomThemeStartEvent(2,35);
+        if(SkillOwned(SK_SHORTCUTJR) && SaveEvolutionCanPersist())ToolReceive(TOOL_PRISM);
         for(int y=1;y<MAP_HEIGHT-1;y++)for(int x=1;x<MAP_WIDTH-1;x++)if(!worldMap[y][x])explored[y][x]=1;
         MakeNoise(hatch->x,hatch->y,32);break;
     case HATCH_WARD: {

@@ -1,3 +1,5 @@
+#include "tactical_tools.h"
+#include "threat_tier.h"
 #include "echo_marks.h"
 #include "run_stats.h"
 #include "threat.h"
@@ -258,7 +260,7 @@ int LoopIsMouseButton(int vk) {
 }
 
 void LoopSelectVisibleSlot(int n) {
-    int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys, phaseBeacons };
+    int counts[ITEM_SLOT_COUNT]; InventoryCounts(counts);
     int k = 0;
     for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
         if (counts[i] <= 0) continue;

@@ -79,6 +79,8 @@ enum {
     SC_SETTINGS = 0x0001,   /* 显示 / 音频 / 键位 / 语言 —— 改设置时才变 */
     SC_LOBBY    = 0x0002,   /* 局外进度：金币 / 升级 / 技能 / 成就 / 银行 / 每日 */
     SC_RUN      = 0x0003,   /* 当前对局的全部状态 */
+    SC_EVOLUTION_V1 = 0x0005, /* Four-tier runtime, schema 1 */
+    SC_TACTICAL_ITEMS_V1 = 0x0006, /* Inventory, bindings, zones, flights */
     SC_WORLD    = 0x0004,   /* worldMap + explored */
     SC_LEGACY29 = 0x00FF,   /* 过渡期：整份 SaveBlob 原样字节 */
     SC_MAX_ID   = 0x00FF

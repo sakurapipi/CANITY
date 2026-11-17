@@ -1,3 +1,6 @@
+#include "monster_evolution.h"
+#include "threat_tier.h"
+#include "tactical_tools.h"
 /*
  * Canity — 可疑点系统（v7 新模块）
  *
@@ -52,6 +55,7 @@ void SuspicionAdd(float x, float y, float strength, float decay, float ttl, int 
         if (strength > susp[i].strength) susp[i].strength = strength;
         if (ttl > susp[i].ttl) susp[i].ttl = ttl;
         if (decay < susp[i].decay) susp[i].decay = decay;
+        EvolutionSoundIssued(i);
         return;
     }
 
@@ -75,6 +79,7 @@ void SuspicionAdd(float x, float y, float strength, float decay, float ttl, int 
     susp[slot].decay = decay;
     susp[slot].ttl = ttl;
     susp[slot].source = source;
+    EvolutionSoundIssued(slot);
 }
 
 /*

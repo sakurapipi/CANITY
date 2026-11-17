@@ -1,3 +1,5 @@
+#include "tactical_tools.h"
+#include "threat_tier.h"
 /*
  * Canity — update/transition orchestration and platform event routing.
  * Domain implementations and their private state live in loop_*.c.
@@ -235,17 +237,12 @@ float bobPhase = 0.0f;   /* v2.1：手持模型走路摆动相位 */
 int   slashDmg = 999;
 float slashMaxDist = 14.0f;   /* v2.0：法术吃武器射程/配件 */          /* 光束伤害：剑气固定秒杀，符印用武器表 */
 float weaponAtkCharge = 0.0f;  /* 武器蓄力 0..1 */
-/* ===== v7 扳手击退 =====
-   次数制（0/1 级）与冷却制（2/3 级）共存：
-     wrenchCharges 只在次数制下有意义，每层开始重置
-     wrenchCd      只在冷却制下有意义 */
+/* Wrench is cooldown-only at every upgrade rank. */
 float gameTime = 0.0f;   /* v2.4.3: 全局秒表（出口脉冲等用） */
 int   shopContractUsed = 0;   /* v7 B3: 本局是否已经签过协议 */
 float playerMoveSpeedNow = 0.0f;
 
-int   wrenchCharges  = 2;
 float wrenchCd       = 0.0f;
-int   wrenchLastUsed = 0;
 int   playDeadUsed = 0;         /* v3.0 假死：本局用过了吗 */
 /* v3.3：tutorialOff 已删除 ——
    旧的四行开局引导整块移除了（改用 Tutorial 模式的分步引导），
@@ -353,11 +350,7 @@ int menuScrollOffsets[16] = {0};   /* 下标 = GameState，留足余量 */  /* �
 /* v1.14：手里不能是空的。
    如果当前槽位数量为 0，自动跳到另一个有货的槽位 ——
    玩家滚轮/按键切到空槽时不需要自己再切回来。 */
-int itemHasStock(void) {
-    /* v3.3 槽位：0 光球 / 1 投石 / 2 烟雾 / 3 胶水 / 4 回声 / 5 诱饵 */
-    int c[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys, phaseBeacons };
-    if (throwSelected < 0 || throwSelected >= ITEM_SLOT_COUNT) return 0;
-    return c[throwSelected] > 0;
+int itemHasStock(void) {return InventoryCount(throwSelected)>0;
 }
 
 /* v2.6：键盘只有 3 个选槽键，但槽位有 5 个（砖/酸/烟都有）。
@@ -370,7 +363,7 @@ void EnsureThrowSelectedValid(void) {
     /* v1.18：这里原来写死 2 个槽位 —— 滚到砖头/酸瓶时
        counts[throwSelected] 越界读到垃圾值，随即被拉回第 0/1 槽，
        表现就是"选不中砖头和酸瓶"。 */
-    int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys, phaseBeacons };
+    int counts[ITEM_SLOT_COUNT]; InventoryCounts(counts);
     if (throwSelected < 0 || throwSelected >= ITEM_SLOT_COUNT) throwSelected = 0;
     if (counts[throwSelected] > 0) return;
     /* 2026-11-05：**就近取，不要永远拽回 0 号槽**。
@@ -743,7 +736,6 @@ float MonsterThreatScore(void) {
 /* v1.16：蓄满（>=0.85）额外 +1 伤害 */
 int chargeBonus(float charge) {
     int b = (charge >= 0.85f) ? 1 : 0;
-    if (b) b += SkillHeavyHand();    /* HEAVY HAND */
     return b;
 }
 
@@ -759,16 +751,8 @@ int g_throwOk = 0;
    rank 0 = 按武器默认（近战钝 / 远程金币 / 法术斩）；
    rank 1/2/3 = 强制 斩 / 钝 / 金币 —— 让"改刃"变成石头剪刀布。 */
 int WeaponDamageType(int id) {
-    int r = SkillTypeWorkRank();
-    if (r <= 0) {
-        const WeaponDef* w = WeaponGet(id);
-        if (w->kind == WPN_RANGED) return DT_SHARD;
-        if (w->kind == WPN_SPELL)  return DT_SLASH;
-        return DT_BLUNT;
-    }
-    if (r == 1) return DT_SLASH;
-    if (r == 2) return DT_BLUNT;
-    return DT_SHARD;
+    const WeaponDef* weapon=WeaponGet(id);
+    return weapon->kind==WPN_RANGED?DT_SHARD:weapon->kind==WPN_SPELL?DT_SLASH:DT_BLUNT;
 }
 
 /* v2.0 RELOAD RHYTHM：每第 3 次命中无视护甲 */
@@ -1264,7 +1248,8 @@ void ActivateMenuItem(void) {
             InitAchievements();
             uiDirty = 1;
         } else if (sel == ixBest) {
-            /* v1.8：怪物图鉴 */
+            /* Remember the actual entrance, never infer it from an old save. */
+            prevState = currentState;
             currentState = STATE_BESTIARY;
             UiArchiveOpen();
             uiDirty = 1;

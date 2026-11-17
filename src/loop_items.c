@@ -1,3 +1,4 @@
+#include "tactical_tools.h"
 /* Transient item pools: smoke, glue and decoys. */
 #include "common.h"
 #include "item_effects.h"
@@ -192,7 +193,7 @@ void UpdateSmokes(float dt) {
                 ev.kind = SK_VOICE;
                 ev.x = decoysArr[i].x;
                 ev.y = decoysArr[i].y;
-                ev.strength = 75.0f;
+                ev.strength = 75.0f * TacticalNoiseMul(ev.x, ev.y);
                 ev.decay = 3.0f;
                 ev.ttl = 8.0f;
                 ev.eventId = 0u;              /* 每 1.5 秒一次是**独立**的叫声 */

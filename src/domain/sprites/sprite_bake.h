@@ -41,4 +41,9 @@ void BakeRoomControlState(int id,int theme,int side,int state);
 void BakeThemeProp(int id,int material,int kind,int state);
 void BakeMisprintFringe(int kind);
 void BakeCreatureSurface(int kind);
+int BakeEvolvedCreature(int kind,int pose);
+void BakeEvolutionDetails(int kind,int pose);
+void BakeTacticalTool(int id,int tool);
+int SpriteBakeEvolutionTier(void);
+int SpriteBakeReferenceModel(int id);
 #endif

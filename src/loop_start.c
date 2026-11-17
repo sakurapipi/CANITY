@@ -1,3 +1,6 @@
+#include "monster_evolution.h"
+#include "threat_tier.h"
+#include "tactical_tools.h"
 /* Orchestration ownership split; stage ordering remains in the entry point. */
 #include "common.h"
 #include "run_economy.h"
@@ -118,8 +121,10 @@ void ResetRunModeFlags(void) {
 }
 
 static void InitializeRunEconomy(void) {
+    ThreatTierConfirmPlan();TacticalResetRun();
     ThreatReset();BenchResetRun();RunUpgReset();counterKillUsed=0;
     if(trainingMode){
+        for(int i=0;i<TOOL_COUNT;i++)tactical.inventory[i]=1;
         carryGold=0;carryAtRunStart=0;throwSelected=0;runInProgress=1;runTime=0;
         RunEconomyReset();return;
     }

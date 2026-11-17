@@ -175,3 +175,6 @@ void MoneyBagsLoad(const float* positions,const int* amounts){
         SuspicionAdd(x,y,fmaxf(5,fminf(100,amounts[i]/200.0f)),.6f,moneyBags[i].life,SUSP_GOLD);
     }
 }
+
+int MoneyBagCanDrop(int amount){if(amount<=0)return 0;for(int i=0;i<MAX_MONEYBAG;i++)if(!moneyBags[i].active)return 1;return amount<=INT_MAX-moneyBags[0].amount;}
+int MoneyBagTryDropAt(float x,float y,int amount){if(!MoneyBagCanDrop(amount) || !isfinite(x) || !isfinite(y) || x<1 || y<1 || x>=MAP_WIDTH-1 || y>=MAP_HEIGHT-1 || Blocked(x,y))return 0;MoneyBagDropAt(x,y,amount);return 1;}

@@ -1,3 +1,9 @@
+#include "loop_api.h"
+#include "state.h"
+#include "world_api.h"
+#include "evolution_art.h"
+#include "threat_tier.h"
+#include "player_api.h"
 /* Shared guide entrance; monster and room records keep independent selections. */
 #include "common.h"
 #include "ui_archive.h"
@@ -16,6 +22,7 @@
 #include "present_api.h"
 static int archiveTab=ARCHIVE_MONSTERS,roomSelection=0;
 static int roomScroll=0,roomScrollMax=0;
+static int portraitTier=-1;
 int UiArchiveTab(void){return archiveTab;}
 int UiArchiveEntryCount(void){return archiveTab==ARCHIVE_ROOMS?ROOM_ARCHETYPE_COUNT:BESTIARY_COUNT;}
 int UiArchiveSelection(void){return archiveTab==ARCHIVE_ROOMS?roomSelection:bestiarySel;}
@@ -30,6 +37,7 @@ void UiArchiveSetTab(int tab){
     archiveTab=tab;roomScroll=roomScrollMax=0;menuScrollOffsets[STATE_BESTIARY]=0;uiDirty=1;
 }
 void UiArchiveOpen(void){
+    portraitTier=-1;
     archiveTab=ARCHIVE_MONSTERS;bestiarySel=0;roomSelection=0;roomScroll=roomScrollMax=0;
     menuScrollOffsets[STATE_BESTIARY]=0;uiDirty=1;
 }
@@ -133,56 +141,68 @@ void UiDossierPortrait(int spriteId, RECT box, int identified) {
     }
 }
 
+static int DisplayTier(void) {
+    if(portraitTier>=0)return portraitTier;
+    return prevState==STATE_PAUSED?CurrentRunThreatTier():PreviewThreatTier();
+}
+static RECT TierRect(MenuGeo g,int i){int left=g.panel.left+(g.panel.right-g.panel.left)*32/100+UIS(16);int w=(g.panel.right-UIS(16)-left)/5;int y=g.firstY+TextMediumLiteralHeight()*2+UIS(16);return (RECT){left+i*w,y,left+(i+1)*w-UIS(3),y+TextMediumLiteralHeight()+UIS(8)};}
+int UiArchiveTierKey(int key){if(currentState!=STATE_BESTIARY || archiveTab!=ARCHIVE_MONSTERS)return 0;if(key>='1' && key<='4')portraitTier=key-'1';else if(key=='0')portraitTier=-1;else return 0;uiDirty=1;return 1;}
+int UiArchiveTierClick(int x,int y){if(currentState!=STATE_BESTIARY || archiveTab!=ARCHIVE_MONSTERS)return 0;MenuGeo g=UiArchiveGeometry();for(int i=0;i<5;i++){RECT r=TierRect(g,i);if(x>=r.left && x<r.right && y>=r.top && y<r.bottom){portraitTier=i<4?i:-1;uiDirty=1;return 1;}}return 0;}
+
 static void DrawMonsterArchive(MenuGeo g) {
     int th = TextHeightWin(), pad = UIS(16);
     int split = g.panel.left + (g.panel.right-g.panel.left)*32/100;
     int x = split+pad, right = g.panel.right-pad;
-    BlendRectWin(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,0x00090F17u,.99f);
-    FrameRectWin(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,0x00485668u,.95f,1);
+    BlendRectWin(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,UI_BG_PANEL,.99f);
+    FrameRectWin(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,UI_EDGE,.95f,1);
     DrawTextWin(g.panel.left+pad,g.titleY,Tr("FIELD GUIDE","图鉴"),UI_ACCENT);
     char text[160];
     snprintf(text,sizeof(text),Tr("ACTIVE %d / %d","现行 %d / %d"),BestiaryCountSeen(bestiarySeen),BestiaryActiveCount());
-    DrawTextWin(right-TextWidthWin(text),g.titleY,text,0x008CCBD3u);
-    BlendRectWin(split,g.firstY-UIS(8),split+1,g.panel.bottom-pad,0x00404C60u,.9f);
+    DrawTextWin(right-TextWidthWin(text),g.titleY,text,UI_ACCENT);
+    BlendRectWin(split,g.firstY-UIS(8),split+1,g.panel.bottom-pad,UI_EDGE,.9f);
     for (int id=g.scrollOffset; id<=BESTIARY_COUNT && id<g.scrollOffset+g.maxVisibleRows; id++) {
         RECT row = RowRect(g,id);
         int selected = bestiarySel == id;
-        if (selected) BlendRectWin(row.left,row.top,row.right,row.bottom,0x002B394Bu,.95f);
+        if (selected) BlendRectWin(row.left,row.top,row.right,row.bottom,UI_BG_SEL,.95f);
         if (id == BESTIARY_COUNT) snprintf(text,sizeof(text),"< %s",Tr("BACK","返回"));
         else if (!BestiaryIsActive(id)) snprintf(text,sizeof(text),"%02d  %s",id+1,Tr("ARCHIVED","旧版记录"));
         else snprintf(text,sizeof(text),"%02d  %s",id+1,BestiaryIsSeen(id) ? Tr(bestiary[id].nameEn,bestiary[id].nameZh) : "???");
         ClampRowText(text,row.right-row.left-UIS(12));
-        DrawTextWin(row.left+UIS(6),row.top+(row.bottom-row.top-th)/2,text,selected?0x00FFE1A0u:0x0093A4B7u);
+        DrawTextWin(row.left+UIS(6),row.top+(row.bottom-row.top-th)/2,text,selected?UI_ACCENT:UI_INK_DIM);
     }
     int id = bestiarySel;
     if (id < 0 || id >= BESTIARY_COUNT) {
-        UiDossierText(Tr("Return to the main menu. Your archive is kept.","返回主菜单。已发现的档案会保留。"),x,g.firstY,right-x,g.panel.bottom-pad,0x0093A4B7u);
+        UiDossierText(Tr("Return to the main menu. Your archive is kept.","返回主菜单。已发现的档案会保留。"),x,g.firstY,right-x,g.panel.bottom-pad,UI_INK_DIM);
         return;
     }
     const BestiaryEntry* entry = &bestiary[id];
     int seen = BestiaryIsSeen(id), stage = BestiaryStage(id), active = BestiaryIsActive(id);
-    int y = UiDossierText(seen ? ((id==BST_ID_HUNTER)?Tr("SOUND HUNTERS / THREE FORMS","听声鬼 / 三种形态"):Tr(entry->nameEn,entry->nameZh)) : Tr("UNIDENTIFIED","未知生物"),x,g.firstY,right-x,g.panel.bottom-pad,0x00F0E1C8u);
+    int y = UiDossierText(seen ? ((id==BST_ID_HUNTER)?Tr("SOUND HUNTERS / THREE FORMS","听声鬼 / 三种形态"):Tr(entry->nameEn,entry->nameZh)) : Tr("UNIDENTIFIED","未知生物"),x,g.firstY,right-x,g.panel.bottom-pad,UI_INK_TITLE);
     snprintf(text,sizeof(text),"%s / %s",active ? Tr("ACTIVE","现行") : Tr("ARCHIVED","旧版记录"),seen?Tr(entry->tagEn,entry->tagZh):"???");
-    y = UiDossierText(text,x,y,right-x,g.panel.bottom-pad,0x007DA7BEu);
+    y = UiDossierText(text,x,y,right-x,g.panel.bottom-pad,UI_INK_DIM);
+    int threatTier=DisplayTier();
+    static const char* tierNames[5]={"1 / I","2 / II","3 / III","4 / IV","AUTO"};
+    for(int t=0;t<5;t++){RECT r=TierRect(g,t);UiPanel(r.left,r.top,r.right,r.bottom,(t==portraitTier || (t==4 && portraitTier<0))?UI_PANEL_HOT:UI_PANEL_NORMAL);DrawTextSmallLiteralWin(r.left+UIS(5),r.top+UIS(4),tierNames[t],t<4?ThreatTierColor(t):UI_INK);}
+    RECT tierRow=TierRect(g,0);if(y<tierRow.bottom+UIS(7))y=tierRow.bottom+UIS(7);
     int bottom = g.panel.bottom-th-pad;
     int imageSize = (right-x)*46/100;
     if (imageSize > (bottom-y)*42/100) imageSize = (bottom-y)*42/100;
     if (imageSize < 12) return;
     RECT image = {x,y+UIS(6),x+imageSize,y+UIS(6)+imageSize};
-    BlendRectWin(image.left,image.top,image.right,image.bottom,0x00131C29u,1.0f);
-    FrameRectWin(image.left,image.top,image.right,image.bottom,0x00374B60u,.9f,1);
+    BlendRectWin(image.left,image.top,image.right,image.bottom,UI_BG_ROW,1.0f);
+    FrameRectWin(image.left,image.top,image.right,image.bottom,UI_EDGE,.9f,1);
     RECT inset = {image.left+UIS(5),image.top+UIS(5),image.right-UIS(5),image.bottom-UIS(5)};
     if(id==BST_ID_HUNTER) {
-        static const int variants[3]={SPR_MON_HUNTER,SPR_MON_HUNTER2,SPR_MON_HUNTER3};
         int width=(inset.right-inset.left)/3;
         for(int variant=0;variant<3;variant++) {
             RECT portrait={inset.left+variant*width,inset.top,inset.left+(variant+1)*width,inset.bottom};
-            UiDossierPortrait(variants[variant],portrait,seen);
+            DrawEvolutionPortrait(BST_ID_HUNTER,variant,threatTier,portrait,seen);
         }
-    } else UiDossierPortrait(entry->spriteId,inset,seen);
+    } else DrawEvolutionPortrait(id,0,threatTier,inset,seen);
     int sx = image.right+UIS(10), sy = image.top, sw = right-sx;
-    snprintf(text,sizeof(text),Tr("KNOWLEDGE %d / 3","认知 %d / 3"),stage);
+    snprintf(text,sizeof(text),Tr("RESEARCH %d / 3","认知 %d / 3"),stage);
     sy = UiDossierText(text,sx,sy,sw,image.bottom,UI_ACCENT);
+    sy=UiDossierText(ThreatTierLabel(threatTier),sx,sy,sw,image.bottom,ThreatTierColor(threatTier));
     if (seen) {
         snprintf(text,sizeof(text),Tr("RISK %d / 5","危险 %d / 5"),BestiaryDanger(id));
         sy = UiDossierText(text,sx,sy,sw,image.bottom,0x00DB997Du);
@@ -193,17 +213,17 @@ static void DrawMonsterArchive(MenuGeo g) {
     }
     y = image.bottom+UIS(10);
     if (!active) {
-        UiDossierText(Tr("Legacy record. This creature no longer spawns and is excluded from completion.","历史记录：当前版本不生成，不计入现行全图鉴。"),x,y,right-x,bottom,0x0093A4B7u);
+        UiDossierText(Tr("Legacy record. This creature no longer spawns and is excluded from completion.","历史记录：当前版本不生成，不计入现行全图鉴。"),x,y,right-x,bottom,UI_INK_DIM);
     } else if (!seen) {
-        UiDossierText(Tr("Encounter this creature in a run to identify its portrait and behavior.","在局内遭遇后，解锁肖像与身份。研究逐层积累，逃脱能加速揭示。"),x,y,right-x,bottom,0x0093A4B7u);
+        UiDossierText(Tr("Encounter this creature in a run to identify its portrait and behavior.","在局内遭遇后，解锁肖像与身份。研究逐层积累，逃脱能加速揭示。"),x,y,right-x,bottom,UI_INK_DIM);
     } else {
         int half = y + (bottom-y)/2;
         y = UiDossierText(Tr("BEHAVIOR","行为"),x,y,right-x,half,UI_ACCENT);
-        UiDossierText(stage>=BST_BEHAVED?Tr(entry->behaviorEn,entry->behaviorZh):Tr("Study across 3 floors or escape twice.","累计遭遇三层，或逃脱两次后揭示。"),x,y,right-x,half,0x00B6C7D1u);
-        y = UiDossierText(Tr("COUNTERMEASURE","对策"),x,half+UIS(4),right-x,bottom,0x008CCBD3u);
+        UiDossierText(EvolutionGuideText(id,threatTier),x,y,right-x,half,0x00B6C7D1u);
+        y = UiDossierText(Tr("COUNTERMEASURE","对策"),x,half+UIS(4),right-x,bottom,UI_ACCENT);
         UiDossierText(stage>=BST_COUNTER?Tr(entry->counterEn,entry->counterZh):Tr("Study across 5 floors or escape three times.","累计遭遇五层，或逃脱三次后揭示。"),x,y,right-x,bottom,0x00B6C7D1u);
     }
-    char hint[128];snprintf(hint,sizeof(hint),"%s",Tr("LEFT/RIGHT: CATEGORY / ARROWS: ENTRY / ESC: BACK","左右切分类，上下选条目，ESC返回"));
+    char hint[128];snprintf(hint,sizeof(hint),"%s",Tr("1-4: FORM / 0: LIVE / LEFT-RIGHT: CATEGORY","一至四键预览形态，零键跟随当前档；左右分类"));
     UiTrimSmallText(hint,right-x);DrawTextSmallWin(x,bottom,hint,0x006E8497u);
 }
 
@@ -329,6 +349,7 @@ static void DrawRoomArchive(MenuGeo g){
     if(firstButton.left-x>UIS(24))DrawTextSmallWin(x,g.panel.bottom-th-UIS(6),hint,UI_INK_DIM);
 }
 void UiDrawArchivePage(MenuGeo g){
+    g=UiArchiveGeometry(); /* Hit testing and drawing use the same geometry. */
     if(archiveTab==ARCHIVE_ROOMS)DrawRoomArchive(g);else DrawMonsterArchive(g);
     for(int tab=0;tab<2;tab++){
         RECT r=UiArchiveTabRect(g,tab);

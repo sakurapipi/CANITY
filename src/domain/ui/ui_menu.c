@@ -1,3 +1,4 @@
+#include "threat_tier.h"
 /* src/domain/ui/ui_menu.c —— 主菜单页（含改造树 / 银行页 / 校准条）
  *
  * 第 2 轮（2026-11-08）从 ui.c 原样搬过来，逻辑一行没改。
@@ -1229,6 +1230,8 @@ static void DrawBankPage(void) {
     int x=winW*62/100,right=winW-pad,y=winH*26/100,bottom=winH*81/100;
     UiPanel(x-UIS(14),y-UIS(12),right+UIS(10),bottom,UI_PANEL_NORMAL);
     y=UiDossierText(Tr("NEXT RUN","下局预测"),x,y,right-x,bottom,UI_INK_TITLE)+UIS(12);
+    snprintf(text,sizeof(text),Tr("NEXT FLOOR: %s","下层预计：%s"),ThreatTierLabel(PreviewThreatTier()));
+    y=UiDossierText(text,x,y,right-x,bottom,ThreatTierColor(PreviewThreatTier()))+UIS(8);
     snprintf(text,sizeof(text),Tr("GOLD PRESSURE %d / 15","金币压力 %d / 15"),BankPreviewTier());
     y=UiDossierText(text,x,y,right-x,bottom,UI_ACCENT)+UIS(12);
     snprintf(text,sizeof(text),Tr("AWARENESS x%.2f","感知倍率 x%.2f"),(double)BankPreviewHearing());
@@ -1237,6 +1240,15 @@ static void DrawBankPage(void) {
     y=UiDossierText(text,x,y,right-x,bottom,UI_INK)+UIS(12);
     snprintf(text,sizeof(text),Tr("DEFEAT REFUND %d%%","失败本金返还 %d%%"),(int)(BANK_DEATH_REFUND*100+.5f));
     UiDossierText(text,x,y,right-x,bottom,UI_INK_DIM);
+    /* All four plans remain selectable without a minimum bank balance. */
+    static const char* tierNames[4] = {"I  / BLUE", "II / VIOLET", "III / AMBER", "IV / BLOOD"};
+    int chipW=(winW-pad*2)/4;
+    for(int stage=0;stage<4;stage++) {
+        int chipX=pad+stage*chipW,chipY=winH*81/100;
+        BlendRectWin(chipX,chipY,chipX+chipW-UIS(5),chipY+UIS(23),UI_BG_ROW,1);
+        FrameRectWin(chipX,chipY,chipX+chipW-UIS(5),chipY+UIS(23),ThreatTierColor(stage),stage==PreviewThreatTier()?2:1,1);
+        DrawTextSmallLiteralWin(chipX+UIS(6),chipY+UIS(4),tierNames[stage],ThreatTierColor(stage));
+    }
     UiDossierText(Tr("Drag sliders / Up-Down select / Left-Right adjust / Enter save / Esc back","拖动滑条；上下选择，左右调整；回车保存，ESC返回"),pad,winH*87/100,winW-pad*2,winH-UIS(10),UI_INK_DIM);
 }
 

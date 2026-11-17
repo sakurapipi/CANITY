@@ -1,3 +1,5 @@
+#include "tactical_tools.h"
+#include "threat_tier.h"
 /* Orchestration ownership split; stage ordering remains in the entry point. */
 #include "common.h"
 #include "help_book.h"
@@ -205,6 +207,7 @@ if (currentState == STATE_HUB) {
     }
 
     if (currentState == STATE_BESTIARY) {
+        if(UiArchiveTierClick(mx,my))return;
         int tab=UiArchiveTabAt(mx,my);
         if(tab>=0){UiArchiveSetTab(tab);return;}
         int scroll=UiArchiveDetailButtonAt(mx,my);
@@ -469,6 +472,7 @@ void CanityMouseMove(int mx, int my) {
 }
 
 void CanityMouseClick(int mx, int my) {
+    if(TacticalInputClick(mx,my) || UiArchiveTierClick(mx,my))return;
     if(exitChoiceOpen && currentState==STATE_PLAYING){
         for(int i=0;i<2;i++){RECT r;ExitChoiceButtonRect(i,&r);if(mx>=r.left && mx<r.right && my>=r.top && my<r.bottom){RunExitChoiceKey(i?'2':'1');break;}}return;
     }
@@ -1256,6 +1260,7 @@ int CanityKeyDown(int vk, int repeat) {
     /* 2026-11-16（用户要求）：移除 K 键直接开小游戏的入口。
        原来按一下 K 就在任意位置启动音游，容易误触；现在只有
        藏身点内（空格/交互）与安全屋"休整服务"能进小游戏。 */
+    if(TacticalInputKey(vk,repeat) || UiArchiveTierKey(vk))return 0;
     if(currentState==STATE_HELP) {
         if(!repeat) {
             if(vk==(int)g_bindings[ACT_MENU_UP] || vk=='W')vk=VK_UP;
@@ -1332,6 +1337,7 @@ static LRESULT WindowMouseMove(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
                而锁盘是游戏中打开的 → 坐标永远是 {0,0}，
                LockHitTest 全部落空，玩家点哪里都没反应。
                这是「锁盘每一个效果都不行」的根因。 */
+            if(TacticalPanelOpen()){int x=(short)LOWORD(lParam),y=(short)HIWORD(lParam);MouseToLogical(&x,&y);g_mousePos.x=x;g_mousePos.y=y;uiDirty=1;return 0;}
             if (lockActive) {
                 int lmx = (short)LOWORD(lParam), lmy = (short)HIWORD(lParam);
                 MouseToLogical(&lmx, &lmy);
@@ -1497,8 +1503,7 @@ static LRESULT WindowMouseWheel(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                          *
                          * 现在直接跳到**下一个有货的槽**，空槽整个跳过。
                          * ============================================================ */
-                        int counts[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs,
-                                             gluePots, echoBolts, decoys, phaseBeacons };
+                        int counts[ITEM_SLOT_COUNT]; InventoryCounts(counts);
                         int moved = 0;
                         for (int step = 0; step < ITEM_SLOT_COUNT; step++) {
                             throwSelected = (throwSelected + dir + ITEM_SLOT_COUNT) % ITEM_SLOT_COUNT;
@@ -1580,6 +1585,7 @@ static LRESULT WindowLeftDown(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 SkillDragStart(dx, dy);
                 return 0;
             }
+            if(TacticalPanelOpen()){int x=(short)LOWORD(lParam),y=(short)HIWORD(lParam);MouseToLogical(&x,&y);TacticalInputClick(x,y);return 0;}
             /* v3.0：锁盘打开时，鼠标全部归锁盘 */
             if (lockActive) {
                 int lx = (short)LOWORD(lParam), ly = (short)HIWORD(lParam);
@@ -1725,7 +1731,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 /* 游戏中（含小窗地图）隐藏光标 —— 鼠标是锁定的。
                    只有全屏地图才显示箭头光标。 */
                 int mouseFree = (currentState != STATE_PLAYING) ||
-                                (isMapOpen && mapFullScreen) || lockActive || exitChoiceOpen || calibActive;
+                                (isMapOpen && mapFullScreen) || lockActive || exitChoiceOpen || calibActive || TacticalPanelOpen();
                 if (!mouseFree) SetCursor(NULL);
                 else /* 2026-11-06（R4）：光标样式归平台层；ForceCursor(1) 已处理可见性 */
                 return TRUE;

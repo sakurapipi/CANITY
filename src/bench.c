@@ -30,7 +30,7 @@ const BenchNode benchNodes[] = {
     {"THICK SKIN","厚皮","Grab sanity cost -20%","被抓扣理智 -20%",180,2,1,0},
     {"RECOVER","回神","Safe room healing +50%","安全屋回复 +50%",320,2,2,0},
     {"IRON MIND","铁石","Grab cost another -30%","被抓扣理智再 -30%",550,2,3,1},
-    {"SPARE TOOL","备用扳手","Wrench charges +1 per floor","每层扳手次数 +1",90,3,0,0},
+    {"RETURN SPRING","复位弹簧","Wrench stagger +20%; cooldown -8%, minimum 5 seconds","扳手硬直 +20%；冷却 -8%，最终不少于5秒",90,3,0,0},
     {"LONG HANDLE","长柄","Knockback distance +1","击退距离 +1 格",180,3,1,0},
     {"HEAVY HEAD","重锤","Knockback +1.5, stun +50%","击退再 +1.5 格，硬直 +50%",320,3,2,0},
     {"SHOCK","震荡","Hits erase the hunters memory","击退命中清空怪物记忆与可疑点",550,3,3,1},
@@ -41,25 +41,24 @@ const BenchNode benchNodes[] = {
     {"SOFT SOLES","软底鞋","Walk noise -10%","行走噪音 -10%",120,1,0,0},
     {"TOOL COOLING","工具散热","Wrench cooldown -12%","扳手冷却时间 -12%",240,3,1,0},
     {"FIELD REST","野外休整","Safe-room recovery +20%","安全区域恢复效果 +20%",180,2,1,0},
-    {"RESERVE LIGHT","应急照明","Below 30 sanity: flashlight drain -15%","理智低于30时手电耗电 -15%",320,2,2,0},
+    {"TRACE REACH","抹迹射程","Trace eraser reach +1 cell","抹迹粉作用距离 +1格",320,2,2,0},
 
     {"BALANCED LOAD","平衡负重","Move speed +3%","移速 +3%",140,0,1,0},
-    {"CLEAR MIND","澄心","Sanity cap +5","理智上限 +5",140,2,1,0},
-    {"BREATH CONTROL","调息","Sprint cost -10%","冲刺耗体 -10%",180,0,2,0},
-    {"WIDE BEAM","广照","Light range +10%","照明距离 +10%",180,1,2,0},
-    {"CALM RESERVE","定心储备","Passive sanity drain -8%","自然理智衰减 -8%",220,0,1,0},
+    {"DAMPING CHAMBER","扩容声腔","Dampener radius +1 cell","吸声胶囊半径 +1格",140,2,1,0},
+    {"DAMPING RESERVE","吸声储备","Dampener duration +4 seconds","吸声胶囊持续时间 +4秒",180,0,2,0},
+    {"MIRROR COATING","镜面镀层","Prism blindness +1 second","棱镜致盲时间 +1秒",180,1,2,0},
+    {"ADHESIVE DUST","附着显尘","Reveal dust duration +4 seconds","显形附尘持续时间 +4秒",220,0,1,0},
     {"SCAVENGE","拾荒诀窍","Crate gold +15%","搜查箱子金币 +15%",210,1,1,0},
     {"RHYTHM FOCUS","节拍专注","Rhythm hits restore +0.2 sanity","每次校准命中额外恢复0.2理智",280,2,1,0},
     {"TRIAGE","急救统筹","Recovery service base prices -15%","恢复服务基础价格 -15%",250,0,1,0},
-    {"SECOND CELL","并联电芯","Battery capacity +15%","电量上限额外 +15%",210,1,2,0},
-    {"LIGHT TOUCH","柔光驱动","Flashlight consumption -10%","手电耗电额外 -10%",250,2,2,0},
-    {"RUNNER","长跑呼吸","Sprint consumption -10%","冲刺耗体额外 -10%",240,0,2,0},
+    {"PULSE CAPACITOR","脉冲电容","Jammer disruption +0.5 seconds","断路失调持续时间 +0.5秒",210,1,2,0},
+    {"SOLVENT MIX","浓缩解丝剂","Emergency solvent removes +0.5 seconds; escape floor unchanged","紧急解丝额外减时0.5秒，保留原挣脱底线",250,2,2,0},
+    {"MAGNET REEL","磁索长卷","Magnetic tether reach +1 cell","磁索钩弹射程 +1格",240,0,2,0},
     {"STEADY HANDS","稳手搜查","Search duration -12%","搜查时间 -12%",220,1,2,0},
     {"CRANK TORQUE","省时摇柄","Crank duration -15%","手摇充电时间 -15%",230,2,3,0},
     {"POCKET CHANGE","节拍佣金","Rhythm completion gold +20%","校准通关金币 +20%",260,0,3,0},
     {"OPENING BONUS","脱身报酬","Verified escape gold +15%","严格确认脱身后金币 +15%",300,1,3,0},
     {"DEEP DIVIDEND","深层分红","Floor completion gold +15%","楼层通关金币 +15%",340,2,3,0},
-
 };
 
 typedef char benchNodes_count_check[(sizeof(benchNodes)/sizeof(benchNodes[0])==BENCH_COUNT) ? 1 : -1];
@@ -149,10 +148,7 @@ int BenchTryBuy(int id) {
  * These three sensory queries intentionally read the separate persistent skill tree. */
 float BenchWalkNoiseMul(void) { return (BenchHas(BENCH_DESPERATE)&&sanity<30.0f?.8f:1.0f)*(BenchHas(BENCH_SOFT_SOLES)?.9f:1.0f); }
 float BenchFearDamageMul(void) { return (BenchHas(BENCH_THICK_SKIN) ? 0.80f : 1.0f) * (BenchHas(BENCH_IRON_MIND) ? 0.70f : 1.0f); }
-float BenchFlashDrainMul(void) { return (BenchHas(BENCH_SAVER) ? 0.80f : 1.0f) * (BenchHas(BENCH_EVERLIGHT) ? 0.65f : 1.0f) * (BenchHas(BENCH_SEARCHLIGHT) ? 1.20f : 1.0f)*(BenchHas(BENCH_RESERVE_LIGHT)&&sanity<30.0f?.85f:1.0f)*(BenchHas(BENCH_LIGHT_TOUCH)?.9f:1.0f); }
-int BenchHearing(void) { return skillRank[8] >= 3; }
-int BenchPremonition(void) { return skillRank[2] >= 3; }
-int BenchInnerEye(void) { return skillRank[9] >= 3; }
+float BenchFlashDrainMul(void) { return (BenchHas(BENCH_SAVER) ? 0.80f : 1.0f) * (BenchHas(BENCH_EVERLIGHT) ? 0.65f : 1.0f) * (BenchHas(BENCH_SEARCHLIGHT) ? 1.20f : 1.0f); }
 
 /* ==================== 画布视口（v2.9，照搬思维导图模型） ====================
  *   screen = world * k + (vx, vy)
@@ -274,14 +270,13 @@ void BenchPanBy(float dxScreen, float dyScreen) {
 
 float BenchMoveMul(void) { return (BenchHas(BENCH_BALANCED_LOAD)?1.03f:1.0f)*(BenchHas(BENCH_LIGHT_PACK)?1.06f:1.0f)*(BenchHas(BENCH_SWIFT)?1.12f:1.0f)*(BenchHas(BENCH_DESPERATE)&&sanity<30.0f?1.1f:1.0f); }
 float BenchStaminaMul(void) { return (BenchHas(BENCH_ENDURANCE)?1.15f:1.0f)*(BenchHas(BENCH_BULL)?1.30f:1.0f)*(BenchHas(BENCH_SWIFT)?0.85f:1.0f); }
-float BenchSprintCostMul(void) { return (BenchHas(BENCH_BREATH_CONTROL)?.9f:1.0f)*(BenchHas(BENCH_ECONOMY)?0.75f:1.0f)*(BenchHas(BENCH_BULL)?0.85f:1.0f)*(BenchHas(BENCH_RUNNER)?.9f:1.0f); }
-float BenchBatteryCapMul(void) { return (BenchHas(BENCH_BIG_CELL)?1.20f:1.0f)*(BenchHas(BENCH_SECOND_CELL)?1.15f:1.0f); }
-float BenchLightRangeMul(void) { return (BenchHas(BENCH_WIDE_BEAM)?1.1f:1.0f)*(BenchHas(BENCH_BRIGHT)?1.25f:1.0f)*(BenchHas(BENCH_SEARCHLIGHT)?1.40f:1.0f); }
-float BenchSanityAdd(void) { return (BenchHas(BENCH_COMPOSURE)?20.0f:0.0f)+(BenchHas(BENCH_CLEAR_MIND)?5.0f:0.0f); }
+float BenchSprintCostMul(void) { return (BenchHas(BENCH_ECONOMY)?0.75f:1.0f)*(BenchHas(BENCH_BULL)?0.85f:1.0f); }
+float BenchBatteryCapMul(void) { return (BenchHas(BENCH_BIG_CELL)?1.20f:1.0f); }
+float BenchLightRangeMul(void) { return (BenchHas(BENCH_BRIGHT)?1.25f:1.0f)*(BenchHas(BENCH_SEARCHLIGHT)?1.40f:1.0f); }
+float BenchSanityAdd(void) { return (BenchHas(BENCH_COMPOSURE)?20.0f:0.0f); }
 float BenchHealMul(void) { return (BenchHas(BENCH_RECOVER)?1.50f:1.0f)*(BenchHas(BENCH_FIELD_REST)?1.20f:1.0f); }
 float BenchKnockExtra(void) { return (BenchHas(BENCH_LONG_HANDLE)?1.0f:0.0f)+(BenchHas(BENCH_HEAVY_HEAD)?1.5f:0.0f); }
-float BenchKnockStunMul(void) { return (BenchHas(BENCH_HEAVY_HEAD)?1.5f:1.0f)*(BenchHas(BENCH_TEMPERED)?2.0f:1.0f); }
-int BenchKnockCharges(void) { return BenchHas(BENCH_SPARE_TOOL)?1:0; }
+float BenchKnockStunMul(void) { return (BenchHas(BENCH_HEAVY_HEAD)?1.5f:1.0f)*(BenchHas(BENCH_TEMPERED)?2.0f:1.0f)*(BenchHas(BENCH_RETURN_SPRING)?1.2f:1.0f); }
 int BenchShock(void) { return BenchHas(BENCH_SHOCK); }
 void BenchRefundRun(void) {
     int refund=0; for(int i=0;i<BENCH_COUNT;++i) if(BenchHas(i)) refund+=benchNodes[i].cost;
@@ -353,7 +348,7 @@ int BenchBuyButtonAt(int x,int y) {
     return x>=x0 && x<=x1 && y>=y0 && y<=y1;
 }
 
-float BenchWrenchCooldownMul(void) { return BenchHas(BENCH_TOOL_COOLING)?.88f:1.0f; }
+float BenchWrenchCooldownMul(void) { return (BenchHas(BENCH_TOOL_COOLING)?.88f:1.0f)*(BenchHas(BENCH_RETURN_SPRING)?.92f:1.0f); }
 
 const char* BenchShortName(int id) {
     return id>=0 && id<BENCH_COUNT?(g_lang==LANG_ZH?benchNodes[id].nameZh:benchNodes[id].name):"?";
@@ -366,4 +361,11 @@ float BenchRestPriceMul(void){return BenchHas(BENCH_TRIAGE)?.85f:1;}
 float BenchRhythmHealBonus(void){return BenchHas(BENCH_RHYTHM_FOCUS)?.2f:0;}
 float BenchSearchTimeMul(void){return BenchHas(BENCH_STEADY_HANDS)?.88f:1;}
 float BenchCrankTimeMul(void){return BenchHas(BENCH_CRANK_TORQUE)?.85f:1;}
-float BenchSanityDrainMul(void){return BenchHas(BENCH_CALM_RESERVE)?.92f:1;}
+
+float BenchTacticalBonus(int stat) {
+    static const int node[BENCH_TACTICAL_STATS]={BENCH_ACOUSTIC_VOLUME,BENCH_ACOUSTIC_RESERVE,
+        BENCH_PRISM_COATING,BENCH_REVEAL_COATING,BENCH_PULSE_CAPACITOR,
+        BENCH_SOLVENT_CONCENTRATE,BENCH_MAGNET_REEL,BENCH_TRACE_REACH};
+    static const float amount[BENCH_TACTICAL_STATS]={1,4,1,4,.5f,.5f,1,1};
+    return stat>=0 && stat<BENCH_TACTICAL_STATS && BenchHas(node[stat])?amount[stat]:0;
+}

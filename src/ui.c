@@ -1,3 +1,5 @@
+#include "monster_evolution.h"
+#include "tactical_tools.h"
 /*
 
  * Canity — UI 层实现：点阵字库 / 文字 / 菜单与弹窗 / HUD / 最终呈现
@@ -1113,6 +1115,7 @@ static void RenderFrameScene(void) {
         /* v2.1：相机抖动（偏移玩家位置再还原，所有投影自动跟着抖） */
         /* Feedback must not push the render camera through walls. */
         Render3D();
+        EvolutionDrawWorld();TacticalDrawWorld();
         if (currentState == STATE_PLAYING && isMapOpen && mapFullScreen) RenderMap();
         /* 跳脸虫：屏幕空间 overlay，盖在场景之上、HUD 之下 */
         /* Floor transitions no longer overwrite the frame with white. */
@@ -1460,6 +1463,7 @@ void RenderFrame(void) {
     UiDrawThreatNotice();
     RenderFrameCalibration();
     DrawRunReplacement();
+    TacticalDrawPanel();
     PresentComposedFrame();
 }
 

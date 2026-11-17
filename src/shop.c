@@ -1,3 +1,4 @@
+#include "tactical_tools.h"
 #include "common.h"
 #include "tutorial.h"
 #include "sprites.h"
@@ -205,18 +206,21 @@ void ShopOpen(int level) {
     {
         /* 2026-11-06：相位信标不进常规池（它太贵，每层都刷会让商店失去意义）。
            只在**第 3 层以后**、且 25% 概率时把它塞进候选池。 */
-        int pool[SHOP_ITEM_KINDS];
-        int n = 0;
-        for (int i = 0; i < SHOP_ITEM_KINDS - 1; i++) pool[n++] = i;
-        /* A phase beacon replaces a single offer in 2% of stock rolls. */
-        for (int k = 0; k < SHOP_OFFERS; k++) {
-            int pick = rand() % n;
-            int kind = pool[pick];
-            pool[pick] = pool[--n];
-            shopOffer[k] = kind;
-            shopPrice[k] = kItemPrice[kind];
+        int used[SHOP_ITEM_KINDS]={0};
+        static const int survival[]={1,2,3,6};
+        int first=survival[rand()%4];shopOffer[0]=first;used[first]=1;
+        for(int k=1;k<SHOP_OFFERS;k++){
+            int candidates[16],n=0;
+            if(k>=2)for(int t=0;t<TOOL_COUNT;t++)if(ToolCanOffer(t)){
+                int duplicate=0;for(int j=0;j<k;j++)duplicate|=shopOffer[j]==TOOL_SHOP_FIRST+t;
+                if(!duplicate)candidates[n++]=TOOL_SHOP_FIRST+t;
+            }
+            if(k!=2 || !n)for(int j=0;j<8;j++)if(!used[j])candidates[n++]=j;
+            int kind=candidates[rand()%n];shopOffer[k]=kind;if(kind<8)used[kind]=1;
         }
-        if(rand()%100<2){int slot=rand()%SHOP_OFFERS;shopOffer[slot]=8;shopPrice[slot]=0;}
+        if(rand()%100<2)shopOffer[3]=8;
+        for(int k=0;k<SHOP_OFFERS;k++){int kind=shopOffer[k];const ToolDef* t=ToolDefinition(kind-TOOL_SHOP_FIRST);shopPrice[k]=t?t->price:kItemPrice[kind];}
+
     }
 }
 
@@ -245,6 +249,7 @@ const char* ShopPageTitle(void) {
  * 恒为"装得下"。判定与真正入包用的是**同一个上限**，避免"能买但进不去"。
  * ================================================================== */
 static int ShopItemFits(int kind) {
+    if(kind>=TOOL_SHOP_FIRST && kind<TOOL_SHOP_FIRST+TOOL_COUNT)return tactical.inventory[kind-TOOL_SHOP_FIRST]<ToolCapacity(kind-TOOL_SHOP_FIRST);
     int cap = BottleCap();
     switch (kind) {
     case 0: return bottles    < cap;
@@ -337,6 +342,9 @@ const char* ShopRowText(int row) {
          *
          * 这正是用户说的「不变的东西完全程序化」。
          * ================================================================ */
+        if(row>=0 && row<SHOP_OFFERS && ToolDefinition(shopOffer[row]-TOOL_SHOP_FIRST)){
+            snprintf(sbuf,sizeof(sbuf),"%s  %d",ShopProductName(row),ShopPriceAt(row));return sbuf;
+        }
         static const char* en[8] = {
             "SLING x1", "FLARE x1", "SMOKE x1", "GLUE x1",
             "ECHO x1",  "DECOY x1", "BATTERY +35", "MEDKIT +25"
@@ -539,7 +547,7 @@ void ShopActivate(void) {
          * kind 的计算也必须一起上移 —— 它原来在扣钱**之后**。
          * ================================================================ */
         int kind = (idx >= 0 && idx < SHOP_OFFERS) ? shopOffer[idx] : 0;
-        if (kind < 0 || kind >= SHOP_ITEM_KINDS) kind = 0;
+        if ((kind < 0 || kind >= SHOP_ITEM_KINDS) && !ToolDefinition(kind-TOOL_SHOP_FIRST)) kind = 0;
         if (!ShopItemFits(kind)) {
             pickupMsg = (kind == 6 || kind == 7) ? Tr("ALREADY FULL", "状态已满，无需补给") : Tr("BAG FULL", "背包已满");
             pickupMsgTimer = 1.2f;
@@ -566,7 +574,8 @@ void ShopActivate(void) {
         }
         /* v6 第 ㊹ 轮：**买的是这一格的物品，不是"第几行"** */
         /* 2026-11-06：kind 已经在上面的容量判定里算好了，这里不再重复声明 */
-        switch (kind) {
+        if(kind>=TOOL_SHOP_FIRST){ToolReceive(kind-TOOL_SHOP_FIRST);pickupMsg=InventoryName(kind-TOOL_SHOP_FIRST+TOOL_FIRST_ITEM);}
+        else switch (kind) {
         case 0: if (bottles < BottleCap()) bottles++;
                 pickupMsg = Tr("+1 SLING", "+1 投石"); break;
         case 1: if (flares < BottleCap()) flares++;
@@ -834,33 +843,40 @@ int ShopTabOfPage(int page) {
 }
 int ShopBasePriceAt(int row) {
     int kind=row==8?8:(row>=0 && row<SHOP_OFFERS?shopOffer[row]:-1);
-    if(kind<0 || kind>=SHOP_ITEM_KINDS)return 0;
+    const ToolDef* tool=ToolDefinition(kind-TOOL_SHOP_FIRST);
+    if((kind<0 || kind>=SHOP_ITEM_KINDS) && !tool)return 0;
     if(kind==8)return WalletRun()>0?(int)(((long long)WalletRun()+19)/20):1;
     double multiplier=1.0+floor(fmaxf(0,runTime)/120)*.025;
-    double price=ceil(kItemPrice[kind]*multiplier);
+    double price=ceil((tool?tool->price:kItemPrice[kind])*multiplier);
     return price>=INT_MAX?INT_MAX:price<1?1:(int)price;
 }
 const char* ShopProductName(int row) {
     static const char* en[SHOP_ITEM_KINDS]={"SLING STONE","LIGHT ORB","SMOKE BOMB","ADHESIVE","ECHO FORK","DECOY","BATTERY CELL","MEDICAL KIT","PHASE BEACON"};
     static const char* zh[SHOP_ITEM_KINDS]={"投石","光球","烟雾弹","黏胶罐","回声叉","诱饵玩偶","电池","医疗包","相位信标"};
     int kind=row>=0 && row<SHOP_OFFERS?shopOffer[row]:-1;
+    const ToolDef* t=ToolDefinition(kind-TOOL_SHOP_FIRST);
+    if(t)return Tr(t->en,t->zh);
     return kind>=0 && kind<SHOP_ITEM_KINDS?Tr(en[kind],zh[kind]):"";
 }
 const char* ShopProductDescription(int row) {
     static const char* en[SHOP_ITEM_KINDS]={"One stone for a distant distraction.","One throwable light source.","Break sight with a smoke cloud.","Slow pursuing creatures.","Reveal nearby routes and hidden threats.","Divert a hunter from your route.","Restore up to 35 battery charge.","Restore up to 25 sanity.","Rare: costs 5% of your current carried gold; place a return anchor."};
     static const char* zh[SHOP_ITEM_KINDS]={"增加一枚投石，用声音引开追捕者。","增加一个可投掷的光源。","利用烟雾遮断视线，争取脱身空间。","减速经过黏胶区域的追捕者。","利用回声揭示附近路径与可疑目标。","放置玩偶，将听声鬼引向别处。","立即恢复最多35点电量。","立即恢复最多25点理智。","稀有补给，价格为当前携带金币的5%，布置一次性返回锚点。"};
     int kind=row>=0 && row<SHOP_OFFERS?shopOffer[row]:-1;
+    const ToolDef* t=ToolDefinition(kind-TOOL_SHOP_FIRST);
+    if(t)return ToolDetail(kind-TOOL_SHOP_FIRST);
     return kind>=0 && kind<SHOP_ITEM_KINDS?Tr(en[kind],zh[kind]):"";
 }
 int ShopProductSprite(int row) {
     static const int sprites[SHOP_ITEM_KINDS]={SPR_ITEM_SLING,SPR_ITEM_FLARE,SPR_ITEM_SMOKE,SPR_ITEM_GLUE,SPR_ITEM_ECHO,SPR_ITEM_DECOY,-1,-1,SPR_PHASE_HAND};
     int kind=row>=0 && row<SHOP_OFFERS?shopOffer[row]:-1;
+    const ToolDef* t=ToolDefinition(kind-TOOL_SHOP_FIRST);
+    if(t)return SPR_TOOL_BASE+kind-TOOL_SHOP_FIRST;
     return kind>=0 && kind<SHOP_ITEM_KINDS?sprites[kind]:-1;
 }
 int ShopCanBuyProduct(int row) {
     if(row<0 || row>=SHOP_OFFERS)return 0;
     int kind=shopOffer[row];
-    return kind>=0 && kind<SHOP_ITEM_KINDS && ShopItemFits(kind) && ShopCooldownOf(row)<=.05f && WalletCanPayRun(ShopPriceAt(row));
+    return ((kind>=0 && kind<SHOP_ITEM_KINDS) || ToolDefinition(kind-TOOL_SHOP_FIRST)!=NULL) && ShopItemFits(kind) && ShopCooldownOf(row)<=.05f && WalletCanPayRun(ShopPriceAt(row));
 }
 const char* ShopServiceName(int row) {
     static const char* en[5]={"RECOVERY POD","CHARGING STATION","BREATHING BREAK","ESCAPE ROUTE","RHYTHM CONSOLE"};

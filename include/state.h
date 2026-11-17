@@ -64,6 +64,8 @@ float MoneyBagLife(int i);
 int   MoneyBagAmount(int i);
 void  MoneyBagTake(int idx);
 void  MoneyBagDropAt(float x, float y, int amount);
+int MoneyBagCanDrop(int amount);
+int MoneyBagTryDropAt(float x,float y,int amount);
 void  MoneyBagsResetForNewFloor(void);
 void  MoneyTick(float dt);     /* v8: 钱袋每帧逻辑（src/money.c） */
 int   ActionIsDown(int act);   /* v8: 按键查询公开包装 */
@@ -102,7 +104,6 @@ void  UpdateScavenger(float dt);
 /* ================================================================== */
 /* 区块 ⑤  扳手（常驻能力 + 商店升级）                                  */
 /* ================================================================== */
-extern int   wrenchCharges;        /* 次数制下本层剩余次数 */
 extern float wrenchCd;             /* 冷却制下剩余冷却 */
 
 /* ================================================================== */

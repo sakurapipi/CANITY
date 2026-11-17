@@ -1,3 +1,4 @@
+#include "monster_evolution.h"
 /* Player stages; callers preserve pause/lock/transition ordering. */
 #include "common.h"
 #include "run_economy.h"
@@ -41,8 +42,7 @@ int PlayerTickVitals(float dt,int inSafe){
     if(!isfinite(battery))battery=0;
     float drain=SanityDrainRate()*PositiveDrainFactor(SkillCalmMul())*
         PositiveDrainFactor(modSanityMul)*(1+fmaxf(0,FxStrength(FX_DRAIN))*1.5f)*
-        PositiveDrainFactor(RelicSanityMul())*PositiveDrainFactor(ColdBloodMul())*
-        PositiveDrainFactor(BenchSanityDrainMul());
+        PositiveDrainFactor(RelicSanityMul());
     if(hiddenIn<0 && Hunter0()->active && Hunter0()->state==1){
         float range=flashlightOn?MONSTER_SIGHT:MONSTER_SIGHT_DARK;
         if(Dist2(posX,posY,Hunter0()->x,Hunter0()->y)<range*range)drain+=SEEN_SANITY_EXTRA;
@@ -213,7 +213,7 @@ void PlayerApplyMovement(float dt, const PlayerFrameInput* input) {
      *
      * 接在这里：它只乘玩家的移动速度，不影响冲刺倍率本身。
      * ================================================================ */
-    float sp = MOVE_SPEED * (1.0f + SkillSpeedAdd() + darkAdd) * slowMul * RelicSpeedMul() * glueSelf * dt * BenchMoveMul()
+    float sp = EvolutionWebSlow(posX,posY) * MOVE_SPEED * (1.0f + SkillSpeedAdd() + darkAdd) * slowMul * RelicSpeedMul() * glueSelf * dt * BenchMoveMul()
              * RunSpeedMul()
              * (sprinting ? SPRINT_MULT : 1.0f) * crankMul * (hatchSpeedT > 0.0f ? 1.25f : 1.0f);
 

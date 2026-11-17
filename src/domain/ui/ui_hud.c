@@ -1,3 +1,5 @@
+#include "tactical_tools.h"
+#include "threat_tier.h"
 /* 2026-11-16：从 ui.c 拆出的**局内 HUD**（域内解耦，行为不变）。
    ui.c 已到 3948 行，超出解耦闸门；HUD 这一簇（15 个函数、约 1400 行）
    只依赖公共绘制 API 与三个模块名表，整体搬走不改变状态归属。 */
@@ -163,24 +165,11 @@ static void DrawHudRunHeader(int effDetail) {
                对新玩家没有任何决策价值，还占着第一行。
                注意：这里**不能 return**（那会把整个 DrawHUD 退掉，
                SANITY / FUSES / 状态条全都不画了 —— 实测截图为证）。 */
-            if (tv <= 0.0f) {
-                goldRowEnd = tx0;
-            } else {
-            snprintf(tbuf, sizeof(tbuf), "THREAT %.1f", (double)tv);
-            {
-                /* v6 铁律十九：三态全部来自调色盘
-                     THREAT = 0   → PAL_DIM（灰，无威胁）
-                     0 < T < 12   → PAL_CYAN（青，正常）
-                     T >= 12      → PAL_MAGENTA（品红，警告）
-                   "品红 = 警告" 是所有页面共用的语言。 */
-                unsigned int tc;
-                if (tv >= 12.0f)      tc = PAL_MAGENTA;
-                else if (tv > 0.0f)   tc = PAL_CYAN;
-                else                  tc = PAL_DIM;
-                DrawTextWin(tx0, UIS(18), tbuf, tc);
-            }
-            goldRowEnd = tx0 + TextWidthWin(tbuf) + UIS(14);
-            }   /* end tv > 0 */
+            static const char* roman[4]={"I","II","III","IV"};
+            snprintf(tbuf,sizeof(tbuf),Tr("THREAT %s %.1f","威胁 %s %.1f"),roman[CurrentRunThreatTier()],(double)tv);
+            DrawTextWin(tx0,UIS(18),tbuf,ThreatTierColor(CurrentRunThreatTier()));
+            goldRowEnd=tx0+TextWidthWin(tbuf)+UIS(14);
+
         }
     }
 
@@ -439,16 +428,9 @@ static void DrawHudVitalsAndStatus(int effDetail) {
            用户看到的就是「没有次数、没有功能」。 */
         {
             char wb[64];
-            float cdMax = RunUpgWrenchCooldown();
             unsigned int wc = 0x00A0A0A0u;
 
-            if (cdMax < 0.0f) {
-                int left = wrenchCharges - wrenchLastUsed;
-                if (left < 0) left = 0;
-                snprintf(wb, sizeof(wb), Tr("WRENCH  %d/%d", "扳手  %d/%d"),
-                         left, wrenchCharges);
-                wc = (left > 0) ? 0x0060D0FFu : 0x00806060u;
-            } else if (wrenchCd > 0.0f) {
+            if (wrenchCd > 0.0f) {
                 snprintf(wb, sizeof(wb), Tr("WRENCH  %.1fs", "扳手  %.1f秒"), wrenchCd);
                 wc = 0x00806060u;
             } else {
@@ -559,13 +541,6 @@ static void DrawHudInventory(void) {
      * 剩下两项是 NULL，HUD 一画就是空，玩家永远看不到第 7/8 个物品。
      * 我在扔东西之前根本没想到名字表也要跟着扩。
      * ================================================================ */
-    static const char* slotName[ITEM_SLOT_COUNT] = {
-        "FLARE", "SLING", "SMOKE", "GLUE", "ECHO", "DECOY",
-        "BEACON" };
-    static const char* slotNameZh[ITEM_SLOT_COUNT] = {
-        "光球", "投石", "烟雾", "胶水", "回声", "诱饵",
-        "相位信标" };
-
         static float scroll = 0.0f;
         static double lastT = 0.0;
 
@@ -576,8 +551,7 @@ static void DrawHudInventory(void) {
         {
             /* v1.17：只给"有货的槽位"排序号，空槽不参与滚动 */
 
-                int cArr[ITEM_SLOT_COUNT] = { flares, bottles, smokeBombs, gluePots, echoBolts,
-                                             decoys, phaseBeacons };;
+                int cArr[ITEM_SLOT_COUNT]; InventoryCounts(cArr);;
             int selVis = 0;
             for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
                 if (cArr[i] <= 0) continue;
@@ -588,22 +562,15 @@ static void DrawHudInventory(void) {
         }
 
         int counts[ITEM_SLOT_COUNT];
-        counts[0] = flares;
-    counts[1] = bottles;
-    counts[2] = smokeBombs;
-    counts[3] = gluePots;
-    counts[4] = echoBolts;
-    { 
-      counts[5] = decoys; counts[6] = phaseBeacons; }
-    counts[5] = decoys;
-
+        InventoryCounts(counts);
         /* v3.3 **判据要覆盖全部 6 个槽位** ——
            试玩实测：「用过一次物品后，1 FLARE / 2 SLING 那一块再也不出现」。
            原来这里查的是旧的 8 个变量（bricks / acids / firePots / mirrors
            在投掷物重做后永远是 0），而**新加的 echoBolts / decoys 没算进来**。
            于是手上只剩回声弹或诱饵时，整条道具栏会消失。 */
     int anyItem = (flares > 0 || bottles > 0 || smokeBombs > 0 ||
-                   gluePots > 0 || echoBolts > 0 || decoys > 0);
+                   gluePots > 0 || echoBolts > 0 || decoys > 0 || phaseBeacons>0);
+    for(int i=7;i<ITEM_SLOT_COUNT;i++)anyItem|=InventoryCount(i)>0;
     int showList = (hudDetail >= 2) || (hudDetail >= 1 && anyItem);
         if (showList) {
             /* v2.6：**只显示三行** —— 上一件 / 当前 / 下一件。
@@ -646,8 +613,8 @@ static void DrawHudInventory(void) {
                        于是『按 1 选 Flare』永久失效」。
                        可见序号（idx）会随物品耗尽左移，而数字键绑的是真实槽位。 */
                     int slotNo = i + 1;
-                    if (slotNo < ITEM_SLOT_COUNT) sprintf(line, "%d %s x%d", slotNo, Tr(slotName[i], slotNameZh[i]), counts[i]);
-                    else             sprintf(line, "  %s x%d", Tr(slotName[i], slotNameZh[i]), counts[i]);
+                    if (slotNo < ITEM_SLOT_COUNT) sprintf(line, "%s x%d", InventoryName(i), counts[i]);
+                    else             sprintf(line, "  %s x%d", InventoryName(i), counts[i]);
 
                     int tw = TextWidthWin(line);
                     int x = winW - margin - tw;
@@ -992,7 +959,7 @@ static void DrawHudPerception(void) {
             /* v6 每日限制：怪物不上小地图 —— 预知/心眼一起失效 */
             { 
               if (DailyForbidMonsterMap()) goto skip_monster_hints; }
-            if (BenchPremonition() && Hunter0()->active) {
+            if (SkillPremonition() && Hunter0()->active) {
                 float dx = Hunter0()->x - posX, dy = Hunter0()->y - posY;
                 float d2 = dx * dx + dy * dy;
                 if (d2 < 64.0f) {
@@ -1011,7 +978,7 @@ static void DrawHudPerception(void) {
             }
             skip_monster_hints:
             /* ② 心眼：藏身时显示怪物距离 */
-            if (BenchInnerEye() && hiddenIn >= 0 && Hunter0()->active) {
+            if (SkillInnerEye() && hiddenIn >= 0 && Hunter0()->active) {
                 float dx = Hunter0()->x - posX, dy = Hunter0()->y - posY;
                 float dm = sqrtf(dx * dx + dy * dy);
                 char ibuf[64];
@@ -1300,8 +1267,8 @@ static void DrawHudChargeHints(const HudBarLayout* layout) {
         {
 
 
-            int cnt[6] = { flares, bottles, smokeBombs, gluePots, echoBolts, decoys };
-            int hasItem = (throwSelected >= 0 && throwSelected < 6 && cnt[throwSelected] > 0);
+            int cnt[ITEM_SLOT_COUNT];InventoryCounts(cnt);
+            int hasItem = (throwSelected >= 0 && throwSelected < ITEM_SLOT_COUNT && cnt[throwSelected] > 0);
             DrawTextCenterWin(winW / 2, by - UIS(24),
                               hasItem ? Tr("CHARGING THROW", "投掷蓄力")
                                       : Tr("CHARGING KNOCK", "敲击蓄力"),

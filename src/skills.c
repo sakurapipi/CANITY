@@ -32,7 +32,7 @@
  *     这样技能树里画出来的竖线才有真实含义（不是你随便点，是真的有路）。 */
 const SkillDef skillDefs[] = {
     /* ---- 列 0：静（噪声的时与地） ---- */
-    {"LIGHT STEP",   "Walk noise -20% and move speed +3% per rank",                          0, 3, {1300,2600,3900},       0, 25, 0},   /* v3.0 退役：纯属性，感知不到 */
+    {"LINKED SILENCE", "Link two dampeners with a quiet corridor; maximum span 6/8/10 cells",                          0, 3, {1300,2600,3900},       0, 25, 0},   /* v3.0 退役：纯属性，感知不到 */
     {"QUIET LID",    "Searching makes NO noise at max rank", 0, 3, {1300,2600,3900}, 0, 0, 0},
     {"GHOST STEP",   "Silent footsteps while light is off", 0, 3, {1300,2600,3900}, 0, 1, 0},
     {"HUSH PULSE",   "G: suppress footsteps 85% for 4s; 8 battery, 24s cooldown", 0, 1, {4500,0,0},  1, 2, 0},
@@ -46,12 +46,12 @@ const SkillDef skillDefs[] = {
        TYPE WORK / RELOAD RHYTHM），无战斗后完全无效。
        换成逃生玩法的核心：怎么躲、怎么脱身。 */
     {"BREATH",       "While hidden, detection risk is reduced by 45%", 2, 3, {1300,2600,3900}, 0, 25, 0},
-    {"STILL FACE",   "Hunters give up twice as quickly at your hiding place",                          2, 3, {1300,2600,3900},       0, 8, 0},   /* v3.0 退役：和 HOLD BREATH 重叠 */
+    {"SIGNAL BREAK", "Wrench hits cancel hunter evolution signals for 4/6/8 seconds",                          2, 3, {1300,2600,3900},       0, 8, 0},   /* v3.0 退役：和 HOLD BREATH 重叠 */
     {"SLIP AWAY",    "Vanish after 2s out of sight (was 3s)", 2, 3, {1300,2600,3900}, 0, 9, 0},
     {"PLAY DEAD",    "Once per run: escape a grab",        2, 1, {4500,0,0},  1, 10, 0},
     /* ---- 列 3：途（整局形状） ---- */
-    {"CARTO", "Reveal safe house + breaker at start", 3, 2, {2000,3900,0}, 0, 0, 0},
-    {"BREAKER", "Locked crates open 40% faster",                        3, 3, {1300,2600,3900},       0, 12, 0},   /* v3.0 退役 */
+    {"CARTO", "Reveal safe house + breaker; rank 2 senses hunter direction while hidden", 3, 2, {2000,3900,0}, 0, 0, 0},
+    {"POLARIZED GUIDE", "After prism blindness, a light beast investigates the hit point for 0.6s per rank",                        3, 3, {1300,2600,3900},       0, 12, 0},   /* v3.0 退役 */
     {"FUSE SMITH",   "Fuse need -1 (min 2)",               3, 3, {1300,2600,3900}, 0, 13, 0},
     {"SHORTCUT",     "Skip one non-boss level per run",    3, 1, {4500,0,0}, 0, 14, 0},
     /* ---- 第 5 行：跨支 keystone（全局只持有一个） ---- */
@@ -74,11 +74,11 @@ const SkillDef skillDefs[] = {
     {"SILENT DEAL",   "Crates are silent; crate gold +50%",        5, 1, {2500,0,0},    0, 26,    0},
     {"GOLDEN ESCAPE", "Escape bonus +50%",                        5, 1, {2500,0,0},    0, 20,    0},
     {"APPRENTICE",    "Cranking noise -50%, walking penalty halved",    5, 1, {2500,0,0},    0, 9,    0},
-    {"SHORTCUT JR",   "Fuse need -1 (minimum 2)",5, 1, {2500,0,0},    0, 22,     0},
-    {"NIGHT WALKER",  "Light on drains 25% slower",               5, 1, {2500,0,0},    0, 2, 0},
+    {"GRID RECLAIMER", "Activating a power tower returns one prism, subject to inventory capacity",5, 1, {2500,0,0},    0, 22,     0},
+    {"POCKET SOLVENT", "Use emergency web solvent from inventory without equipping or binding it",               5, 1, {2500,0,0},    0, 2, 0},
     {"ORIGIN",        "The center. Light this to unlock the net.",5, 1, {0,0,0},       0, -1,           0},
     {"GREEDY HAND", "Gold +20% per rank, THREAT +1 per rank", 4, 3, {1300,2000,2250},0, 5,0},
-    {"GOLD SCENT", "Noise -10% per rank while carrying gold", 4, 3, {1300,2000,2250},0, 26,0},
+    {"RETRIEVAL LINE", "Magnetic split bags land 1/3, 2/3, then all the way back to you", 4, 3, {1300,2000,2250},0, 26,0},
     {"GAMBLER", "10% per rank chance for double crate gold", 4, 3, {1300,2000,2250},0, 27,0},
     {"DESPERATE", "Below 30 sanity: move +4% per rank", 4, 3, {1300,2000,2250},0, 28,0},
     /* ---- 2026-11-08（第 7 轮）：幽灵流派 GHOST ---- */
@@ -353,11 +353,8 @@ int HasKeystone(int id) { return SkillOwned(id) && (!skillDefs[id].isKeystone ||
    现在：1~2 级给 -40%/-70%，**满 3 级直接完全无声**（走路零噪音）。
    从「数值」变成「质变」—— 满级之后你可以贴着怪走。 */
 float SkillNoiseMul(void) {
-    int r = skillRank[SK_QUIET];
-
-    float m=1.0f-0.20f*(float)r;
+    float m=1.0f;
     if(HasKeystone(SK_SALVAGE))m*=0.75f;
-    if(carryGold>0) m*=1.0f-0.10f*skillRank[SK_GOLDSCENT];
     return m;   /* 1 级 -40%，2 级 -80% */
 }
 /* v3.4 **机制化** —— GHOST STEP（鬼步）：
@@ -371,9 +368,7 @@ float SkillSearchNoiseMul(void) {
 float SkillRestAdd(void) {
     return 0.25f * (float)skillRank[SK_REST];
 }
-float SkillStunAdd(void) {
-    return 0.20f * (float)skillRank[SK_STILL];
-}
+
 
 /* ---- v2.8：Hub 的 6 项基础升级折进技能树 ------------------------------
    每个普通节点 3 级，每级同时给「机制」和一项「基础属性」，
@@ -395,7 +390,7 @@ float SkillSpeedAdd(void) {
        QUITE STEP +2%/级 -> +3%/级；深层还 +4%（濒死加成保持不变）。
        地图变大之后移动距离变长，+2% 几乎感觉不到。 */
 
-    return 0.03f*(float)skillRank[SK_QUIET]+(sanity<30.0f ? 0.04f*skillRank[SK_DESPERATE] : 0.0f);
+    return sanity<30.0f ? 0.04f*skillRank[SK_DESPERATE] : 0.0f;
 }
 float SkillQuietMul(void) {
     /* 2026-11-06：翻箱噪音 -15%/级 -> -18%/级。
@@ -434,7 +429,7 @@ float SkillEcoMul(void) {
     /* 2026-11-06：省电 -10%/级 -> -12%/级。
        手电上限涨到 150 之后，每 1% 的绝对值也变大了，
        这里只补一点点，避免夜行者那条 -25% 叠加后过于强势。 */
-    return fmaxf(.40f,1.0f-0.12f*(float)SkillClampRank(SK_GHOSTSTEP,skillRank[SK_GHOSTSTEP]))*(SkillOwned(SK_NIGHTWALKER)?0.75f:1.0f);
+    return fmaxf(.40f,1.0f-0.12f*(float)SkillClampRank(SK_GHOSTSTEP,skillRank[SK_GHOSTSTEP]));
 }
 float SkillCalmMul(void) {                  /* REST       -10%/级 */
     return fmaxf(.50f,1.0f - 0.10f * (float)SkillClampRank(SK_REST,skillRank[SK_REST]));
@@ -483,12 +478,8 @@ float SkillGhostStepDrainMul(void) {
 }
 
 /* HEAVY HAND：满蓄力（>=0.85）额外伤害，代价是蓄力更慢 */
-int SkillHeavyHand(void) {
-    return skillRank[SK_BREATH];
-}
-float SkillHeavyHandChargeMul(void) {
-    return skillRank[SK_BREATH] > 0 ? 1.40f : 1.0f;
-}
+
+
 
 /* SCAVENGER：翻箱额外掉一件投掷物，代价是金币收入变少 */
 int SkillScavenger(void) {
@@ -519,12 +510,12 @@ const InRunDef inRunDefs[INRUN_COUNT] = {
     {"LONG WIND", "Stamina +25, heal -10%", IRK_PASSIVE, 0, "长气", "体力 +25，治疗 -10%"},
     {"THICK HIDE", "Grab sanity loss -35%", IRK_PASSIVE, 1, "厚皮", "被抓扣理智 -35%"},
     /* 规则（3，稀有） */
-    {"SILENT BOTTLE", "Silent breaks, dmg -10%", IRK_RULE, 1, "静音瓶", "瓶子不发声，伤害 -10%"},
+    {"WIDE PULSE", "Jammer radius +0.5 cells", IRK_RULE, 1, "广域脉冲", "断路脉冲半径 +0.5格"},
     {"DARK WALK", "Off-light +12%, drain +10%", IRK_RULE, 1, "暗行", "关灯移速 +12%，流失 +10%"},
     {"LIGHT FUSES", "Fuse need -1, gold -10%", IRK_RULE, 1, "省保险丝", "所需保险丝 -1，金币 -10%"},
     /* 大招（2，一局一个，第 5 层后进池） */
-    {"WHISTLE", "Lure every hunter far away", IRK_ULTIMATE, 1, "哨声", "把所有追捕者引向远处"},
-    {"SMOKE OUT", "Break line of sight instantly", IRK_ULTIMATE, 1, "烟幕", "立刻断开所有视线"},
+    {"SIGNAL JAM", "Stop hunters for 6 seconds; costs 8 sanity", IRK_ULTIMATE, 1, "讯号干扰", "追捕者停止6秒，消耗8理智"},
+    {"RELOCATION", "Move the primary hunter to a distant free tile", IRK_ULTIMATE, 1, "空间挪移", "将首只听声鬼移至远处可通行位置"},
 
     /* ---- v2.0 新增 8 张（16 -> 24） ---- */
     {"FIELD REPAIR", "+35 battery, -5 sanity", IRK_INSTANT, 0, "现场维修", "+35 电量，-5 理智"},
@@ -532,9 +523,9 @@ const InRunDef inRunDefs[INRUN_COUNT] = {
     {"PACK RAT", "+2 bottles +30 bankGold", IRK_INSTANT, 0, "囤积者", "+2 瓶子，+30 金币"},
     {"OIL CAN", "+25 battery, +20 stamina", IRK_INSTANT, 0, "油壶", "+25 电量，+20 体力"},
     {"LUCKY FUSE", "+1 fuse held", IRK_INSTANT, 0, "幸运保险丝", "+1 持有保险丝"},
-    {"QUIET SOLE", "Walk noise -25%", IRK_PASSIVE, 0, "静底", "走路噪音 -25%"},
-    {"COLD BLOOD", "Sanity drain -20%", IRK_PASSIVE, 0, "冷血", "理智流失 -20%"},
-    {"BLACKOUT", "All hunters blind for 10s", IRK_ULTIMATE, 1, "全黑", "全场追捕者失明 10 秒"},
+    {"DUST COATING", "Reveal dust lasts 4 seconds longer", IRK_PASSIVE, 0, "长效显尘", "显形附尘持续时间 +4秒"},
+    {"COOLING RIG", "Wrench cooldown -15%, minimum 5 seconds", IRK_PASSIVE, 0, "散热支架", "扳手冷却 -15%，最终不少于5秒"},
+    {"STATIC SHOCK", "Stun hunters for 8 seconds", IRK_ULTIMATE, 1, "静电冲击", "追捕者硬直8秒"},
     /* v2.4.1 第 10 轮 */
     {"BIOLUMINESCENCE", "Landed flares heal sanity nearby", IRK_PASSIVE, 0,
      "生物荧光", "落到地上的照明棒会缓慢恢复附近理智"},
@@ -611,15 +602,11 @@ float RunSearchNoiseMul2(void) {
 int RunBatteryCapDelta(void) {
     return RunSkillOwned(IR_SAVER) ? -5 : 0;             /* "cap -5" */
 }
-float RunThrowDmgMul(void) {
-    return RunSkillOwned(IR_SILENTBOTTLE) ? 0.90f : 1.0f; /* "dmg -10%" */
-}
 
-float RunDamageMul(void) {
-    return RunSkillOwned(IR_STEADYHAND) ? 1.20f : 1.0f;
-}
-float RunCooldownMul(void) {
-    return RunSkillOwned(IR_SWIFTRELOAD) ? 0.75f : 1.0f;
+
+
+float RunWrenchCooldownMul(void) {
+    return RunSkillOwned(IR_TOOLCOOLING) ? 0.85f : 1.0f;
 }
 
 int RunStaminaAdd(void) {
@@ -632,9 +619,7 @@ float RunDamageTakenMul(void) {
 float RunSanityGainMul(void) {
     return RunSkillOwned(IR_LONGWIND) ? 0.90f : 1.0f;
 }
-int RunBottleSilent(void) {
-    return RunSkillOwned(IR_SILENTBOTTLE) ? 1 : 0;
-}
+
 float RunDarkSpeedAdd(void) {
     return RunSkillOwned(IR_DARKWALK) ? 0.12f : 0.0f;
 }
@@ -651,12 +636,7 @@ int RunFuseLess(void) {
 /* ------------------------------------------------------------------ */
 
 /* EXECUTIONER：目标 <25% 血时伤害 +80% */
-float SkillExecuteMul(int hp, int maxHp) {
-    if (!HasKeystone(SK_SILENTRUN)) return 1.0f;
-    if (maxHp <= 0) return 1.0f;
-    if (hp * 4 >= maxHp) return 1.0f;          /* 还不到 1/4 血 */
-    return 1.8f;
-}
+
 
 /* SALVAGE：死亡时保留 50% 待上缴金币 */
 /* 2026-11-08（第 13 轮）：SkillSalvageKeep 是常量桩（全工程零调用），已删 */
@@ -668,22 +648,17 @@ int SkillCartoUnlock(void) {
 
 /* SHORTCUT：每局可以跳过一个非 Boss 层 */
 int SkillShortcutAvailable(void) {
-    return HasKeystone(SK_SHORTCUT) ? 1 : 0;
+    return SkillOwned(SK_SHORTCUT) ? 1 : 0;
 }
 
 /* LAST RESORT：理智归零时免死一次 */
 
 
 /* TYPE WORK：武器伤害类型（0 = 不启用，1..3 = 砍/钝/金币） */
-int SkillTypeWorkRank(void) {
-    return skillRank[SK_SLIP];
-}
+
 
 /* RELOAD RHYTHM：每第 3 次命中无视护甲 */
-int SkillRhythmActive(int hitCounter) {
-    if (!HasKeystone(SK_PLAYDEAD)) return 0;
-    return (hitCounter % 3) == 0 ? 1 : 0;
-}
+
 
 int SkillsSelfTest(void) {
     int fail = 0;
@@ -740,10 +715,7 @@ float HideStealthMul(void) {
 }
 
 /* 静面：追捕者在藏身点旁放弃速度（越大放弃越快） */
-float StillFaceMul(void) {
-    if (SkillOwned(SK_STILL)) return 2.0f;      /* 放弃时间减半 */
-    return 1.0f;
-}
+
 
 /* 脱身：脱离视线多久后隐身（技能树 SLIP AWAY 从 3 秒降到 2 秒） */
 float SlipAwaySeconds(void) {
@@ -763,13 +735,11 @@ int SilentRunOwned(void) {
 
 /* 静底（局内 QUIET SOLE）：走路噪音 -25% */
 float QuietSoleMul(void) {
-    return RunSkillOwned(IR_STEADYHAND) ? 0.75f : 1.0f;
+    return RunSkillOwned(IR_DUSTCOAT) ? 0.75f : 1.0f;
 }
 
 /* 冷血（局内 COLD BLOOD）：理智流失 -20% */
-float ColdBloodMul(void) {
-    return RunSkillOwned(IR_SWIFTRELOAD) ? 0.80f : 1.0f;
-}
+
 
 /* 厚皮（局内 THICK HIDE）：被抓扣理智 -35% */
 float ThickHideMul(void) {
@@ -918,7 +888,7 @@ int SkillNavNearest(int from,int direction) {
  * 详情条仍然显示全名 —— 全名没有丢。
  * ================================================================ */
 static const char* kShortNames[SKILL_COUNT] = {
-    "LIGHT", /*  0 */
+    "LINK", /*  0 */
     "QUIET", /*  1 */
     "GHOST", /*  2 */
     "HUSH", /*  3 */
@@ -927,11 +897,11 @@ static const char* kShortNames[SKILL_COUNT] = {
     "REST",  /*  6 */
     "METAB", /*  7 */
     "BREATH",/*  8 */
-    "STILL", /*  9 */
+    "SIGNAL", /*  9 */
     "SLIP",  /* 10 */
     "DEAD",  /* 11 */
     "CARTO", /* 12 */
-    "BREAK", /* 13 */
+    "GUIDE", /* 13 */
     "FUSE",  /* 14 */
     "CUT",   /* 15 */
     "SILENT",/* 16 */
@@ -941,11 +911,11 @@ static const char* kShortNames[SKILL_COUNT] = {
     "DEAL",  /* 20 */
     "GOLD",  /* 21 */
     "APPR",  /* 22 */
-    "JR",    /* 23 */
-    "NIGHT", /* 24 */
+    "GRID",  /* 23 */
+    "POCKET",/* 24 */
     "START", /* 25 */
     "HAND",  /* 26 */
-    "SCENT", /* 27 */
+    "REEL",  /* 27 */
     "BET",   /* 28 */
     "DESP",  /* 29 */
     "BREATH", /* 30 */
@@ -967,7 +937,7 @@ static const char* kShortNames[SKILL_COUNT] = {
 const char* SkillShortName(int id) {
     if (id < 0 || id >= SKILL_COUNT) return "?";
     if(g_lang==LANG_ZH){
-        static const char* shortZh[SKILL_COUNT]={"轻步","静盖","幽步","静息","蓄电","手摇","修整","代谢","屏息","静面","脱追","假死","制图","解锁","保险","捷径","无声","贪约","阵风","暗行","交易","满载","学徒","短径","夜行","起点","巧手","金息","赌徒","绝境","同步","影步","静落","无形","典当","豪赌","金力","挣脱","反击","反制","内部","镇定","破局","识隙","佯攻","余音","火花","忆路","复苏","测绘","静摇"};
+        static const char* shortZh[SKILL_COUNT]={"连线","静盖","幽步","静息","蓄电","手摇","修整","代谢","屏息","断线","脱追","假死","制图","引导","保险","捷径","无声","贪约","阵风","暗行","交易","满载","学徒","电网","袖藏","起点","巧手","牵引","赌徒","绝境","同步","影步","静落","无形","典当","豪赌","金力","挣脱","反击","反制","内部","镇定","破局","识隙","佯攻","余音","火花","忆路","复苏","测绘","静摇"};
         return shortZh[id];
     }
     if (kShortNames[id] && kShortNames[id][0]) return kShortNames[id];
@@ -1043,7 +1013,7 @@ float SkillCrateGoldMul(void) {
 float SkillExtractMul(void) { return SkillOwned(SK_GOLDENESC) ? 1.5f : 1.0f; }
 
 static const char* kSkillNameZh[SKILL_COUNT]={
-    "轻步",
+    "声障连线",
     "静盖",
     "鬼步",
     "静息脉冲",
@@ -1052,11 +1022,11 @@ static const char* kSkillNameZh[SKILL_COUNT]={
     "休整",
     "能量代谢",
     "屏息",
-    "静面",
+    "反制断线",
     "脱离追踪",
     "假死",
     "制图",
-    "快速解锁",
+    "偏振引导",
     "保险丝匠",
     "捷径",
     "无声疾行",
@@ -1066,11 +1036,11 @@ static const char* kSkillNameZh[SKILL_COUNT]={
     "静默交易",
     "满载撤离",
     "摇电学徒",
-    "简易捷径",
-    "夜行者",
+    "电网回收",
+    "袖中解丝",
     "起点",
     "贪婪之手",
-    "金币气息",
+    "赃款牵引",
     "赌徒",
     "绝境疾行",
     "呼吸同步",
@@ -1091,7 +1061,7 @@ static const char* kSkillNameZh[SKILL_COUNT]={
     "余音静息","备用火花","出口记忆","藏身复苏","回声测绘","静默手摇",
 };
 static const char* kSkillDescZh[SKILL_COUNT]={
-    "每级降低20%行走噪音，并增加3%移动速度。",
+    "两个吸声点之间形成一格宽静音走廊；两端须通视，跨度随等级为6/8/10格。",
     "搜箱噪音随等级降低，满级时搜箱无声。",
     "关灯时降低脚步声，满级完全无声。",
     "G释放静息脉冲：四秒内脚步降噪85%，消耗8电量，冷却24秒。",
@@ -1100,11 +1070,11 @@ static const char* kSkillDescZh[SKILL_COUNT]={
     "每级提高安全区域的恢复效率。",
     "将被动理智流失转换为电量消耗；断电时有额外代价。",
     "降低藏身时被发现的风险。",
-    "静止藏身时让追捕者更快放弃。",
+    "扳手命中听声鬼后打断其新增复查和声源分享，抑制4/6/8秒；不取消原有感知。",
     "脱离视线后更快摆脱追踪。",
     "每局一次，从抓捕中脱身。",
-    "揭示安全屋与配电箱位置。",
-    "更快打开锁住的容器。",
+    "揭示安全屋与配电箱；二级时藏身可感知首位听声鬼的方向。",
+    "棱镜致盲结束后，追光怪先调查命中点，每级0.6秒；不直接追踪你的新位置。",
     "减少通关所需保险丝，保留最低需求。",
     "每局一次，跳过非首领层。",
     "冲刺无声，但降低体力上限。",
@@ -1114,11 +1084,11 @@ static const char* kSkillDescZh[SKILL_COUNT]={
     "搜箱无声并增加箱子收益。",
     "增加撤离收益。",
     "摇电更安静，移动摇电的惩罚降低。",
-    "减少保险丝需求，保留最低需求。",
-    "降低开灯耗电。",
+    "激活过载电塔后获得一枚断光棱镜，受携带上限限制，每座装置只结算一次。",
+    "被蛛网束缚时可直接使用背包中的解丝溶剂，无需提前选中或绑定。",
     "技能网中心，免费保留。",
     "每级金币收入提高20%，额外增加1点构筑威胁。",
-    "携带金币时，每级降低10%噪音。",
+    "磁索分离的钱袋向你拉回三分之一、三分之二、全部距离，赃款总额不变。",
     "开箱时有一定概率获得双倍金币。",
     "低理智时增加移动速度。",
     "静止时降低理智流失，持续时间有上限。",

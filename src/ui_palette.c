@@ -1,3 +1,4 @@
+#include "threat_tier.h"
 #include "common.h"
 #include "ui_theme.h"
 #include "ui.h"
@@ -8,95 +9,128 @@
 #include "loop_api.h"
 #include "player_api.h"
 #include "render.h"
+static int ThemeTier(void) {
+    int live = currentState == STATE_PLAYING || currentState == STATE_SAFEHOUSE ||
+               currentState == STATE_PAUSED || currentState == STATE_SKILL_PICK ||
+               (currentState == STATE_SETTINGS && prevState == STATE_PAUSED);
+    return live ? CurrentRunThreatTier() : PreviewThreatTier();
+}
 unsigned int UiThemeColor(int role) {
-    int live=currentState==STATE_PLAYING || currentState==STATE_SAFEHOUSE || currentState==STATE_PAUSED || currentState==STATE_SKILL_PICK;
-    /* 2026-11-16（用户实测：满强度档下"第一级暂停页"仍是蓝色）：
-       原来 live 态（含暂停）只用 GoldTier()+ThreatValue()，
-       而设置页用的是 BankPreviewTier()+bankRiskPlan*2 ——
-       两边公式不同，于是"暂停=低档蓝、设置=满档红"同时出现。
-       现在统一取**两者较大值**：银行的强度档位也算进画面档位，
-       暂停页与二级/三级页面就一致了。 */
-    float livePressure   = live ? GoldTier() + ThreatValue()*.45f : 0.0f;
-    float bankPressure   = BankPreviewTier() + bankRiskPlan*2;
-    float pressure       = live ? fmaxf(livePressure, bankPressure) : bankPressure;
-    int tier=pressure>=13?3:pressure>=8?2:pressure>=4?1:0;
-    static const unsigned int colors[4][7]={
-        {0x79CDF2,0xF0F5FF,0x0B111B,0x172433,0x294D6C,0x4C718D,0x243F56},
-        {0xA7C6FF,0xDCEAFF,0x11131F,0x22253A,0x414A73,0x6878A5,0x313959},
-        {0xD84A32,0xF0D9CA,0x170C0B,0x2D1410,0x542116,0x8B3420,0x401B12},
-        {0xE42A17,0xFFF0D9,0x160706,0x300C08,0x64190F,0xA02B18,0x491109}};
-    return colors[tier][role>=0 && role<7?role:0];
+    static const unsigned int colors[4][7] = {
+        {0x79CDF2, 0xF0F5FF, 0x0B111B, 0x172433, 0x294D6C, 0x4C718D, 0x243F56},
+        {0xA99AFF, 0xEEE8FF, 0x10101D, 0x26213D, 0x4F4270, 0x7E6C9D, 0x3C3159},
+        {0xF0C45A, 0xFFF2CF, 0x16140B, 0x302918, 0x665221, 0xA58535, 0x493B1D},
+        {0xF12B1C, 0xF1E5CF, 0x0C0708, 0x210D0E, 0x581718, 0x9A3029, 0x3C1015}};
+    int tier = ThemeTier();
+    return colors[tier][role >= 0 && role < 7 ? role : 0];
 }
 
-void UiDecayFrame(void){
-    if(((UiThemeColor(0)>>16)&255)<180)return;
-    int gutter=UIS(12);
-    for(int i=0;i<28;i++){
-        int y=(i*83+11)%winH;
-        int x=i%2?winW-gutter:0;
-        BlendRectWin(x,y,x+gutter,y+UIS(2),0x4A0C07,.8f);
-        BlendRectWin(x+gutter/2,y,x+gutter/2+2,y+UIS(16),0x9E2510,.55f);
-    }
-}
-
-
-void UiCorrodeRect(int x0,int y0,int x1,int y1){
-    if(x1-x0<20 || y1-y0<16 || ((UiThemeColor(0)>>16)&255)<180)return;
-    unsigned seed=(unsigned)(x0*127+y0*331+x1*17);
-    int margin=UIS(7),depth=UIS(13);if(depth>(y1-y0)/4)depth=(y1-y0)/4;
-    for(int i=0;i<9;i++){
-        seed=seed*1664525u+1013904223u;
-        int x=x0+3+(int)(seed%(unsigned)(x1-x0-9));
-        int len=3+(int)(seed%9);
-        for(int row=0;row<depth;row++){
-            int w=len-row/2;if(w<1)break;
-            int right=x+w;if(right>x1)right=x1;
-            BlendRectWin(x,y0+row,right,y0+row+1,row<2?0x060708:0x40130B,.9f);
-        }
-        int px=x,py=y1-1;
-        for(int k=0;k<depth;k++){
-            int nx=px+(k%3==0?1:-1);if(nx<x0+2 || nx>x1-2)nx=px;
-            BlendRectWin(nx,py-k,nx+1,py-k+1,0x080B0D,.85f);px=nx;
+/* Blood tier: broken registration rails, dry stains, hanging filaments and
+ * interrupted warning bars. Confined to gutters: no scene warp or strobe. */
+void UiDecayFrame(void) {
+    int tier = ThemeTier();
+    if (tier < 2 || winW < 100 || winH < 100)
+        return;
+    int red = tier == 3, gutter = UIS(red ? 17 : 9), count = red ? 44 : 18;
+    if (gutter > winW / 30)
+        gutter = winW / 30;
+    for (int i = 0; i < count; i++) {
+        int y = (i * 83 + 11) % winH, x = i % 2 ? winW - gutter : 0;
+        int length = UIS(4 + i % 9);
+        BlendRectWin(x, y, x + gutter, y + UIS(1), red ? 0x78251C : UI_EDGE, .9f);
+        BlendRectWin(x + gutter / 2, y, x + gutter / 2 + 1, y + length, red ? 0xB53D29 : UI_ACCENT,
+                     .6f);
+        if (red) {
+            int tooth = UIS(2 + i % 5);
+            for (int row = 0; row < tooth; row++)
+                BlendRectWin(x, y + row, x + gutter - row, y + row + 1, 0x060708, .95f);
+            if (i % 4 == 0) {
+                BlendRectWin(x + 2, y + 2, x + gutter - 2, y + 3, 0xC1AA87, .45f);
+                for (int wire = 0; wire < 3; wire++)
+                    BlendRectWin(x + 2 + wire * 3, y + 4, x + 3 + wire * 3, y + length + wire * 2,
+                                 0x4E2925, .8f);
+            }
         }
     }
-    /* Side gutters carry the grime; keep all center text and button labels intact. */
-    for(int i=0;i<5;i++){
-        int y=y0+4+(i*41)%(y1-y0-8);
-        BlendRectWin(x0+1,y,x0+margin,y+2,0x7B2716,.7f);
-        BlendRectWin(x1-margin,y,x1-1,y+2,0x29120C,.85f);
-    }
+    if (red)
+        for (int i = 0; i < 19; i++) {
+            int x = winW * (i + 1) / 20, span = UIS(7 + i % 5);
+            BlendRectWin(x, 1, x + span, 3, 0xAC3727, .8f);
+            BlendRectWin(x + 2, 4, x + span / 2, 5, 0x725044, .6f);
+            BlendRectWin(x, winH - 3, x + span / 2, winH - 1, 0x551B18, .8f);
+        }
 }
-
+void UiCorrodeRect(int x0, int y0, int x1, int y1) {
+    int tier = ThemeTier();
+    if (tier < 2 || x1 - x0 < 20 || y1 - y0 < 16)
+        return;
+    int red = tier == 3, depth = red ? UIS(9) : UIS(4);
+    if (depth > (y1 - y0) / 5)
+        depth = (y1 - y0) / 5;
+    unsigned seed = (unsigned)(x0 * 127 + y0 * 331 + x1 * 17);
+    int count = red ? 17 : 6;
+    for (int i = 0; i < count; i++) {
+        seed = seed * 1664525u + 1013904223u;
+        int x = x0 + 3 + (int)(seed % (unsigned)(x1 - x0 - 9));
+        int len = 2 + (int)(seed % (red ? 9u : 5u));
+        /* Scrape only the topmost 2px; deeper damage belongs at corners. */
+        BlendRectWin(x, y0, x + len < x1 ? x + len : x1, y0 + 2, 0x080B0D, .95f);
+        if (red && (i % 3 == 0)) {
+            int xx = i % 2 ? x0 + 2 : x1 - 4;
+            for (int row = 0; row < depth; row++) {
+                BlendRectWin(xx, y0 + row, xx + 1 + (row % 2), y0 + row + 1, 0x07090B, .95f);
+                BlendRectWin(xx, y1 - 1 - row, xx + 1, y1 - row, 0xBA5135, .48f);
+            }
+        }
+    }
+    if (red)
+        for (int side = 0; side < 2; side++) {
+            int x = side ? x1 - 4 : x0 + 1;
+            for (int n = 0; n < 4; n++) {
+                int y = y0 + 4 + (y1 - y0 - 8) * (n + 1) / 5;
+                BlendRectWin(x, y, x + 3, y + 2, 0x9B3527, .8f);
+                BlendRectWin(x + 1, y + 2, x + 2, y + 5, 0x342121, .9f);
+            }
+        }
+}
 
 /* Original weirdcore collage: photocopied eye cutouts, misregistered red/cyan
  * ink, torn paper and registration marks. No full-screen strobe or text mask. */
 void UiDreamFrame(void) {
-    if(currentState==STATE_PAUSED || (currentState==STATE_SETTINGS && prevState==STATE_PAUSED))return;
-    if(winW<160 || winH<120)return;
-    int live=currentState==STATE_PLAYING;
-    float ratio=live?sanity/fmaxf(1.0f,SanityMax()):.55f;
-    float stress=live?fmaxf(0,(.62f-ratio)/.62f):.16f;
-    if(live && (!vignetteOn || stress<=0))return;
-    int w=UIS(45),h=UIS(19),pad=UIS(9);
-    if(w>winW/10)w=winW/10;
-    if(h>winH/16)h=winH/16;
-    int drift=(int)(sinf((float)g_timeSec*.34f)*UIS(3));
-    for(int side=0;side<2;side++) {
-        int cx=side?winW-pad-w:pad+w,cy=winH/3+side*winH/5+drift;
-        float alpha=live?.12f+stress*.24f:.15f;
-        for(int y=-h;y<=h;y++) {
-            int half=(int)(w*(1.0f-fabsf((float)y)/fmaxf(1,h)));
-            BlendRectWin(cx-half,cy+y,cx+half+1,cy+y+1,0xDAD8CC,alpha);
-            if(abs(y)<h/2) {
-                int iris=h/2-abs(y)/2;
-                BlendRectWin(cx-iris+2,cy+y,cx+iris+2,cy+y+1,0x181A22,alpha+.15f);
-                BlendRectWin(cx-1,cy+y,cx+2,cy+y+1,0x900F1B,alpha);
+    if (currentState == STATE_PAUSED ||
+        (currentState == STATE_SETTINGS && prevState == STATE_PAUSED))
+        return;
+    if (winW < 160 || winH < 120)
+        return;
+    int live = currentState == STATE_PLAYING;
+    float ratio = live ? sanity / fmaxf(1.0f, SanityMax()) : .55f;
+    float stress = live ? fmaxf(0, (.62f - ratio) / .62f) : .16f;
+    if (live && (!vignetteOn || stress <= 0))
+        return;
+    int w = UIS(45), h = UIS(19), pad = UIS(9);
+    if (w > winW / 10)
+        w = winW / 10;
+    if (h > winH / 16)
+        h = winH / 16;
+    int drift = (int)(sinf((float)g_timeSec * .34f) * UIS(3));
+    for (int side = 0; side < 2; side++) {
+        int cx = side ? winW - pad - w : pad + w, cy = winH / 3 + side * winH / 5 + drift;
+        float alpha = live ? .12f + stress * .24f : .15f;
+        for (int y = -h; y <= h; y++) {
+            int half = (int)(w * (1.0f - fabsf((float)y) / fmaxf(1, h)));
+            BlendRectWin(cx - half, cy + y, cx + half + 1, cy + y + 1, 0xDAD8CC, alpha);
+            if (abs(y) < h / 2) {
+                int iris = h / 2 - abs(y) / 2;
+                BlendRectWin(cx - iris + 2, cy + y, cx + iris + 2, cy + y + 1, 0x181A22,
+                             alpha + .15f);
+                BlendRectWin(cx - 1, cy + y, cx + 2, cy + y + 1, 0x900F1B, alpha);
             }
         }
-        for(int i=0;i<7;i++) {
-            int x=side?winW-pad-UIS(2+i%3):pad+UIS(i%3);
-            int y=winH/5+i*winH/13;
-            BlendRectWin(x,y,x+UIS(2),y+UIS(8+i%4),i%2?0xBC1827:0x87BDD0,.12f+stress*.25f);
+        for (int i = 0; i < 7; i++) {
+            int x = side ? winW - pad - UIS(2 + i % 3) : pad + UIS(i % 3);
+            int y = winH / 5 + i * winH / 13;
+            BlendRectWin(x, y, x + UIS(2), y + UIS(8 + i % 4), i % 2 ? 0xBC1827 : 0x87BDD0,
+                         .12f + stress * .25f);
         }
     }
 }

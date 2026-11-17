@@ -1,3 +1,4 @@
+#include "evolution_save.h"
 /* Pure validation shared by local loading and cloud admission. */
 #include "common.h"
 #include "save.h"
@@ -63,7 +64,7 @@ int SaveValidateBytes(const void* bytes, size_t length) {
         if (!SaveContainerAt(payload, payloadBytes, i, &desc, &body)) return 0;
         for (int j = 0; j < i; j++) if (ids[j] == desc.id) return 0;
         ids[i] = desc.id;
-        if (!KnownSchemaSupported(desc.id, desc.schema)) return 0;
+        if (!KnownSchemaSupported(desc.id, desc.schema) || !EvolutionChunkValid(desc.id,desc.schema,body,(int)desc.size)) return 0;
         used += desc.size;
         if (desc.id == SC_LEGACY29) {
             if (desc.schema != 1 || !BlobValid(body, desc.size)) return 0;

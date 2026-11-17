@@ -1,3 +1,4 @@
+#include "progression.h"
 /* Wrench charge -> swing -> contact; private per-swing and key state. */
 #include "common.h"
 #include "tutorial.h"
@@ -79,6 +80,7 @@ static void WrenchApplyHit(float power) {
             /* 第 1 轮：命中闪光 —— 让玩家**看得见**自己打中了 */
             {  wrenchHitFlashT = 0.22f; }
             target->stun=RunUpgWrenchStun()*BenchKnockStunMul();
+            ProgressionWrenchContact(target);
             SpawnParticles(target->x, target->y, 1);   /* v3.6：受击血/墨粒子 */
             knockCountRun++;
             if(SkillOwned(SK_COUNTER_REPOSITION) && retaliateT<1.0f)retaliateT=1.0f;
@@ -141,29 +143,12 @@ void WrenchStartSwing(float charge) {
 
     float cdMax = RunUpgWrenchCooldown();
 
-    if (cdMax < 0.0f) {
-        if (wrenchLastUsed >= wrenchCharges) {
-            /* 2026-11-06：**用完/冷却必须给提示** ——
-               原来静默 return，玩家以为键没反应（手机端尤其明显）。 */
-
-
-            pickupMsg = (g_lang == LANG_ZH) ? "扳手次数用完了" : "WRENCH USES SPENT";
-            pickupMsgTimer = 1.2f;
-            /* 2026-11-08（第 4 轮）：HINT_WRENCH 文案写好了却从没触发过 */
-            {  HintOnce(6); }
-            return;
-        }
-        wrenchLastUsed++;
-    } else {
-        if (wrenchCd > 0.0f) {
-
-
-            pickupMsg = (g_lang == LANG_ZH) ? "扳手冷却中" : "WRENCH ON COOLDOWN";
-            pickupMsgTimer = 1.0f;
-            return;
-        }
-        wrenchCd = cdMax;
+    if (wrenchCd > 0.0f) {
+        pickupMsg = Tr("WRENCH ON COOLDOWN", "扳手冷却中");
+        pickupMsgTimer = 1.0f;
+        return;
     }
+    wrenchCd = cdMax;
 
     /* 第 2 轮：难度决定判定窗口宽度（轻松 ×1.45 / 硬核 ×0.85） */
     wrenchSwingT     = WRENCH_SWING_TIME * DiffWrenchWindowMul();

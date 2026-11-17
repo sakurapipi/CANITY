@@ -98,6 +98,8 @@ void RoomThemeSaveEvent(int* kind,float* time) {if(kind)*kind=eventKind;if(time)
 void RoomThemeLoadEvent(int kind,float time) {RoomThemeStartEvent(kind,time);}
 int RoomThemeEventKind(void) {return eventKind;}
 float RoomThemeEventRemaining(void) {return eventTime;}
+/* Derived from the saved power-event clock: reload cannot restart the benefit. */
+float RoomThemeFreeMapRemaining(void) {return eventKind==HATCH_POWER ? fmaxf(0,eventTime-20.0f) : 0;}
 float RoomThemeControlPulse(void) {return fminf(1,fmaxf(0,roomTheme.timer/.8f));}
 int RoomThemeVisualStage(void) {
     if(roomTheme.spent || (hatchCount && hatches[0].state==HATCH_FIRED))

@@ -28,6 +28,12 @@ DOCS = os.path.join(ROOT, 'docs', 'modules')
 
 # 域定义：域 -> (实现文件, 契约头, 卡片)
 DOMAINS = {
+    'evolution': (['domain/evolution/threat_tier.c', 'domain/evolution/monster_evolution.c',
+                   'domain/evolution/evolution_hunters.c', 'domain/evolution/evolution_light.c',
+                   'domain/evolution/evolution_mimic.c', 'domain/evolution/evolution_art.c',
+                   'domain/evolution/tool_catalog.c', 'domain/evolution/tool_impact.c', 'domain/evolution/progression.c'],
+                  ['threat_tier.h', 'monster_evolution.h', 'tactical_tools.h', 'evolution_art.h', 'progression.h'], 'evolution.md'),
+    'evolution_save': (['save/evolution_wire.c'], ['evolution_save.h'], 'evolution.md'),
     'core':     (['core/tick.c', 'core/rng.c'], [], None),
     'localization': (['lang.c', 'cjktext.c'], ['lang.h'], 'localization.md'),
     'phase':    (['domain/phase/phase.c'], ['phase.h'], 'phase.md'),
@@ -44,19 +50,19 @@ DOMAINS = {
     'map_rooms': (['map_rooms.c', 'domain/rooms/floor_routes.c'], ['map_rooms.h', 'floor_routes.h'], 'map_rooms.md'),
     'ui':       (['ui.c', 'domain/ui/ui_text.c', 'domain/ui/ui_pages.c',
                  'domain/ui/ui_menu.c', 'domain/ui/ui_hud.c',
-                 'domain/ui/ui_skilltree.c', 'domain/ui/ui_overlay.c', 'domain/ui/ui_archive.c', 'domain/ui/ui_calibration.c'],
+                 'domain/ui/ui_skilltree.c', 'domain/ui/ui_overlay.c', 'domain/ui/ui_archive.c', 'domain/ui/ui_calibration.c', 'domain/ui/ui_tactical.c'],
                  ['ui.h', 'ui_text.h', 'ui_pages.h', 'ui_menu.h',
-                  'src/domain/ui/ui_overlay.h', 'ui_archive.h'], 'ui.md'),
+                  'src/domain/ui/ui_overlay.h', 'ui_archive.h', 'tactical_tools.h'], 'ui.md'),
     'sprites': (['sprites.c', 'domain/sprites/sprite_canvas.c',
                  'domain/sprites/sprite_actors.c', 'domain/sprites/sprite_props.c',
-                 'domain/sprites/sprite_room_devices.c', 'domain/sprites/sprite_theme_props.c'],
+                 'domain/sprites/sprite_room_devices.c', 'domain/sprites/sprite_theme_props.c', 'domain/sprites/sprite_evolution.c', 'domain/sprites/sprite_evolved_models.c'],
                  ['sprites.h', 'src/domain/sprites/sprite_bake.h'], 'sprites.md'),
     'render':   (['render.c', 'domain/render/render_map.c', 'domain/render/map_markers.c',
                  'domain/render/render_decoy.c',
                  'domain/render/render_spritequeue.c',
                  'domain/render/render_viewmodel.c',
                  'domain/render/render_props.c',
-                 'domain/render/render_surface.c'], ['render.h', 'src/domain/render/map_markers.h'], 'render.md'),
+                 'domain/render/render_surface.c', 'domain/render/render_evolution.c'], ['render.h', 'src/domain/render/map_markers.h'], 'render.md'),
 }
 
 

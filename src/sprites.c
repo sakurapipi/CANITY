@@ -1,3 +1,4 @@
+#include "monster_evolution.h"
 /*
  * Canity — v2.1 烘焙精灵管线
  *
@@ -21,6 +22,8 @@
 
 static Sprite g_sprites[SPR_COUNT];
 static int g_ready = 0;
+static int evolutionBakeTier=0;
+int SpriteBakeEvolutionTier(void){return evolutionBakeTier;}
 Sprite* SpriteBakeTarget(int id) { return &g_sprites[id]; }
 int SpriteBakeIndex(const Sprite* sprite) { return (int)(sprite - g_sprites); }
 
@@ -283,7 +286,8 @@ void SpritesInit(void) {
     BakeItem(SPR_ITEM_SMOKE, 2);   /* 烟雾 */
     BakeItem(SPR_ITEM_GLUE,  6);   /* 胶水 */
     BakeItem(SPR_ITEM_ECHO,  9);   /* 回声（音叉） */
-    BakeItem(SPR_ITEM_DECOY, 5);   /* 玩偶 */
+    BakeItem(SPR_ITEM_DECOY, 5);
+    for(int tool=0;tool<7;tool++)BakeTacticalTool(SPR_TOOL_BASE+tool,tool);   /* 玩偶 */
     for (int p = 0; p < 4; p++) {
         BakeMonster(SPR_MON_HUNTER + p, 0, p);
     /* 听声鬼变体：第二只「匍匐者」、第三只「长颈」，各 4 帧 */
@@ -469,7 +473,9 @@ static void DrawSpriteSurface(int id, int x, int y, int w, int h,
             vshift=breath*.003f*sinf(nv*3.14159265f)*rigidK;
             if(insect)bend+=sinf(clock*5.5f+nv*14)*.008f*feet;
             if(id==SPR_MON_PARASITE){bend+=sinf(clock*3.0f+nv*16)*.009f;spread+=sinf(clock*3.0f-nv*19)*.015f;}
-            if(id==SPR_MON_MIMIC && nv<.62f)spread+=sinf(clock*1.8f)*.012f;
+            if(id==SPR_MON_MIMIC && nv<.62f)spread+=sinf(clock*1.8f)*.012f+EvolutionPoseSignal(id)*.10f;
+            if((id==SPR_MON_LIGHT || id==SPR_MON_LIGHT_W) && nv>.25f && nv<.65f)spread+=EvolutionPoseSignal(id)*.08f;
+            if(insect)spread+=EvolutionPoseSignal(id)*.06f;
             if(id==SPR_MON_ECHO)bend+=sinf(clock*2.4f+nv*11)*.008f;
         }
         float v=(nv+vshift)*(float)s->h-.5f;
@@ -760,3 +766,55 @@ void DrawSpriteFlip(int id,int x,int y,int w,int h,float light,float alpha,int z
     DrawSpriteSurface(id,x,y,w,h,light,alpha,zTest,zDist,0,0,NULL,1);
 }
 
+void SpritesSetEvolutionTier(int tier) {
+    if (tier < 0 || tier > 3)
+        tier = 0;
+    if (tier == evolutionBakeTier)
+        return;
+    evolutionBakeTier = tier;
+    if (!g_ready)
+        return;
+    for (int p = 0; p < 4; p++) {
+        BakeMonster(SPR_MON_HUNTER + p, 0, p);
+        BakeMonster(SPR_MON_HUNTER2 + p, 11, p);
+        BakeMonster(SPR_MON_HUNTER3 + p, 12, p);
+        BakeMonster(SPR_MON_LIGHT + p, 1, p);
+        BakeMonster(SPR_MON_LEECH + p, 7, p);
+    }
+    BakeMonster(SPR_MON_SHADE, 8, 0);
+    BakeMonster(SPR_MON_SPIDER, 9, 0);
+    BakeMonster(SPR_MON_WARDEN_CHASE, 9, 2);
+    BakeMonster(SPR_MON_MIMIC, 13, 0);
+    BakeProp(SPR_PROP_SPIDER, 16);
+}
+
+/* Reference creatures already carry their own metal/cloth finish. Do not
+ * turn the entire silhouette into woven doll fabric in the final raster pass. */
+int SpriteBakeReferenceModel(int id) {
+    return (id>=SPR_MON_HUNTER && id<=SPR_MON_LEECH_SW) ||
+        (id>=SPR_MON_HUNTER2 && id<=SPR_MON_HUNTER3_SW) ||
+        id==SPR_MON_SHADE || id==SPR_MON_SPIDER || id==SPR_MON_WARDEN_CHASE ||
+        id==SPR_MON_MIMIC || id==SPR_PROP_SPIDER ||
+        (id>=SPR_GUIDE_CACHE_BASE && id<=SPR_GUIDE_CACHE_LAST);
+}
+
+/* Three lazy cache slots serve the triple-hunter spread. Preview bakes only
+ * these targets and restores the world bake tier without rebaking live actors. */
+int SpritesEvolutionPortrait(int family,int variant,int tier) {
+    static int keys[3]={-1,-1,-1};
+    static const int kinds[7]={0,1,16,7,8,9,13};
+    if(family<0 || family>=7 || tier<0 || tier>3)return -1;
+    if(!g_ready)SpritesInit();
+    if(!g_ready)return -1;
+    int slot=family==0 && variant>=0 && variant<3?variant:0;
+    int key=family*12+slot*4+tier,id=SPR_GUIDE_CACHE_BASE+slot;
+    if(keys[slot]!=key) {
+        int previous=evolutionBakeTier;
+        evolutionBakeTier=tier;
+        int kind=family==0?(slot==0?0:slot==1?11:12):kinds[family];
+        if(kind==16)BakeProp(id,kind);else BakeMonster(id,kind,0);
+        evolutionBakeTier=previous;
+        keys[slot]=key;
+    }
+    return id;
+}

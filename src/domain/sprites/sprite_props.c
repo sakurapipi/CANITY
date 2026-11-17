@@ -1149,6 +1149,12 @@ void BakeProp(int id, int kind) {
     SpriteBakeCanvasState* canvas = SpriteBakeCanvas();
     canvas->scale=(kind==16 || kind==7 || kind==0 || kind==1 || kind==2 || kind==4 || kind==5 || kind==17 || kind==18)?SPR_CREATURE_SCALE:1;
     cvClear();
+    if (kind==16 && BakeEvolvedCreature(kind,0)) {
+        cvFinish(SpriteBakeTarget(id));
+        canvas->scale=1;
+        return;
+    }
+
     float c = CANVAS_W * 0.5f;
     float baseY = 244.0f;
     PropBakeContext bake = { c, baseY };
@@ -1180,7 +1186,7 @@ void BakeProp(int id, int kind) {
         BakePropSceneFixture(&bake);
     }
 
-    if(kind==16)BakeCreatureSurface(14);
+    if(kind==16){BakeCreatureSurface(14);BakeEvolutionDetails(16,0);}
     if(kind==7)BakeCreatureSurface(13);
     if(kind==16 || kind==7)BakeMisprintFringe(kind==16?16:13);
     cvFinish(SpriteBakeTarget(id));

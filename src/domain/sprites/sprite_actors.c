@@ -1289,6 +1289,11 @@ void BakeMonster(int id, int kind, int pose) {
     SpriteBakeCanvasState* canvas = SpriteBakeCanvas();
     canvas->scale=SPR_CREATURE_SCALE;
     cvClear();
+    if (BakeEvolvedCreature(kind, pose)) {
+        cvFinish(SpriteBakeTarget(id));
+        canvas->scale=1;
+        return;
+    }
     float c = CANVAS_W * 0.5f;
 
     int side = (pose >= 2) ? 1 : 0;
@@ -1396,6 +1401,7 @@ void BakeMonster(int id, int kind, int pose) {
     }
 
     BakeCreatureSurface(kind);
+    BakeEvolutionDetails(kind,pose);
     if (kind == 0 || kind == 1 || kind == 7 || kind == 8 || kind == 9 || kind == 13)
         BakeMisprintFringe(kind);
     cvFinish(SpriteBakeTarget(id));
