@@ -14,6 +14,7 @@
 #include "threat.h"
 #include "save.h"
 #include "sound_event.h"
+#include "sound_propagation.h"
 #include "monster_rules.h"
 #include "control_effect.h"
 #include "tactical_tools.h"
@@ -67,8 +68,8 @@ const char *ProtocolRoleAbility(int role) {
          "手摇充电量增加10%。消耗12点电量，在前方展开5秒阻滞区。听声鬼和追光鬼首次进入时，移速降至60%，持续2秒。冷却36秒。"},
         {"Spend 6 sanity to send out a moving sound lure for 5s. It travels up to 6 tiles. Cooldown 40s.",
          "消耗6点理智，在前方放出持续5秒的移动声源，最远6格。冷却40秒。"},
-        {"Spend 16 stamina. The first eligible contact hit within 3s can lose up to 30% of its damage. Cooldown 38s.",
-         "消耗16点体力。3秒内首次符合条件的接触伤害最多减免30%。冷却38秒。"}
+        {"Spend 16 stamina. The first eligible contact hit within 3s can lose up to 40% of its damage. Cooldown 38s.",
+         "消耗16点体力。3秒内首次符合条件的接触伤害最多减免40%。冷却38秒。"}
     };
     return LangTr(detail[role][0],detail[role][1]);
 }
@@ -78,6 +79,7 @@ int ProtocolSelectRole(int role) {
     return 1;
 }
 void ProtocolFloorReset(void) {
+    ProtocolResetTrial();
     active = soundTimer = elapsed = 0;
     guarded=abilityHeld=once=trackedChase=guardFollowup=traceTurned=jammed=0;
     activeAge=guardSprint=wrenchWindow=chaseQuiet=grace=traceTail=guardFollowupTime=shieldImpact=0;
@@ -108,7 +110,7 @@ static int MarkerPlacement(float *x,float *y) {
 }
 static void EmitDouble(float strength) {
     SoundEvent sound={.kind=SK_VOICE,.x=markerX,.y=markerY,.strength=strength,
-        .maxRadius=Own(4)?10:8,.ttl=2,.sourceEntityId=-1};
+        .maxRadius=DECOY_SHOUT_R,.ttl=2,.sourceEntityId=-1};
     SoundEmit(&sound);
 }
 static int DoubleContact(void) {
@@ -159,8 +161,8 @@ void ProtocolActivate(void) {
     memset(slowUntil,0,sizeof slowUntil);
     memset(lostSight,0,sizeof lostSight);redirected=0;
     active=(role==0?5+Own(1):role==3?3+Own(0):5+2*Own(2))+.5f*tuning;
+    if (role==2) active*=1.5f;
     protocolRun.used|=1u;
-    ProtocolMissionAbilityTick();
     TutorialRecordAction(TUTOR_PULSE);
     PlaySfx(role==3?SFX_IMPACT:role==2?SFX_ECHO:SFX_POWER,.45f);
     if (role==1 || role==2) SpawnParticles(tx,ty,0);
@@ -221,7 +223,6 @@ void ProtocolTick(float dt) {
         }
     }
     if (!Blocked(nx,ny)) {markerX=nx;markerY=ny;traceDistance+=step;}
-    ProtocolMissionAbilityTick();
     soundTimer-=dt;
     if (soundTimer<=0) {EmitDouble(Own(4)?75:Own(3)?65:55);soundTimer=Own(3)?.5f:.6f;}
 }
@@ -256,9 +257,9 @@ float ProtocolContactLoss(float loss,float raw) {
         once=1;stamina=fminf(StaminaMax(),stamina+15);
     }
     if (protocolRun.role!=3) return loss;
-    float rate=0,cap=.3f;
+    float rate=0,cap=.40f;
     if (active>0 && !guarded) {
-        guarded=1;rate=Own(4)?.4f:.3f;cap=Own(4)?.35f:.3f;
+        guarded=1;rate=Own(4)?.45f:.40f;cap=rate;
         shieldImpact=.28f;
         PlaySfx(SFX_IMPACT,.75f);
         SpawnParticles(posX+dirX*.4f,posY+dirY*.4f,0);
@@ -286,11 +287,18 @@ void ProtocolAbilityEffect(char *out,int capacity) {
         snprintf(out,capacity,"%s",Own(5)?LangTr("Distracts with sound and light","以声音和光诱导"):LangTr("Moving sound lure","移动声源诱导"));
         break;
     default:
-        snprintf(out,capacity,LangTr("Blocks up to %d%% of one hit","一次命中最多减免%d%%"),Own(4)?40:30);
+        snprintf(out,capacity,LangTr("Blocks up to %d%% of one hit","一次命中最多减免%d%%"),Own(4)?45:40);
         break;
     }
 }
 
+int ProtocolFieldContains(float x,float y) {
+    if (protocolRun.role!=1 || active<=0 || !HasLOS(markerX,markerY,x,y)) return 0;
+    float dx=x-markerX,dy=y-markerY;
+    float forward=dx*motionX+dy*motionY;
+    return forward>=-.5f && forward<=(Own(7)?1.1f:.5f) &&
+           fabsf(dx*motionY-dy*motionX)<=(Own(0)?1.75f:1.25f);
+}
 float ProtocolHunterMul(const void *actor, int optical) {
     if (protocolRun.role != 1) return 1;
     (void)optical;
@@ -301,12 +309,7 @@ float ProtocolHunterMul(const void *actor, int optical) {
         if (affected[i] == actor) return elapsed < slowUntil[i] ? (Own(3)?.5f:.6f) : 1;
         if (!affected[i] && vacant < 0) vacant = i;
     }
-    if (active <= 0 || vacant < 0 ||
-        !HasLOS(markerX,markerY,m->x,m->y)) return 1;
-    float dx=m->x-markerX,dy=m->y-markerY;
-    float forward=dx*motionX+dy*motionY;
-    if (forward<-.5f || forward>(Own(7)?1.1f:.5f) ||
-        fabsf(dx*motionY-dy*motionX) > (Own(0)?1.75f:1.25f)) return 1;
+    if (vacant<0 || !ProtocolFieldContains(m->x,m->y)) return 1;
     affected[vacant] = actor;
     slowUntil[vacant]=elapsed+(Own(4)?2.8f:2)+(Own(6) && !once?.5f:0);
     if (!once) {
@@ -326,8 +329,9 @@ int ProtocolHearingTarget(int index,float dt,int chasing,int seesPlayer,float x,
     if (!chasing || seesPlayer) {lostSight[index]=0;return 0;}
     lostSight[index]+=dt;
     unsigned bit=1u<<index;
-    if (lostSight[index]<.8f || (redirected&bit) || Dist2(x,y,markerX,markerY)>36 ||
-        !HasLOS(x,y,markerX,markerY)) return 0;
+    if (lostSight[index]<.8f || (redirected&bit) || Dist2(x,y,markerX,markerY)>DECOY_SHOUT_R*DECOY_SHOUT_R) return 0;
+    SoundPropBuild(x,y);
+    if (SoundPropCostAt(markerX,markerY)==PROP_UNREACHABLE) return 0;
     redirected|=bit;
     *tx=markerX;*ty=markerY;
     return 1;
@@ -352,7 +356,7 @@ static int ValidNext(unsigned mask,int id) {
     return (mask & (1u<<(id-3))) != 0;
 }
 int ProtocolNodeAvailable(int id) {
-    return !dailyMode && ValidNext(protocolRun.nodes,id) && WalletCanPayRun(costs[id]);
+    return (unsigned)id<PROTOCOL_NODE_COUNT && !ProtocolPeacefulStory() && !dailyMode && ValidNext(protocolRun.nodes,id) && WalletCanPayRun(costs[id]);
 }
 const char *ProtocolNodeStatus(int id) {
     if (Own(id)) return LangTr("Owned","已拥有");
@@ -371,14 +375,21 @@ int ProtocolBuyNode(int id) {
     if (!trainingMode) SaveGame();
     return 1;
 }
-int ProtocolRefund(void) {
-    if (hiddenIn < 0 || active > 0 || (protocolRun.used & 1u) || !protocolRun.nodes) return 0;
+static int RefundNodes(void) {
+    if (!protocolRun.nodes) return 0;
     int total=0;
     float pressure=0;
-    for (int i=0;i<10;i++) if (Own(i)) { total+=costs[i];pressure+=prices[i]; }
+    for (int i=0;i<PROTOCOL_NODE_COUNT;i++) if (Own(i)) { total+=costs[i];pressure+=prices[i]; }
     protocolRun.nodes=0;
     ThreatSet(ThreatRaw()-pressure);
     WalletAddRun(total);
+    return 1;
+}
+
+void ProtocolReleaseStoryNodes(void) { (void)RefundNodes(); }
+
+int ProtocolRefund(void) {
+    if (hiddenIn < 0 || active > 0 || (protocolRun.used & 1u) || !RefundNodes()) return 0;
     if (!trainingMode) SaveGame();
     return 1;
 }
@@ -390,7 +401,7 @@ void ProtocolRestore(void) {
     protocolRun.role = (protocolRun.role >= 0 && protocolRun.role <= 3) ? protocolRun.role : 0;
     if (protocolRun.story<0 || protocolRun.story>8) protocolRun.story=0;
     protocolRun.flags &= PROTOCOL_STORY_FLAG_MASK;
-    if (protocolRun.story<1 || protocolRun.story>3) protocolRun.flags &= ~(PROTOCOL_MISSIONS|PROTOCOL_MISSION_SOLVED);
+    if (protocolRun.story<1 || protocolRun.story>3) protocolRun.flags &= ~(PROTOCOL_MISSIONS|PROTOCOL_MISSION_SOLVED|PROTOCOL_EVAC_LAYOUT);
     if (protocolRun.flags&PROTOCOL_MISSIONS) protocolRun.role=protocolRun.story;
     else if ((protocolRun.role && !(protocolProfile.unlocked & (1u<<protocolRun.role))) || dailyMode) protocolRun.role=0;
     protocolRun.cooldown=isfinite(protocolRun.cooldown)?fmaxf(0,fminf(45,protocolRun.cooldown)):0;
@@ -433,7 +444,7 @@ static const RoleNodeText roleNodes[4][PROTOCOL_NODE_COUNT]={
     },{
         {{"Long Recording","延长录音"},{"The double travels at 1.6 tiles/s up to 8 tiles","替身移速提高至每秒1.6格，最远8格"}},
         {{"Compressed Memory","记忆压缩"},{"Activation costs 4 sanity","发动消耗降至4理智"}},
-        {{"Extended Playback","延时回放"},{"The double lasts 7s","替身持续7秒"}},
+        {{"Extended Playback","延时回放"},{"The double lasts 10.5s before shop upgrades","强化后替身基础持续时间为10.5秒"}},
         {{"Clear Signal","清晰信号"},{"The double emits stronger, more frequent sounds","替身发声更频繁，传播强度更高"}},
         {{"Amplified Echo","回声放大"},{"Increases signal strength to 75","声源强度提高至75"}},
         {{"False Light","拟态灯光"},{"The double also draws light hunters in line of sight","替身也会诱导视线内的追光鬼"}},
@@ -446,7 +457,7 @@ static const RoleNodeText roleNodes[4][PROTOCOL_NODE_COUNT]={
         {{"Low Stance","省力架势"},{"Activation costs 12 stamina","发动消耗降至12体力"}},
         {{"Quick Brace","迅速架防"},{"Cooldown becomes 32s","冷却缩短至32秒"}},
         {{"Hold the Line","守住防线"},{"A successful block restores 8 stamina","成功防御恢复8体力"}},
-        {{"Reinforced Brace","坚固防守"},{"Reduces the first hit by up to 40%, subject to the raw-hit cap","第一次命中最多减免40%，受原始伤害上限约束"}},
+        {{"Reinforced Brace","坚固防守"},{"Adds 5 points to the base block, up to 45%","首次格挡提高5个百分点，最多减免45%"}},
         {{"Retreat Window","撤退窗口"},{"After a block, sprint drain drops by 20% for 2s","成功防御后2秒内，冲刺体耗降低20%"}},
         {{"Counter Swing","反击架势"},{"After a block, the next wrench hit within 8s stuns for 0.3s longer","防御后8秒内，下次扳手命中的硬直延长0.3秒"}},
         {{"Second Block","连续防御"},{"After the first block, reduce one more hit within 1s by up to 20%","首次防御后1秒内，再减免至多20%的一次命中"}},

@@ -76,7 +76,6 @@ int CollectSpriteScenery(SpriteDrawEntry* list, int n) {
 
         for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++) {
             if (!roomProps[i].active) continue;
-            if(RoomPropIsControl(roomProps[i].kind) && (roomProps[i].kind-ROOMPROP_CONTROL_FIRST)/2==HATCH_BRICK)continue;
             if (n >= MAX_SPRITES) break;
             list[n].d2 = Dist2(roomProps[i].x, roomProps[i].y, posX, posY);
             list[n].kind = 16;
@@ -104,6 +103,15 @@ int CollectSpriteActorsAndMarkers(SpriteDrawEntry* list, int n) {
         int state=i==3?ProtocolAbilityMarker(&x,&y):ProtocolProp(i,&x,&y);
         if (!state) continue;
         list[n].d2=Dist2(x,y,posX,posY);list[n].kind=20;list[n].idx=i;n++;
+    }
+    for (int i=0;i<MAX_DECOY && n<MAX_SPRITES;i++) if (decoysArr[i].active) {
+        list[n].d2=Dist2(decoysArr[i].x,decoysArr[i].y,posX,posY);
+        list[n].kind=23;list[n].idx=i;n++;
+    }
+    float trialX,trialY,signal;
+    if (n<MAX_SPRITES && ProtocolTrialVisual(&trialX,&trialY,&signal)) {
+        list[n].d2=Dist2(trialX,trialY,posX,posY);
+        list[n].kind=22;list[n].idx=0;n++;
     }
     float impactX,impactY;
     if (n<MAX_SPRITES && TacticalJammerEffect(&impactX,&impactY)>0) {

@@ -1,34 +1,11 @@
-# throwing（投掷物：飞行、落点结算、回声）
+# 投掷物
 
-## 职责
-所有飞行中的投掷物：推进、撞墙/落地/撞怪的**统一效果结算**、回声弹的声呐扫描。
-手里有什么、能不能扔，不归这里管（那是 game.c 的物品与输入）。
+- `src/throwing.c` 负责生成投掷物和逐步推进飞行。
+- `src/domain/throwing/shot_impact.c` 负责碰撞目标、破锁和落点结算。地面、墙面、怪物和寿命到期都经过 `FinishShot`。
+- `src/content/content_shots.c` 登记投掷物规格、噪音和效果类型。
+- `src/domain/throwing/decoy_runtime.c` 管理玩偶放置、启动、叫声和摧毁。
+- `src/domain/throwing/flare_heal.c` 管理荧光棒治疗窗口和楼层预算。
 
-## 契约
-`include/throwing.h` —— 3 个符号：
-`ThrowItem`（出手）、`UpdateShots`（每帧推进）、`EchoTryTrigger`（落点留可疑位置）。
+新增投掷效果时，先在规格表声明类型，再实现对应的命中效果。飞行模块通过 `throwing_runtime.h` 调用命中模块，场景通过 `throwing.h` 访问投掷系统。
 
-文件内私有：`ShotImpact(i,x,y)` —— **唯一**的效果分派入口。
-
-## 绝不做
-- 不在三处各写一套落点效果（历史坑见下）
-- 不在这里读玩家输入
-- 不改 `shot[i].kind` 的语义（那是 `content` 表的事）
-
-## 测试
-`python tools/build_validate.py` → PASS (12212 checks)
-本域用例：`tests/domains/test_throwing.c`（3 个，含石头听觉范围、
-破锁只结算一次噪音、照明弹回血预算）。
-
-## 常见改动
-| 想改什么 | 动哪里 |
-|---|---|
-| 加一种投掷物 | 第 6 轮后会变成"加一行表"，现在要动 3 处 switch |
-| 改落地噪音 | `UpdateShots` 末尾的 nz 计算 |
-| 改回声扫描半径 | `ShotImpact` 里 kind==10 分支的 `rad` |
-
-## 历史坑
-- 2026-11-07 三条落点分支（全局落地/子步落地/撞墙）各写一套效果，
-  子步落地只有碎片、撞墙的回声只做了半套 → 用户说"回声有时候不生效"（AD-71）。
-  修法是抽出 `ShotImpact` 三处共用。**加新 kind 时务必只改这一处。**
-- 破门石（kind 1）落地和撞墙要各试一次锁箱，否则贴着墙的锁箱永远砸不开。
+回归用例位于 `tests/domains/test_throwing.c`，包括撞墙落点、单次破锁噪音、直接命中生成一份胶水，以及荧光棒治疗预算。

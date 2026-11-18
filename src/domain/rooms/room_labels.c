@@ -8,21 +8,25 @@
 #include "lang.h"
 #include "player_api.h"
 #include "world_api.h"
+#include "loop_api.h"
+#include "run_economy.h"
+#include "present_api.h"
+#include "skills.h"
 static const char* roomControlEn[7][2]={
         {"TUNE THE TRANSMITTER; COST PAID AT THE CENTRAL DEVICE", "ALIGN THE RETURN PIPE; THEN ACTIVATE THE CENTRAL DEVICE"},
         {"AUTHORIZE: 25% CARRIED GOLD (MIN 40) / VAULT POOL 80-120% RETURN / NOISE +25%", "CANCEL AUTHORIZATION; NO GOLD HAS BEEN PAID"},
-        {"GROUND THE LEFT INSULATOR", "GROUND THE RIGHT INSULATOR; THEN USE THE CENTRAL DEVICE"},
+        {"CHARGE THE LEFT TOWER", "CHARGE THE RIGHT TOWER; THEN USE THE CENTRAL DEVICE"},
         {"SELECT: 20 BATTERY -> UP TO 35 SANITY", "SELECT: 20 SANITY -> UP TO 50 BATTERY (25 SAN REQUIRED)"},
-        {"FIRST HOLD: LOCK A DISTANT TARGET; RELEASE; HOLD AGAIN: SWAP", "ONE CENTRAL FRAME / ONCE PER FLOOR / 40 STAMINA"},
+        {"CALIBRATE LEFT SWAP RELAY", "CALIBRATE RIGHT SWAP RELAY"},
         {"ARM IRREVERSIBLE COVENANT: 35% CARRIED GOLD (MIN 80), LOOT +25%, NOISE +35%", "CANCEL COVENANT; NO COST UNTIL THE CENTRAL DEVICE OPENS"},
         {"WIND THE MECHANICAL HEART", "PREPARE OFFERING: 1 THROWABLE / 20s STILLNESS / FINAL SCREAM"}
     };
 static const char* roomControlZh[7][2]={
         {"校准发声管，消耗由中央装置统一结算", "校准回声管，完成后可启动中央装置"},
         {"确认风险：携带金币25%（至少40），独立奖池回款80%至120%，噪音+25%", "取消确认，目前没有扣除金币"},
-        {"左侧装置接地", "右侧装置接地，完成后启动中央装置"},
+        {"给左侧电塔充电", "给右侧电塔充电，完成后启动中央装置"},
         {"选择：20电量换最多35理智", "选择：20理智换最多50电量，需保有25理智"},
-        {"中央门框长按锁定目标，松开后再次长按换位", "只有中央门框负责锁定与换位，每层一次，消耗40体力"},
+        {"校准左侧换位装置", "校准右侧换位装置"},
         {"确认不可撤销的契约：携带金币35%（至少80），收益+25%、噪音+35%", "取消确认，中央装置打开前不会扣费"},
         {"为机械心脏上弦", "准备一个投掷物，静止20秒，结束时发出尖啸"}
     };
@@ -61,10 +65,6 @@ const char* RoomThemeFixtureLine(int index) {
     static char status[384];
     const char* action=g_lang==LANG_ZH?roomControlZh[theme][side]:roomControlEn[theme][side];
     if(roomTheme.spent)return Tr("SPENT / NO SECOND ACTIVATION", "已结算，不可再次启动");
-    if(theme==HATCH_BRICK && roomTheme.target>=0) {
-        snprintf(status,sizeof(status),Tr("TARGET %d SELECTED / NOT TELEPORTED / CENTRAL FRAME: ONCE PER FLOOR", "已选目标%d，尚未换位；在中央装置执行，本层仅一次"),roomTheme.target+1);
-        return status;
-    }
     if(roomProps[index].searched) {
         snprintf(status,sizeof(status),Tr("READY / %s / ACTIVATE THE CENTRAL DEVICE TO COMMIT", "已校准 / %s / 请在中央装置启动生效"),action);
         return status;
@@ -116,4 +116,36 @@ const char* RoomThemeEffectLine(int index) {
         }
     }
     return RoomThemeGuideEffect(kind);
+}
+
+void RoomThemeGuideStep(int step,const char **label,float *progress,int *alternate) {
+    static const char *const en[7][2]={
+        {"Tune transmitter","Tune return pipe"},{"Authorize stake","Cancel authorization"},
+        {"Charge left tower","Charge right tower"},{"Battery to sanity","Sanity to battery"},
+        {"Calibrate left relay","Calibrate right relay"},{"Arm the covenant","Cancel authorization"},
+        {"Wind the heart","Prepare one throwable"}
+    };
+    static const char *const zh[7][2]={
+        {"校准发声管","校准回声管"},{"确认投资","取消确认"},
+        {"左塔充电","右塔充电"},{"电量换理智","理智换电量"},
+        {"校准左侧","校准右侧"},{"确认契约","取消确认"},
+        {"为心脏上弦","准备投掷物"}
+    };
+    int theme=roomTheme.theme;
+    *alternate=0;*progress=0;*label="";
+    if ((unsigned)theme>=7 || (unsigned)step>=3 || !hatchCount) return;
+    if (step==2) {
+        *label=Tr("Start central device","启动中央装置");
+        *progress=roomTheme.spent?1:hatches[0].state==HATCH_OPENING?.70f+.29f*HatchOpen01(0):0;
+        if(!*progress && holdingNow && hoverKind==4) *progress=fminf(.68f,holdTimer/(SEARCH_TIME*RunSearchTimeMul()*BenchSearchTimeMul())*.68f);
+        return;
+    }
+    *label=(g_lang==LANG_ZH?zh:en)[theme][step];
+    if ((theme==HATCH_WARD && roomTheme.choice && roomTheme.choice!=step+1) ||
+        (step==1 && (theme==HATCH_STORAGE || theme==HATCH_HELL))) *alternate=1;
+    *progress=((roomTheme.prepared>>step)&1u)?1:0;
+    if (roomTheme.spent && !*alternate && theme!=HATCH_WARD) *progress=1;
+    if (!*progress && holdingNow && hoverKind==3 && hoverIndex>=0 && hoverIndex<roomPropCount &&
+        roomProps[hoverIndex].kind==ROOMPROP_CONTROL_FIRST+theme*2+step)
+        *progress=fminf(.98f,holdTimer/(SEARCH_TIME*RunSearchTimeMul()*BenchSearchTimeMul()));
 }

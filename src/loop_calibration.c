@@ -1,4 +1,4 @@
-/* Four-lane rhythm calibration. Rewards settle only after a completed chart. */
+/* Four-lane rhythm calibration. Hits restore resources; completion awards gold. */
 #include "common.h"
 #include "tutorial.h"
 #include "calibration.h"
@@ -25,7 +25,9 @@ static unsigned char judged[512];
 static float elapsed=0,drainBudget=0,leadIn=0;
 static double lastSpace=-10, outroUntil;
 int CalibOutroActive(void) { return PlatNow() < outroUntil; }
-static int waitingForStart=0;
+static int waitingForStart=0, musicStarted=0;
+static float musicStart;
+#define CALIB_ENTRY_SECONDS 2.40f
 static int errors=0,combo=0,pending=0,level=-1,startLatch=0;
 static int hits=0,bestCombo=0;static float restored=0,charged=0;
 static unsigned char laneLatch[4];
@@ -77,7 +79,7 @@ static void Finish(int result) {
     pickupMsg=message;stationSession=0;memset(keyPressed,0,sizeof(keyPressed));pickupMsgTimer=3;uiDirty=1;
 }
 void CalibStart(void) {
-    if(calibActive || (!stationSession && hiddenIn<0 && !trainingMode) || calibCooldown>0)return;
+    if(calibActive || hiddenIn<0 || calibCooldown>0)return;
     if(!MusicPrepareForCalibration()){pickupMsg=LangTr("CHART MUSIC NOT READY","谱面音乐尚未就绪");pickupMsgTimer=1.4f;return;}
     int scene=(int)MusicCurrentScene();if(scene<0 || scene>=6)scene=MUSIC_EXPLORE;
     chart=&scoreCharts[scene];
@@ -85,7 +87,7 @@ void CalibStart(void) {
     memset(flash,0,sizeof(flash));memset(judgement,0,sizeof(judgement));
     memset(judged,0,sizeof(judged));elapsed=-AudioOutputLatencySeconds()-.006f;errors=combo=pending=hits=bestCombo=0;restored=charged=0;drainBudget=0;
     for(int lane=0;lane<4;lane++){laneLatch[lane]=(unsigned char)PlatKeyDown("QWER"[lane]);lanePressAt[lane]=elapsed-10.0f;laneMissAt[lane]=elapsed-10.0f;}
-    level=currentLevel;lastSpace=-10;startLatch=0;calibActive=1;calibResult=0;
+    level=currentLevel;lastSpace=-10;startLatch=0;calibActive=1;calibResult=0;musicStarted=0;
     waitingForStart=1;leadIn=0;uiDirty=1;
 }
 void CalibLock(void) {
@@ -118,10 +120,12 @@ static void Hit(int lane) {
         judged[best]=1;combo++;hits++;if(combo>bestCombo)bestCombo=combo;
         int perfect=delta<=HitWindow()*.35f;
         float chain=1+fminf(20,(float)(combo-1))*.04f;
-        float gain=(perfect?1.0f:.8f)*chain+BenchRhythmHealBonus();
+        float remainingSanity=fmaxf(0,SanityMax()*.55f-restored);
+        float remainingBattery=fmaxf(0,(float)BatteryMax()*.80f-charged);
+        float gain=fminf(remainingSanity,(perfect?1.0f:.8f)*chain+BenchRhythmHealBonus());
         flash[lane]=.45f;judgement[lane]=perfect?2:1;
         float before=sanity;sanity=fminf(SanityMax(),sanity+gain);hitSanity[lane]=sanity-before;restored+=hitSanity[lane];pending=(int)floorf(restored+.5f);
-        float cellBefore=battery;battery=fminf((float)BatteryMax(),battery+(perfect?3.0f:2.2f)*chain);hitBattery[lane]=battery-cellBefore;charged+=hitBattery[lane];
+        float cellBefore=battery;battery=fminf((float)BatteryMax(),battery+fminf(remainingBattery,(perfect?3.0f:2.2f)*chain));hitBattery[lane]=battery-cellBefore;charged+=hitBattery[lane];
         PlaySfx(perfect?SFX_POWER:SFX_PICKUP,perfect?.22f:.18f);
     }
     if(errors>5)Finish(3);
@@ -131,7 +135,7 @@ void CalibTick(float dt) {
     calibCooldown=fmaxf(0,calibCooldown-dt);calibResultTimer=fmaxf(0,calibResultTimer-dt);
     for(int lane=0;lane<4;lane++)flash[lane]=fmaxf(0,flash[lane]-dt);
     if(!calibActive)return;
-    if(currentLevel!=level || (stationSession?currentState!=STATE_SAFEHOUSE:(!trainingMode && hiddenIn<0))){Finish(2);return;}
+    if(currentLevel!=level || hiddenIn<0 || (stationSession && currentState!=STATE_SAFEHOUSE)){Finish(2);return;}
     if(hiddenIn>=0){
         float regen = HIDE_BATTERY_REGEN * (flashlightOn ? 0.5f : 1.0f);
         battery=fminf((float)BatteryMax(),battery+regen*dt);
@@ -145,10 +149,17 @@ void CalibTick(float dt) {
     if(waitingForStart){uiDirty=1;return;}
     if(leadIn>0){
         leadIn=fmaxf(0,leadIn-dt);
-        if(leadIn==0){MusicSeekSeconds((float)chart->startSample/44100.0f);elapsed=-AudioOutputLatencySeconds()-.006f;}
+        if(leadIn==0) {
+            musicStart=-AudioOutputLatencySeconds()-.006f;
+            elapsed=musicStart-CALIB_ENTRY_SECONDS;
+        }
         uiDirty=1;return;
     }
-    elapsed+=dt;calibPos=elapsed/40.0f;
+    elapsed+=dt;calibPos=fmaxf(0,elapsed/40.0f);
+    if (!musicStarted && elapsed>=musicStart) {
+        MusicSeekSeconds((float)chart->startSample/44100.0f);
+        musicStarted=1;
+    }
     /* 松键锁存：安全屋里 CalibHandleInput 不跑（它只处理 PLAYING），
        所以 latch 的复位必须放在每帧都执行的 CalibTick 里。 */
     for(int lane=0;lane<4;lane++)if(!PlatKeyDown("QWER"[lane]) && elapsed-lanePressAt[lane]>0.03f)laneLatch[lane]=0;
@@ -166,7 +177,7 @@ void CalibHandleInput(int inSafe) {
     (void)inSafe;
     if(currentState!=STATE_PLAYING || ControlActive())return;
     int down=PlatKeyDown(VK_SPACE);
-    if(keyPressed[VK_SPACE] && (hiddenIn>=0 || trainingMode)) {
+    if(keyPressed[VK_SPACE] && hiddenIn>=0) {
         keyPressed[VK_SPACE]=0;
         if(!startLatch){startLatch=1;if(calibActive)CalibLock();else CalibStart();}
     }
@@ -197,7 +208,7 @@ void CalibInputKey(int key) {
     if(key==VK_SPACE){CalibLock();return;}
     for(int lane=0;lane<4;lane++)if(key=="QWER"[lane]){
         if(waitingForStart){waitingForStart=0;leadIn=1.25f;laneLatch[lane]=1;lanePressAt[lane]=elapsed;keyPressed[key]=0;uiDirty=1;return;}
-        if(leadIn>0)return;
+        if(leadIn>0 || !musicStarted)return;
         /* 同一次按住产生的重复 keydown（系统重复 / 平台重复边沿）不能
            每一个都算一次判定：laneLatch 未松键、或距离上次判定太近，
            都直接吞掉。原来这里无条件 Hit()，按一次会加好几次失误。 */

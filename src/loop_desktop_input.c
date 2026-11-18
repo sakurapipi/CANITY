@@ -13,6 +13,7 @@
 #include "training_stations.h"
 #include "map_validator.h"
 #include "hatch.h"
+#include "room_theme.h"
 #include "cell_meta.h"
 #include "map_rooms.h"
 #include "sound_event.h"
@@ -351,34 +352,22 @@ void CanityMouseWheel(int delta, int mx, int my) {
         uiDirty = 1;
         return;
     }
-    if (currentState == STATE_PLAYING) {
-        static int wheelAcc = 0;
-        static double wheelCd = 0.0;
-
-        wheelAcc += delta;
-        if (wheelAcc >= 60 || wheelAcc <= -60) {
-            if (g_timeSec - wheelCd > 0.09) {
-                int dir = (wheelAcc > 0) ? +1 : -1;
-                wheelAcc = 0;
-                wheelCd = g_timeSec;
-                {
-                    int n = ITEM_SLOT_COUNT;
-                    int s = throwSelected + dir;
-                    if (s < 0) s += n;
-                    if (s >= n) s -= n;
-                    throwSelected = s;
-                    /* 落到空槽就继续找下一个有货的，避免"HUD 高亮但拿不出来" */
-                    for (int k = 0; k < n && !itemHasStock(); k++) {
-                        s = throwSelected + dir;
-                        if (s < 0) s += n;
-                        if (s >= n) s -= n;
-                        throwSelected = s;
-                    }
-                    uiDirty = 1;
-                }
-            }
+    if (currentState==STATE_PLAYING) {
+        static int remainder;
+        if (calibActive || lockActive || exitChoiceOpen || (isMapOpen && mapFullScreen)) {
+            remainder=0;
+            return;
+        }
+        if ((delta>0 && remainder<0) || (delta<0 && remainder>0)) remainder=0;
+        int turns=(remainder+delta)/120;
+        remainder=(remainder+delta)%120;
+        if (turns && TacticalPanelOpen()) TacticalInputWheel(-turns);
+        else if (turns && !isCharging) {
+            throwSelected=InventoryCycle(throwSelected,turns);
+            uiDirty=1;
         }
     }
+
 }
 
 /* ==================================================================
@@ -1313,6 +1302,12 @@ int CanityKeyDown(int vk, int repeat) {
        藏身点内（空格/交互）与安全屋"休整服务"能进小游戏。 */
     if (currentState == STATE_PLAYING && hiddenIn >= 0 && CalibOutroActive() &&
         (strchr("QWER", vk) || vk == g_bindings[ACT_INTERACT])) return 0;
+    if (vk=='X' && currentState==STATE_PLAYING && roomTheme.active && roomTheme.inside &&
+        roomTheme.theme==HATCH_BOILER && !lockActive && !TacticalPanelOpen() &&
+        !(isMapOpen && mapFullScreen)) {
+        if (!repeat) { roomTheme.guideExpanded=!roomTheme.guideExpanded;uiDirty=1; }
+        return 0;
+    }
     if(TacticalInputKey(vk,repeat) || UiArchiveTierKey(vk))return 0;
     if(currentState==STATE_HELP) {
         if(!repeat) {
@@ -1505,76 +1500,13 @@ static LRESULT WindowMouseMove(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 static LRESULT WindowMouseWheel(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     (void)hwnd; (void)uMsg; (void)wParam; (void)lParam;
 
-    if(currentState==STATE_BESTIARY || currentState==STATE_HELP){
+    if(currentState==STATE_BESTIARY || currentState==STATE_HELP || currentState==STATE_HUB ||
+       currentState==STATE_PLAYING || (currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE)){
         POINT point={(short)LOWORD(lParam),(short)HIWORD(lParam)};
         ScreenToClient(g_hwnd,&point);
         int x=point.x,y=point.y;MouseToLogical(&x,&y);
         CanityMouseWheel(GET_WHEEL_DELTA_WPARAM(wParam),x,y);return 0;
     }
-            /* v6：**技能树页用滚轮缩放**（和改造树同一套锚点逻辑） */
-            if (currentState == STATE_HUB) {
-                int wx = (short)LOWORD(lParam), wy = (short)HIWORD(lParam);
-                POINT pt = { wx, wy };
-                ScreenToClient(g_hwnd, &pt);
-                int hx = pt.x, hy = pt.y;
-                MouseToLogical(&hx, &hy);
-                float hf = (GET_WHEEL_DELTA_WPARAM(wParam) > 0) ? 1.12f : (1.0f / 1.12f);
-                SkillZoomAt(hf, hx, hy);
-                return 0;
-            }
-            /* v2.8：改造树页用滚轮缩放（以鼠标为锚点） */
-            if (currentState == STATE_SAFEHOUSE && shopPage == SHP_TREE) {
-                int wx = (short)LOWORD(lParam), wy = (short)HIWORD(lParam);
-                POINT pt = { wx, wy };
-                ScreenToClient(g_hwnd, &pt);
-                int lx2 = pt.x, ly2 = pt.y;
-                MouseToLogical(&lx2, &ly2);
-                float f = (GET_WHEEL_DELTA_WPARAM(wParam) > 0) ? 1.12f : (1.0f / 1.12f);
-                BenchZoomAt(f, lx2, ly2);
-                return 0;
-            }
-            /* v1.8：游玩中用滚轮切换投掷物（1/2/3 仍然可用） */
-            if (currentState == STATE_PLAYING) {
-                /* v1.14：滚轮阻尼。
-                   ① 累加 delta，够 60 才切一格（原来一格 = 一次滚，太敏感）
-                   ② 切换后 90ms 内不再响应（防止高精度滚轮连发）
-                   ③ 顺手修 bug：原来模 3，但只有 ITEM_SLOT_COUNT 格 →
-                      会选到不存在的槽位，HUD 数组越界。 */
-                static int wheelAcc = 0;
-                static double wheelCd = 0.0;
-                int dz = GET_WHEEL_DELTA_WPARAM(wParam);
-                wheelAcc += dz;
-                if (wheelAcc >= 60 || wheelAcc <= -60) {
-                    if (g_timeSec - wheelCd > 0.09) {
-                        int dir = (wheelAcc > 0) ? +1 : -1;
-                        /* ============================================================
-                         * 2026-11-05 修 bug：**滚轮永久卡死**
-                         * ------------------------------------------------------------
-                         * 旧写法是 (sel + dir + 6) % 6 —— 会落在**空槽**上。
-                         * 而 Update() 每帧都调 EnsureThrowSelectedValid()，
-                         * 它发现当前槽空着，就把选中拽回"第一个有货的槽"。
-                         *
-                         * 于是：槽0 有货、槽1 空 → 滚轮 +1 到槽1 → 下一帧拽回槽0
-                         *       → 再滚 +1 又到槽1 又拽回槽0 …… **永远出不去**。
-                         * 玩家看到的就是"滚轮切换不出来"。
-                         *
-                         * 现在直接跳到**下一个有货的槽**，空槽整个跳过。
-                         * ============================================================ */
-                        int counts[ITEM_SLOT_COUNT]; InventoryCounts(counts);
-                        int moved = 0;
-                        for (int step = 0; step < ITEM_SLOT_COUNT; step++) {
-                            throwSelected = (throwSelected + dir + ITEM_SLOT_COUNT) % ITEM_SLOT_COUNT;
-                            if (counts[throwSelected] > 0) { moved = 1; break; }
-                        }
-                        if (!moved) throwSelected = 0;   /* 一件都没有：回 0 号槽 */
-                        wheelCd = g_timeSec;
-                        uiDirty = 1;
-                    }
-                    wheelAcc = 0;
-                }
-                return 0;
-            }
-
             /* 鼠标滚轮滚动菜单 */
             if (currentState != STATE_PLAYING && !settingsPopupOpen) {
                 int delta = GET_WHEEL_DELTA_WPARAM(wParam);

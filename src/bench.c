@@ -72,7 +72,7 @@ void BenchResetRun(void) {
     benchOwned = 0u;
 }
 
-int BenchGraphCount(void) { return dailyMode?BENCH_COUNT:BENCH_GRAPH_COUNT; }
+int BenchGraphCount(void) { return dailyMode || ProtocolPeacefulStory()?BENCH_COUNT:BENCH_GRAPH_COUNT; }
 int BenchNodeCost(int id) { return id>=BENCH_COUNT?ProtocolNodeCost(id-BENCH_COUNT):benchNodes[id].cost; }
 const char* BenchNodeName(int id) {
     return id>=BENCH_COUNT?ProtocolNodeName(id-BENCH_COUNT):LangTr(benchNodes[id].name,benchNodes[id].nameZh);

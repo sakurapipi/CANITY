@@ -52,7 +52,7 @@ void GamepadPoll(void) {
     gpConnected = 1;
     XGPAD* g = &st.Gamepad;
     int packButtons=g->wButtons,packEdges=packButtons & ~prevBtn;
-    if((packEdges&0x0020) && currentState==STATE_PLAYING)TacticalInputKey('I',0);
+    if((packEdges&0x0020) && currentState==STATE_PLAYING)TacticalInputKey('J',0);
     if(TacticalPanelOpen()){
         if(packEdges&0x0001)TacticalInputKey(VK_UP,0);
         if(packEdges&0x0002)TacticalInputKey(VK_DOWN,0);

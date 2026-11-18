@@ -359,22 +359,10 @@ int itemHasStock(void) {return InventoryCount(throwSelected)>0;
 
 
 void EnsureThrowSelectedValid(void) {
-    /* v1.18：这里原来写死 2 个槽位 —— 滚到砖头/酸瓶时
-       counts[throwSelected] 越界读到垃圾值，随即被拉回第 0/1 槽，
-       表现就是"选不中砖头和酸瓶"。 */
-    int counts[ITEM_SLOT_COUNT]; InventoryCounts(counts);
-    if (throwSelected < 0 || throwSelected >= ITEM_SLOT_COUNT) throwSelected = 0;
-    if (counts[throwSelected] > 0) return;
-    /* 2026-11-05：**就近取，不要永远拽回 0 号槽**。
-       原来是从 0 开始找第一个有货的 —— 配合滚轮的空槽问题，
-       造成"选中项永远回到最左边"的观感。
-       现在从当前槽向两边交替找，落在最近的有货槽上。 */
-    for (int d = 1; d < ITEM_SLOT_COUNT; d++) {
-        int fwd = (throwSelected + d) % ITEM_SLOT_COUNT;
-        if (counts[fwd] > 0) { throwSelected = fwd; uiDirty = 1; return; }
-        int bwd = (throwSelected - d + ITEM_SLOT_COUNT * 2) % ITEM_SLOT_COUNT;
-        if (counts[bwd] > 0) { throwSelected = bwd; uiDirty = 1; return; }
-    }
+    if (InventoryCount(throwSelected)>0)return;
+    int next=InventoryCycle(-1,0);
+    if (next!=throwSelected) {throwSelected=next;uiDirty=1;}
+
 }
 
 /* v1.16 烟幕：落地生成，最多 MAX_SMOKE 朵 */

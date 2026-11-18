@@ -1,3 +1,4 @@
+#include "protocol.h"
 /* src/loop_world.c —— P2 世界（2026-11-09，C 段第 1 块）
  *
  * 从 `game.c` 搬出来的**世界查询**函数。这是拆 game.c 的第一块 ——
@@ -79,7 +80,7 @@ int UpgradeCost(int kind) {
 
 
 int EndlessUnlocked(void) {
-    return (bestLevel >= 10) || gameCleared || gameWon;
+    return (bestLevel >= 10) || gameCleared || (gameWon && !ProtocolPeacefulStory());
 }
 
 int EventScore(int ev) {

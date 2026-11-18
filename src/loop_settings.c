@@ -108,19 +108,19 @@ SettingItem settings[] = {
     {"Flashlight",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_FLASHLIGHT],    NULL, 0, 0, 0, 4},
     {"Toggle Map",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MAP],           NULL, 0, 0, 0, 4},
     {"Throw",           SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_THROW],         NULL, 0, 0, 0, 4},
-    {"ATTACK (hold)",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_CANCEL_CHARGE], NULL, 0, 0, 0, 4},
+    {"Cancel Throw Charge",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_CANCEL_CHARGE], NULL, 0, 0, 0, 4},
     /* v2.2：这一行其实就是攻击键（原来叫 Cancel Charge，玩家根本不知道） */
-    {"Select Flare",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_1],      NULL, 0, 0, 0, 4},
-    {"Select Bottle",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_2],      NULL, 0, 0, 0, 4},
+    {"Select Slot 1",    SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_1],      NULL, 0, 0, 0, 4},
+    {"Select Slot 2",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_2],      NULL, 0, 0, 0, 4},
     {"Select Slot 3",   SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SELECT_3],      NULL, 0, 0, 0, 4},
     /* 2026-11-08（第 2 轮联通修复）：这三个动作有默认键、游戏里在用，
        但设置表里一直没有行 —— 玩家查不到也改不了。 */
-    {"Attack (wrench)", SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SWING],         NULL,      0,    0,    0, 5},
-    {"Character Ability",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DECOY],         NULL,      0,    0,    0, 5},
-    {"Drop Gold",       SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DROP_GOLD],     NULL,      0,    0,    0, 5},
+    {"Attack (wrench)", SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SWING],         NULL,      0,    0,    0, 4},
+    {"Character Ability",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DECOY],         NULL,      0,    0,    0, 4},
+    {"Drop Gold",       SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DROP_GOLD],     NULL,      0,    0,    0, 4},
 
     /* ========== 分类: KEY BINDINGS / MENU KEYS ========== */
-    {"Dodge (QTE)",     SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DODGE],         NULL, 0, 0, 0, 5},
+    {"Dodge (QTE)",     SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DODGE],         NULL, 0, 0, 0, 4},
     {"Pause",           SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_PAUSE],         NULL, 0, 0, 0, 5},
     {"Menu Up",         SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_UP],       NULL, 0, 0, 0, 5},
     {"Menu Down",       SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_MENU_DOWN],     NULL, 0, 0, 0, 5},

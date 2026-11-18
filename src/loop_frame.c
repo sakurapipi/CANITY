@@ -229,8 +229,9 @@ static int UpdatePreflight(float dt) {
        · **大地图不耗电**（全屏规划路线是免费的）
        · 小地图耗电，且可以被局内强化「小地图省电」降低（10 → 4 /秒） */
     if (isMapOpen && !mapFullScreen && currentState == STATE_PLAYING && !ProtocolPeacefulStory()) {
-        battery -= RunUpgMapDrainPct() * fmaxf(0, dt - RoomThemeFreeMapRemaining());
-        if (battery <= 0.0f) {
+        float billedTime=fmaxf(0,dt-RoomThemeFreeMapRemaining());
+        battery -= RunUpgMapDrainPct()*billedTime;
+        if (billedTime>0 && battery<=0.0f) {
             battery = 0.0f;
             isMapOpen = 0;
             mapFullScreen = 0;
@@ -940,7 +941,6 @@ static int UpdateMovementAndHatches(float dt, const PlayerFrameInput* movement) 
 }
 
 static void CompleteHeldHatch(void) {
-    if(RoomThemeSelectCentralTarget(hoverIndex)){hoverKind=0;return;}
 
                 /* ================================================================
                  * 舱门：门槛判定 → 开门动画
@@ -1204,6 +1204,9 @@ static void CompleteHeldBreaker(void) {
 }
 
 static void UpdateHeldInteraction(float dt) {
+    static int previousKind, previousIndex;
+    if (hoverKind!=previousKind || hoverIndex!=previousIndex) holdTimer=0;
+    previousKind=hoverKind;previousIndex=hoverIndex;
     /* ---------------- 交互：长按 E 搜索容器 / 给配电箱上电 ---------------- */
     if (holdingNow) {
         if (holdTimer == 0.0f && (hoverKind == 1 || hoverKind == 3 || hoverKind == 4)) {
@@ -1333,21 +1336,11 @@ static int UpdateThrowInput(float dt) {
                 mouseCharge = 0;
                 mouseLeftPrev=mouseLeftNow;mouseRightPrev=mouseRightNow;return 0;
             }
-            if (sel == 5) {
-                if (decoys > 0) {
-                    PlaceDecoy(posX, posY);
-                    decoys--;
-                    totalThrown++;          /* 也算一次道具消耗 */
-                    throwCd = 0.60f;
-                    pickupMsg = (g_lang == LANG_ZH)
-                        ? "诱饵已放下" : "DECOY PLACED";
-                    pickupMsgTimer = 2.0f;
-                    PlaySfx(SFX_PICKUP, 0.7f);
-                }
-                mouseCharge = 0.0f;
-                mouseLeftPrev = mouseLeftNow;
-                mouseRightPrev = mouseRightNow;
-                return 0;
+            if (sel==5 && mouseCharge<.1f && decoys>0) {
+                PlaceDecoy(posX,posY);
+                decoys--;totalThrown++;throwCd=.45f;
+                pickupMsg=Tr("DECOY PLACED","玩偶已放下");
+                pickupMsgTimer=1.5f;
             }
             if (mouseCharge >= 0.1f && counts[sel] > 0) {
                 /* v2.7：先投，真生成了才扣。原来先扣再投，
@@ -1359,6 +1352,7 @@ static int UpdateThrowInput(float dt) {
                     else if (sel == 1) bottles--;
                     else if (sel == 2) smokeBombs--;
                     else if (sel == 3) gluePots--;
+                    else if (sel == 5) decoys--;
                     else if (sel == 6) phaseBeacons--;
                     else if (sel == 4) { echoBolts--; {  echoCellsTotalRun += 15; } }
                     totalThrown++;   /* v3.3：逃生向成就用（整条链之后加） */
@@ -1479,6 +1473,11 @@ static void UpdateWorldThreats(float dt, const PlayerFrameInput* movement) {
 
     TickMark(TICK_SMOKES);
     UpdateSmokes(dt);
+    if (flashlightOn) runLightUse=1;
+    ShopTickCooldown(dt);
+    MoneyTick(dt);
+    if (!ProtocolPeacefulStory()) UpdateWarden(dt);
+    DecoyTick(dt);
     /* v1.18：站在烟里 → **只把光压暗**（用户要求，不再收窄视野） */
     /* v1.21: in smoke go nearly black (like the old 0.09 ambient build) */
     /* v2.1：0.10 等于把画面关掉。要的是「看不清」不是「看不见」。 */
@@ -1639,6 +1638,11 @@ static void UpdateWorldParticles(float dt) {
             /* v1.9：这里原来还有一次 vz -= GRAVITY*dt ——
                一帧减两次重力，抛物线直接塌成"砸脚面"。已删除。 */
 
+            if (thrown[i].type==0 && thrown[i].z<1.9f &&
+                ThrowableActorNear(thrown[i].x,thrown[i].y,.48f)) {
+                thrown[i].z=0;
+                thrown[i].vx=thrown[i].vy=0;
+            }
             /* 落地 */
             if (thrown[i].z <= 0.0f) {
                 thrown[i].z = 0.0f;
@@ -1786,12 +1790,13 @@ static void UpdateExitProgression(float dt) {
         int exitGold=30+6*(cleared-1)+5*containerCount;
         int advance=ProtocolAdvance();
         if (!advance) return;
-        WalletAddRun(exitGold);
+        if (!ProtocolPeacefulStory()) WalletAddRun(exitGold);
         if (advance==2) {
             gameWon=1;runInProgress=0;
             ScoreInput result={currentLevel,1,0,runSearched,bottlesKilled,runTime,modsSeenCount};
             ComputeScore(&result,&lastScore);
             lastRunGold=WalletRun();lastRunCaught=CatchCountThisRun();
+            lastRunKept=ProtocolPeacefulStory()?ProtocolStoryPayout():0;
             WalletStealRun(WalletRun());
             SaveGame();hasSave=SaveHasPendingRun();
             currentState=STATE_GAMEOVER;menuSelection=0;

@@ -23,7 +23,7 @@ static int Rows(void) {
     return n < 3 ? 3 : n > 9 ? 9 : n;
 }
 static int First(void) {
-    int n = selected - Rows() / 2;
+    int n = InventoryPosition(selected) - Rows() / 2;
     if (n < 0)
         n = 0;
     if (n > ITEM_SLOT_COUNT - Rows())
@@ -52,7 +52,7 @@ int TacticalPanelOpen(void) {
 static int KeyAllowed(int key) {
     if (key <= 0 || key >= 256 || key == VK_ESCAPE || key == VK_RETURN || key == VK_SPACE ||
         (key >= VK_F1 && key <= VK_F12) || key <= VK_MBUTTON || key == VK_SHIFT ||
-        key == VK_CONTROL || key == VK_MENU || strchr("1234567890ICEQTGBMKR", key))
+        key == VK_CONTROL || key == VK_MENU || strchr("1234567890ICEQTGBMRHJKL", key))
         return 0;
     for (int i = 0; i < ACT_COUNT; i++)
         if (g_bindings[i] == key)
@@ -62,6 +62,16 @@ static int KeyAllowed(int key) {
             return 0;
     return 1;
 }
+void TacticalInputWheel(int steps) {
+    int position=InventoryPosition(selected);
+    selected=InventoryAt((position+ITEM_SLOT_COUNT+steps%ITEM_SLOT_COUNT)%ITEM_SLOT_COUNT);
+    uiDirty=1;
+}
+
+static int ReservedInventoryKey(int key) {
+    return key=='H' || key=='J' || key=='K' || key=='L';
+}
+
 int TacticalInputKey(int key, int repeat) {
     if (currentState != STATE_PLAYING)
         return 0;
@@ -80,19 +90,23 @@ int TacticalInputKey(int key, int repeat) {
             uiDirty = 1;
             return 1;
         }
-        if (key == 'I' || key == VK_ESCAPE) {
+        if (key == 'J' || key == VK_ESCAPE) {
             Close();
             return 1;
         }
-        if (key == VK_UP)
-            selected = (selected + ITEM_SLOT_COUNT - 1) % ITEM_SLOT_COUNT;
-        if (key == VK_DOWN)
-            selected = (selected + 1) % ITEM_SLOT_COUNT;
+        if (key == VK_UP || key == VK_DOWN) TacticalInputWheel(key==VK_UP?-1:1);
+        if (key==VK_PRIOR || key==VK_NEXT || key==VK_HOME) {
+            int position=InventoryPosition(selected);
+            int destination=key==VK_HOME?0:position+(key==VK_PRIOR?-1:1);
+            if (InventoryReorder(selected,destination))
+                feedback=SaveInventoryOrder()?Tr("ORDER SAVED","排序已保存"):
+                    Tr("ORDER CHANGED FOR THIS SESSION","排序仅在本次运行生效");
+        }
         if (key == VK_LEFT)
             quickSlot = (quickSlot + 3) % 4;
         if (key == VK_RIGHT)
             quickSlot = (quickSlot + 1) % 4;
-        if ((key == VK_RETURN || key == 'K') && !SaveEvolutionCanPersist()) {
+        if ((key == VK_RETURN || key == 'B') && !SaveEvolutionCanPersist()) {
             feedback = Tr("SAVE EXTENSION DIRECTORY FULL", "存档扩展目录已满，保留原版存档");
             return 1;
         }
@@ -104,9 +118,9 @@ int TacticalInputKey(int key, int repeat) {
             tactical.key[quickSlot] = 0;
             feedback = Tr("KEY CLEARED", "快捷键已清除");
         }
-        if (key == 'K')
+        if (key == 'B')
             capture = 1;
-        if (key == 'H')
+        if (key == 'A')
             tactical.assistEscape = !tactical.assistEscape;
         if (key == VK_SPACE) {
             throwSelected = selected;
@@ -116,11 +130,12 @@ int TacticalInputKey(int key, int repeat) {
         uiDirty = 1;
         return 1;
     }
-    if (key == 'I' && !repeat && !ControlActive() && !exitChoiceOpen && !lockActive &&
-        !calibActive) {
+    if (key == 'J' && !repeat && !ControlActive() && !exitChoiceOpen && !lockActive &&
+        !calibActive && !(isMapOpen && mapFullScreen)) {
         opened = 1;
         selected = throwSelected >= 0 && throwSelected < ITEM_SLOT_COUNT ? throwSelected : 0;
         feedback = "";
+        isCharging=0;mouseCharge=0;
         ForceCursor(1);
         LoopClearInputEdges();
         return 1;
@@ -128,7 +143,7 @@ int TacticalInputKey(int key, int repeat) {
     for (int action = 0; action < ACT_COUNT; action++)
         if (g_bindings[action] == key)
             return 0;
-    if (!repeat)
+    if (!repeat && !ReservedInventoryKey(key))
         for (int i = 0; i < 4; i++)
             if (tactical.key[i] > 0 && tactical.key[i] == key) {
                 throwSelected = tactical.quick[i];
@@ -138,8 +153,8 @@ int TacticalInputKey(int key, int repeat) {
     return 0;
 }
 static RECT Button(int i) {
-    int x = winW * 65 / 100, y = winH * (45 + i * 7) / 100;
-    return (RECT){x, y, winW * 90 / 100, y + TextHeightWin() + UIS(8)};
+    int x = winW * 65 / 100, y = winH * (34 + i * 7) / 100;
+    return (RECT){x, y, winW * 90 / 100, y + FONT_H + UIS(8)};
 }
 int TacticalInputClick(int x, int y) {
     if (!TacticalPanelOpen())
@@ -157,18 +172,15 @@ int TacticalInputClick(int x, int y) {
     }
     int top = winH * 27 / 100, line = TextHeightWin() + UIS(10), row = (y - top) / line;
     if (x >= winW * 8 / 100 && x < winW * 60 / 100 && y >= top && row < Rows()) {
-        selected = First() + row;
+        selected = InventoryAt(First()+row);
+        uiDirty=1;
         return 1;
     }
-    for (int i = 0; i < 5; i++) {
-        RECT r = Button(i);
-        if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) {
-            TacticalInputKey(i == 0   ? VK_RETURN
-                             : i == 1 ? 'K'
-                             : i == 2 ? 'H'
-                             : i == 3 ? VK_UP
-                                      : VK_DOWN,
-                             0);
+    static const int actions[]={VK_PRIOR,VK_NEXT,VK_HOME,VK_RETURN,'B','A'};
+    for (int i=0;i<6;i++) {
+        RECT r=Button(i);
+        if (x>=r.left && x<r.right && y>=r.top && y<r.bottom) {
+            TacticalInputKey(actions[i],0);
             return 1;
         }
     }
@@ -198,8 +210,8 @@ void TacticalDrawPanel(void) {
     int top = winH * 27 / 100, lineH = TextHeightWin() + UIS(10), first = First();
     char text[180];
     for (int row = 0; row < Rows(); row++) {
-        int item = first + row, y = top + row * lineH;
-        snprintf(text, sizeof(text), "%s  x%d", InventoryName(item), InventoryCount(item));
+        int position=first+row,item=InventoryAt(position),y=top+row*lineH;
+        snprintf(text,sizeof text,"%02d  %s  x%d",position+1,InventoryName(item),InventoryCount(item));
         if (item == selected)
             BlendRectWin(left, y, winW * 60 / 100, y + lineH, UI_BG_SEL, 1);
         UiTrimSmallText(text, winW * 50 / 100);
@@ -207,26 +219,25 @@ void TacticalDrawPanel(void) {
                                 item == selected ? UI_ACCENT : UI_INK);
     }
     int x = winW * 65 / 100, y = top;
-    const ToolDef *t = ToolDefinition(selected - 7);
-    UiDossierText(t ? ToolDetail(selected - 7)
-                    : Tr("Original equipment. Keep using its existing throw or placement action.",
-                         "原有装备，使用既有投掷或放置操作。"),
-                  x, y, right - x, winH * 44 / 100, UI_INK);
-    const char *labels[5] = {Tr("BIND / ENTER", "绑定到所选槽"),
-                             capture ? Tr("PRESS AN UNUSED KEY", "请按未占用键")
-                                     : Tr("CHANGE KEY / K", "设置快捷键"),
-                             tactical.assistEscape ? Tr("ESCAPE: HOLD", "挣脱：持续按住")
-                                                   : Tr("ESCAPE: TAP", "挣脱：逐次按键"),
-                             Tr("PREVIOUS ITEM", "上一物品"), Tr("NEXT ITEM", "下一物品")};
-    for (int i = 0; i < 5; i++) {
-        RECT r = Button(i);
-        UiPanel(r.left, r.top, r.right, r.bottom, UI_PANEL_NORMAL);
-        DrawTextSmallLiteralWin(r.left + UIS(5), r.top + UIS(4), labels[i], UI_ACCENT);
+    snprintf(text,sizeof text,"%s  x%d",InventoryName(selected),InventoryCount(selected));
+    UiTrimSmallText(text,right-x);
+    DrawTextSmallLiteralWin(x,y,text,UI_INK);
+    const char *labels[]={
+        Tr("MOVE UP / PGUP","上移"),Tr("MOVE DOWN / PGDN","下移"),
+        Tr("PRIORITIZE / HOME","设为第一优先"),Tr("BIND / ENTER","绑定到快捷槽"),
+        capture?Tr("PRESS UNUSED KEY","按未占用键"):Tr("CHANGE KEY / B","设置快捷键"),
+        tactical.assistEscape?Tr("ESCAPE: HOLD","挣脱：长按"):Tr("ESCAPE: TAP","挣脱：连按"),
+    };
+    for(int i=0;i<6;i++) {
+        RECT r=Button(i);
+        UiPanel(r.left,r.top,r.right,r.bottom,UI_PANEL_NORMAL);
+        snprintf(text,sizeof text,"%s",labels[i]);
+        UiTrimSmallText(text,r.right-r.left-UIS(10));
+        DrawTextSmallLiteralWin(r.left+UIS(5),r.top+UIS(4),text,UI_ACCENT);
     }
     DrawTextSmallLiteralWin(left, winH * 79 / 100, feedback, UI_WARN);
     UiDossierText(
-        Tr("Seven new tools are sealed reserves: a mimic catch does not discard them. Space / tap "
-           "below: equip and return.",
-           "七种新工具属于密封储备，不随宝箱怪抓中丢弃。空格或点击下方区域：选用并返回。"),
+        Tr("Order applies to the item wheel and number keys. Space / tap below to equip. J closes the pack.",
+           "排序用于滚轮和数字键。按空格或点击下方选用，按 J 关闭背包。"),
         left, winH * 85 / 100, right - left, winH * 98 / 100, UI_INK_DIM);
 }

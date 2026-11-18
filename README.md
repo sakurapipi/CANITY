@@ -4,9 +4,9 @@
 
 一款以探索、声音、光线与资源取舍为核心的第一人称像素恐怖逃生游戏，使用 C99 编写。
 
-**当前预发布版 v2.5.0 RC1，当前正式版 v2.4.9。** 地图为 36×36，容器槽为 12。RC1 使用 v46 存档，升级前请备份旧档。
+**当前预发布版 v2.5.0 RC2，当前正式版 v2.4.9。** 地图为 36×36，容器槽为 12。RC2 使用 v46 存档，升级前请备份旧档。
 
-[下载 v2.5.0 RC1](https://github.com/sakurapipi/CANITY/releases/tag/v2.5.0-RC1) · [RC1 更新与兼容说明](docs/RELEASE-v2.5.0-RC1.md)
+[下载 v2.5.0 RC2](https://github.com/sakurapipi/CANITY/releases/tag/v2.5.0-RC2) · [RC2 更新与兼容说明](docs/RELEASE-v2.5.0-RC2.md)
 
 「失序协议」新增三章剧情。分别用维修员的过载防线、档案员的记忆替身和隔离警卫的战术防御推进故事。三章没有游荡怪物，包含独立的场景材质、装置、现场记录和地图地标。经典探索保留生存玩法，局外技能对所有角色通用。
 
@@ -150,7 +150,7 @@ python -X utf8 tools/build_web.py --single
 先完成对应平台构建，再打包；下列命令使用最近一次完整验证报告：
 
 ```sh
-python -X utf8 tools/package_playable.py --include-web --label CANITY_v2.5.0-RC1 --notes docs/RELEASE-v2.5.0-RC1.md --acceptance-report work/codex-build/validation-summary.json --source-commit <完整提交SHA>
+python -X utf8 tools/package_playable.py --include-web --label CANITY_v2.5.0-RC2 --notes docs/RELEASE-v2.5.0-RC2.md --acceptance-report work/codex-build/validation-summary.json --source-commit <完整提交SHA>
 ```
 
 `--include-web` 要求网页构建已存在。默认打包 **Lite**：复制 EXE 与 `music/`、谱面和清单；只有用 `--embed-music` 构建 Full 版后，才可加 `--single-exe --embed-music` 打单文件 EXE 包。运行包记录源码、资源和验证摘要；报告与当前验证输入不匹配时拒绝套用。生成安装包不等于已经完成真实桌面或手机验收。

@@ -10,6 +10,7 @@
 #include "ui.h"
 #include "ui_text.h"
 #include "map_rooms.h"
+#include "hatch.h"
 #include "upgrade_run.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -33,7 +34,7 @@ static void DrawMapLegend(void) {
     static const struct {int kind;const char* en;const char* zh;} items[]={
         {-1,"YOU","你"}, {MAP_ICON_EXIT,"EXIT","出口"},
         {MAP_ICON_COIL,"DISPATCH COIL","调度线圈"}, {MAP_ICON_RECEIVER,"WITNESS RECEIVER","证词接收器"},
-        {MAP_ICON_SHUTTER,"PRESSURE SHUTTER","泄压闸"}, {MAP_ICON_TERMINAL,"TERMINAL","剧情终端"},
+        {MAP_ICON_SHUTTER,"PRESSURE SHUTTER","泄压闸"}, {MAP_ICON_TERMINAL,"TERMINAL","剧情终端"}, {MAP_ICON_RECORD,"EVIDENCE","关键证据"},
         {MAP_ICON_CRATE,"CHEST","宝箱"}, {MAP_ICON_FUSE,"FUSE CHEST","保险丝箱"},
         {MAP_ICON_BREAKER,"BREAKER","配电箱"}, {MAP_ICON_SAFE,"SAFE ROOM","安全屋"},
         {MAP_ICON_HIDE,"HIDE SPOT","隐藏点"}, {MAP_ICON_BROKEN,"BROKEN HIDE","损坏隐藏点"},
@@ -46,6 +47,7 @@ static void DrawMapLegend(void) {
         if (kind>=MAP_ICON_COIL && kind<MAP_ICON_TERMINAL &&
             (!(protocolRun.flags&PROTOCOL_MISSIONS) || kind!=MAP_ICON_COIL+protocolRun.story-1)) continue;
         if (kind==MAP_ICON_TERMINAL && !protocolRun.story) continue;
+        if (kind==MAP_ICON_RECORD && !ProtocolPeacefulStory()) continue;
         indices[count++]=(int)i;
     }
     int row=UIS(18);if(row<FONT_H+5)row=FONT_H+5;
@@ -163,13 +165,15 @@ void RenderMap(void) {
         }
     }
 
+    int gridReveal=RoomThemeMapRevealed();
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             unsigned int color = 0;
             float alpha = 0.8f;
-            if (explored[y][x] == 0) { color = 0x00050505; alpha = 0.95f; }
+            if (!gridReveal && explored[y][x] == 0) { color = 0x00050505; alpha = 0.95f; }
             else {
-                if (worldMap[y][x] == 1) color = 0x00888888;
+                if (worldMap[y][x] == 1) color = gridReveal ? 0x00567380 : 0x00888888;
+                else if (gridReveal) { color = 0x00214657; alpha = .8f; }
                 else { color = 0x00000000; alpha = 0.3f; }
             }
             int bx = mapStartX + x * cellSize, by = mapStartY + y * cellSize;

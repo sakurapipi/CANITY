@@ -463,7 +463,14 @@ static void DrawSkillTreeDetails(const SkillTreeDrawContext* context) {
         char b[128];
 
         sprintf(b, "%.2fx", skillView.zoom);
-        DrawTextWin(innerR - TextWidthWin(b), dy - TH, b, 0x00808080u);
+        int zoomX=innerR-TextWidthWin(b);
+        if (SkillOwned(sel) && (sel==SK_DECOY || sel==SK_HUSH_ECHO || sel==SK_ECHO_MAPPING)) {
+            char notice[120];
+            snprintf(notice,sizeof notice,"%s",Tr("Retuned skill · Your rank was kept","技能已重制，已购等级保留"));
+            ClampRowText(notice,zoomX-innerL-UIS(12));
+            DrawTextWin(innerL,dy-TH,notice,UI_GOLD);
+        }
+        DrawTextWin(zoomX, dy - TH, b, 0x00808080u);
 
         sprintf(b, "%s   [%s]", SkillDisplayName(sel),
                 SkillArchetypeName(SkillArchetype(sel), g_lang == LANG_ZH));

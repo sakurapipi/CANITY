@@ -134,14 +134,20 @@ int SuspicionBestReach(float fromX, float fromY, float distPenalty,
     for (int i = 0; i < SUSP_MAX; i++) {
         if (susp[i].strength <= 0.0f) continue;
 
-        float reach = SoundReach(fromX, fromY, susp[i].x, susp[i].y, maxListen);
-        if (reach <= 0.0f) continue;                 /* 根本传不过来 */
-
-        /* 距离用路径步数；不可达时用一个大数把它压下去 */
         int steps = SoundPropCostAt(susp[i].x, susp[i].y);
-        float d = (steps == PROP_UNREACHABLE) ? 9999.0f : (float)steps;
-
-        float score = susp[i].strength * reach - d * distPenalty;
+        float d = steps==PROP_UNREACHABLE ? 9999.f : (float)steps;
+        int decoy = susp[i].source==SUSP_DECOY;
+        float reach;
+        if (decoy) {
+            /* A lure can be heard around bends, but only across connected floor. */
+            float straight=sqrtf(Dist2(fromX,fromY,susp[i].x,susp[i].y));
+            if (steps==PROP_UNREACHABLE || straight>=DECOY_SHOUT_R) continue;
+            reach=1.f-.55f*straight/DECOY_SHOUT_R;
+        } else {
+            reach=SoundReach(fromX,fromY,susp[i].x,susp[i].y,maxListen);
+        }
+        if (reach <= 0.0f) continue;
+        float score = susp[i].strength * reach - (decoy?fminf(d,DECOY_SHOUT_R):d) * distPenalty;
         if (score > bestScore) {
             bestScore = score;
             best = i;

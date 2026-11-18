@@ -54,9 +54,9 @@ static const char *message;
 
 
 static const FloorDef missions[]={
-    {{"The Last Live Coil","末路供电"},{"DISPATCH LOG: All external calls were rerouted to a recording. The original is in the witness archive.","调度记录：所有外呼都被转接到一段录音。原始呼叫存放在证词档案室。"}, {0,0},{0,0},{0,0},0,300,1,0,1,5,1.f},
-    {{"A Voice on Both Tracks","双轨证词"},{"WITNESS RECORD: We were told the exit was open. Guard Ward is still holding the spillway.","证词：他们说出口已经开放。警卫沈砚还守在泄压通道。"}, {0,0},{0,0},{0,0},0,500,2,1,2,9,1.1f},
-    {{"Hold the Spillway","守住泄压渠"},{"DISPATCH: Evidence uploaded. Evacuation lights are on. The last crossing is yours.","调度：证词已传出，疏散灯已亮。最后一个过闸的是你。"}, {0,0},{0,0},{0,0},0,700,3,2,3,15,1.2f}
+    {{"B-17: The Repeated All-Clear","B-17：重复的解除警报"},{"MASON: I restored the B-17 line. Lumen, take the witness reel out of the archive. I'll keep the lamps on.","程默：B-17线路已恢复。林岑，去档案室取证词原带。我留在这边供电。"}, {0,0},{0,0},{0,0},0,65,1,0,1,5,1.f},
+    {{"B-17: The Uncut Tape","B-17：未剪辑的录音"},{"LUMEN: The B-17 tape is outside. Ward, I heard the manual release instructions. Face the shutter on the second tone.","林岑：B-17录音已传到外面。沈砚，我听到了手动解锁方法。第二声警报响时，面向闸门。"}, {0,0},{0,0},{0,0},0,85,2,1,2,9,1.1f},
+    {{"B-17: The Last Name","B-17：最后一个名字"},{"WARD: Mason gave us light. Lumen told us when to move. Everyone else is across. Mark B-17 complete as soon as I clear the gate.","沈砚：程默接通了灯，林岑报准了时机。其他人都过去了。我一过闸，就把B-17标成完成。"}, {0,0},{0,0},{0,0},0,110,3,2,3,15,1.2f}
 };
 int ProtocolPeacefulStory(void) {
     return protocolRun.story>=1 && protocolRun.story<=3 && (protocolRun.flags&PROTOCOL_MISSIONS);
@@ -74,13 +74,31 @@ void ProtocolClearStoryActors(void) {
     NeutralReset();
     ExtrasReset();
 }
-static int LayoutFloor(void) { return protocolRun.story+(ProtocolPeacefulStory()?8:0); }
+static int LayoutFloor(void) {
+    if (!ProtocolPeacefulStory()) return protocolRun.story;
+    return protocolRun.story+((protocolRun.flags&PROTOCOL_EVAC_LAYOUT)?11:8);
+}
+static struct {
+    float time,contact,x,y;
+    int captured,warned;
+} trial;
+
+void ProtocolResetTrial(void) { memset(&trial,0,sizeof trial); }
+static int MissionEvidence(void) { return (protocolRun.flags&RELAY)!=0; }
+static const char *MissionEvidenceHint(void) {
+    static const char *const text[][2]={
+        {"Read the B-17 switch log","读取B-17切换记录"},
+        {"Read the B-17 reel label","查看B-17录音盘标签"},
+        {"Check the B-17 evacuation roster","检查B-17疏散名册"}
+    };
+    return LangTr(text[protocolRun.story-1][0],text[protocolRun.story-1][1]);
+}
 static int MissionSolved(void) { return (protocolRun.flags&PROTOCOL_MISSION_SOLVED)!=0; }
 static const char *MissionInstruction(void) {
     const char *const steps[][2]={
-        {"%s  Aim at the coil and deploy your field","%s  瞄准线圈，部署过载防线"},
-        {"%s  Send your double through the receiver","%s  让记忆替身穿过证词接收器"},
-        {"%s  Raise your shield and approach the shutter","%s  举盾靠近泄压闸，接下冲击"}
+        {"%s  Slow the moving relay carriage","%s  用过载防线减速移动滑台"},
+        {"%s  Draw the tracking pickup to your double","%s  用记忆替身引开巡检拾音器"},
+        {"%s  Brace at the shutter after the alarm","%s  警报响后在闸前举盾"}
     };
     static char line[128];
     int step=protocolRun.story-1;
@@ -101,6 +119,7 @@ void ProtocolBuildFloor(void) {
     roomSeedUsed=0;
     memset(explored,0,sizeof explored);
     for (int y=0;y<MAP_HEIGHT;y++) for (int x=0;x<MAP_WIDTH;x++) worldMap[y][x]=1;
+    if (ProtocolPeacefulStory()) protocolRun.flags|=PROTOCOL_EVAC_LAYOUT;
     int layout=LayoutFloor();
     StoryLayOut(layout);
     const Cell *entry=StorySite(layout,SITE_ENTRY);
@@ -134,7 +153,7 @@ void ProtocolBuildFloor(void) {
     modShardMul=f->gold;
     memset(thrown,0,sizeof thrown);
     memset(smokes,0,sizeof smokes);
-    protocolRun.flags=(protocolRun.flags&PROTOCOL_MISSIONS)|AUTHORED_LAYOUT;
+    protocolRun.flags=(protocolRun.flags&(PROTOCOL_MISSIONS|PROTOCOL_EVAC_LAYOUT))|AUTHORED_LAYOUT;
     static const char *const entryLines[][2]={
         {"A sign on the empty bed says 00. Someone left the recovery hatch open.",
          "空床上的牌子写着00。有人把苏醒舱的门留开了。"},
@@ -154,9 +173,9 @@ void ProtocolBuildFloor(void) {
          "列车和检修撤离舱走不同线路。信号室能看到两边。"}
     };
     static const char *const brief[][2]={
-        {"MASON: The relay is feeding a false rescue call. I can stop the coil with my field.","程默：这条继电线路在播放伪造的救援广播。我能用过载阻滞区让线圈停下来。"},
-        {"LUMEN: The archive erased my access. It still recognizes the voice I recorded before the lockdown.","林岑：档案室把我的权限删了，但它还认得封锁前录下的声音。"},
-        {"WARD: I opened this gate once for the others. The emergency pressure will hit when I get close.","沈砚：我开过这扇闸，让其他人先走。再靠近时，泄压冲击会打过来。"}
+        {"MASON: Dispatch says B-17 is clear. On the floor plan that lamp is red. I'll pull the switching log.","程默：调度说B-17安全，面板上的指示灯却是红的。我去查切换记录。"},
+        {"LUMEN: Mason got B-17 back on the line. The live warning is still on the uncut witness reel.","林岑：程默接回了B-17的线路。真正的警报还在那盘未剪辑的录音里。"},
+        {"WARD: Lumen put the real warning on the radio. The crew are crossing now. I'll close the pressure line behind us.","沈砚：林岑把真正的警报发到了电台。其他人正在过闸，我留最后切断压力线路。"}
     };
     const char *const *intro=ProtocolPeacefulStory()?brief[floor-1]:entryLines[floor-1];
     message=LangTr(intro[0],intro[1]);messageTime=8;
@@ -179,7 +198,7 @@ int ProtocolBreakerReady(void) {
 }
 int ProtocolExitReady(void) {
     if (!protocolRun.story) return 1;
-    if (ProtocolPeacefulStory()) return MissionSolved() && (protocolRun.flags&TERMINAL);
+    if (ProtocolPeacefulStory()) return MissionEvidence() && MissionSolved() && (protocolRun.flags&TERMINAL);
     return (protocolRun.flags&TERMINAL) && (protocolRun.story!=8 ||
            protocolRun.ending==1 || (protocolRun.ending==2 && (protocolRun.flags&CORE)));
 }
@@ -207,9 +226,13 @@ static int DeviceReady(int id) {
 }
 const char *ProtocolDeviceHint(int id,int *ready) {
     if (ProtocolPeacefulStory()) {
-        *ready=id!=PROTOCOL_TERMINAL || MissionSolved();
+        *ready=id==PROTOCOL_RELAY || (MissionEvidence() && (id!=PROTOCOL_TERMINAL || MissionSolved()));
         if (id==PROTOCOL_RELAY) return LangTr("Read the local record","读取现场记录");
-        if (id==PROTOCOL_EVIDENCE) return MissionSolved()?LangTr("Station aligned","装置已就绪"):MissionInstruction();
+        if (!MissionEvidence()) return MissionEvidenceHint();
+        if (id==PROTOCOL_EVIDENCE) {
+            if (MissionSolved()) return LangTr("Station aligned","装置已就绪");
+            return trial.time>0?MissionInstruction():LangTr("Start the station cycle","启动装置试运行");
+        }
         return *ready?LangTr("Read the terminal and unlock evacuation","读取终端并开启撤离"):MissionInstruction();
     }
     *ready=DeviceReady(id);
@@ -280,53 +303,105 @@ static void ReadStation(void) {
     }
     Notify(LangTr(record[floor-1][0],record[floor-1][1]));
 }
-void ProtocolMissionAbilityTick(void) {
-    if (!ProtocolPeacefulStory() || MissionSolved() || hiddenIn>=0 || ProtocolAbilityRemaining()<=0) return;
-    float x,y,tx=posX,ty=posY;
-    if (!ProtocolProp(PROTOCOL_EVIDENCE,&x,&y)) return;
-    int role=protocolRun.role;
-    if (role==1 || role==2) {
-        if (!ProtocolAbilityMarker(&tx,&ty)) return;
-        if (Dist2(x,y,tx,ty)>(role==1?1.44f:.81f) || !HasLOS(tx,ty,x,y)) return;
-    } else {
-        if (Dist2(x,y,posX,posY)>1.44f || (x-posX)*dirX+(y-posY)*dirY<.35f ||
-            !HasLOS(posX,posY,x,y)) return;
-        float loss=ProtocolContactLoss(6,6);
-        if (loss>=6) return;
-        sanity=fmaxf(1,sanity-loss);
-    }
+static void FinishMissionTrial(float x,float y) {
+    ProtocolResetTrial();
     protocolRun.flags|=PROTOCOL_MISSION_SOLVED;
     breakerOpen=1;
     SpawnParticles(x,y,0);
     Notify(LangTr("Station ready. Follow the terminal marker.","装置就绪。沿标记前往终端。"));
     SaveGame();
 }
+
+int ProtocolTrialVisual(float *x,float *y,float *signal) {
+    if (!ProtocolPeacefulStory() || trial.time<=0) return 0;
+    *x=trial.x;*y=trial.y;
+    *signal=trial.contact>0?1.f:.57f+.23f*sinf(trial.time*12);
+    return protocolRun.story;
+}
+
+static void TickMissionTrial(float dt) {
+    if (!ProtocolPeacefulStory() || trial.time<=0 || MissionSolved()) return;
+    float x,y;
+    if (!ProtocolProp(PROTOCOL_EVIDENCE,&x,&y)) return;
+    trial.time=fmaxf(0,trial.time-dt);
+    if (protocolRun.story==1) {
+        float rate=ProtocolFieldContains(trial.x,trial.y)?.55f:1.f;
+        trial.contact=rate<1?trial.contact+dt:0;
+        trial.x+=(trial.captured?-1:1)*1.5f*rate*dt;
+        if (trial.x>=x+1.35f) {trial.x=x+1.35f;trial.captured=1;}
+        if (trial.x<=x-1.35f) {trial.x=x-1.35f;trial.captured=0;}
+        if (trial.contact>=.50f) { FinishMissionTrial(x,y);return; }
+    } else if (protocolRun.story==2) {
+        float mx,my;
+        int hears=ProtocolAbilityMarker(&mx,&my)==2 && Dist2(mx,my,x,y)<9 &&
+                  Dist2(mx,my,posX,posY)>.81f && HasLOS(trial.x,trial.y,mx,my);
+        float goalX=x+(trial.captured?1.15f:-1.15f),goalY=y;
+        if (hears) {goalX=mx;goalY=my;}
+        float dx=goalX-trial.x,dy=goalY-trial.y;
+        float distance=sqrtf(dx*dx+dy*dy);
+        float fraction=distance>.01f?fminf(1,dt*1.85f/distance):0;
+        float nx=trial.x+dx*fraction,ny=trial.y+dy*fraction;
+        if (!Blocked(nx,ny)) {trial.x=nx;trial.y=ny;}
+        if (!hears && distance<.15f) trial.captured=!trial.captured;
+        trial.contact=hears && distance<.58f?trial.contact+dt:0;
+        if (trial.contact>=.28f) { FinishMissionTrial(x,y);return; }
+    } else {
+        if (!trial.warned && trial.time<=6) {
+            trial.warned=1;
+            PlaySfx(SFX_POWER,.85f);
+        }
+        if (trial.time<=6 && trial.time>4 && hiddenIn<0 && Dist2(x,y,posX,posY)<=1.44f &&
+            (x-posX)*dirX+(y-posY)*dirY>.28f && HasLOS(posX,posY,x,y)) {
+            if (ProtocolAbilityRemaining()>0) {
+                float loss=ProtocolContactLoss(6,6);
+                if (loss<6) {
+                    sanity=fmaxf(1,sanity-loss);
+                    FinishMissionTrial(x,y);return;
+                }
+            }
+        }
+        if (trial.time<=4) trial.time=0;
+    }
+    if (trial.time<=0) {
+        ProtocolResetTrial();
+        Notify(LangTr("Cycle ended. Use the station to try again.","本轮结束。操作装置即可重试。"));
+    }
+}
+
 static int InteractMission(int id) {
     if (id==PROTOCOL_RELAY) {
         static const char *const lines[][2]={
-            {"SWITCH LOG: The rescue line was looped from inside. The dispatch coil is still powered by the bypass.", "切换记录：救援线路从内部接入了循环。调度线圈仍由旁路供电。"},
-            {"REEL LABEL: Lumen, Booth 2. The receiver hears the original recording even after the access list was wiped.", "录音盘标签：林岑，二号录音间。权限表被清空后，接收器仍认得原声。"},
-            {"EVACUATION LIST: Every name is checked off except Ward. The crew left his route lit from the far side.", "疏散名册：只剩沈砚尚未画勾。撤离人员在闸门另一侧为他留了灯。"}
+            {"B-17 SWITCH LOG: The drill recording replaced the live line during the pressure spike. Catch the relay carriage to restore it.", "B-17切换记录：压力飙升时，演习录音顶掉了实时信号。截停滑台，把线路切回去。"},
+            {"B-17 REEL: The pressure operator recorded two alarm tones. Draw the pickup away so the receiver can copy both.", "B-17录音盘：操作员录下了两声警报。用替身引开巡检拾音器，让接收器完整转录。"},
+            {"B-17 ROSTER: The gate stalls on the second tone. Use your shield at the shutter until the pressure falls.", "B-17疏散名册：第二声警报时闸门会卡住。在闸前举盾，撑到压力回落。"}
         };
         protocolRun.flags|=RELAY;
         const char *const *line=lines[protocolRun.story-1];
         Notify(LangTr(line[0],line[1]));
         SaveGame();
     } else if (id==PROTOCOL_TERMINAL) {
-        if (!MissionSolved()) { Notify(MissionInstruction());return 1; }
+        if (!MissionEvidence() || !MissionSolved()) { Notify(ProtocolObjective());return 1; }
         protocolRun.flags|=TERMINAL;
         const FloorDef *f=Def();
         Notify(LangTr(f->event[0],f->event[1]));
         SaveGame();
     } else if (!MissionSolved()) {
-        /* A station provides only enough reserve for one more attempt. */
-        if (ProtocolAbilityRemaining()<=0) {
-            protocolRun.cooldown=0;
-            if (protocolRun.role==1) battery=fmaxf(battery,12);
-            if (protocolRun.role==2) sanity=fmaxf(sanity,12);
-            if (protocolRun.role==3) stamina=fmaxf(stamina,16);
+        if (!MissionEvidence() || trial.time>0) { Notify(ProtocolObjective());return 1; }
+        if (ProtocolAbilityRemaining()>0) {
+            Notify(LangTr("Let your ability finish before starting the next cycle.",
+                          "等当前能力结束，再启动下一轮。"));
+            return 1;
         }
+        protocolRun.cooldown=0;
+        if (protocolRun.role==1) battery=fmaxf(battery,12);
+        if (protocolRun.role==2) sanity=fmaxf(sanity,7);
+        if (protocolRun.role==3) stamina=fmaxf(stamina,16);
+        ProtocolResetTrial();
+        ProtocolProp(PROTOCOL_EVIDENCE,&trial.x,&trial.y);
+        if (protocolRun.story!=3) trial.x-=1.1f;
+        trial.time=9;
         Notify(MissionInstruction());
+        if (protocolRun.story==3) PlaySfx(SFX_CRANK,.65f);
     }
     return 1;
 }
@@ -403,14 +478,10 @@ int ProtocolAdvance(void) {
     WalletAddRun(f->reward);
     if (f->unlock) protocolProfile.unlocked|=1u<<f->unlock;
     if (ProtocolPeacefulStory()) {
-        if (protocolRun.story==3) {
-            if (!(protocolProfile.endings&4u)) WalletAddBank(500);
-            protocolProfile.endings|=4u;
-            return 2;
-        }
+        ProtocolReleaseStoryNodes();
+        if (protocolRun.story==3) return 2;
         currentLevel=++protocolRun.story;
         protocolRun.role=currentLevel;
-        protocolRun.nodes=0;
         protocolRun.cooldown=0;
         sanity=SanityMax();battery=BatteryMax();stamina=StaminaMax();
         return 1;
@@ -427,10 +498,27 @@ int ProtocolAdvance(void) {
     return 1;
 }
 
+int ProtocolStoryPayout(void) {
+    int bankBefore=WalletBank();
+    int bonus=(protocolProfile.endings&4u)?0:500;
+    int earnings=WalletRun()-PROTOCOL_STORY_SUPPLIES;
+    if (earnings<0) earnings=0;
+    if (earnings>PROTOCOL_STORY_BANK_CAP) earnings=PROTOCOL_STORY_BANK_CAP;
+    WalletAddBank(earnings+bonus);
+    protocolProfile.endings|=4u;
+    return WalletBank()-bankBefore;
+}
+
 const char *ProtocolObjective(void) {
     if (trainingMode) return guideMode?LangTr("Complete the current lesson","完成当前教学"):LangTr("Practice at your own pace","自由练习");
     if (ProtocolPeacefulStory()) {
-        if (!MissionSolved()) return MissionInstruction();
+        if (!MissionEvidence()) return MissionEvidenceHint();
+        if (!MissionSolved()) {
+            if (trial.time<=0) return LangTr("Go to the marked station and start its cycle","前往标记装置，启动试运行");
+            if (protocolRun.story==3 && trial.time>6)
+                return LangTr("Pressure building. Face the shutter and wait for the alarm.","压力正在上升。面向泄压闸，等待警报。");
+            return MissionInstruction();
+        }
         return ProtocolExitReady()?LangTr("Reach the evacuation gate","前往撤离闸"):LangTr("Read the marked terminal","读取已标记的终端");
     }
     if (protocolRun.story==1 && !(protocolRun.flags&RELAY))
@@ -461,7 +549,24 @@ int ProtocolCinematicSkip(void){if(film<=0)return 0;film=0;return 1;}
 void ProtocolCinematicTick(float dt){
     if (film>0) {film=fmaxf(0,film-dt);uiDirty=1;return;}
     messageTime=fmaxf(0,messageTime-dt);
-    if (currentState==STATE_PLAYING && protocolRun.role==3) ProtocolMissionAbilityTick();
+    if (currentState==STATE_PLAYING) TickMissionTrial(dt);
+    if (currentState==STATE_PLAYING && ProtocolPeacefulStory() &&
+        (protocolRun.flags&PROTOCOL_EVAC_LAYOUT) && !(protocolRun.flags&EVIDENCE) && messageTime<=0) {
+        const Cell *record=StorySite(LayoutFloor(),SITE_RECORD);
+        if (Dist2(posX,posY,record->x+.5f,record->y+.5f)<4) {
+            static const char *const details[][2]={
+                {"The bypass key is still turned to DRILL. Someone wired the red pressure lamp directly to B-17.",
+                 "旁路钥匙还拧在演习档。有人用一根单独的线，把红色压力灯接到了B-17。"},
+                {"Two reel cases bear the same timestamp. The lighter case is labelled ALL-CLEAR and has no pressure-channel track.",
+                 "两个录音盘盒的时间相同。写着解除警报的那盘，没有压力频道的音轨。"},
+                {"Boot marks lead across the wet floor. At the far gate, someone left a lamp pointed back toward the shutter.",
+                 "湿地上有一排向外的靴印。远端闸门旁，有人留了一盏朝向泄压闸的灯。"}
+            };
+            protocolRun.flags|=EVIDENCE;
+            message=LangTr(details[protocolRun.story-1][0],details[protocolRun.story-1][1]);
+            messageTime=7;
+        }
+    }
     if (trainingMode || currentState!=STATE_PLAYING || MonsterChaseActive()) return;
     const char *line=ProtocolObjective();
     if (strcmp(line,previousObjective)!=0) {
@@ -479,7 +584,7 @@ void ProtocolCinematicDraw(void) {
     }
     DrawTextCenterWin(cx,winH/10,"C A N I T Y",0xadd7cb);
     if (filmKind==2) {
-        DrawTextCenterWin(cx,winH*7/10,ProtocolPeacefulStory()?LangTr("The evidence left the facility first. The three followed.","证词先离开了设施。三个人随后撤离。"):protocolRun.ending==1?
+        DrawTextCenterWin(cx,winH*7/10,ProtocolPeacefulStory()?LangTr("B-17 closed. The evacuation log had no blank lines.","B-17已关闭，疏散名册上没有空着的名字。"):protocolRun.ending==1?
             LangTr("Departure: the train leaves the signal behind.","离开设施：列车驶离信号范围。"):
             LangTr("Protocol Reset: the facility goes dark.","协议归零：设施断电，陷入沉寂。"),0xf0eae1);
     } else if (filmKind==1) {
@@ -489,11 +594,16 @@ void ProtocolCinematicDraw(void) {
         DrawTextCenterWin(cx,winH*76/100,LangTr("The next chapter begins here.","已抵达下一章入口。"),0xa6bdbe);
     } else if (ProtocolPeacefulStory()) {
         DrawTextCenterWin(cx,winH*7/10,film>6?ProtocolRoleName(protocolRun.role):ProtocolFloorName(),0xf0eae1);
-        DrawTextCenterWin(cx,winH*76/100,LangTr("The distress signal repeats on a closed circuit.","求救信号在一条封闭线路里反复播放。"),0xa6bdbe);
+        DrawTextCenterWin(cx,winH*76/100,LangTr("Story prologue · Three chapters","剧情序章 · 共三章"),0xa6bdbe);
     } else DrawTextCenterWin(cx,winH*7/10,film>7?ProtocolRoleName(protocolRun.role):
         film>4?LangTr("Can you hear me? You are underground.","听得见吗？你在地下。"):
         LangTr("Find the fuses. Get power to the exit.","寻找保险丝。恢复出口电力。"),0xf0eae1);
-    DrawTextCenterWin(cx,winH*84/100,LangTr("Press Enter or tap to skip","回车或轻触以跳过"),0xa6bdbe);
+#ifdef CANITY_WEB
+    const char *skip=LangTr("Press Enter or tap to skip","按回车或轻触跳过");
+#else
+    const char *skip=LangTr("Press Enter to skip","按回车跳过");
+#endif
+    DrawTextCenterWin(cx,winH*84/100,skip,0xa6bdbe);
 }
 int ProtocolProp(int id,float *x,float *y) {
     if (!protocolRun.story || id<0 || id>=PROTOCOL_DEVICE_COUNT) return 0;
@@ -527,7 +637,7 @@ int ProtocolTarget(float *x,float *y) {
     if (!protocolRun.story || MonsterChaseActive()) return 0;
     if (ProtocolPeacefulStory()) {
         if (ProtocolExitReady()) { *x=exitX;*y=exitY;return 1; }
-        return ProtocolProp(MissionSolved()?PROTOCOL_TERMINAL:PROTOCOL_EVIDENCE,x,y);
+        return ProtocolProp(!MissionEvidence()?PROTOCOL_RELAY:MissionSolved()?PROTOCOL_TERMINAL:PROTOCOL_EVIDENCE,x,y);
     }
     if (protocolRun.story==1 && !(protocolRun.flags&RELAY)) {
         if (fusesHeld) return ProtocolProp(1,x,y);

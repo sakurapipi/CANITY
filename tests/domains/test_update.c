@@ -481,27 +481,49 @@ static void test_three_peaceful_missions(void) {
         CHECK(ProtocolPeacefulStory() && currentLevel==chapter && protocolRun.role==chapter,
               "story starts each chapter with its assigned role");
         CHECK(!ProtocolExitReady() && ProtocolAdvance()==0,"story gate requires its objectives");
+        CHECK(!ProtocolNodeAvailable(0),"prologue disables role node purchases");
         CHECK(!mimicCount && !WardenActive() && !CollectorActive() && !SpiderActive(),
               "peaceful story has no special encounter population");
         for (int i=0;i<MON_HUNTER_MAX;i++)
             CHECK(!monHunters[i].active,"peaceful story has no hunters");
         for (int i=0;i<LIGHTBEAST_MAX;i++)
             CHECK(!lightBeasts[i].active,"peaceful story has no light beasts");
-        float x,y;
+        float x,y,signal;
         CHECK(ProtocolProp(PROTOCOL_EVIDENCE,&x,&y)==1,"unsolved station is available");
-        posX=x-(chapter==2?2.1f:1.0f);posY=y;
+        posX=x-1;posY=y;
         dirX=1;dirY=0;
+        ProtocolInteract(PROTOCOL_EVIDENCE);
+        CHECK(!ProtocolTrialVisual(&x,&y,&signal),"missing evidence blocks trial activation");
+        CHECK(ProtocolProp(PROTOCOL_RELAY,&x,&y)==1,"key record awaits inspection");
+        posX=x-1;posY=y;
+        CHECK(ProtocolInteract(PROTOCOL_RELAY),"the player can inspect the required evidence");
+        CHECK(ProtocolProp(PROTOCOL_EVIDENCE,&x,&y)==1,"unsolved station remains available");
+        posX=x-1;posY=y;
+        CHECK(ProtocolInteract(PROTOCOL_EVIDENCE) && ProtocolTrialVisual(&x,&y,&signal),
+              "examining evidence unlocks the station cycle");
+        if (chapter==3)
+            for (int tick=0;tick<64;tick++) ProtocolCinematicTick(.05f);
         ProtocolActivate();
-        if (chapter==2)
-            for (int tick=0;tick<10;tick++) ProtocolTick(.1f);
+        for (int tick=0;tick<130 && !(protocolRun.flags&PROTOCOL_MISSION_SOLVED);tick++) {
+            ProtocolTick(.05f);
+            ProtocolCinematicTick(.05f);
+        }
         CHECK((protocolRun.flags&PROTOCOL_MISSION_SOLVED) && !ProtocolExitReady(),
-              "the actual role ability solves the station while exit awaits terminal");
+              "the role ability solves the live trial while exit awaits terminal");
         CHECK(ProtocolProp(PROTOCOL_TERMINAL,&x,&y)==1,"terminal is reachable after solving");
         posX=x-1;posY=y;
         CHECK(ProtocolInteract(PROTOCOL_TERMINAL) && ProtocolExitReady(),
               "reading the terminal opens evacuation");
         CHECK(ProtocolAdvance()==(chapter==3?2:1),"chapter advances or completes the campaign");
     }
+    bankGold=0;
+    carryGold=PROTOCOL_STORY_SUPPLIES+PROTOCOL_STORY_BANK_CAP+300;
+    protocolProfile.endings&=~4u;
+    CHECK(ProtocolStoryPayout()==PROTOCOL_STORY_BANK_CAP+500 &&
+          bankGold==PROTOCOL_STORY_BANK_CAP+500,
+          "first prologue settlement adds the capped earnings and one-time reward");
+    carryGold=PROTOCOL_STORY_SUPPLIES;
+    CHECK(ProtocolStoryPayout()==0,"starting supplies and the one-time reward cannot pay again");
     StartFreshTestRun();
 }
 

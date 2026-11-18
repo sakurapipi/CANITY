@@ -86,7 +86,7 @@ const char* optKeys[] = {
     "N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
     "Space","LShift","RShift","LCtrl","RCtrl","LAlt","RAlt",
     "Up","Down","Left","Right","Enter","Esc","Tab",
-    "LMB","RMB","MMB"
+    "LMB","RMB","MMB","Shift"
 };
 /* 对应的虚拟键码，与 optKeys 下标一一对应 */
 const int optKeyVKs[] = {
@@ -95,20 +95,20 @@ const int optKeyVKs[] = {
     'N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
     VK_SPACE, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU,
     VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, VK_TAB,
-    VK_LBUTTON, VK_RBUTTON, VK_MBUTTON
+    VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_SHIFT
 };
 
 /* 改绑提示框用的动作名（下标 = ActionId） */
 const char* actionNames[ACT_COUNT] = {
     "MOVE FORWARD", "MOVE BACKWARD", "MOVE LEFT", "MOVE RIGHT",
     "SPRINT", "INTERACT", "CRANK BATTERY", "FLASHLIGHT", "TOGGLE MAP",
-    "THROW", "CANCEL CHARGE", "SELECT FLARE", "SELECT BOTTLE", "SELECT SLOT 3",
+    "THROW", "Cancel Throw Charge", "Select Slot 1", "Select Slot 2", "Select Slot 3",
     "PAUSE", "MENU UP", "MENU DOWN", "MENU LEFT", "MENU RIGHT",
     "MENU CONFIRM", "MENU CANCEL", "DODGE (QTE)",
     /* v2.7：这两项以前漏了，数组声明长度是 ACT_COUNT，缺的自动补 NULL，
        而 DrawRebindOverlay 会拿 actionNames[...] 去 strlen → 崩。
        今天它们还没进设置表所以摸不到，谁加一行改绑就立刻炸。 */
-    "SWING KNIFE", "THROW DECOY"
+    "Attack (wrench)", "Character Ability", "Drop Gold"
 };
 /* 编译期守卫：表项数量必须与动作数一致，漏一个改绑框就会画到 NULL */
 /* 注意：sizeof(array)/sizeof(elem) 拿到的是**声明长度**（缺省元素补 0），
@@ -260,14 +260,10 @@ int LoopIsMouseButton(int vk) {
 }
 
 void LoopSelectVisibleSlot(int n) {
-    int counts[ITEM_SLOT_COUNT]; InventoryCounts(counts);
-    int k = 0;
-    for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
-        if (counts[i] <= 0) continue;
-        if (k == n) {
-            if (throwSelected != i) { throwSelected = i; uiDirty = 1; }
-            return;
-        }
-        k++;
+    for(int position=0;position<ITEM_SLOT_COUNT;position++) {
+        int item=InventoryAt(position);
+        if (InventoryCount(item)<=0) continue;
+        if (n--==0) {throwSelected=item;uiDirty=1;return;}
     }
+
 }

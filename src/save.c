@@ -1120,6 +1120,8 @@ static void RestoreEvolutionChunks(int tierOnly) {
             Shot flying[MAX_SHOTS];
             if (TacticalWireDecode(&state, flying, s_carry[i].data, (int)s_carry[i].size)) {
                 tactical = state;
+                for (int slot=0;slot<4;slot++)
+                    if (tactical.key[slot] && strchr("HJKL",tactical.key[slot])) tactical.key[slot]=0;
                 for (int k = 0; k < 2; k++)
                     if (tactical.acoustic[k].ttl > 0 &&
                         Blocked(tactical.acoustic[k].x, tactical.acoustic[k].y))
@@ -1195,6 +1197,27 @@ static void WriteSaveCandidates(void) {
     SavePathCand(0, p, sizeof(p));
     strncpy(g_savePath, p, sizeof(g_savePath) - 1);
     g_savePath[sizeof(g_savePath) - 1] = 0;
+}
+
+int SaveInventoryOrder(void) {
+    int index=-1,legacy=0;
+    for (int i=0;i<s_carryCount;i++) {
+        if(s_carry[i].id==SC_INVENTORY_ORDER) index=i;
+        if(s_carry[i].id==SC_LEGACY29) legacy=1;
+    }
+    if (index>=0 && s_carry[index].schema!=1) return 0;
+    int reserve=(!legacy)+2;
+    for (int i=0;i<s_carryCount;i++)
+        if (s_carry[i].id==SC_EVOLUTION_V1 || s_carry[i].id==SC_TACTICAL_ITEMS_V1) reserve--;
+    if(index<0 && s_carryCount+reserve>=SAVE_CARRY_MAX) return 0;
+    unsigned char *order=malloc(ITEM_SLOT_COUNT);
+    if (!order)return 0;
+    InventoryOrderSave(order);
+    if (index<0) index=s_carryCount++;
+    else free(s_carry[index].data);
+    s_carry[index]=(SaveCarryChunk){SC_INVENTORY_ORDER,1,ITEM_SLOT_COUNT,order};
+    SaveGame();
+    return g_saveState!=2;
 }
 
 void SaveGame(void) {
@@ -1906,6 +1929,11 @@ static void ApplyLoadedSettings(const LoadedSaveInfo* info) {
 }
 
 static void RestoreLoadedProgress(const LoadedSaveInfo* info) {
+    InventoryOrderRestore(NULL,0);
+    for (int i=0;i<s_carryCount;i++) if(s_carry[i].id==SC_INVENTORY_ORDER && s_carry[i].schema==1){
+        InventoryOrderRestore(s_carry[i].data,(int)s_carry[i].size);
+        break;
+    }
     protocolProfile=g_save.protocolProfileSave;
     if (info->fileSize < offsetof(SaveBlob,protocolProfileSave)+sizeof(ProtocolProfile))
         protocolProfile.briefSeen=1;
@@ -1990,6 +2018,7 @@ static void RestoreLoadedProgress(const LoadedSaveInfo* info) {
 }
 
 int LoadSettings(void) {
+    InventoryOrderRestore(NULL,0);
     LoadedSaveInfo info;
     memset(&info, 0, sizeof(info));
     if (!ReadSettingsCandidate(&info)) {
@@ -2242,7 +2271,7 @@ static int LoadedFloorCell(int x,int y){
 }
 static int LoadedHidePosition(float x,float y){
     if(!isfinite(x) || !isfinite(y) || x<1 || y<1 || x>=MAP_WIDTH-1 || y>=MAP_HEIGHT-1)return 0;
-    if(!LoadedFloorCell((int)x,(int)y) || Blocked(x,y))return 0;
+    if(RoomThemeContains(x,y) || !LoadedFloorCell((int)x,(int)y) || Blocked(x,y))return 0;
     /* A closet silhouette needs more room than the player's center point. */
     const float edge=.43f;
     return !worldMap[(int)(y-edge)][(int)(x-edge)] && !worldMap[(int)(y-edge)][(int)(x+edge)] &&

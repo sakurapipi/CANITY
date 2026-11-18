@@ -367,6 +367,7 @@ const SaveBlob* SaveTestBlob(void);  /* 仅测试用：最近一次载入的 blo
 
 /* 写当前进度（游戏中 / 退出时） */
 void SaveGame(void);
+int SaveInventoryOrder(void);
 /* 启动时只读设置；返回是否还有可继续的进度 */
 int LoadSettings(void);
 int SaveSelectSlot(int slot);

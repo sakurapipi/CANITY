@@ -1,3 +1,4 @@
+#include "ui_frame_stats.h"
 #include "protocol.h"
 #include "monster_evolution.h"
 #include "tactical_tools.h"
@@ -963,8 +964,8 @@ static void DrawRebindOverlay(void) {
 
     BlendRectWin(left, top, right, bottom, 0x0004080c, 1.0f);
     FrameRectWin(left, top, right, bottom, UI_EDGE, 0.95f, UIS(2));
-    DrawTitleWin("REBIND", top + pad, 0x00E65A5Au);
-    DrawTextCenterWin(winW / 2, top + pad + titlePx + UIS(24), actionNames[rebindingAct], 0x00A0FFA0u);
+    DrawTitleWin(Transl("REBIND"), top + pad, 0x00E65A5Au);
+    DrawTextCenterWin(winW / 2, top + pad + titlePx + UIS(24), Transl(actionNames[rebindingAct]), UI_ACCENT);
     if (rebindConflict >= 0 && rebindConflict < ACT_COUNT) {
         /* 冲突确认：告诉玩家会顶掉哪个动作的绑定，再按一次才生效 */
         char cbuf[96];
@@ -1014,7 +1015,7 @@ void DrawPopupText(void) {
     if (currentState != STATE_SETTINGS || !settingsPopupOpen) return;
     MenuGeo p = GetPopupGeo();
     const SettingItem* it = &settings[popupItem];
-    DrawTitleWin(p.title, p.titleY, 0x00E65A5Au);
+    DrawTitleWin(Transl(p.title), p.titleY, 0x00E65A5Au);
 
     if (it->kind == SET_SLIDER) {
         char val[32];
@@ -1035,12 +1036,12 @@ void DrawPopupText(void) {
         DrawTextWin(t.left, t.bottom + UIS(10), l, 0x008C8C8Cu);
         DrawTextWin(t.right - TextWidthWin(r), t.bottom + UIS(10), r, 0x008C8C8Cu);
 
-        const char* hint = "DRAG OR A/D   ENTER OK";
+        const char* hint = Tr("DRAG OR A/D   ENTER OK","拖动或按A/D调整，回车确认");
         DrawTextCenterWin(winW / 2, p.panel.bottom - UIS(38), hint, 0x006E6E6Eu);
     } else {
         for (int i = 0; i < p.count; i++) {
             unsigned int c = (i == popupSelection) ? 0x00A0FFA0u : 0x00A0A0A0u;
-            DrawTextInRow(settings[popupItem].options[i], RowRect(p, i), c);
+            DrawTextInRow(Transl(settings[popupItem].options[i]), RowRect(p, i), c);
         }
     }
 }
@@ -1476,6 +1477,8 @@ void RenderFrame(void) {
     DrawTutorialPanel();
     UiDrawThreatNotice();
     RenderFrameCalibration();
+    if (showFps && currentState==STATE_PLAYING && !calibActive && !lockActive &&
+        !exitChoiceOpen && !(isMapOpen && mapFullScreen)) UiDrawFrameStats();
     DrawRunReplacement();
     TacticalDrawPanel();
     PresentComposedFrame();

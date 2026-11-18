@@ -1,109 +1,14 @@
-#include "tactical_tools.h"
-/*
- * Canity — 投掷物系统（v8 重构第六刀 C）
- *
- * 原来整段写在 game.c 里（ThrowItem 107 行 + UpdateShots 234 行），
- * 现在独立成一个区块。依赖：
- *   · include/state.h      全局状态
- *   · include/suspicion.h  可疑点表（落地写 THE ECHO 的点）
- *   · game.c 暴露的公开变量（下面 extern 声明）
- */
-#include "common.h"
-#include "echo_marks.h"
-#include "phase.h"
-#include "loop_api.h"
-#include "player_api.h"
-#include "world_api.h"
-#include "present_api.h"
-#include "state.h"
-#include "suspicion.h"
 #include "throwing.h"
-#include "shot_spec.h"
+#include "throwing_runtime.h"
+#include "tactical_tools.h"
 #include "hints.h"
 #include "audio.h"
-#include "lang.h"
-#include "entity.h"
-#include "skills.h"
-#include "bench.h"
-#include "relics.h"
-#include "upgrade_run.h"
-#include "weapons.h"
+#include "player_api.h"
+#include "state.h"
+#include "world_api.h"
+#include "present_api.h"
 
-/* ---- game.c 里的公开变量（重构时逐步搬进 state.h） ---- */
-extern float mouseCharge;
-extern int   g_throwOk;
-extern void  SpawnGlue(float,float);
-extern void  SpawnShards(float,float,float,float,float);
-extern int chargeBonus(float);
-extern float weaponAtkCharge;
-extern int   g_lang;
-
-/* ==================================================================
- * 2026-11-05：**投石 → 破门石**（方案 B）
- * ------------------------------------------------------------------
- * 用户原话：「局里有个叫投石的技能的设计是怎么样的」→ 结论是它没有
- * 不可替代的功能（噪音输给诱饵、功能性输给烟雾/胶水）。
- *
- * 现在给它一件**别的道具都做不到**的事：
- *     丢过去的石头砸在锁箱上 → 锁直接崩开，跳过锁盘小游戏。
- *
- * 为什么这个功能该归它：
- *   · 物理上最自然 —— 抛物线扔一块石头砸锁，本来就是这件事
- *   · 锁盘现在有 6 种、开一把 8~15 秒，而它提供「用噪音换时间」的解法
- *   · 代价明确且够痛：20 格噪音，砸完就得跑
- *
- * 和「宝箱怪的扳手解法」是同一族设计：
- *   同一个障碍（锁/伪装），给两种完全不同的应对（动手 / 动脑）。
- * ================================================================ */
-#define STONE_LOCK_RADIUS   1.35f
-#define STONE_LOCK_NOISE   20.0f     /* 砸锁的噪音 —— 这是它的代价 */
-
-/* 落点 x,y 附近有没有锁箱；有就砸开。返回 1 = 砸开了。
-   ⚠ 只处理 `locked`，不碰 `mimicHost`（宝箱怪不是锁箱）。 */
-/* 2026-11-06 仅测试用：StoneBreakLockAt 原来是 static，
-   而"一次落点只解一把锁"这条契约必须能被直接验证（弹道落点不可控）。
-   沿用 SaveTestBlob / SpiderDebugPlace 的先例，只导出不改行为。 */
-static int StoneBreakLockAt(float x, float y);
-
-int StoneBreakLockAtTest(float x, float y) { return StoneBreakLockAt(x, y); }
-
-static int StoneBreakLockAt(float x, float y) {
-
-
-
-
-
-
-    int best = -1;
-    float bestD = STONE_LOCK_RADIUS * STONE_LOCK_RADIUS;
-    for (int i = 0; i < containerCount && i < MAX_CONTAINERS; i++) {
-        if (!containers[i].active) continue;
-        if (!containers[i].locked) continue;
-        if (containers[i].mimicHost) continue;
-        float dx = containers[i].x - x, dy = containers[i].y - y;
-        float d2 = dx * dx + dy * dy;
-        if (d2 < bestD && HasLOS(x, y, containers[i].x, containers[i].y)) { bestD = d2; best = i; }
-    }
-    if (best < 0) return 0;
-
-    containers[best].locked   = 0;      /* 锁崩开 */
-    containers[best].lockType = 0;
-    containers[best].lockCode = 0;
-    containers[best].searched = 0;
-
-    float boxX = containers[best].x, boxY = containers[best].y;
-    MakeNoise(boxX, boxY, STONE_LOCK_NOISE);
-    AudioPlayWorld(SFX_IMPACT, boxX, boxY, .90f, 20, 3);
-    AudioPlayWorld(SFX_METAL_SCRAPE, boxX, boxY, .72f, 22, 3);
-    SpawnParticles(boxX, boxY, 2);
-    float kick = 1 / (1 + .24f * sqrtf(Dist2(posX, posY, boxX, boxY)));
-    AddShake(.21f, .23f * kick);
-
-    pickupMsg = (g_lang == LANG_ZH) ? "石头砸开了锁！" : "THE STONE BROKE THE LOCK!";
-    pickupMsgTimer = 1.6f;
-    {  uiDirty = 1; }
-    return 1;
-}
+extern int g_throwOk;
 
 void ThrowItem(int type, float charge) {
     {  HintOnce(0); }   /* v7 B4: 第一次投掷 */
@@ -115,9 +20,10 @@ void ThrowItem(int type, float charge) {
     float angle = 0.35f * charge;  /* 抛物线角度：蓄力越高越平直 */
 
     if (type == 1) {
-        /* Quick throws arc over near obstacles; charging makes the stone fly flatter. */
-        const float stoneHorizontal = 6.8f + 9.6f * charge;
-        const float stoneLift = 3.0f - 1.55f * charge;
+        /* A tap reaches the nearby lock; charging restores the longer arc. */
+        float power = (charge - .1f) / .9f;
+        const float stoneHorizontal = 6.75f + 8.45f * power;
+        const float stoneLift = 2.15f - .8f * power;
         for (int i = 0; i < MAX_SHOTS; i++) {
             if (shot[i].active) continue;
             shot[i].x = posX;
@@ -159,8 +65,8 @@ void ThrowItem(int type, float charge) {
      * 落地的物理都是现成的，不需要新写一套投掷流程。
      * kind 约定：12 = 信标 / 13 = 锚
      * ================================================================ */
-    if (type == 6 || type == 7) {
-        int kind = (type == 6) ? 12 : 13;
+    if (type == 5 || type == 6 || type == 7) {
+        int kind = type==5?SHOT_KIND_DECOY:type==6?12:13;
         for (int i = 0; i < MAX_SHOTS; i++) {
             if (shot[i].active) continue;
             shot[i].x = posX;
@@ -208,8 +114,8 @@ void ThrowItem(int type, float charge) {
         }
         for (int i = 0; i < MAX_SHOTS; i++) {
             if (shot[i].active) continue;
-            shot[i].x = posX + dirX * 0.35f;
-            shot[i].y = posY + dirY * 0.35f;
+            shot[i].x = posX;
+            shot[i].y = posY;
             shot[i].z = SHOT_HEIGHT * (type == 4 ? 0.9f : itemHeight);
             shot[i].vx = dirX * itemSpeed * cosf(itemAngle);
             shot[i].vy = dirY * itemSpeed * cosf(itemAngle);
@@ -257,383 +163,42 @@ void ThrowItem(int type, float charge) {
     PlaySfx(SFX_THROW, 0.6f);  /* 投掷专用音效：呼啸+出手闷响 */
 }
 
-/* ==================================================================
- * 2026-11-07（v2.4.2）：**落点结算只有一份实现**
- * ------------------------------------------------------------------
- * 用户实测：「回声投掷物有时候不生效」「相位传送有时候不生效」。
- *
- * 根因是同一个投掷物有**三条落点分支**，各自写了不同的效果：
- *   ① 全局落地（vd 积分后 z<=0）—— 最全：烟雾/胶水/回声全有
- *   ② 子步落地（分段推进里 z<=0）—— 只有碎片和相位
- *   ③ 撞墙                        —— 有烟雾/胶水，回声只做了半套
- *                                （没揭地形、没 EchoMarksScan）
- *
- * 撞到哪条分支取决于这一帧的步进几何 —— 所以表现为"有时候生效"。
- *
- * 现在三处都走 ShotImpact()，投掷物不管在哪落地/撞墙，效果都一致。
- * ================================================================ */
-static void ShotImpact(int i, float x, float y) {
-    /* 2026-11-08（第 6 轮）：**分派只读规格表**
-       以前这里是一串 kind == 4 / 8 / 10 / 12 的魔法数字，
-       加一种投掷物要改三处。现在效果由 src/domain/throwing/shot_table.c
-       的 effect 字段决定 —— 加一种"同样是烟雾"的投掷物只加一行。 */
-    const ShotSpec* sp = ShotSpecFor(shot[i].kind);
-    int kind = shot[i].kind;
-
-    if(sp->effect==FX_TACTICAL){TacticalImpact(kind,x,y);return;}
-
-    if (sp->effect == FX_SMOKE) {
-        SpawnSmoke(x, y);
-        return;
-    }
-    if (sp->effect == FX_GLUE) {
-        SpawnGlue(x, y);
-        PlaySfx(SFX_GLUE, 0.85f);
-        SpawnShards(x, y, shot[i].vx, shot[i].vy, shot[i].charge);
-        return;
-    }
-    if (sp->effect == FX_ECHO_SCAN) {
-        /* 回声弹：声呐扫描 —— 揭地形 + 标记资源 + 暴露活物 */
-
-
-
-        int cx0 = (int)x, cy0 = (int)y;
-        int rad = 14;
-        int gy, gx;
-
-        echoScanT = 6.0f;
-        echoScanX = x;
-        echoScanY = y;
-
-        for (gy = cy0 - rad; gy <= cy0 + rad; gy++) {
-            if (gy < 0 || gy >= MAP_HEIGHT) continue;
-            for (gx = cx0 - rad; gx <= cx0 + rad; gx++) {
-                int ddx, ddy;
-                if (gx < 0 || gx >= MAP_WIDTH) continue;
-                ddx = gx - cx0; ddy = gy - cy0;
-                if (ddx * ddx + ddy * ddy > rad * rad) continue;
-                explored[gy][gx] = 1;
-            }
-        }
-        { 
-          EchoMarksScan(x, y, ECHO_RADIUS); }
-        pickupMsg = (g_lang == LANG_ZH) ? "声呐扫描：资源已标出（有声）"
-                                        : "SONAR: RESOURCES MARKED (LOUD)";
-        pickupMsgTimer = 1.8f;
-        { 
-          AudioPlayWorld(SFX_ECHO, x, y, 0.85f, 22.0f, 2); }
-        return;
-    }
-    if (sp->effect == FX_PHASE) {
-
-        PhaseOnThrowLanded(kind, x, y);
-        return;
-    }
-
-    SpawnShards(x, y, shot[i].vx, shot[i].vy, shot[i].charge);
-}
-
-static int TacticalPrismHit(int index) {
-    Shot *projectile=&shot[index];
-    if(projectile->kind!=TOOL_SHOT_FIRST+TOOL_PRISM || projectile->z>=2.6f)return 0;
-    for(int i=0;i<LIGHTBEAST_MAX;i++) {
-        Monster *target=&lightBeasts[i];
-        if(!target->active || Dist2(projectile->x,projectile->y,target->x,target->y)>=.36f ||
-           !HasLOS(projectile->x,projectile->y,target->x,target->y))continue;
-        ShotImpact(index,projectile->x,projectile->y);projectile->active=0;
-        return 1;
-    }
-    return 0;
-}
-
-static Monster *StoneTarget(int slot) {
-    return slot < MON_HUNTER_MAX ? &monHunters[slot] : &lightBeasts[slot-MON_HUNTER_MAX];
-}
-
-static void StoneHitTargets(Shot *stone, float radius, int landed) {
-    for (int slot=0;slot<MON_HUNTER_MAX+LIGHTBEAST_MAX;slot++) {
-        Monster *actor=StoneTarget(slot);
-        unsigned bit=1u<<slot;
-        if (!actor->active || (stone->hitMask & bit) ||
-            Dist2(stone->x, stone->y, actor->x, actor->y) >= radius*radius ||
-            !HasLOS(stone->x, stone->y, actor->x, actor->y)) continue;
-        stone->hitMask |= bit;
-        if (landed) {
-            actor->stun=fmaxf(actor->stun,.35f);
-        } else {
-            ApplyDamage(actor,0,DT_SHARD,stone->x,stone->y);
-            SpawnShards(stone->x,stone->y,0,0,.25f);
-        }
-    }
-}
-
-static void EndStoneFlight(int index) {
-    Shot *stone = &shot[index];
-    float x = stone->x, y = stone->y;
-    if (!StoneBreakLockAt(x, y)) {
-        MakeNoise(x, y, 8 + 12 * stone->charge);
-        AudioPlayWorld(SFX_IMPACT, x, y, .45f + .25f * stone->charge, 16, 2);
-        AddShake(.09f, .06f / (1 + .3f * sqrtf(Dist2(posX, posY, x, y))));
-    }
-    SpawnShards(x, y, stone->vx * .25f, stone->vy * .25f, stone->charge);
-    if (CollectorActive() && Dist2(x,y,CollectorX(),CollectorY())<1.44f &&
-        HasLOS(x,y,CollectorX(),CollectorY())) CollectorBurstBounty();
-    if (!trainingMode) StoneHitTargets(stone,1.5f,1);
-    stone->active = 0;
-}
-
-/* 推进所有飞行中的玻璃瓶，结算命中 + 抛物线 + 金币 */
 void UpdateShots(float dt) {
-    for (int i = 0; i < MAX_SHOTS; i++) {
-        if (!shot[i].active) continue;
-        shot[i].life -= dt;
-        shot[i].age += dt;
-        if (shot[i].ignoreTargetTime > 0.0f) {
-            shot[i].ignoreTargetTime -= dt;
-            if (shot[i].ignoreTargetTime <= 0.0f) {
-                shot[i].ignoreTargetTime = 0.0f;
-                shot[i].ignoreTarget = -1;
-            }
-        }
+    for (int i=0;i<MAX_SHOTS;i++) {
+        Shot *projectile=&shot[i];
+        if (!projectile->active) continue;
+        projectile->life-=dt;
+        projectile->age+=dt;
+        projectile->ignoreTargetTime=fmaxf(0,projectile->ignoreTargetTime-dt);
 
-        /* v1.18：重力 + 落地。
-           之前 shot 完全没有 z 积分 —— 砖头/酸瓶/烟雾弹都是
-           从胸口直线飞出去、而且永远不落地（烟雾弹自然出不了烟）。 */
-        /* Legacy projectiles retain their original integration. New tactical
-         * objects integrate once, in substeps, rather than falling twice. */
-        int stone = shot[i].kind == 1;
-        int tacticalShot = ShotSpecFor(shot[i].kind)->effect == FX_TACTICAL;
-        int singleIntegration = stone || tacticalShot;
-        if (!singleIntegration) {
-            shot[i].vz -= 16.0f * dt;
-            shot[i].z += shot[i].vz * dt;
-        }
-        if (shot[i].z <= 0.0f && shot[i].age > 0.02f) {
-            shot[i].z = 0.0f;
-            if (stone) { EndStoneFlight(i); continue; }
-            /* ---- v3.3 落地效果分派 ----
-               kind 1 投石 / 4 烟雾 / 8 胶水 / 10 回声 ----
-               噪音全部由**落点 + 蓄力**决定，不再固定：
-                 投石   8 + 蓄力*12  ->  8 ~ 20（玩家自己调）
-                 胶水   6（小）
-                 烟雾   5（小）
-                 回声   0（完全静音 —— 它就是用来偷情报的） */
-            /* ===== v7 **THE ECHO** =====
-               你扔出去的每个东西，落点都会留下一个「可疑位置」。
-               它**自己不发声**（发声反而会分散怪物注意力），
-               而是给听声怪一条「玩家刚才在这」的坐标，10 秒后消散。 */
-            /* 2026-11-07：落地效果统一走 ShotImpact（见函数注释） */
-            ShotImpact(i, shot[i].x, shot[i].y);
+        const ShotSpec *spec=ShotSpecFor(projectile->kind);
+        int stone=projectile->kind==1;
+        int tactical=spec->effect==FX_TACTICAL;
+        /* Preserve the higher gravity of the legacy utility throws. */
+        float verticalScale=stone || tactical ? 1.f : 2.f;
+        float gravity=stone?14.2f:tactical?
+            (projectile->kind==TOOL_SHOT_FIRST+TOOL_PRISM?GRAVITY*.08f:GRAVITY):16.f+GRAVITY;
+        float stepLength=hypotf(hypotf(projectile->vx,projectile->vy),verticalScale*projectile->vz)*dt;
+        int steps=(int)(stepLength/.12f)+1;
+        float stepTime=dt/steps;
+        for (int step=0;step<steps && projectile->active;step++) {
+            float nx=projectile->x+projectile->vx*stepTime;
+            float ny=projectile->y+projectile->vy*stepTime;
+            if (tactical ? Blocked(nx,ny) : ShotBlocked(nx,ny)) { FinishShot(i);break; }
+            projectile->x=nx;
+            projectile->y=ny;
+            projectile->z+=(projectile->vz-.5f*gravity*stepTime)*stepTime*verticalScale;
+            projectile->vz-=gravity*stepTime;
 
-            /* ===== v2.4.58 **投石（瓶子）打拾荒者 → 赃款直接爆出来** =====
-               用户要求：「拾荒者被瓶子命中，也会把钱爆出来」。
-               瓶子本来就该是"从远处打断它"的手段 —— 比扳手安全得多，
-               代价是瓶子要花一个投掷格。
-               命中半径 1.2 格（比扳手的 0.7 宽），因为瓶子有溅射。 */
-            {
-                /* 2026-11-08（第 6 轮）：噪音也读表 —— 不再按 kind 写死 */
-                const ShotSpec* nsp = ShotSpecFor(shot[i].kind);
-                float nz = nsp->noise;
-                if (nsp->noiseScaled) nz += shot[i].charge * 12.0f;   /* 投石 8 ~ 20 */
-                if (nz > 0.0f) MakeNoise(shot[i].x, shot[i].y, nz);
-            }
-            shot[i].active = 0;
-            continue;
-        }
-
-        /* 分段推进，避免高速穿过怪 */
-        float stepLen = sqrtf(shot[i].vx*shot[i].vx + shot[i].vy*shot[i].vy + shot[i].vz*shot[i].vz) * dt;
-        int steps = (int)(stepLen / 0.12f) + 1;
-        float sdx = shot[i].vx * dt / (float)steps;
-        float sdy = shot[i].vy * dt / (float)steps;
-        float sdz = shot[i].vz * dt / (float)steps;
-
-        for (int s = 0; s < steps && shot[i].active; s++) {
-            float beforeX = shot[i].x, beforeY = shot[i].y;
-            shot[i].x += sdx;
-            shot[i].y += sdy;
-            float subDt = dt / (float)steps;
-            shot[i].z += singleIntegration ? shot[i].vz * subDt : sdz;
-            float gravity = stone ? 14.2f :
-                (shot[i].kind == TOOL_SHOT_FIRST + TOOL_PRISM ? GRAVITY * .08f : GRAVITY);
-            shot[i].vz -= gravity * subDt;
-            /* Impact and arming use the same clearance, including furniture. */
-            if (tacticalShot && Blocked(shot[i].x,shot[i].y)) {
-                ShotImpact(i,beforeX,beforeY);
-                shot[i].active=0;
-                break;
-            }
-            if (stone && ShotBlocked(shot[i].x, shot[i].y)) {
-                shot[i].x = beforeX; shot[i].y = beforeY;
-                EndStoneFlight(i);
-                break;
-            }
-            if (stone && shot[i].z <= 0) {
-                shot[i].z = 0;
-                EndStoneFlight(i);
-                break;
-            }
-
-            /* 撞地面：碎裂生成金币 */
-            if (shot[i].z <= 0.0f) {
-                shot[i].z = 0.0f;
-                /* 2026-11-05：**破门石** —— 落在锁箱旁边就把锁砸开。 */
-                /* 2026-11-07：子步落地原来只结算相位，烟雾/胶水/回声全丢 ——
-                   和"全局落地"两套分派就是用户说的"有时候不生效"。
-                   现在统一走 ShotImpact。 */
-                ShotImpact(i, shot[i].x, shot[i].y);
-                if (ShotSpecFor(shot[i].kind)->effect != FX_TACTICAL) PlaySfx(SFX_GLASS, 0.7f);
-                /* v2.4-alpha：**一次物理撞击只结算一次逻辑噪音**。
-                   破锁时 StoneBreakLockAt 已经发过 20 格冲击声，
-                   这里不能再叠一次 15 格落地声 —— 那是同一块石头。 */
-                if (ShotSpecFor(shot[i].kind)->effect != FX_TACTICAL) MakeNoise(shot[i].x, shot[i].y, 15.0f);
-                shot[i].active = 0;
-                break;
-            }
-
-            /* ===== 撞墙 =====
-               v3.3 **修「有时候不生效」** ——
-               原来飞行途中撞墙时**只碎、不生成任何效果**，
-               于是「对着地面扔胶水，弧线蹭到墙」就什么都不会出现，
-               玩家感觉就是「胶水有时候不生效」。
-               现在撞墙也走和落地一样的效果分派（只是落点变成墙面位置）。 */
-            if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
-                /* 2026-11-05：**破门石** —— 锁箱贴着墙时，瓶子会先撞墙，
-                   所以撞墙分支也要试一次，否则「贴着墙的锁箱永远砸不开」。 */
-                /* 2026-11-07：撞墙也走 ShotImpact —— 原来这里的回声只做了半套
-                   （没揭地形、没 EchoMarksScan），和落地不是一回事。 */
-                ShotImpact(i, shot[i].x, shot[i].y);
-                PlaySfx(SFX_GLASS, 0.7f);
-                MakeNoise(shot[i].x, shot[i].y, 15.0f);
-                shot[i].active = 0;
-                break;
-            }
-
-            if(TacticalPrismHit(i))break;
-
-            /* 撞怪：按 kind 分派（1 玻璃瓶 / 2 砖头 / 3 酸瓶 / 4 烟雾弹） */
-            float r = SHOT_RADIUS + 0.24f;
+            if (projectile->z<=0) { projectile->z=0;FinishShot(i);break; }
             if (stone) {
-                StoneHitTargets(&shot[i],r,0);
-                continue;
-            }
-            {
-                /* 投掷物也要能打中第 2、3 只听声鬼 ——
-                   原来这里是手写两条 push，扩到三只之后它们免疫投掷物。 */
-                Monster* targets[MON_HUNTER_MAX + 1];
-
-                int nTargets = MonsterCollect(targets, MON_HUNTER_MAX + 1, 1);
-                for (int t = 0; t < nTargets; t++) {
-                    Monster* m = targets[t];
-                    if (shot[i].ignoreTargetTime > 0.0f && shot[i].ignoreTarget == t) continue;
-                    if (Dist2(shot[i].x, shot[i].y, m->x, m->y) >= r * r) continue;
-
-                    /* 默认值来自规格表；下面的特殊分支仍按需要覆盖
-                       （烟雾/胶水/镜片/信号枪的行为差异太大，函数指针表不划算） */
-                    const ShotSpec* msp = ShotSpecFor(shot[i].kind);
-                    if(msp->effect==FX_TACTICAL){shot[i].active=0;ShotImpact(i,shot[i].x,shot[i].y);break;}
-                    int base = msp->dmg > 0 ? msp->dmg : 1;
-                    int type = (msp->dmgType < 0) ? DT_SHARD : msp->dmgType;
-                    g_dmgIgnoreArmor = msp->ignoresArmor;
-                    if (shot[i].kind == 2) {            /* 砖头：钝击 12 点，蓄满 15 */
-                        base = 12 + chargeBonus(shot[i].charge) * 3;
-                        type = DT_BLUNT;
-                    } else if (shot[i].kind == 3) {     /* 酸瓶：金币 10 点、无视护甲 */
-                        base = 10 + chargeBonus(shot[i].charge) * 2;
-                        type = DT_SHARD;
-                        g_dmgIgnoreArmor = 1;
-                    } else if (shot[i].kind == 4) {     /* 烟雾弹：不造成伤害 */
-                        SpawnSmoke(shot[i].x, shot[i].y);
-                        shot[i].active = 0;
-                        break;
-                    } else if (shot[i].kind == 8) {    /* v2.0 胶水瓶：定身 2 秒，无伤害 */
-                        m->stun = 2.0f;
-                        m->glued = 1;   /* v2.2：胶水期间受伤 +50% */
-                        shot[i].active = 0;
-                        SpawnShards(shot[i].x, shot[i].y, 0, 0, 0.3f);
-                        PlaySfx(SFX_GLASS, 0.6f);
-                        break;
-                    } else if (shot[i].kind == 9) {    /* v2.0 镜片：反弹一次 */
-                        if (shot[i].charge > 0.5f && !shot[i].mirrorRebounded) {
-                            /* 不再严格 180°折返：那会把弹片立刻送回原目标/玩家。
-                               加一点侧向偏转，并短暂忽略被反弹的目标。 */
-                            float oldVx = shot[i].vx, oldVy = shot[i].vy;
-                            float side = 0.22f;
-                            float rvx = -oldVx - oldVy * side;
-                            float rvy = -oldVy + oldVx * side;
-                            float rlen = sqrtf(rvx * rvx + rvy * rvy);
-                            float olen = sqrtf(oldVx * oldVx + oldVy * oldVy);
-                            if (rlen > 0.001f && olen > 0.001f) {
-                                shot[i].vx = rvx * olen / rlen * 0.8f;
-                                shot[i].vy = rvy * olen / rlen * 0.8f;
-                            } else {
-                                shot[i].vx = -oldVx * 0.8f;
-                                shot[i].vy = -oldVy * 0.8f;
-                            }
-                            shot[i].x += shot[i].vx * 0.08f;
-                            shot[i].y += shot[i].vy * 0.08f;
-                            shot[i].charge = 0.0f;
-                            shot[i].mirrorRebounded = 1;
-                            shot[i].ignoreTarget = t;
-                            shot[i].ignoreTargetTime = 0.18f;
-                            break;                     /* 保留飞行 */
-                        }
-                        base = 1; type = DT_SHARD;
-                    } else if (shot[i].kind == 7) {    /* v2.0 燃烧瓶：直接命中 = 10 点火伤 */
-                        base = 10; type = DT_SHARD;
-                        g_dmgIgnoreArmor = 0;
-                    } else if (shot[i].kind == 6) {     /* v2.0 信号枪弹 */
-                        base = shot[i].dmg > 0 ? shot[i].dmg : 8;
-                        type = WeaponDamageType(curWeapon);
-                    } else {
-                        ApplyDamage(m, 0, DT_SHARD, shot[i].x, shot[i].y);
-                        SpawnShards(shot[i].x, shot[i].y, 0, 0, 0.25f);
-                        continue;        /* ← 不销毁，继续飞 */
-                    }
-                    SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-                    ApplyDamage(m, base, type, shot[i].x, shot[i].y);
-                    /* 2026-11-05：武器系统已下线，信号枪弹（kind 6）也已不再生成 */
-
-                    g_dmgIgnoreArmor = 0;
-                    if (shot[i].pierce) { shot[i].pierce = 0; continue; }   /* v2.0：穿透一次 */
-                    shot[i].active = 0;
-                    break;
-                }
-                if (!shot[i].active) break;
+                if (projectile->z<2.1f && ShotStoneLockNear(nx,ny,.57f)>=0) { FinishShot(i);break; }
+                if (projectile->z<1.9f) StoneHitTargets(projectile,SHOT_RADIUS+.24f,0);
+            } else if (ShotHitsActor(projectile,spec)) {
+                FinishShot(i);
             }
         }
-        /* ==================================================================
-         * 2026-11-06（子代理审计·高 3）：**落地已经结算过，这里不能再算一次**
-         * ------------------------------------------------------------------
-         * 内层落地分支已经 active=0 并做完全部效果（烟雾/胶水/回声/碎屑/噪音），
-         * 但 z 被置 0 之后又满足下面这个"到期"条件 ——
-         * 而这块**没有判断 active**，于是同一颗投掷物结算两次：
-         *   烟雾一次变两朵、胶水一次两滩、回声扫两次、投石噪音双份。
-         * ================================================================== */
-        if (!shot[i].active) continue;
-        if (shot[i].life <= 0.0f || (shot[i].z <= 0.0f && shot[i].age > 0.02f)) {
-            /* 2026-11-05：**空中过期也要生效**。
-               原来这里只有 `SpawnShards()` 就销毁 —— 瓶子在半空炸开、
-               一点效果都没有（另一半"半空碎裂"报告就是这条）。
-               寿命到期意味着"它飞到哪儿就在哪儿落地"，所以补一次落地效果。 */
-            if (ShotSpecFor(shot[i].kind)->effect == FX_ECHO_SCAN) {
-                ShotImpact(i, shot[i].x, shot[i].y);
-                shot[i].active = 0;
-                continue;
-            }
-            if (stone) {
-                EndStoneFlight(i);
-                continue;
-            } else if (shot[i].kind == 4) {
-                SpawnSmoke(shot[i].x, shot[i].y);       /* 烟雾弹落地成云 */
-            } else if (shot[i].kind == 8) {
-                SpawnGlue(shot[i].x, shot[i].y);
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-            } else if (shot[i].z > 0.0f) {
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-            }
-            shot[i].active = 0;
-        }
+        if (projectile->active && projectile->life<=0) FinishShot(i);
     }
 
     /* 更新玻璃金币 */
@@ -655,71 +220,4 @@ void UpdateShots(float dt) {
             shards_debris[i].active = 0;
         }
     }
-}
-
-
-/* ==================================================================
- * 2026-11-06（v2.4.1 第 10 轮）：**生物荧光**
- * ------------------------------------------------------------------
- * 持有 IR_BIOLUM 时，落到地上的照明棒会缓慢恢复附近玩家的理智。
- *
- * 三个限制缺一不可（否则道具流可以无限续航）：
- *   ① 单根只在**前 8 秒**有效 —— 灯亮 25 秒，但治疗时间更短
- *   ② 单根最多回 12 点
- *   ③ 每层总预算 24 点
- *
- * 用 "elapsed = FLARE_LIFE - life" 判断有效窗口，
- * 不需要给每根灯加状态字段（thrown[] 是存档结构，不能随便扩）。
- * 多根重叠时**只按最近的一根**结算，不叠加速率。
- * ================================================================== */
-static float s_floorFlareHealed = 0.0f;
-
-void FlareHealReset(void) { s_floorFlareHealed = 0.0f; }
-float FlareHealBudgetLeft(void) { return FLARE_HEAL_FLOOR_BUDGET - s_floorFlareHealed; }
-
-void FlareHealTick(float dt) {
-
-    /* ==================================================================
-     * 2026-11-06（用户实测：「闪光弹不能回理智，你没有做好」）
-     * ------------------------------------------------------------------
-     * 原来这一行是 `if (!RunSkillOwned(IR_BIOLUM)) return;` ——
-     * 也就是说**必须先抽到那张卡**才生效。玩家扔了照明弹发现不回理智，
-     * 完全合理：他根本没有那张卡。
-     *
-     * 现在：**基础效果对所有人生效**，抽到 IR_BIOLUM 则是强化
-     * （回得更快、单根上限更高）。这样"照明弹能回理智"是稳定预期，
-     * 卡牌负责把它变成值得专门去构筑的方向。
-     * ================================================================ */
-    int boosted = RunSkillOwned(IR_BIOLUM);
-    if (sanity >= SanityMax()) return;
-    if (s_floorFlareHealed >= FLARE_HEAL_FLOOR_BUDGET) return;
-
-    /* 找最近的一根"仍在有效治疗窗口内"的落地照明棒 */
-    int best = -1;
-    float bestD2 = FLARE_HEAL_RADIUS * FLARE_HEAL_RADIUS;
-    for (int i = 0; i < MAX_THROWN; i++) {
-        if (!thrown[i].active) continue;
-        if (thrown[i].type != 0) continue;             /* 0 = 照明棒 */
-        float elapsed = FLARE_LIFE_SECONDS - thrown[i].life;
-        if (elapsed < 0.0f) continue;
-        if (elapsed >= FLARE_HEAL_SECONDS) continue;   /* 只在前 8 秒有效 */
-        float d2 = Dist2(thrown[i].x, thrown[i].y, posX, posY);
-        if (d2 > bestD2) continue;
-        bestD2 = d2;
-        best = i;
-    }
-    if (best < 0) return;
-    (void)best;
-
-    /* 单根上限靠"窗口 + 速率"自然成立：1.5/s × 8s = 12，
-       正好等于 FLARE_HEAL_CAP。这里再用总量封一次顶，防止帧率异常。 */
-    float rate = FLARE_HEAL_RATE * (boosted ? 2.0f : 1.0f);
-    float cap  = FLARE_HEAL_CAP  * (boosted ? 2.0f : 1.0f);
-    float want = rate * dt;
-    if (want > cap) want = cap;
-    float room = FLARE_HEAL_FLOOR_BUDGET - s_floorFlareHealed;
-    if (want > room) want = room;
-    sanity += want;
-    if (sanity > SanityMax()) sanity = SanityMax();
-    s_floorFlareHealed += want;
 }

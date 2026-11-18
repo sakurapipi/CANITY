@@ -57,9 +57,9 @@ static void prepared_commit(void) {
         const RoomArchetype* def=RoomArchetypeGet(theme);
         if(def->preparationMask)CHECK(!HatchGateCheck(0,NULL,0),"new rooms cannot bypass their preparation controls");
         int gold=carryGold;float charge=battery;
-        if(theme==HATCH_BRICK)CHECK(RoomThemeSelectCentralTarget(0),"central frame owns target selection");
-        else CHECK(RoomThemeInteractFixture(1),"left control is an action, never a search reward");
+        CHECK(RoomThemeInteractFixture(1),"left control is an action, never a search reward");
         if(def->preparationMask==3)CHECK(RoomThemeInteractFixture(2),"second preparation control is connected");
+        if(theme==HATCH_BRICK)CHECK((roomTheme.prepared&3u)==3u,"both relays prepare the swap");
         CHECK(carryGold==gold && battery==charge,"preparation does not charge early or grant free supplies");
         CHECK(HatchGateCheck(0,NULL,0),"prepared room with sufficient resources can activate");
         HatchSetState(0,HATCH_OPENING);HatchTick(HATCH_OPEN_SECONDS+.01f);
@@ -79,7 +79,7 @@ static void choices_and_failures(void) {
     room_scene(HATCH_POWER);RoomThemeInteractFixture(1);RoomThemeInteractFixture(2);
     battery=25;HatchSetState(0,HATCH_OPENING);battery=0;HatchTick(HATCH_OPEN_SECONDS+.01f);
     CHECK(hatches[0].state==HATCH_SEALED && battery==0,"resource loss during animation leaves an unpaid room retryable");
-    room_scene(HATCH_BRICK);RoomThemeSelectCentralTarget(0);
+    room_scene(HATCH_BRICK);RoomThemeInteractFixture(1);RoomThemeInteractFixture(2);
     worldMap[3][18]=1;
     CHECK(!HatchGateCheck(0,NULL,0),"target becoming embedded in a wall cancels the swap before charging");
 }

@@ -18,7 +18,8 @@ typedef enum {
     FX_SMOKE,      /* 生成烟云 */
     FX_GLUE,       /* 生成胶水区 */
     FX_ECHO_SCAN,  /* 声呐扫描（揭地形 + 标资源） */
-    FX_PHASE       /* 交给 phase 域处理 */
+    FX_PHASE,      /* 交给 phase 域处理 */
+    FX_DECOY
     ,
     FX_TACTICAL
 } ShotEffect;
@@ -37,6 +38,7 @@ typedef struct {
 } ShotSpec;
 
 /* 按 kind 取规格；未知 kind 返回默认行（碎片，静音，不穿透）。 */
+#define SHOT_KIND_DECOY 14
 const ShotSpec *ShotSpecFor(int kind);
 
 /* 表里有多少行（测试用） */

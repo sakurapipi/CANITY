@@ -1210,6 +1210,7 @@ static void DrawSpriteEntries(const SpriteDrawEntry* list, int n) {
             case 2: DrawMonsterSprite(); break;
             case 13: DrawMonster2Sprite(); break;   /* v2.4.12 第二只听声怪 */
             case 14: DrawMonster3Sprite(); break;   /* 第三只听声鬼 */
+            case 23: DrawDecoyModel(list[i].idx); break;
             case 15: DrawMimicSprite(list[i].idx); break;   /* 2026-11-05 宝箱怪 */
         case 9: DrawLeechSprite(list[i].idx); break;
             case 5:
@@ -1229,6 +1230,15 @@ static void DrawSpriteEntries(const SpriteDrawEntry* list, int n) {
 
             /* 半身高 0.34 -> 0.50：第一版太小，暗场里像块石头 */
             DrawBakedPropArt(SPR_PROP_PHASE, phaseX, phaseY, 0.0f, 0.50f, 1.25f);
+            break;
+        }
+        case 22: {
+            float x,y,signal;
+            int chapter=ProtocolTrialVisual(&x,&y,&signal);
+            if (chapter) {
+                float z=chapter==3?.73f:0;
+                DrawBakedPropArt(SPR_TRIAL_MACHINE+chapter-1,x,y,z,chapter==3?.25f:.40f,1.f+signal);
+            }
             break;
         }
         case 21: {
@@ -1281,12 +1291,6 @@ static void DrawSpriteOverlays(void) {
     DrawSmokeCloud();
     DrawGluePuddle();   /* v3.3 地面胶水 */
     DrawEchoRadarPulse();
-    /* v3.3：诱饵玩偶 */
-    {
-
-        for (int di = 0; di < MAX_DECOY; di++)
-            if (decoysArr[di].active) DrawDecoyModel(di);
-    }
     /* v2.3.5：地上的钱袋 */
     for (int mb = 0; mb < 3; mb++) DrawMoneyBagModel(mb);
     /* v2.3.5：三只新怪 + 回响（v2.3.3 误删过一次，导致全部隐形） */

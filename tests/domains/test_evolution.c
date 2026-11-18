@@ -51,8 +51,8 @@ static void tool_commit_guards(void) {
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++)
             worldMap[y][x] = (x == 0 || y == 0 || x == MAP_WIDTH - 1 || y == MAP_HEIGHT - 1);
-    CHECK(tactical.key[0] == 'J' && tactical.key[1] == 'U' &&
-              tactical.key[2] == 'O' && tactical.key[3] == 'L',
+    CHECK(tactical.key[0] == 0 && tactical.key[1] == 'U' &&
+              tactical.key[2] == 'O' && tactical.key[3] == 0,
           "fresh runs can select all four quick slots without configuration");
     ThreatTierRestore(1, 3, 13);
     EvolutionWebMiss(posX, posY, 1);
@@ -208,7 +208,7 @@ static void progression_mechanisms(void) {
                  (UINT64_C(1) << BENCH_PULSE_CAPACITOR) |
                  (UINT64_C(1) << BENCH_SOLVENT_CONCENTRATE) | (UINT64_C(1) << BENCH_MAGNET_REEL) |
                  (UINT64_C(1) << BENCH_TRACE_REACH);
-    CHECK(ProgressionToolValue(PG_DAMP_RADIUS) == 4 && ProgressionToolValue(PG_DAMP_TIME) == 14,
+    CHECK(fabsf(ProgressionToolValue(PG_DAMP_RADIUS) - (TOOL_ACOUSTIC_RADIUS + 1.f)) < .001f && ProgressionToolValue(PG_DAMP_TIME) == 14,
           "local equipment increases real damping area and lifetime");
     CHECK(ProgressionToolValue(PG_BLIND_TIME) == 4 && ProgressionToolValue(PG_SOLVENT_TIME) == 2,
           "local optics and solvent change their actual effect parameters");

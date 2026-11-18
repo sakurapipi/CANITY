@@ -9,4 +9,6 @@ void FlareHealTick(float dt);
 
 void FlareHealReset(void);
 
+int ThrowableActorNear(float x, float y, float radius);
+
 #endif

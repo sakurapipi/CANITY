@@ -188,7 +188,15 @@ static void hatch_effect_scene(int kind){
     monHunters[0].active=1;monHunters[0].x=12.5f;monHunters[0].y=3.5f;
     RoomThemeSetMadness(0);RoomThemeLoadEvent(-1,0);HatchReset();
     HatchAdd(2.5f,2.5f,kind,kind);
+    if (kind==HATCH_POWER)
+        CellMetaFillRoom(1,1,6,6,1,4,ACOUSTIC_METAL,0);
     roomSeedUsed=1;hiddenIn=-1;RoomThemeBind();
+    if (kind==HATCH_POWER) {
+        CHECK(!HatchGateCheck(0,NULL,0),"legacy power room requires both restored towers");
+        for (int i=0;i<roomPropCount;i++) {
+            if (RoomPropIsControl(roomProps[i].kind)) RoomThemeInteractFixture(i);
+        }
+    }
 }
 static void fire_test_hatch(void){
     CHECK(HatchGateCheck(0,NULL,0),"effect fixture supplies current gate requirements");
@@ -211,7 +219,13 @@ static void test_all_hatch_effects(void){
 
     hatch_effect_scene(HATCH_POWER);fire_test_hatch();
     CHECK(battery==125 && hatchLightsT>34 && hatchLightsT<=35,"lumen overload pays 25 battery and lasts 35 seconds");
-    CHECK(explored[3][3],"lumen overload reveals walkable routes");
+    CHECK(RoomThemeMapRevealed() && RoomThemeFreeMapRemaining()==15.f,
+          "the grid reveals the entire map and waives the first 15 seconds of drain");
+    RoomThemeTick(16.f);
+    CHECK(RoomThemeMapRevealed() && RoomThemeFreeMapRemaining()==0,
+          "the map remains visible after free minimap access ends");
+    RoomThemeTick(20.f);
+    CHECK(!RoomThemeMapRevealed(),"the map returns to ordinary exploration after 35 seconds");
 
     hatch_effect_scene(HATCH_WARD);sanity=20;fire_test_hatch();
     CHECK(sanity==55 && battery==130,"ward trades 20 battery for 35 sanity");
@@ -288,7 +302,6 @@ static void test_hatch_end_to_end(void) {
     /* Current central devices require explicit preparation, not looting furniture. */
     for(int i=0;i<roomPropCount;i++)if(RoomPropIsControl(roomProps[i].kind))
         (void)RoomThemeInteractFixture(i);
-    if(roomTheme.theme==HATCH_BRICK)(void)RoomThemeSelectCentralTarget(0);
     {
         int gateFails = 0;
         for (int i = 0; i < hatchCount; i++) {

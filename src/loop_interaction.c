@@ -36,9 +36,11 @@ void InteractionRefreshTargets(void) {
         float d=Dist2(posX,posY,hatches[i].x,hatches[i].y);
         if(d<deviceDistance){deviceDistance=d;hoverKind=4;hoverIndex=i;}
     }
-    for(int i=0;i<roomPropCount;i++)if(roomProps[i].active && RoomPropIsControl(roomProps[i].kind) &&
-        (roomProps[i].kind-ROOMPROP_CONTROL_FIRST)/2!=HATCH_BRICK && hatchCount &&
-        hatches[0].state==HATCH_SEALED && RoomDeviceVisible(roomProps[i].x,roomProps[i].y)) {
+    for (int i=0;i<roomPropCount;i++) {
+        if (roomTheme.theme==HATCH_POWER && roomProps[i].searched) continue;
+        if (!(roomProps[i].active && RoomPropIsControl(roomProps[i].kind) &&
+        hatchCount &&
+        hatches[0].state==HATCH_SEALED && RoomDeviceVisible(roomProps[i].x,roomProps[i].y))) continue;
         float d=Dist2(posX,posY,roomProps[i].x,roomProps[i].y);
         if(d<deviceDistance){deviceDistance=d;hoverKind=3;hoverIndex=i;}
     }
@@ -100,9 +102,10 @@ void InteractionRefreshTargets(void) {
         float bestD = INTERACT_RANGE * INTERACT_RANGE;
         for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++) {
             if (!roomProps[i].active || roomProps[i].searchLeft <= 0 || RoomPropIsLandmark(roomProps[i].kind)) continue;
-            if(RoomPropIsControl(roomProps[i].kind) && (roomProps[i].kind-ROOMPROP_CONTROL_FIRST)/2==HATCH_BRICK)continue;
             if(RoomPropIsControl(roomProps[i].kind) &&
-               (!hatchCount || hatches[0].state!=HATCH_SEALED || !RoomDeviceVisible(roomProps[i].x,roomProps[i].y)))continue;
+               (!hatchCount || hatches[0].state!=HATCH_SEALED ||
+                (roomTheme.theme==HATCH_POWER && roomProps[i].searched) ||
+                !RoomDeviceVisible(roomProps[i].x,roomProps[i].y)))continue;
             float d = Dist2(posX, posY, roomProps[i].x, roomProps[i].y);
             if (d >= INTERACT_RANGE * INTERACT_RANGE) continue;
             if (d < bestD) { bestD = d; hoverKind = 3; hoverIndex = i; }

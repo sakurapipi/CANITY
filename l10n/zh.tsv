@@ -952,3 +952,24 @@ BRASS LUNG	黄铜肺	content-relics.c
 SCOUT BOOTS	斥候靴	content-relics.c
 GHOST SHELL	幽壳	content-relics.c
 LAST LIGHT	残火	content-relics.c
+MOVEMENT	移动	settings-250
+ACTIONS	局内操作	settings-250
+MENU KEYS	菜单按键	settings-250
+Movement	移动	settings-250
+Actions	局内操作	settings-250
+Menu Keys	菜单按键	settings-250
+Difficulty	难度	settings-250
+Phase: Teleport	相位传送	settings-250
+Cancel Throw Charge	取消投掷蓄力	settings-250
+Attack (wrench)	扳手攻击	settings-250
+Character Ability	角色能力	settings-250
+Drop Gold	丢弃金币	settings-250
+Select Slot 1	选择第1个道具	settings-250
+Select Slot 2	选择第2个道具	settings-250
+SLOT 1	槽位1	settings-250
+SLOT 2	槽位2	settings-250
+SLOT 3	槽位3	settings-250
+None	未绑定	settings-250
+Automatic	自动	settings-250
+Basic	简要	settings-250
+Off	关闭	settings-250

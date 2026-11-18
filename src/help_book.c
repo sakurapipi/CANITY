@@ -21,7 +21,13 @@ typedef struct {
 static const HelpLesson controls[] = {
     {"Movement", "移动与观察", "Move and turn to check a route before sprinting. Sprint spends stamina and alerts hunters.",
      "先观察路口，再决定是否冲刺。冲刺消耗体力，也更容易惊动听声鬼。",
-     "Touch: left stick moves, right side turns.", "触屏：左摇杆移动，屏幕右侧滑动转向。"},
+#ifdef CANITY_WEB
+     "On touch screens, move with the left stick and look by dragging on the right.",
+     "触屏操作时，左摇杆移动，拖动屏幕右侧转向。"},
+#else
+     "Move with your assigned keys and turn with the mouse.",
+     "使用已绑定的方向键移动，用鼠标转向。"},
+#endif
     {"Flashlight", "手电与充电", "Toggle the flashlight to avoid light beasts. Cranking restores power but makes noise.",
      "关灯可降低被追光鬼发现的风险。手摇可恢复电量，但会发出声音。",
      "Recharge from cover or at the rhythm console.", "可在藏身点或节律校准台补充电量。"},

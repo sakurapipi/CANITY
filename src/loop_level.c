@@ -892,7 +892,7 @@ static void PlaceFloorContainers(LevelBuildWorkspace* work) {
         for (int tries = 0; tries < 300 && hideSpotCount < want && work->emptyCount > 0; tries++) {
             int idx = rand() % work->emptyCount;
             float hx2 = work->cells[idx][0] + 0.5f, hy2 = work->cells[idx][1] + 0.5f;
-            if (Dist2(hx2, hy2, exitX, exitY) < 6.0f) continue;
+            if (RoomThemeContains(hx2,hy2) || Dist2(hx2, hy2, exitX, exitY) < 6.0f) continue;
             if (!SpotClear(hx2, hy2, 1.4f, 1, -1)) continue;
             int bad = 0;
             for (int k = 0; k < hideSpotCount; k++)
@@ -923,7 +923,7 @@ static void PlaceFloorContainers(LevelBuildWorkspace* work) {
             float hx2 = work->cells[idx][0] + 0.5f, hy2 = work->cells[idx][1] + 0.5f;
             /* 兜底也不能贴着出口，否则藏身点会和离关目标重叠，
                造成玩家按 E 后看似藏好、实际却站在出口触发区里的错觉。 */
-            if (Dist2(hx2, hy2, exitX, exitY) < 6.0f) continue;
+            if (RoomThemeContains(hx2,hy2) || Dist2(hx2, hy2, exitX, exitY) < 6.0f) continue;
             int bad = 0;
             for (int k = 0; k < hideSpotCount; k++)
                 if (Dist2(hx2, hy2, hideSpots[k].x, hideSpots[k].y) < HIDESPOT_MIN_GAP2_RELAX) { bad = 1; break; }

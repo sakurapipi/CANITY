@@ -254,39 +254,8 @@ static void DrawHudRunHeader(int effDetail) {
         }
     }
 
-    /* v1.8：待上缴金币 + 绣刀冷却。
-       注意：右上角 FPS 那一行也占着 y=UIS(18)，所以这两行要排在它下面，
-       否则开 FPS 时会叠在一起。 */
     {
-        /* v3.0：PENDING 行删掉后 hy 没人用了，显式标记避免编译告警。 */
-        /* ==================================================================
-         * 2026-11-05 修 UI 重叠：**日游行和 LEVEL 行画在同一个 y**
-         * ------------------------------------------------------------------
-         * 左边 HUD 的纵向分配是：
-         *     UIS(18)                    LEVEL / CAMPAIGN / DAILY 种子  (3447)
-         *     UIS(18)                    DAILY 进度 + 目标文本          (本块) ← 重叠
-         *     hudY1 = 18 + 1*(TH+4)      SANITY
-         *     hudY2 = 18 + 2*(TH+4)      FUSES
-         *     hudY3 = 18 + 3*(TH+4)      CARRY / TIER
-         *     18 + 4*(TH+4)              BOOST
-         *
-         * 两行都从 x≈12 起、青色和绿色几乎同色，叠起来就是一坨乱码
-         * （用户截图：DAILY 0/15 和 LEVEL 那行糊在一起）。
-         *
-         * 现在把日游行排到整叠之后：18 + 5*(TH+4)。
-         * ================================================================ */
         int hy = UIS(18) + 5 * (TextHeightWin() + UIS(4));
-        if (showFps) hy += TextHeightWin() + UIS(4);
-        (void)hy;
-(void)hy;
-
-        /* ==================================================================
-         * v6 第 ㊶ 轮：**每日任务在局内终于可见了**
-         * ==================================================================
-         * daily.c 的 DailyCurrent / DailyGoalParam / DailyDone 一直是死代码 ——
-         * 玩家只在开局看到一行提示，之后完全不知道进度到哪。
-         * 这里用 PENDING 行删掉后腾出的位置，不占新空间。
-         * ================================================================ */
         if (dailyMode) {
 
             if (!DailyCanProgress()) {
@@ -620,7 +589,8 @@ static void DrawHudInventory(void) {
 
             /* 收集"有货"的槽 */
             int vis[ITEM_SLOT_COUNT], nvis = 0, curVis = -1;
-            for (int i = 0; i < ITEM_SLOT_COUNT; i++) {
+            for (int position=0;position<ITEM_SLOT_COUNT;position++) {
+                int i=InventoryAt(position);
                 if (counts[i] <= 0) continue;
                 if (i == throwSelected) curVis = nvis;
                 vis[nvis++] = i;
@@ -650,9 +620,7 @@ static void DrawHudInventory(void) {
                        试玩实测：「用掉槽 1 的 FLARE 后，SLING 从槽 2 自动补到槽 1，
                        于是『按 1 选 Flare』永久失效」。
                        可见序号（idx）会随物品耗尽左移，而数字键绑的是真实槽位。 */
-                    int slotNo = i + 1;
-                    if (slotNo < ITEM_SLOT_COUNT) sprintf(line, "%s x%d", InventoryName(i), counts[i]);
-                    else             sprintf(line, "  %s x%d", InventoryName(i), counts[i]);
+                    snprintf(line,sizeof line,"%s x%d",InventoryName(i),counts[i]);
 
                     int tw = TextWidthWin(line);
                     int x = winW - margin - tw;
@@ -677,7 +645,6 @@ static void DrawHudInventory(void) {
 }
 
 static void DrawHudWorldHints(void) {
-    char buf[96];
     /* ------------------------------------------------------------------ */
     /* 跳脸虫 QTE                                                        */
     /* ------------------------------------------------------------------ */
@@ -732,11 +699,6 @@ static void DrawHudWorldHints(void) {
             DrawTextWin(UIS(20), y, modDesc[levelMod], 0x00C08050u);
         }
         DrawTextWin(UIS(20), y + TextHeightWin() + UIS(6), themeNames[(themeId >= 0 && themeId < THEME_COUNT) ? themeId : 0], 0x00B08040u);
-    }
-
-    if (showFps) {
-        sprintf(buf, "FPS %d  %.1f/%.1fms  %dx%d", currentFps, lastRenderMs, frameMsMax, renderW, renderH);
-        DrawTextWin(winW - UIS(20) - TextWidthWin(buf), UIS(18), buf, 0x00C8C8C8u);
     }
 
     /* v2.4.20：拾取提示**从这里移走** —— 见 DrawPickupToast()。

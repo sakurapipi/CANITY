@@ -284,7 +284,6 @@ static int FurnishCurrentRoom(const RoomTemplate* t,int fx,int fy) {
     if(!def)return 0;
     float cx=fx+1+t->w*.5f,cy=fy+1+t->h*.5f;
     if(!AddCurrentFixture(t,fx,fy,cx,cy,def->landmarkKind))return 0;
-    if(theme==HATCH_BRICK)return 1;
     return AddCurrentFixture(t,fx,fy,fx+1.5f,fy+1.5f,ROOMPROP_CONTROL_FIRST+theme*2) &&
            AddCurrentFixture(t,fx,fy,fx+t->w+.5f,fy+t->h+.5f,ROOMPROP_CONTROL_FIRST+theme*2+1);
 }

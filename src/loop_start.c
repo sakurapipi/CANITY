@@ -125,7 +125,7 @@ static void InitializeRunEconomy(void) {
     ThreatTierConfirmPlan();TacticalResetRun();
     ThreatReset();BenchResetRun();RunUpgReset();counterKillUsed=0;
     if(protocolRun.story){
-        carryGold=150;carryAtRunStart=0;throwSelected=0;runInProgress=1;runTime=0;
+        carryGold=PROTOCOL_STORY_SUPPLIES;carryAtRunStart=0;throwSelected=0;runInProgress=1;runTime=0;
         RunEconomyReset();return;
     }
     if(trainingMode){

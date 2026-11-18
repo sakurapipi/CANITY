@@ -98,6 +98,48 @@ const char *ToolDetail(int tool) {
     }
     return text;
 }
+/* Positions are preferences. Item IDs remain stable in saves, shots and bindings. */
+static unsigned char inventoryOrder[ITEM_SLOT_COUNT]={0,1,2,3,4,5,6,7,8,9,10,11,12,13};
+int InventoryAt(int position) {
+    return (unsigned)position<ITEM_SLOT_COUNT?inventoryOrder[position]:-1;
+}
+int InventoryPosition(int item) {
+    for(int i=0;i<ITEM_SLOT_COUNT;i++) if(inventoryOrder[i]==item) return i;
+    return -1;
+}
+int InventoryReorder(int item,int destination) {
+    int from=InventoryPosition(item);
+    if(from<0 || (unsigned)destination>=ITEM_SLOT_COUNT || from==destination) return 0;
+    if(from<destination)
+        memmove(inventoryOrder+from,inventoryOrder+from+1,(size_t)(destination-from));
+    else
+        memmove(inventoryOrder+destination+1,inventoryOrder+destination,(size_t)(from-destination));
+    inventoryOrder[destination]=(unsigned char)item;
+    return 1;
+}
+void InventoryOrderSave(unsigned char *out) { memcpy(out,inventoryOrder,sizeof inventoryOrder); }
+void InventoryOrderRestore(const void *bytes,int length) {
+    const unsigned char *order=bytes;
+    unsigned used=0;
+    if(order && length==ITEM_SLOT_COUNT) for(int i=0;i<length;i++) {
+        if(order[i]>=ITEM_SLOT_COUNT || (used&(1u<<order[i]))) {used=0;break;}
+        used|=1u<<order[i];
+    }
+    if(used==(1u<<ITEM_SLOT_COUNT)-1) memcpy(inventoryOrder,order,sizeof inventoryOrder);
+    else for(int i=0;i<ITEM_SLOT_COUNT;i++) inventoryOrder[i]=(unsigned char)i;
+}
+int InventoryCycle(int item,int step) {
+    int list[ITEM_SLOT_COUNT],count=0,from=-1;
+    for(int i=0;i<ITEM_SLOT_COUNT;i++) {
+        int id=InventoryAt(i);
+        if(InventoryCount(id)<=0)continue;
+        if(id==item)from=count;
+        list[count++]=id;
+    }
+    if(!count)return InventoryAt(0);
+    if(from<0)return step<0?list[count-1]:list[0];
+    return list[(from+count+step%count)%count];
+}
 int InventoryCount(int item) {
     switch (item) {
     case 0:
@@ -178,7 +220,7 @@ void TacticalResetRun(void) {
     tactical.quick[1] = 1;
     tactical.quick[2] = 2;
     tactical.quick[3] = 6;
-    static const int defaultKeys[] = {'J', 'U', 'O', 'L'};
+    static const int defaultKeys[] = {0, 'U', 'O', 0};
     for (int slot = 0; slot < 4; slot++) {
         int key = defaultKeys[slot];
         for (int action = 0; action < ACT_COUNT; action++)

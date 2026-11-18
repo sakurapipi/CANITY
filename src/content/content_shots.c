@@ -50,6 +50,7 @@ static const ShotSpec kShotSpecs[] = {
     { 10, "echo",    FX_ECHO_SCAN,  0.0f, 0,         0, -1,  0, 1, 0 },  /* 完全静音 */
     { 12, "phase",   FX_PHASE,     10.0f, 0,         0, -1,  0, 1, 0 },
     { 13, "anchor",  FX_PHASE,     10.0f, 0,         0, -1,  0, 1, 0 },
+    { SHOT_KIND_DECOY, "decoy", FX_DECOY, 4.0f, 0, 0, -1, 0, 0, 0 },
 };
 
 /* 未知 kind 的兜底：碎一下、出声、不伤害 —— 和改动前的 else 分支一致 */

@@ -298,6 +298,25 @@ static void test_glue_works_when_it_lands_on_open_floor(void) {
           "a glue pot landing on open floor must spawn a glue zone");
 }
 
+static void test_glue_impact_only_settles_once(void) {
+    throw_prepare(10, 0);
+    memset(shot,0,sizeof shot);
+    memset(monHunters,0,sizeof monHunters);
+    memset(lightBeasts,0,sizeof lightBeasts);
+    posX=5.5f;posY=8.5f;
+    throw_prepare(10,0);
+    Monster *target=&monHunters[0];
+    target->active=1;target->x=6.25f;target->y=8.5f;
+    ThrowItem(3,.1f);
+    for (int i=0;i<MAX_SHOTS;i++) if (shot[i].active) shot[i].life=.015f;
+    UpdateShots(.03f);  /* The projectile hits and expires in the same update. */
+    int areas=0;
+    for (int i=0;i<MAX_GLUE;i++) if (glues[i].active) areas++;
+    CHECK(target->glued && target->stun>=2.f, "a direct glue hit immobilizes the hunter");
+    CHECK(areas==1, "a direct glue hit deploys exactly one puddle");
+    target->active=0;
+}
+
 static void test_echo_works_when_it_lands_on_open_floor(void) {
     int marked = 0;
     int i;
@@ -394,6 +413,7 @@ void TestSuite_throwing(void) {
     test_stone_break_single_event();
     test_smoke_works_when_it_lands_on_open_floor();
     test_glue_works_when_it_lands_on_open_floor();
+    test_glue_impact_only_settles_once();
     test_echo_works_when_it_lands_on_open_floor();
     test_effects_also_fire_when_hitting_a_wall();
     test_shot_spec_covers_every_kind_in_use();

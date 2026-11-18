@@ -93,6 +93,10 @@ def main():
             shutil.copy2(source, folder/source.name)
     compiler = os.environ.get('CANITY_GCC') or profile.get('configuration', {}).get('compiler', {}).get('path') or shutil.which('gcc')
     runtime = []
+    strip = Path(compiler).resolve().parent/'strip.exe' if compiler else None
+    if not strip or not strip.is_file():
+        raise SystemExit('Windows release packaging requires strip.exe alongside the compiler.')
+    subprocess.run([str(strip), '--strip-unneeded', str(folder/'canity.exe')], check=True)
     if compiler:
         compiler_bin = Path(compiler).resolve().parent
         objdump = compiler_bin/'objdump.exe'
@@ -127,9 +131,6 @@ def main():
     save_version = int(re.search(r'^#define\s+SAVE_VERSION\s+(\d+)', save_header, re.M)[1])
     if acceptance:
         shutil.copy2(args.acceptance_report,folder/'验收摘要.json')
-    if args.single_exe:
-        strip=Path(compiler).resolve().parent/'strip.exe' if compiler else None
-        if strip and strip.is_file():subprocess.run([str(strip),'--strip-unneeded',str(folder/'canity.exe')],check=True)
     description = ('音乐已嵌入 EXE，首次运行缓存到用户目录。' if args.single_exe else
                    '默认 Lite 构建，必须保留 music/ 目录和随包 DLL。')
     instructions = (f'CANITY {game_version} — 存档格式 v{save_version}\n\n'

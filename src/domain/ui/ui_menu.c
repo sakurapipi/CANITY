@@ -361,7 +361,7 @@ static const char* MenuLabel(int i) {
             }
             if (it->value == &pitchLookEnabled) {
                 snprintf(buf, sizeof(buf), "%s: %s (%s)", label,
-                         Tr(it->options[*it->value ? 1 : 0], it->options[*it->value ? 1 : 0]),
+                         Transl(it->options[*it->value ? 1 : 0]),
                          Tr("Visual artifacts possible", "可能出现画面异常"));
                 return buf;
             }
@@ -375,10 +375,10 @@ static const char* MenuLabel(int i) {
                 if (dispVal >= 0 && dispVal < it->count) {
                     /* v2.9：选项值也走翻译（原来 LOW/MEDIUM/HIGH 全英文） */
                     sprintf(buf, "%s: %s", label,
-                            Tr(it->options[dispVal], it->options[dispVal]));
+                            Transl(it->options[dispVal]));
                 } else {
                     sprintf(buf, "%s: %s", label,
-                            Tr(it->options[0], it->options[0]));
+                            Transl(it->options[0]));
                 }
             }
             return buf;
@@ -802,7 +802,7 @@ static void DrawGenericMenuTitle(MenuGeo g) {
     }
     /* v2.9：标题为空就不画 —— 安全屋靠顶部页签表明位置，
        那行大红「SAFE HOUSE - SHOP」会把改造树整个盖住（用户要求去掉）。 */
-    if (g.title && g.title[0]) DrawTitleWin(g.title, g.titleY, titleColor);
+    if (g.title && g.title[0]) DrawTitleWin(Transl(g.title), g.titleY, titleColor);
 }
 
 
@@ -862,9 +862,11 @@ static void DrawGenericMenuRows(MenuGeo g, int sel, int popupOpen, const int* id
 
         if (currentState == STATE_GAMEOVER && i > 0) {
             if (protocolRun.story) {
+                char settlement[96];
+                snprintf(settlement,sizeof settlement,Tr("EVIDENCE TRANSMITTED   BANK +%d","证词已传出   银行入账 +%d"),lastRunKept);
                 const char *label = i==1?ProtocolFloorName():
                     !gameWon?Tr("Escape: return to main menu","按 Esc 返回主菜单"):
-                    (protocolRun.flags&PROTOCOL_MISSIONS)?Tr("Ending: Evidence transmitted","结局：证词已传出"):
+                    ProtocolPeacefulStory()?settlement:
                     protocolRun.ending==1?Tr("Ending: Departure","结局：离开设施"):Tr("Ending: Protocol Reset","结局：协议归零");
                 DrawTextInRow(label,RowRect(g,i),UI_INK);
                 continue;
@@ -914,20 +916,9 @@ static void DrawGenericMenuRows(MenuGeo g, int sel, int popupOpen, const int* id
             RECT row = RowRect(g, i);
             int th = TextHeightWin();
             int y = row.top + ((row.bottom - row.top) - th) / 2;
-            DrawTextWin(row.left + UIS(8), y, it->name, c);
-            int act = BindActionOfItem(it);
-            const char* valStr;
-            if (act >= 0 && act == rebindingAct) {
-                valStr = "...";          /* 正在改绑这一项 */
-            } else {
-                int vk = *it->value;
-                int dispVal = -1;
-                for (int k = 0; k < OPT_KEY_COUNT; k++) {
-                    if (optKeyVKs[k] == vk) { dispVal = k; break; }
-                }
-                if (dispVal >= 0) valStr = optKeys[dispVal];
-                else valStr = (vk == 0) ? "None" : "?";
-            }
+            DrawTextWin(row.left + UIS(8), y, Transl(it->name), c);
+            const char *valStr = BindActionOfItem(it) == rebindingAct
+                ? "..." : Transl(VkName(*it->value));
             int tw = TextWidthWin(valStr);
             DrawTextWin(row.right - UIS(8) - tw, y, valStr, 0x0070B0D0u);
             continue;
@@ -1009,14 +1000,14 @@ static void DrawMenuScrollIndicator(MenuGeo g) {
         int thumbY = g.firstY + (int)((float)g.scrollOffset / (g.count - g.maxVisibleRows) * (barH - thumbH));
         int barX = g.panel.right - UIS(12);
         BlendRectWin(barX, g.firstY, barX + UIS(8), g.panel.bottom, 0x00202020, 0.5f);
-        BlendRectWin(barX, thumbY, barX + UIS(8), thumbY + thumbH, 0x008CFF8C, 0.8f);
+        BlendRectWin(barX, thumbY, barX + UIS(8), thumbY + thumbH, UI_ACCENT, 0.8f);
 
         /* 顶部/底部箭头提示 */
         if (g.scrollOffset > 0) {
-            DrawTextCenterWin(g.panel.left + (g.panel.right - g.panel.left) / 2, g.firstY - UIS(20), "^", 0x008CFF8C);
+            DrawTextCenterWin(g.panel.left + (g.panel.right - g.panel.left) / 2, g.firstY - UIS(20), "^", UI_ACCENT);
         }
         if (g.scrollOffset + g.maxVisibleRows < g.count) {
-            DrawTextCenterWin(g.panel.left + (g.panel.right - g.panel.left) / 2, g.panel.bottom + UIS(4), "v", 0x008CFF8C);
+            DrawTextCenterWin(g.panel.left + (g.panel.right - g.panel.left) / 2, g.panel.bottom + UIS(4), "v", UI_ACCENT);
         }
     }
 }
@@ -1436,7 +1427,7 @@ static void DrawBankPage(void) {
         BlendRectWin(r.left,r.top,handle,r.bottom,UI_BG_SEL,1);
         FrameRectWin(r.left,r.top,r.right,r.bottom,slider==BankSelectedControl()?UI_EDGE_HOT:UI_EDGE,1,1);
         BlendRectWin(handle-UIS(4),r.top-UIS(4),handle+UIS(4),r.bottom+UIS(4),UI_ACCENT,1);
-        UiDossierText(slider?Tr("Higher risk raises awareness and extraction rewards.","提高风险会增加感知压力，也提高撤离收益。"):Tr("This amount leaves the bank only when a normal run starts.","只在普通对局开始时取出，不会因拖动立即扣款。"),r.left,r.bottom+UIS(20),r.right-r.left,winH*82/100,UI_INK_DIM);
+        UiDossierText(slider?Tr("The contract sets the minimum threat tier. Higher risk increases extraction rewards.","契约决定本局最低威胁档位，高风险会提高撤离收益。"):Tr("This amount leaves the bank only when a normal run starts.","只在普通对局开始时取出，不会因拖动立即扣款。"),r.left,r.bottom+UIS(20),r.right-r.left,winH*82/100,UI_INK_DIM);
     }
     int x=winW*62/100,right=winW-pad,y=winH*26/100,bottom=winH*81/100;
     UiPanel(x-UIS(14),y-UIS(12),right+UIS(10),bottom,UI_PANEL_NORMAL);
@@ -1474,7 +1465,7 @@ void UiDrawMenuPages(void) {
 static const char* MainMenuVisibleLabel(int index) {
     static const char *const labels[][2]={
         [MENU_CONTINUE]={"Continue","继续游戏"},
-        [MENU_STORY]={"Story: Disorder Protocol","剧情：失序协议"},
+        [MENU_STORY]={"Story Prologue","剧情序章：失序协议"},
         [MENU_FIRST_STORY]={"Enter the Facility","进入设施（推荐）"},
         [MENU_CLASSIC]={"Classic Exploration","经典探索"},
         [MENU_ROLES]={"Character Dossiers","角色档案"},

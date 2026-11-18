@@ -133,7 +133,7 @@ typedef struct { LONG x, y; } POINT;
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 49         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_NUM 50         /* 整数版本，进存档做记录 */
 /* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
    置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
    置 0 = 回到旧的战斗版本。 */
@@ -175,7 +175,7 @@ typedef struct { LONG x, y; } POINT;
 
 /* v2.4.2：双端稳定性补丁 —— 旧档迁移 / 运行段隔离 / 相位与舱门 /
    网页动作绑定与存档导出。存档结构**未变**（仍是 v34）。 */
-#define CANITY_VERSION_STR "2.5.0 RC1"
+#define CANITY_VERSION_STR "2.5.0 RC2"
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -348,7 +348,7 @@ extern int bestEndlessScore;
    game.c 里有编译期断言保证它与实际表项数一致。 */
 #define SETTING_COUNT 46   /* Includes objective guidance and display-only reset. */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
-#define OPT_KEY_COUNT 54
+#define OPT_KEY_COUNT 55
 
 /* ------------------------------------------------------------------ */
 /* 状态效果                                                            */
@@ -409,7 +409,7 @@ typedef struct {
 extern Decoy decoysArr[MAX_DECOY];
 void PlaceDecoy(float x, float y);
 void ArmDecoy(void);
-int  DecoyIntercept(void);       /* 若有激活的诱饵可以替玩家挨打，返回 1 并消耗一次 */
+int DecoyHitNear(float x,float y);
 
 
 #define MAX_SMOKE 3
@@ -854,7 +854,8 @@ typedef struct { float x, y; int active; } Breaker;
 #define ECHO_RADIUS     10.0f
 #define ECHO_LIFE       5.0f
 #define DECOY_SHOUT_EVERY 1.5f   /* v2.4.14：每 1.5 秒叫一次（原来 3 秒太慢） */
-#define DECOY_SHOUT_R    20.0f   /* 叫声半径（比投石最大噪音还大） */
+#define DECOY_SHOUT_R    (0.5f * MAP_WIDTH)  /* Half the map width. */
+#define DECOY_LIFE       15.0f
 #define DECOY_HP         2       /* 能挡两次伤害 */
 
 /* 关卡主题（墙面/地板/天花板风格）数量 */

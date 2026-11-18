@@ -35,8 +35,8 @@ int RoomThemeMaterialForFloor(int level) {
 }
 int RoomThemeTemplateForFloor(int level) {static const int templates[7]={4,1,5,3,2,0,6};return templates[RoomThemeForFloor(level)];}
 const char* RoomThemeName(int theme,int chinese) {
-    static const char* en[7]={"RESONANCE WELL","DEBT VAULT","OVERLOAD BEACON","EQUIVALENT TRANSPLANT","RETURN GATE","MADNESS COVENANT","BORROWED HEART"};
-    static const char* zh[7]={"声源诱导井","债务密库","过载灯塔","等价移植舱","折返换位门","疯癫契约","借时心室"};
+    static const char* en[7]={"RESONANCE WELL","DEBT VAULT","OVERLOAD BEACON","VITAL EXCHANGE","SWAP GATE","MADNESS COVENANT","BORROWED HEART"};
+    static const char* zh[7]={"声源诱导井","债务密库","过载灯塔","生命转换舱","折返换位门","疯癫契约","借时心室"};
     return theme>=0 && theme<7?(chinese?zh[theme]:en[theme]):"";
 }
 void RoomThemeRebuildControls(void) {
@@ -44,13 +44,37 @@ void RoomThemeRebuildControls(void) {
     for(int i=0;i<roomPropCount;i++) {
         RoomProp* p=&roomProps[i];
         if(p->active && p->kind==ROOMPROP_LANDMARK_FIRST+HATCH_BRICK && p->searched>0 && p->searched<=MON_HUNTER_MAX)
-            {roomTheme.target=p->searched-1;roomTheme.prepared=1;}
+            roomTheme.target=p->searched-1;
         if(!p->active || !RoomPropIsControl(p->kind))continue;
         int theme=(p->kind-ROOMPROP_CONTROL_FIRST)/2,side=(p->kind-ROOMPROP_CONTROL_FIRST)%2;
         if(theme!=roomTheme.theme || !p->searched)continue;
         roomTheme.prepared|=1u<<side;
         if(theme==HATCH_WARD)roomTheme.choice=side+1;
-        if(theme==HATCH_BRICK && roomTheme.target<0)roomTheme.target=p->searched-1;
+    }
+}
+int RoomThemeContains(float x,float y) {
+    if (hatchCount<=0 || !isfinite(x) || !isfinite(y) || x<1 || y<1 || x>=MAP_WIDTH-1 || y>=MAP_HEIGHT-1) return 0;
+    return cellMeta[(int)y][(int)x].roomId!=0;
+}
+
+/* Rebuild missing side controls in older room layouts. */
+static void RestoreRoomControls(int theme) {
+    for (int side=0;side<2;side++) {
+        int kind=ROOMPROP_CONTROL_FIRST+theme*2+side,present=0;
+        for (int i=0;i<roomPropCount;i++) if (roomProps[i].active && roomProps[i].kind==kind) present=1;
+        if (present) continue;
+        float targetX=roomTheme.landmarkX+(side?2:-2),targetY=roomTheme.landmarkY+(side?1:-1);
+        float best=1e9f,bx=0,by=0;
+        for (int y=1;y<MAP_HEIGHT-1;y++) for (int x=1;x<MAP_WIDTH-1;x++) {
+            float wx=x+.5f,wy=y+.5f;
+            if (!RoomThemeContains(wx,wy) || worldMap[y][x] || RoomPropAt(wx,wy)>=0) continue;
+            float score=Dist2(wx,wy,targetX,targetY);
+            if (score<best) {best=score;bx=wx;by=wy;}
+        }
+        if (best<1e9f && RoomPropAdd(bx,by,kind)) {
+            RoomProp *p=&roomProps[roomPropCount-1];
+            p->blocks=0;p->height=.48f;p->searchLeft=1;
+        }
     }
 }
 void RoomThemeBind(void) {
@@ -76,10 +100,18 @@ void RoomThemeBind(void) {
         roomTheme.variant=RoomLayoutVariant(roomSeedUsed);
         roomTheme.landmarkX=roomProps[i].x;roomTheme.landmarkY=roomProps[i].y;
     }
+    if (roomTheme.theme==HATCH_POWER && !RoomThemeIsCurrent(0)) {
+        if (RoomPropAdd(roomTheme.landmarkX,roomTheme.landmarkY,ROOMPROP_LANDMARK_FIRST+HATCH_POWER)) {
+            RoomProp *prop=&roomProps[roomPropCount-1];
+            prop->blocks=0;prop->searchLeft=0;prop->height=.94f;
+        }
+    }
     if(RoomThemeIsCurrent(0)) {
         hatches[0].x=roomTheme.landmarkX;hatches[0].y=roomTheme.landmarkY;
         roomTheme.switchX=roomTheme.landmarkX;roomTheme.switchY=roomTheme.landmarkY;
     }
+    if ((roomTheme.theme==HATCH_BRICK || roomTheme.theme==HATCH_POWER) &&
+        !roomTheme.spent && RoomThemeIsCurrent(0)) RestoreRoomControls(roomTheme.theme);
     roomTheme.ambientClock=1.0f;
     RoomThemeRebuildControls();
 }
@@ -99,6 +131,7 @@ void RoomThemeLoadEvent(int kind,float time) {RoomThemeStartEvent(kind,time);}
 int RoomThemeEventKind(void) {return eventKind;}
 float RoomThemeEventRemaining(void) {return eventTime;}
 /* Derived from the saved power-event clock: reload cannot restart the benefit. */
+int RoomThemeMapRevealed(void) {return eventKind==HATCH_POWER && eventTime>0;}
 float RoomThemeFreeMapRemaining(void) {return eventKind==HATCH_POWER ? fmaxf(0,eventTime-20.0f) : 0;}
 float RoomThemeControlPulse(void) {return fminf(1,fmaxf(0,roomTheme.timer/.8f));}
 int RoomThemeVisualStage(void) {

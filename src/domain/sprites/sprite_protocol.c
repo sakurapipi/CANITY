@@ -368,6 +368,88 @@ static void BakeJammerBurst(void) {
     cvFinish(SpriteBakeTarget(SPR_JAMMER_BURST));
 }
 
+static void BakeTrialMachine(int chapter) {
+    cvClear();
+    if (chapter==0) {
+        Face(33,108,190,104,0xb58256,0x4c3323);
+        Rect(61,122,193,173,0x312921);
+        for(int i=0;i<4;i++) cvLine(78+i*31,137,78+i*31,161,5,0xf8bb63,1);
+        cvEllipse(68,211,23,20,0x2b3033,1);
+        cvEllipse(189,211,23,20,0x2b3033,1);
+        Lamp(128,100,9,0xffcc79,1);
+    } else if (chapter==1) {
+        Face(87,186,82,44,0x537680,0x243642);
+        cvLine(128,185,128,102,12,0x62858b,1);
+        cvEllipse(128,95,59,36,0x395359,1);
+        cvEllipse(128,95,41,21,0x1d323b,1);
+        Lamp(128,94,10,0xb0f8ee,1);
+        cvLine(46,221,211,221,7,0x4f6470,.9f);
+    } else {
+        cvGlow(128,112,85,0xffa657,.52f);
+        cvEllipse(128,112,42,42,0x828663,1);
+        cvEllipse(128,112,31,31,0x382e24,1);
+        Lamp(128,112,18,0xffb565,1);
+    }
+    cvFinish(SpriteBakeTarget(SPR_TRIAL_MACHINE+chapter));
+}
+
+static void BakeDecoy(int armed,int sprite) {
+    cvClear();
+    unsigned canvas=0x887858,edge=0x352b24,brass=0xb99654;
+    if (armed) {
+        cvLine(104,165,69,228,28,edge,1.0f);
+        cvLine(153,166,190,228,28,edge,1.0f);
+        cvLine(96,109,52,183,17,canvas,1.0f);
+        cvLine(163,109,202,180,17,canvas,1.0f);
+        Face(91,74,75,117,canvas,edge);
+        cvEllipse(128,69,38,43,0x594938,1);
+        cvEllipse(127,65,33,37,0xAD9981,1);
+        cvLine(104,62,149,62,7,0x332d28,1);
+        cvEllipse(129,83,17,13,0x251e1d,1);
+        for(int i=0;i<5;i++) cvLine(119+i*5,77,119+i*5,89,2,brass,1);
+        Lamp(128,138,10,0xFFC364,1);
+    } else {
+        cvLine(124,161,79,221,30,edge,1);
+        cvLine(141,160,180,218,28,edge,1);
+        Face(71,97,118,125,canvas,edge);
+        cvLine(74,119,139,211,19,canvas,1);
+        cvLine(175,130,116,205,19,0x9d8865,1);
+        cvEllipse(132,98,46,43,0x504137,1);
+        cvEllipse(133,97,39,35,0xA89678,1);
+        cvLine(106,107,147,116,3,edge,1);
+        Rect(96,169,155,181,brass);
+    }
+    for(int i=0;i<6;i++) {
+        int x=(armed?99:81)+i*8;
+        cvLine(x,156,x+6,161,2,0xD3B981,.75f);
+    }
+    cvFinish(SpriteBakeTarget(sprite));
+}
+
+static void BakePhaseBeacon(int sprite,int deployed) {
+    cvClear();
+    Face(40,174,176,52,0x536578,0x212832);
+    unsigned cell=0x65E5CC;
+    if (deployed) {
+        cvLine(100,148,49,220,15,0x536778,1);
+        cvLine(156,148,207,220,15,0x536778,1);
+        cvLine(129,140,130,227,14,0x384e62,1);
+        cvEllipse(128,75,67,45,0x466576,1);
+        cvEllipse(128,75,56,35,0x19282f,1);
+        cvEllipse(128,75,45,22,0x347872,1);
+        cvLine(128,68,128,147,13,cell,1);
+        Lamp(128,77,15,cell,1);
+    } else {
+        float housing[]={44,152,68,83,116,56,177,67,217,116,193,190,158,212,73,200};
+        cvPolyGrad(housing,8,0x8397A4,0x26323f,1);
+        cvLine(75,144,181,92,12,0x223339,1);
+        cvLine(77,145,178,95,5,cell,1);
+        cvLine(90,184,185,145,5,0xd49761,.9f);
+        Lamp(140,151,9,cell,1);
+    }
+    cvFinish(SpriteBakeTarget(sprite));
+}
+
 void BakeProtocolProps(void) {
     for (int sprite=SPR_MISSION_COIL;sprite<=SPR_MISSION_SHUTTER;sprite+=2)
         for (int on=0;on<2;on++) BakeMissionStation(sprite,on);
@@ -376,6 +458,11 @@ void BakeProtocolProps(void) {
         for(int chapter=0;chapter<3;chapter++)
             for(int on=0;on<2;on++) BakeChapterProp(chapterProps[i],chapter,on);
     BakeJammerBurst();
+    BakeDecoy(0,SPR_DECOY_FOLDED);
+    BakeDecoy(1,SPR_DECOY_ARMED);
+    BakePhaseBeacon(SPR_PROP_PHASE,1);
+    BakePhaseBeacon(SPR_PHASE_PROJECTILE,0);
+    for(int chapter=0;chapter<3;chapter++) BakeTrialMachine(chapter);
     for (int kind=STORY_CAPACITOR;kind<=STORY_HATCH;kind++) {
         for (int on=0;on<2;on++) {
             unsigned color=on?0x67e0c2:0xbe8350;

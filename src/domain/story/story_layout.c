@@ -69,7 +69,22 @@ static const Layout levels[]={
      {{6,26},{26,21},{20,12},{8,10},{11,20},{21,29},{15,7},{31,12}},
      {2,2,2,2,2,3,2,2},{1,2,2,2,2,1,2,2},1,5,ACOUSTIC_HARD,
      {{0,4,1},{0,5,1},{4,3,0},{4,2,0},{3,6,1},{6,2,0},{2,1,0},
-      {6,7,0},{1,7,1},{5,1,0},{5,2,1},{2,7,0}}}
+      {6,7,0},{1,7,1},{5,1,0},{5,2,1},{2,7,0}}},
+    { /* B-17 switching yard: dispatch and a return duct skirt the main bus. */
+     {{5,24},{29,11},{20,16},{10,29},{9,15},{22,26},{20,7},{31,20}},
+     {2,2,3,2,2,3,3,2},{2,2,2,1,2,2,2,2},5,2,ACOUSTIC_METAL,
+     {{0,4,1},{0,3,1},{3,5,0},{4,2,0},{4,6,1},{6,2,0},{6,1,0},
+      {2,5,1},{2,1,0},{5,7,0},{1,7,1},{2,7,0}}},
+    { /* B-17 witness archive: separate booths flank the receiver and merge at the uplink. */
+     {{5,10},{29,25},{20,20},{9,15},{9,25},{23,29},{17,9},{31,11}},
+     {2,2,3,2,2,2,3,2},{2,2,2,2,2,1,2,2},3,4,ACOUSTIC_DEFAULT,
+     {{0,3,1},{0,6,0},{3,4,1},{3,2,0},{4,2,0},{4,5,0},{6,2,1},
+      {6,7,0},{2,5,1},{2,1,0},{5,1,0},{1,7,0}}},
+    { /* B-17 spillway: two shelter lanes meet at the pressure shutter. */
+     {{5,22},{27,12},{22,20},{9,28},{10,13},{23,28},{17,9},{31,17}},
+     {2,2,3,2,2,3,2,2},{2,2,2,1,2,1,2,2},1,5,ACOUSTIC_HARD,
+     {{0,4,1},{0,3,0},{4,6,1},{4,2,0},{3,5,0},{5,2,0},{6,2,1},
+      {6,1,0},{2,1,1},{2,7,0},{1,7,0},{5,7,0}}}
 };
 
 const Cell *StorySite(int floor,int site) { return &levels[floor-1].site[site]; }
@@ -110,7 +125,23 @@ void StoryLayOut(int floor) {
         Open(24,22,31,22);Open(31,22,31,29);Open(29,27,33,29);
         Furnish(l,SITE_RETURN,ROOMPROP_CONSOLE);
     }
-    if (floor>8) return;
+    if (floor>8) {
+        static const int fixtures[3][3]={
+            {ROOMPROP_CONSOLE,ROOMPROP_THEME_FIRST,ROOMPROP_CRATES},
+            {ROOMPROP_SHELF,ROOMPROP_CONSOLE,ROOMPROP_SHELF},
+            {ROOMPROP_CRATES,ROOMPROP_THEME_FIRST+2,ROOMPROP_CONSOLE},
+        };
+        const int *f=fixtures[(floor-9)%3];
+        Furnish(l,SITE_ENTRY,f[0]);
+        Furnish(l,SITE_RECORD,f[1]);
+        Furnish(l,SITE_TERMINAL,f[2]);
+        if (floor>=12) {
+            Furnish(l,SITE_SERVICE,ROOMPROP_CONSOLE);
+            Furnish(l,SITE_RETURN,floor==13?ROOMPROP_SHELF:ROOMPROP_CRATES);
+            Furnish(l,SITE_REFUGE,floor==14?ROOMPROP_SHELF:ROOMPROP_CRATES);
+        }
+        return;
+    }
     Furnish(l,SITE_SERVICE,floor==2 || floor==3 || floor==5?ROOMPROP_SHELF:ROOMPROP_CONSOLE);
     Furnish(l,SITE_RECORD,floor==2 || floor==3?ROOMPROP_SHELF:ROOMPROP_CONSOLE);
 }

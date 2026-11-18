@@ -1,3 +1,4 @@
+#include "shot_spec.h"
 #include "tactical_tools.h"
 /* 2026-11-16：从 render.c 拆出的**世界道具/投掷物绘制**（域内解耦，行为不变）。
    这一簇包含投影工具 ProjectPoint、染色怪物、怪物列表、投掷物与胶水坑。
@@ -279,6 +280,12 @@ void DrawShotModel(int idx) {
     if (ty * 0.85f >= zBuffer[occ]) return;
 
     int kind = shot[idx].kind;
+    if (kind==12 || kind==13 || kind==SHOT_KIND_DECOY) {
+        int size=(int)fmaxf(5,fminf(190,unit*.28f));
+        int sprite=kind==SHOT_KIND_DECOY?SPR_DECOY_FOLDED:SPR_PHASE_PROJECTILE;
+        DrawSprite(sprite,cx-size/2,cy-size/2,size,size,.90f,1,1,ty);
+        return;
+    }
     if(kind>=TOOL_SHOT_FIRST && kind<TOOL_SHOT_FIRST+TOOL_COUNT) {
         DrawTacticalShot(idx,cx,cy,unit,ty);
         return;

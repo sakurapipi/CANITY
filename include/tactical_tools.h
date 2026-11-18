@@ -3,7 +3,7 @@
 #include "common.h"
 #define TOOL_FIRST_ITEM 7
 #define TOOL_COUNT 7
-#define TOOL_ACOUSTIC_RADIUS 3.0f
+#define TOOL_ACOUSTIC_RADIUS 3.7f
 #define TOOL_ACOUSTIC_SECONDS 10.0f
 #define TOOL_PRISM_BLIND_SECONDS 3.0f
 #define TOOL_SHOT_FIRST 32
@@ -31,6 +31,12 @@ extern TacticalState tactical;
 const ToolDef *ToolDefinition(int tool);
 const char *ToolDetail(int tool);
 int InventoryCount(int item);
+int InventoryAt(int position);
+int InventoryPosition(int item);
+int InventoryReorder(int item,int destination);
+void InventoryOrderSave(unsigned char *out);
+void InventoryOrderRestore(const void *bytes,int length);
+int InventoryCycle(int item,int step);
 void InventoryCounts(int *out);
 const char *InventoryName(int item);
 int ToolCapacity(int tool);
@@ -50,6 +56,7 @@ int CollectorMagneticPull(int apply);
 int TacticalPanelOpen(void);
 int TacticalInputKey(int key, int repeat);
 int TacticalInputClick(int x, int y);
+void TacticalInputWheel(int steps);
 void TacticalDrawPanel(void);
 void TacticalDrawWorld(void);
 #endif

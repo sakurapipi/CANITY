@@ -41,31 +41,13 @@ static int SwapCandidate(int index) {
     return 1;
 }
 int RoomThemeSwapTarget(void) {
-    if(RoomThemeIsCurrent(0) && roomTheme.target>=0)return SwapCandidate(roomTheme.target)?roomTheme.target:-1;
+    if(RoomThemeIsCurrent(0) && SwapCandidate(roomTheme.target))return roomTheme.target;
     int best=-1;float distance=35;
     for(int i=0;i<MON_HUNTER_MAX;i++)if(SwapCandidate(i)) {
         float d=Dist2(posX,posY,monHunters[i].x,monHunters[i].y);
         if(d>distance){best=i;distance=d;}
     }
     return best;
-}
-/* First hold locks a distant target; the next hold commits the swap. */
-int RoomThemeSelectCentralTarget(int idx) {
-    if(!RoomThemeIsCurrent(idx) || hatches[idx].kind!=HATCH_BRICK ||
-       hatches[idx].state!=HATCH_SEALED || roomTheme.spent)return 0;
-    if(roomTheme.target>=0 && SwapCandidate(roomTheme.target))return 0;
-    roomTheme.target=-1;
-    int target=RoomThemeSwapTarget();
-    if(target<0)return 0;
-    for(int i=0;i<roomPropCount;i++) {
-        if(roomProps[i].active && roomProps[i].kind==ROOMPROP_LANDMARK_FIRST+HATCH_BRICK)
-            roomProps[i].searched=target+1;
-        if(roomProps[i].active && RoomPropIsControl(roomProps[i].kind) &&
-           (roomProps[i].kind-ROOMPROP_CONTROL_FIRST)/2==HATCH_BRICK)roomProps[i].searched=0;
-    }
-    roomTheme.target=target;roomTheme.prepared=1;roomTheme.timer=.8f;roomTheme.awaitingRelease=1;
-    RoomThemeNotify(Tr("TARGET LOCKED / RELEASE AND HOLD AGAIN TO SWAP", "目标已锁定，松开后再次长按执行换位"));uiDirty=1;PlaySfx(SFX_PICKUP,.3f);
-    return 1;
 }
 static void SetControl(int theme,int side,int value) {
     for(int i=0;i<roomPropCount;i++)if(roomProps[i].active &&
@@ -85,15 +67,8 @@ int RoomThemeInteractFixture(int index) {
         SetControl(theme,0,0);SetControl(theme,1,0);control->searched=1;
     } else if(theme==HATCH_STORAGE || theme==HATCH_HELL) {
         SetControl(theme,0,side==0);SetControl(theme,1,0);
-    } else if(theme==HATCH_BRICK) {
-        int previous=roomTheme.target,next=-1;
-        for(int n=1;n<=MON_HUNTER_MAX;n++) {
-            int candidate=(previous+n+MON_HUNTER_MAX)%MON_HUNTER_MAX;
-            if(SwapCandidate(candidate)){next=candidate;break;}
-        }
-        if(next<0) {RoomThemeNotify(Tr("NO SAFE TARGET 6-28 CELLS AWAY", "六至二十八格内没有安全换位目标"));return 1;}
-        SetControl(theme,0,0);SetControl(theme,1,0);control->searched=next+1;
     } else control->searched=1;
+    roomTheme.awaitingRelease=1;
     RoomThemeRebuildControls();roomTheme.timer=.8f;
     AudioPlayWorld(theme==HATCH_BOILER?SFX_ECHO:SFX_CRANK,control->x,control->y,.32f,9,2);
     RoomThemeNotify(RoomThemeFixtureLine(index));uiDirty=1;
@@ -116,8 +91,8 @@ int RoomThemeCanActivate(int idx,char* reason,int cap) {
         const RoomArchetype* def=RoomArchetypeGet(kind);
         if(!def)return 0;
         if(!(kind==HATCH_STORAGE && RoomLayoutVersion(roomSeedUsed)==ROOM_LAYOUT_LEGACY) && (roomTheme.prepared&def->preparationMask)!=def->preparationMask) {
-            static const char* en[7]={"TUNE BOTH SOUND PIPES FIRST","AUTHORIZE THE PERCENTAGE INVESTMENT FIRST","GROUND BOTH INSULATORS FIRST","SELECT AN EXCHANGE","SELECT A TARGET","CONFIRM THE IRREVERSIBLE COVENANT FIRST","WIND THE HEART AND PREPARE AN OFFERING FIRST"};
-            static const char* zh[7]={"先校准两根声管","先在柜台确认比例风险投资","先为左右装置接地","先选择转换方向","先选择换位目标","先确认本局不可撤销的契约","先为心脏上弦并准备投掷物"};
+            static const char* en[7]={"TUNE BOTH SOUND PIPES FIRST","AUTHORIZE THE PERCENTAGE INVESTMENT FIRST","CHARGE BOTH TOWERS FIRST","SELECT AN EXCHANGE","CALIBRATE BOTH SWAP RELAYS FIRST","CONFIRM THE IRREVERSIBLE COVENANT FIRST","WIND THE HEART AND PREPARE AN OFFERING FIRST"};
+            static const char* zh[7]={"先校准两根声管","先在柜台确认比例风险投资","先给左右两座电塔充电","先选择转换方向","先校准左右两台换位装置","先确认本局不可撤销的契约","先为心脏上弦并准备投掷物"};
             return Missing(reason,cap,g_lang==LANG_ZH?zh[kind]:en[kind]);
         }
     }
@@ -147,7 +122,6 @@ int RoomThemeCanActivate(int idx,char* reason,int cap) {
         if((!current || roomTheme.choice==2) && sanity>=25 && battery<BatteryMax()-1)return 1;
         return Missing(reason,cap,Tr("SELECTED EXCHANGE NEEDS RESOURCES AND RECOVERY SPACE", "所选转换需要足够资源和恢复空间"));
     case HATCH_BRICK:
-        if(current && roomTheme.target<0)return Missing(reason,cap,Tr("HOLD THE CENTRAL FRAME ONCE TO LOCK A DISTANT HUNTER", "在中央门框长按一次锁定远处目标"));
         if(stamina>=40 && RoomThemeSwapTarget()>=0)return 1;
         return Missing(reason,cap,Tr("NEED 40 STAMINA AND A SAFE TARGET 6-28 CELLS AWAY", "需要40体力和六至二十八格内的安全换位目标"));
     case HATCH_FLESH:
@@ -173,7 +147,6 @@ int RoomThemeActivate(int idx) {
     case HATCH_POWER:
         battery-=25;hatchLightsT=35;RoomThemeStartEvent(2,35);
         if(SkillOwned(SK_SHORTCUTJR) && SaveEvolutionCanPersist())ToolReceive(TOOL_PRISM);
-        for(int y=1;y<MAP_HEIGHT-1;y++)for(int x=1;x<MAP_WIDTH-1;x++)if(!worldMap[y][x])explored[y][x]=1;
         MakeNoise(hatch->x,hatch->y,32);break;
     case HATCH_WARD: {
         int direction=current?roomTheme.choice:
@@ -202,6 +175,9 @@ int RoomThemeActivate(int idx) {
     /* Commit the persisted terminal state before returning to any caller. */
     HatchSetState(idx,HATCH_FIRED);roomTheme.spent=1;roomTheme.timer=.8f;
     AudioPlayWorld(hatch->kind==HATCH_HELL?SFX_IMPACT:SFX_POWER,hatch->x,hatch->y,.55f,18,3);
-    RoomThemeNotify(Tr("ACTIVATED / ONCE PER FLOOR", "装置已生效，本层不可重复使用"));uiDirty=1;
+    RoomThemeNotify(hatch->kind==HATCH_POWER?
+        Tr("FLOOR REVEALED FOR 35s / MINIMAP FREE FOR 15s","全层已揭示35秒，小地图免耗电15秒"):
+        Tr("ACTIVATED / ONCE PER FLOOR","装置已生效，本层不可重复使用"));
+    uiDirty=1;
     return 1;
 }

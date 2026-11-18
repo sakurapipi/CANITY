@@ -86,6 +86,17 @@ static void DrawLessonMarker(float wx, float wy) {
 void DrawTutorialPanel(void) {
     if (!trainingMode && currentState==STATE_PLAYING && !calibActive && !lockActive &&
         !isMapOpen && !ProtocolCinematicActive() && ProtocolShowGuide()) {
+        if (ProtocolPeacefulStory()) {
+            int boxW=winW*48/100, x=winW-boxW-UIS(12), top=UIS(13);
+            int pad=UIS(7), height=2*FONT_H+3*pad;
+            char objective[160];
+            snprintf(objective,sizeof objective,"%s",ProtocolObjective());
+            UiTrimSmallText(objective,boxW-2*pad);
+            BlendRectWin(x,top,x+boxW,top+height,UI_BG_PANEL,.94f);
+            FrameRectWin(x,top,x+boxW,top+height,UI_EDGE,.85f,1);
+            DrawTextSmallLiteralWin(x+pad,top+pad,Tr("CURRENT OBJECTIVE","当前目标"),UI_ACCENT);
+            DrawTextSmallLiteralWin(x+pad,top+2*pad+FONT_H,objective,UI_INK);
+        }
         float x,y;
         if (ProtocolTarget(&x,&y)) DrawLessonMarker(x,y);
     }
@@ -282,36 +293,66 @@ void DrawPickupToast(void) {
 void UiDrawRoomHint(void) {
     if(currentState!=STATE_PLAYING || !roomTheme.active || !roomTheme.inside ||
        calibActive || lockActive || exitChoiceOpen || (isMapOpen && mapFullScreen))return;
-    int x=UIS(20),pad=8,width=winW*48/100;
-    if(width>UIS(380))width=UIS(380);
-    int line=FONT_H+5,height=line*5+pad*2,y;
-    int top=UIS(18)+TextHeightWin()*3+UIS(12),bottom=winH-UIS(150);
+    int x=UIS(20),pad=UIS(7),width=winW*49/100;
+    if(width>UIS(425))width=UIS(425);
+    int well=roomTheme.theme==HATCH_BOILER;
+    int collapsed=well && !roomTheme.guideExpanded;
+    if (collapsed && width>UIS(220)) width=UIS(220);
+    int textH=TextMediumLiteralHeight(), rowH=textH+UIS(8);
+    int height=collapsed?2*FONT_H+3*pad:3*rowH+2*textH+FONT_H+6*pad,y;
+    int top=UIS(18)+3*(TextHeightWin()+UIS(4)),bottom=winH-UIS(110);
     if(!UiFindFreeBand(x,top,width,height,bottom,&y))return;
-    BlendRectWin(x,y,x+width,y+height,UI_BG_PANEL,.96f);
-    FrameRectWin(x,y,x+width,y+height,UI_EDGE,.9f,1);
-    char heading[160];
-    snprintf(heading,sizeof(heading),"%s / %s",RoomThemeName(roomTheme.theme,g_lang==LANG_ZH),
-             roomTheme.spent?Tr("ACTIVE / USED","已生效 / 已用"):Tr("ROOM DEVICE","主题装置"));
-    UiTrimSmallText(heading,width-pad*2);DrawTextSmallLiteralWin(x+pad,y+pad,heading,UI_ACCENT);
-    const char* body=RoomThemeNotification();
-    if(!body[0])body=(hoverKind==3 && hoverIndex>=0 && hoverIndex<roomPropCount && RoomPropIsControl(roomProps[hoverIndex].kind))?RoomThemeFixtureLine(hoverIndex):RoomThemeInstruction();
-    char text[512];snprintf(text,sizeof(text),"%s",body);const char* cursor=text;
-    for(int row=0;row<3 && *cursor;row++) {
-        char part[512];int used=0,fit=0;
-        while(cursor[used] && used<490){unsigned char c=(unsigned char)cursor[used];int bytes=c<128?1:c<224?2:c<240?3:4;
-            memcpy(part+used,cursor+used,(size_t)bytes);used+=bytes;part[used]=0;
-            if(TextSmallLiteralWidth(part)>width-pad*2)break;
-            fit=used;
-        }
-        if(!fit)break;
-        memcpy(part,cursor,(size_t)fit);part[fit]=0;cursor+=fit;
-        DrawTextSmallLiteralWin(x+pad,y+pad+line*(row+1),part,UI_INK);
+    BlendRectWin(x,y,x+width,y+height,UI_BG_PANEL,well?.52f:.97f);
+    FrameRectWin(x,y,x+width,y+height,UI_EDGE,well?.66f:.9f,1);
+    if (collapsed) {
+        int charged=!!(roomTheme.prepared&1u)+!!(roomTheme.prepared&2u)+!!roomTheme.spent;
+        char title[96];
+        snprintf(title,sizeof title,"%s  %d/3",RoomThemeName(roomTheme.theme,g_lang==LANG_ZH),charged);
+        UiTrimSmallText(title,width-2*pad);
+        DrawTextSmallLiteralWin(x+pad,y+pad,title,UI_ACCENT);
+        DrawTextSmallLiteralWin(x+pad,y+2*pad+FONT_H,Tr("X  SHOW GUIDE","X  展开引导"),UI_INK);
+        return;
     }
-    char action[128];
-    if(roomTheme.spent)snprintf(action,sizeof(action),"%s",Tr("THIS FLOOR: SINGLE USE COMPLETE","本层一次性装置已结算"));
-    else snprintf(action,sizeof(action),Tr("HOLD %s TO INTERACT / RELEASE TO CANCEL","按住%s交互，松开取消"),VkName(g_bindings[ACT_INTERACT]));
-    UiTrimSmallText(action,width-pad*2);DrawTextSmallLiteralWin(x+pad,y+pad+line*4,action,UI_INK_DIM);
-    if(holdingNow && (hoverKind==3 || hoverKind==4))UiBar(x+pad,y+height-5,width-pad*2,3,fminf(1,holdTimer/SEARCH_TIME),UI_BG_ROW,UI_ACCENT);
+    const char *title=RoomThemeName(roomTheme.theme,g_lang==LANG_ZH);
+    if(TextMediumLiteralWidth(title)<=width-pad*2) DrawTextMediumLiteralWin(x+pad,y+pad,title,UI_ACCENT);
+    else DrawTextSmallLiteralWin(x+pad,y+pad,title,UI_ACCENT);
+    if (well) {
+        const char *collapse=Tr("X HIDE","X 收起");
+        int right=x+width-pad-DrawTextSmallWidth(collapse);
+        if (right>x+pad+TextMediumLiteralWidth(title)+pad)
+            DrawTextSmallLiteralWin(right,y+pad,collapse,UI_INK);
+    }
+    int yy=y+textH+pad*2;
+    for(int step=0;step<3;step++,yy+=rowH){
+        const char *label;float done;int alternate;
+        RoomThemeGuideStep(step,&label,&done,&alternate);
+        char line[108];
+        snprintf(line,sizeof line,"%d. %s%s",step+1,label,alternate?Tr(" (optional)","（备选）"):"");
+        if (TextMediumLiteralWidth(line)<=width-2*pad)
+            DrawTextMediumLiteralWin(x+pad,yy,line,alternate?UI_INK_DIM:UI_INK);
+        else {
+            UiTrimSmallText(line,width-2*pad);
+            DrawTextSmallLiteralWin(x+pad,yy,line,alternate?UI_INK_DIM:UI_INK);
+        }
+        UiBar(x+pad,yy+rowH-UIS(6),width-2*pad,UIS(4),done,UI_BG_ROW,done>=1?UI_OK:UI_ACCENT);
+    }
+    char line[320];
+    if(roomTheme.spent) snprintf(line,sizeof line,"%s",Tr("EFFECT COMMITTED","装置已启动"));
+    else if(roomTheme.theme==HATCH_WARD)
+        snprintf(line,sizeof line,"%s",Tr("CHOOSE ONE EXCHANGE, THEN START THE CENTER","只选一种资源转换，再启动中央装置"));
+    else snprintf(line,sizeof line,Tr("HOLD %s AT THE NEXT DEVICE","到对应装置按住 %s"),VkName(g_bindings[ACT_INTERACT]));
+    UiTrimSmallText(line,width-2*pad);
+    DrawTextSmallLiteralWin(x+pad,yy+pad,line,UI_ACCENT);
+    const char *notice=RoomThemeNotification();
+    if (!notice[0]) notice=RoomThemeInstruction();
+    snprintf(line,sizeof line,"%s",notice);
+    if(TextMediumLiteralWidth(line)<=width-2*pad)
+        DrawTextMediumLiteralWin(x+pad,yy+2*pad+FONT_H,line,UI_INK);
+    else {
+        UiTrimSmallText(line,width-2*pad);
+        DrawTextSmallLiteralWin(x+pad,yy+2*pad+FONT_H,line,UI_INK);
+    }
+
 }
 static int threatNoticeKind=0;
 static double threatNoticeUntil=0;

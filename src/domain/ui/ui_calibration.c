@@ -69,10 +69,11 @@ void UiDrawCalibration(void) {
         if(offset<-.12f || offset>horizon)continue;
         int lane=CalibNoteLane(i);
         int ny=target-(int)(offset*(target-laneTop)/horizon);
-        if(ny<laneTop+UIS(4) || ny>target+UIS(6))continue;
+        if(ny<laneTop || ny>target+UIS(6))continue;
         int nx=inner+lane*laneW+UIS(5),rx=inner+(lane+1)*laneW-UIS(8);
-        BlendRectWin(nx,ny-UIS(4),rx,ny+UIS(4),colors[lane],1);
-        BlendRectWin(nx+UIS(3),ny-UIS(2),rx-UIS(3),ny,0xF4F6E9,.9f);
+        int noteTop=ny-UIS(4)>laneTop?ny-UIS(4):laneTop;
+        BlendRectWin(nx,noteTop,rx,ny+UIS(4),colors[lane],1);
+        if(ny>laneTop+UIS(2)) BlendRectWin(nx+UIS(3),ny-UIS(2),rx-UIS(3),ny,0xF4F6E9,.9f);
     }
     snprintf(text,sizeof(text),Tr("%.0f%% / 40s  |  PERFECT HITS RECOVER MORE","%.0f%% / 40秒  |  精准与连击提高恢复"),(double)(CalibProgress()*100));
     UiTrimSmallText(text,w-margin*2);

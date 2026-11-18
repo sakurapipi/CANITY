@@ -632,7 +632,7 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
 LightContact: ;
     float pd2 = Dist2(L->x, L->y, posX, posY);
     /* v3.3：诱饵同样能替玩家挡追光鬼这一下 */
-    if (L->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R && DecoyIntercept()) {
+    if (DecoyHitNear(L->x,L->y)) {
         L->hitCooldown = HIT_COOLDOWN_BASE;
     } else if (L->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R) {
             if (hiddenIn < 0) {   /* v3.0：藏起来抓不到 */
@@ -962,24 +962,11 @@ static void HunterPerceive(Monster* M, float dt) {
        这里补上：怪进入 0.7 格内 → 玩偶当场炸掉（消失）+ 怪顿一下 +
        接下来 10 秒不再刷新目标（suspCool = 10），所以它会原地乱走而不是立刻改追别的。
     */
-    {
-
-        for (int di = 0; di < MAX_DECOY; di++) {
-            if (!decoysArr[di].active || !decoysArr[di].armed) continue;
-            float ddx = M->x - decoysArr[di].x;
-            float ddy = M->y - decoysArr[di].y;
-            if (ddx * ddx + ddy * ddy > 0.49f) continue;   /* 0.7 格内 */
-
-            ShatterDecoy(di);
-            M->stun = SkillDecoyHoldSeconds();             /* v2.4.15：**定身 10 秒**（用户要求） */
-            M->state = 0;
-            M->suspCool = SkillDecoyHoldSeconds();           /* **10 秒内不再刷新目标** */
-            M->suspTarget = -1;
-            M->pathLen = 0;
-            M->pathIdx = 0;
-            M->repath = 0.0f;
-            break;
-        }
+    if (DecoyHitNear(M->x,M->y)) {
+        M->stun=M->suspCool=SkillDecoyHoldSeconds();
+        M->state=0;M->suspTarget=-1;
+        M->pathLen=M->pathIdx=0;M->repath=0;
+        return;
     }
 
     /* v3.0：**寻声怪要能看见玩家** ——
@@ -1306,22 +1293,7 @@ static int HunterResolveContact(Monster* M, float dt) {
     }
 
     /* 抓到玩家：掉理智 + 怪被弹开（以后可以换成真正的地图事件） */
-    /* v3.3：**诱饵先替玩家挨这一下** ——
-       附近有激活的玩偶就抵掉，玩家不掉理智，怪物还会转向玩偶。 */
-    if (!playerInSafe && M->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R && DecoyIntercept()) {
-        M->hitCooldown = HitCooldownFor(currentLevel);
-        for (int di = 0; di < MAX_DECOY; di++) {
-            if (decoysArr[di].active && decoysArr[di].armed) {
-                M->state = 1;
-                M->tx = decoysArr[di].x;
-                M->ty = decoysArr[di].y;
-                M->repath = 0.0f;
-                M->pathLen = 0;
-                M->pathIdx = 0;
-                break;
-            }
-        }
-    } else if (!playerInSafe && M->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R) {
+    if (!playerInSafe && M->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R) {
         /* v1.8：被抓的惩罚随层数增长，且受局内"铁皮"减免 */
         float catchLoss = CatchSanityPeek();   /* v2.4.93 递增档位 */
         /* v3.0：**藏在柜子里 = 完全抓不到**。

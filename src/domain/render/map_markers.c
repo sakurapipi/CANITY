@@ -14,7 +14,7 @@
 unsigned MapIconColor(int kind) {
     static const unsigned colors[MAP_ICON_COUNT]={
         0xFFE3A1,0xFFB65F,0xE1F0FF,0x8CBDFF,0xADFFF0,0xFF7864,
-        0xE2BDFF,0x9985B0,0xFFFAD2,0xFF7465,0xFF9B8C,0xFFDA77,0x80F0FF,0xFFEFE0,0xABD1FF
+        0xE2BDFF,0x9985B0,0xFFFAD2,0xFF7465,0xFF9B8C,0xFFDA77,0x80F0FF,0xFFEFE0,0xABD1FF,0xFFE8A1
     };
     return kind>=0 && kind<MAP_ICON_COUNT?colors[kind]:0xFFFFFF;
 }
@@ -24,7 +24,7 @@ int MapIconPixel(int kind,int x,int y) {
         {4,14,31,17,21}, {17,17,31,17,17}, {17,10,4,10,17},
         {4,14,27,14,4}, {4,10,17,10,4}, {4,6,31,6,4},
         {0,14,21,14,0}, {31,21,17,10,4},
-        {5,6,31,12,20}, {17,10,21,10,17}, {31,21,17,21,31}, {31,17,31,4,14}
+        {5,6,31,12,20}, {17,10,21,10,17}, {31,21,17,21,31}, {31,17,31,4,14}, {30,17,29,21,31}
     };
     return kind>=0 && kind<MAP_ICON_COUNT && x>=0 && x<5 && y>=0 && y<5 &&
            (glyphs[kind][y]&(1u<<(4-x)));
@@ -34,7 +34,8 @@ static int Cell(float x,float y,int* cx,int* cy) {
     *cx=(int)x;*cy=(int)y;return 1;
 }
 static void Mark(unsigned short grid[MAP_HEIGHT][MAP_WIDTH],float x,float y,int kind,int reveal) {
-    int cx,cy;if(!Cell(x,y,&cx,&cy) || (!reveal && !explored[cy][cx]))return;
+    int gridReveal=RoomThemeMapRevealed();
+    int cx,cy;if(!Cell(x,y,&cx,&cy) || (!reveal && !gridReveal && !explored[cy][cx]))return;
     grid[cy][cx]|=(unsigned short)(1u<<kind);
 }
 static void Glyph(int x,int y,int size,int kind) {
@@ -76,7 +77,9 @@ void DrawMapMarkers(int ox,int oy,int cellSize) {
         int icon=id==PROTOCOL_TERMINAL?MAP_ICON_TERMINAL:MAP_ICON_DEVICE;
         if (mission && id==PROTOCOL_EVIDENCE)
             icon=MAP_ICON_COIL+protocolRun.story-1;
-        int show=mission && (id==PROTOCOL_EVIDENCE || (id==PROTOCOL_TERMINAL && (protocolRun.flags&PROTOCOL_MISSION_SOLVED)));
+        float tx,ty;
+        int show=mission && ProtocolTarget(&tx,&ty) && Dist2(tx,ty,x,y)<.01f;
+        if (mission && id==PROTOCOL_RELAY) icon=MAP_ICON_RECORD;
         Mark(grid,x,y,icon,show);
     }
     Mark(grid,exitX,exitY,MAP_ICON_EXIT,mission && ProtocolExitReady());
@@ -88,7 +91,7 @@ void DrawMapMarkers(int ox,int oy,int cellSize) {
             Mark(grid,echoMarkX[j],echoMarkY[j],kind,1);break;
         }
     }
-    static const int priority[]={MAP_ICON_COIL,MAP_ICON_RECEIVER,MAP_ICON_SHUTTER,MAP_ICON_TERMINAL,MAP_ICON_DEVICE,MAP_ICON_EXIT,MAP_ICON_BROKEN,MAP_ICON_THREAT,
+    static const int priority[]={MAP_ICON_RECORD,MAP_ICON_COIL,MAP_ICON_RECEIVER,MAP_ICON_SHUTTER,MAP_ICON_TERMINAL,MAP_ICON_DEVICE,MAP_ICON_EXIT,MAP_ICON_BROKEN,MAP_ICON_THREAT,
         MAP_ICON_MIMIC,MAP_ICON_HIDE,MAP_ICON_FUSE,MAP_ICON_BREAKER,MAP_ICON_SAFE,MAP_ICON_CRATE,MAP_ICON_SPENT};
     int size=cellSize>=7?cellSize-2:cellSize;if(size>7)size=7;if(size<1)size=1;
     for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++) {

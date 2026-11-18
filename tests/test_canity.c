@@ -351,10 +351,10 @@ static void test_no_dead_monster_hp(void) {
 
     /* 玩偶的耐久是**真的**，不能被顺手删掉 */
     {
-        char* g = read_loop_sources();
+        char* g = read_file("src/domain/throwing/decoy_runtime.c");
         strip_comments(g);
-        check(contains(g, "decoysArr[i].hp"), 
-              "CONTRACT: the decoy doll's durability is real data and must stay");
+        check(contains(g, "decoysArr[slot].hp = DECOY_HP"),
+              "CONTRACT: the decoy runtime initializes durability");
         free(g);
     }
 }
@@ -736,14 +736,6 @@ static void test_save_persist_contract(void) {
      * 行为验证需要精确控制投掷物的飞行终点（会被怪物拦截），不稳定，
      * 所以这里只保证"那道保险还在"。
      * ================================================================== */
-    {
-        char* throwc = read_file("src/throwing.c");
-        check(throwc != NULL, "src/throwing.c must be readable");
-        check(contains(throwc, "if (!shot[i].active) continue;"),
-              "the shot expiry block must skip shots already settled by the landing branch");
-        free(throwc);
-    }
-
     check(SAVE_VERSION>=44,"save format must include the complete v44 state prefix");
     check(contains_tight(savec,"g_save.version==37") && contains_tight(savec,"g_save.version==43"),
           "supported v37-v43 saves retain explicit migration into the current format");

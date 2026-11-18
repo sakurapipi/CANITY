@@ -1,20 +1,10 @@
-#include "protocol.h"
-#include "tactical_tools.h"
 /* Transient item pools: smoke, glue and decoys. */
 #include "common.h"
 #include "item_effects.h"
 #include "world_api.h"
 #include "player_api.h"
-#include "present_api.h"
-#include "loop_api.h"
-#include "entity.h"
 #include "state.h"
-#include "shop.h"
-#include "sound_event.h"
-#include "audio.h"
-#include "warden.h"
 #include "mimic.h"
-#include "lang.h"
 
 
 int flares = 0, bottles = 0;
@@ -27,7 +17,7 @@ int throwSelected = 0;        /* 0=荧光棒, 1=玻璃瓶, 2=预留 */
 
 SmokeCloud smokes[MAX_SMOKE];
 GlueZone  glues[MAX_GLUE];     /* v3.3 粘胶区域 */
-Decoy decoysArr[MAX_DECOY];
+
 
 void SpawnSmoke(float x, float y) {
     for (int i = 0; i < MAX_SMOKE; i++) {
@@ -37,71 +27,6 @@ void SpawnSmoke(float x, float y) {
         smokes[i].active = 1;
         return;
     }
-}
-
-void PlaceDecoy(float x, float y) {
-    int slot = -1;
-    for (int i = 0; i < MAX_DECOY; i++) {
-        if (!decoysArr[i].active) { slot = i; break; }
-    }
-    if (slot < 0) {
-        /* 顶掉最老的那个 */
-        float oldest = 1e9f; 
-        for (int i = 0; i < MAX_DECOY; i++)
-            if (decoysArr[i].life < oldest) { oldest = decoysArr[i].life; slot = i; }
-    }
-    if (slot < 0) return;
-    decoysArr[slot].x = x;
-    decoysArr[slot].y = y;
-    decoysArr[slot].life = 10.0f;   /* v2.4.14：只活 10 秒 */
-    decoysArr[slot].shoutT = DECOY_SHOUT_EVERY;
-    decoysArr[slot].hp = DECOY_HP;
-    decoysArr[slot].active = 1;
-    decoysArr[slot].armed = 0;
-}
-
-void ArmDecoy(void) {
-    /* 激活最近的一个未激活玩偶 */
-    int best = -1; float bd = 1e9f;
-    for (int i = 0; i < MAX_DECOY; i++) {
-        if (!decoysArr[i].active || decoysArr[i].armed) continue;
-        float d = Dist2(decoysArr[i].x, decoysArr[i].y, posX, posY);
-        if (d < bd) { bd = d; best = i; }
-    }
-    if (best >= 0) {
-        decoysArr[best].armed = 1;
-        decoysArr[best].shoutT = 0.0f;   /* 激活立刻叫第一声 */
-    }
-}
-
-void ShatterDecoy(int slot) {
-    Decoy *decoy = &decoysArr[slot];
-    decoy->active = decoy->armed = 0;
-    decoy->hp = 0;
-    AudioPlayWorld(SFX_GLASS, decoy->x, decoy->y, .84f, 17, 3);
-    pickupMsg = Tr("DECOY DESTROYED", "傀儡已被击毁");
-    pickupMsgTimer = 2.4f;
-    uiDirty = 1;
-}
-
-int DecoyIntercept(void) {
-    for (int i = 0; i < MAX_DECOY; i++) {
-        if (!decoysArr[i].active || !decoysArr[i].armed) continue;
-        if (decoysArr[i].hp <= 0) continue;
-        /* 玩偶要在怪物附近（它替玩家吸引了怪） */
-        if (Dist2(decoysArr[i].x, decoysArr[i].y, posX, posY) > 64.0f) continue;
-        decoysArr[i].hp--;
-        if (decoysArr[i].hp <= 0) {
-            ShatterDecoy(i);
-            return 1;
-        } else {
-            pickupMsg = (g_lang == LANG_ZH) ? "玩偶替你挨了一下" : "DECOY TOOK THE HIT";
-        }
-        pickupMsgTimer = 1.6f;
-        PlaySfx(SFX_GLASS, 0.8f);
-        return 1;
-    }
-    return 0;
 }
 
 void SpawnGlue(float x, float y) {
@@ -155,69 +80,6 @@ void UpdateSmokes(float dt) {
         smokes[i].life -= dt;
         if (smokes[i].life <= 0.0f) smokes[i].active = 0;
     }
-    /* v3.4：记录本局有没有开过手电（表现加成用） */
-    if (flashlightOn) runLightUse = 1;
-
-    /* v6：出口弹窗的淡入计时 */
-    /* Exit modal time is advanced in RunExitChoiceTick while gameplay is frozen. */
-
-    /* v3.4：商店每行的补货倒计时 */
-    {
-        ShopTickCooldown(dt);
-    }
-
-    MoneyTick(dt);
-    {  if (!ProtocolPeacefulStory()) UpdateWarden(dt); }   /* v8 B1: 守门人 */
-
-    /* v3.3：诱饵心跳 —— 每 DECOY_SHOUT_EVERY 秒叫一次，把怪引过去 */
-    for (int i = 0; i < MAX_DECOY; i++) {
-        if (!decoysArr[i].active) continue;
-        decoysArr[i].life -= dt;
-        if (decoysArr[i].life <= 0.0f) { decoysArr[i].active = 0; continue; }
-        if (!decoysArr[i].armed) continue;
-        decoysArr[i].shoutT -= dt;
-        if (decoysArr[i].shoutT <= 0.0f) {
-            decoysArr[i].shoutT = DECOY_SHOUT_EVERY;
-            /* ===== v7 **玩偶重写** =====
-               原来走 MakeNoise(半径20)，那个管道会直接改 monster.state，
-               和玩家自己的脚步噪音抢同一个字段 —— 玩偶刚设好就被顶掉，
-               所以「玩偶吸引不了听声怪」。
-
-               现在直接往可疑点表写：strength 75（比冲刺的 45 高），
-               decay 3/s、寿命 8 秒 —— 三个叫周期都能覆盖到。
-               玩家自己的脚步只有 36 强度，抢不过它。 */
-            /* ============================================================
-             * 2026-11-06（v2.4-beta B05）：**诱饵走事件中心，并且有位置**
-             * ------------------------------------------------------------
-             * 原来这里直接 SuspicionAdd + 居中的 PlaySfx。
-             * 结果：**你听不出自己的玩偶在左边还是右边** ——
-             * 而"把怪引到那个方向"正是玩偶的全部意义。
-             *
-             * 现在：
-             *   · 线索走 SoundEmit(SK_VOICE) —— 类别显式，参数在 kKindDefs 里
-             *   · 声音走 AudioPlayWorld —— 从玩偶所在方向传过来
-             * 参数保持原值（强度 75 / decay 3 / ttl 8），行为不变。
-             * ============================================================ */
-            {
-                SoundEvent ev;
-                memset(&ev, 0, sizeof(ev));
-                ev.kind = SK_VOICE;
-                ev.x = decoysArr[i].x;
-                ev.y = decoysArr[i].y;
-                ev.strength = 75.0f * TacticalNoiseMul(ev.x, ev.y);
-                ev.decay = 3.0f;
-                ev.ttl = 8.0f;
-                ev.eventId = 0u;              /* 每 1.5 秒一次是**独立**的叫声 */
-                ev.sourceEntityId = -1;
-                SoundEmit(&ev);
-            }
-            /* 保留一小圈物理噪音，让追光怪/环境音也有反应 */
-            MakeNoise(decoysArr[i].x, decoysArr[i].y, 6.0f);
-            { 
-              AudioPlayWorld(SFX_DECOY, decoysArr[i].x, decoysArr[i].y, 0.70f, 22.0f, 3); }
-        }
-    }
-
     /* v3.3：粘胶区域 / 回声扫描的生命周期 */
     for (int i = 0; i < MAX_GLUE; i++) {
         if (!glues[i].active) continue;

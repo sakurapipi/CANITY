@@ -333,7 +333,6 @@ void SpritesInit(void) {
     BakeProp(SPR_PROP_SHELF_BOARD, 11);
     BakeProp(SPR_PROP_CONSOLE_BASE, 12);
     BakeProp(SPR_PROP_CONSOLE_PANEL, 13);
-    BakeProp(SPR_PROP_PHASE, 14);          /* 2026-11-06 相位信标：地面 */
     BakeProp(SPR_PHASE_HAND, 15);          /* 2026-11-06 相位信标：手持 */
     BakeProp(SPR_PROP_SPIDER, 16);         /* 2026-11-06 缚丝蛛 */
     for(int i=0;i<7;i++)BakeRoomFixture(SPR_ROOM_BOILER+i,i); /* Legacy save visuals. */
