@@ -4,13 +4,13 @@
 
 一款以探索、声音、光线与资源取舍为核心的第一人称像素恐怖逃生游戏，使用 C99 编写。
 
-**当前候选版：v2.4.9-RC2。存档主体：v45；地图：36×36；容器槽：12。RC 为预发布，稳定版仍是 v2.4.8。**
+**当前候选版：v2.4.9-RC3。存档主体：v45；地图：36×36；容器槽：12。RC 为预发布，稳定版仍是 v2.4.8。**
 
 本轮加入冷蓝／蓝紫／琥珀黄／血红四色进化、七种战术工具、四个快捷槽，以及从游戏模型生成的分档图鉴。两棵技能树同步更新：局外侧重声障连线、偏振引导、反制断线等机制；局内侧重工具范围、时长和恢复数值。旧扳手次数制及相关技能已移除，所有等级统一冷却。
 
-[下载 v2.4.9-RC2 预发布](https://github.com/sakurapipi/CANITY/releases/tag/v2.4.9-RC2) · [完整更新与兼容说明](docs/RELEASE-v2.4.9-RC2.md)
+[下载 v2.4.9-RC3 预发布](https://github.com/sakurapipi/CANITY/releases/tag/v2.4.9-RC3) · [完整更新与兼容说明](docs/RELEASE-v2.4.9-RC3.md)
 
-RC2 修复扩展存档的索引校验、投掷失败仍进入冷却、双锚丝网断开和声源井降噪顺序。新局可按 J、U、O、L 选择四个背包快捷槽。
+RC3 重做生存指南、分步教程和四区训练场。每日挑战只在当天的每日地图推进。通关面板独立绘制，局内技能单击查看、双击购买。新局可按 J、U、O、L 选择背包快捷槽。
 
 幽灵、掠夺者、反击者仍朝北、西南、东南展开，通用技能位于内侧。保留51个局外存储位（50个玩家节点含起点）、40个局内购买节点和25张局内技能卡，避免旧存档乱序。局外花银行金币，局内花本局金币。
 
@@ -146,7 +146,7 @@ python -X utf8 tools/build_web.py --single
 先完成对应平台构建，再打包；下列命令使用最近一次完整验证报告：
 
 ```sh
-python -X utf8 tools/package_playable.py --include-web --label CANITY_v2.4.9-RC2 --notes docs/RELEASE-v2.4.9-RC2.md --acceptance-report work/codex-build/validation-summary.json --source-commit <完整提交SHA>
+python -X utf8 tools/package_playable.py --include-web --label CANITY_v2.4.9-RC3 --notes docs/RELEASE-v2.4.9-RC3.md --acceptance-report work/codex-build/validation-summary.json --source-commit <完整提交SHA>
 ```
 
 `--include-web` 要求网页构建已存在。默认打包 **Lite**：复制 EXE 与 `music/`、谱面和清单；只有用 `--embed-music` 构建 Full 版后，才可加 `--single-exe --embed-music` 打单文件 EXE 包。运行包记录源码、资源和验证摘要；报告与当前验证输入不匹配时拒绝套用。生成安装包不等于已经完成真实桌面或手机验收。

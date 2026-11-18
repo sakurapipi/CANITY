@@ -83,6 +83,8 @@ static void WrenchApplyHit(float power) {
             ProgressionWrenchContact(target);
             SpawnParticles(target->x, target->y, 1);   /* v3.6：受击血/墨粒子 */
             knockCountRun++;
+            if (ti == 0 && (d <= .01f || ux*dirX + uy*dirY > .65f))
+                TutorialRecordAction(TUTOR_WRENCH);
             if(SkillOwned(SK_COUNTER_REPOSITION) && retaliateT<1.0f)retaliateT=1.0f;
             if(BenchShock()) { SuspicionReset();target->stateTimer=0.0f;target->tx=target->x;target->ty=target->y; }
             target->state = 0;
@@ -159,7 +161,6 @@ void WrenchStartSwing(float charge) {
        手持模型早就删了，原来只有一声 SFX_STEP（脚步），
        玩家根本分不清"挥了"还是"没挥"。
        现在换成挥空的风声 + 一下轻微屏幕冲击。 */
-    TutorialRecordAction(TUTOR_WRENCH);
     PlaySfx(SFX_THROW, 0.55f);
     AddShake(0.12f, 0.07f);
     /* 第 3 轮：挥空也要有准星反馈（命中时会被更亮的标记覆盖） */

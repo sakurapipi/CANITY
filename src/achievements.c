@@ -13,6 +13,7 @@
 #include "wallet.h"
 #include "audio.h"
 #include "music.h"
+#include "lang.h"
 
 Achievement g_achievements[ACH_COUNT];
 int achSelection = 0;
@@ -49,27 +50,29 @@ const char* AchCatNameZh(int c) {
     }
 }
 
-/* 当前筛选下有多少行 */
-int AchVisibleCount(void) {
-    if (achFilter >= ACH_CAT_COUNT) return ACH_COUNT;
-    int n = 0;
-    for (int i = 0; i < ACH_COUNT; i++)
-        if (kAchDefs[i].category == achFilter) n++;
-    return n;
+/* Preserve archived IDs for saves and external achievement history. */
+static int AchRetired(int id) {
+    const AchDef *def = &kAchDefs[id];
+    return def->kind == AK_FLAG && def->target == ACH_FLAG_META_RESET;
+}
+static int AchInFilter(int id) {
+    return !AchRetired(id) &&
+           (achFilter >= ACH_CAT_COUNT || kAchDefs[id].category == achFilter);
 }
 
-/* 第 row 行对应哪个成就 id（-1 = 越界） */
+int AchVisibleCount(void) {
+    int count = 0;
+    for (int id = 0; id < ACH_COUNT; id++)
+        if (AchInFilter(id)) count++;
+    return count;
+}
+
 int AchIdAtRow(int row) {
     if (row < 0) return -1;
-    if (achFilter >= ACH_CAT_COUNT) {
-        return (row < ACH_COUNT) ? row : -1;
-    }
-    int n = 0;
-    for (int i = 0; i < ACH_COUNT; i++) {
-        if (kAchDefs[i].category != achFilter) continue;
-        if (n == row) return i;
-        n++;
-    }
+    for (int unlocked = 0; unlocked <= 1; unlocked++)
+        for (int id = 0; id < ACH_COUNT; id++)
+            if (AchInFilter(id) && !!g_achievements[id].unlocked == unlocked && row-- == 0)
+                return id;
     return -1;
 }
 
@@ -85,7 +88,7 @@ void AchCycleFilter(int delta) {
 int AchUnlockedInFilter(void) {
     int n = 0;
     for (int i = 0; i < ACH_COUNT; i++) {
-        if (achFilter < ACH_CAT_COUNT && kAchDefs[i].category != achFilter) continue;
+        if (!AchInFilter(i)) continue;
         if (g_achievements[i].unlocked) n++;
     }
     return n;
@@ -133,7 +136,7 @@ void InitAchievements(void) {
 }
 
 void AchUnlock(int idx) {
-    if (idx < 0 || idx >= ACH_COUNT) return;
+    if (idx < 0 || idx >= ACH_COUNT || AchRetired(idx)) return;
     if (g_achievements[idx].unlocked) return;
 
     g_achievements[idx].unlocked = 1;
@@ -147,9 +150,9 @@ void AchUnlock(int idx) {
 
 
 
-        static char abuf[72];
-        snprintf(abuf, sizeof(abuf), "+%d GOLD  %s",
-                 kAchDefs[idx].reward, kAchDefs[idx].nameEn);
+        static char abuf[160];
+        snprintf(abuf, sizeof(abuf), Tr("+%d GOLD  %s", "+%d 金币  %s"),
+                 kAchDefs[idx].reward, Tr(kAchDefs[idx].nameEn, kAchDefs[idx].nameZh));
         pickupMsg = abuf;
         pickupMsgTimer = 2.2f;
         PlaySfx(SFX_POWER, 0.9f);
@@ -201,7 +204,7 @@ void AchCheck(const AchSnap* s) {
     if (!s) return;
 
     for (int i = 0; i < ACH_COUNT; i++) {
-        if (g_achievements[i].unlocked) continue;
+        if (g_achievements[i].unlocked || AchRetired(i)) continue;
         const AchDef* d = &kAchDefs[i];
 
         switch (d->kind) {

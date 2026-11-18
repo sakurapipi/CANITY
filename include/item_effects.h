@@ -16,6 +16,7 @@ int PointInSmoke(float x, float y);
 int SegmentInSmoke(float x0, float y0, float x1, float y1);
 int PlayerInSmoke(void);
 void UpdateSmokes(float dt);
+void ShatterDecoy(int slot);
 
 
 /* Shared contract, declared by the owning subsystem. */

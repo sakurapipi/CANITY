@@ -312,7 +312,7 @@ void CollectorHitByWrench(float hx, float hy) {
     }
 }
 
-void UpdateCollector(float dt) {
+static void UpdateCollectorMotion(float dt) {
     {  if (trainingMode) return; }
     if (!collector.active) return;
 
@@ -456,6 +456,23 @@ void UpdateCollector(float dt) {
                 if (!Blocked(bx, by)) { collector.x = bx; collector.y = by; }
             }
         }
+    }
+}
+
+void UpdateCollector(float dt) {
+    static float cadence;
+    float x = collector.x, y = collector.y;
+    int active = collector.active;
+    UpdateCollectorMotion(dt);
+    if (!active || !collector.active) {
+        cadence = 0;
+        return;
+    }
+    if (Dist2(x, y, collector.x, collector.y) <= .000001f) return;
+    cadence += dt;
+    if (cadence >= .37f) {
+        cadence = 0;
+        AudioPlayWorld(SFX_COLLECTOR_STEP, collector.x, collector.y, .42f, 9, 1);
     }
 }
 

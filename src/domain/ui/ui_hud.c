@@ -323,7 +323,7 @@ static void DrawHudVitalsAndStatus(int effDetail) {
        那块半透明黑边界很硬，在左上角看起来像一块阴影/渲染错误。
        对比度已由文字颜色本身解决（都提到 4.8:1 以上），不再需要底衬。 */
     int hudY1 = UIS(18) + hudTH + UIS(4);
-    sprintf(buf, "SANITY: %.0f%%", sanity);
+    sprintf(buf, Tr("SANITY: %.0f%%", "理智值：%.0f%%"), sanity);
     DrawTextWin(UIS(20), hudY1, buf, (sanity < 30.0f) ? 0x00FF3C3Cu : 0x0000FFFFu);
     int hudY2 = hudY1 + hudTH + UIS(4);
 
@@ -1356,8 +1356,8 @@ static void DrawHudCalibrationHints(const HudBarLayout* layout) {
 
 
 
-            if (trainingMode && !tutorialGuideOn) {
-                const char* gtxt = Tr("[B] GUIDED FLOOR", "[B] 进入引导层");
+            if (guideMode) {
+                const char* gtxt = Tr("[B] TRAINING ARENA", "[B] 进入训练场");
                 DrawTextWin(px2, py2, gtxt, 0x004A9480u);
                 px2 += TextWidthWin(gtxt) + UIS(18);
             }

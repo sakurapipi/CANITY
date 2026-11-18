@@ -315,8 +315,14 @@ void DailyLoadFrom(const int* a) {
 /* 进度推进 —— 唯一入口                                                */
 /* ================================================================== */
 
+int DailyCanProgress(void) {
+    return dailyMode && !trainingMode && !campaignMode && !isEndlessRun &&
+           dailySeed > 0 && (unsigned)dailySeed == s_daily.seed;
+}
+
 void DailySetProgress(int v) {
     if (!s_ready) DailyGenerate();
+    if (!DailyCanProgress()) return;
     if (v < 0) v = 0;
     if (v > s_daily.goalParam) v = s_daily.goalParam;
     if (v <= s_daily.progress) return;      /* 只增不减 */
@@ -329,7 +335,7 @@ void DailySetProgress(int v) {
 void DailyObserve(int goal, int value) {
     if (!s_ready) DailyGenerate();
     if (goal < 0 || goal >= DQ_COUNT) return;
-    if (trainingMode) return;               /* 训练营不计进度 */
+    if (!DailyCanProgress()) return;
     if (value < 0) value = 0;
 
     int previous = s_daily.samples[goal];
@@ -356,7 +362,7 @@ void DailyMarkDone(void) {
      * 不会被重置，读档时又做了单调化 —— 所以它无法被旧档压回去。
      * ================================================================== */
     if (!s_ready) DailyGenerate();
-    if (s_daily.done) return;
+    if (!DailyCanProgress() || s_daily.done) return;
 
     s_daily.done = 1;            /* 任务确实是「完成」的，这一点先记上 */
 

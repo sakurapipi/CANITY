@@ -38,7 +38,15 @@ static void test_daily(void) {
         CHECK(distinct==14,"all fourteen hand-authored daily scenarios rotate into play");
     }
     CHECK(!(res & (1u<<4)),"the retired wrench restriction must never be picked");
-    trainingMode=0;dailyMode=0;
+    trainingMode=0;campaignMode=0;isEndlessRun=0;dailyMode=0;
+    dailySeed=(int)DailySeedToday();
+    daily_case(DQ_SEARCH,40);
+    DailyObserve(DQ_SEARCH,7);
+    CHECK(DailyCurrent()==0,"classic runs cannot advance the daily challenge");
+    campaignMode=1;DailySetProgress(40);campaignMode=0;
+    isEndlessRun=1;DailyObserve(DQ_SEARCH,7);isEndlessRun=0;
+    CHECK(DailyCurrent()==0,"campaign and endless runs cannot advance the daily challenge");
+    dailyMode=1;
     for(int goal=0;goal<DQ_COUNT;++goal) {
         daily_case(goal,hi[goal]);bankGold=0;
         DailyObserve(goal,1);CHECK(DailyCurrent()==1,"all eight daily goals advance");
@@ -55,10 +63,10 @@ static void test_daily(void) {
     saved[5]=20260101;DailyLoadFrom(saved);CHECK(DailyCurrent()==0,"previous date cannot restore progress");
     unsigned dates[]={20260129,20260130,20260131,20260201,20260202,20260203,20260204};
     int empty[15]={0};DailyLoadFrom(empty);bankGold=0;
-    for(int i=0;i<7;++i) {DailyGenerateForDate(dates[i]);DailySetProgress(DailyGoalParam());}
+    for(int i=0;i<7;++i) {dailySeed=(int)dates[i];DailyGenerateForDate(dates[i]);DailySetProgress(DailyGoalParam());}
     CHECK(DailyStreak()==7 && bankGold==7*400+300+900,"three/seven day streak bonuses across month boundary");
     DailyGenerateForDate(20260206);CHECK(DailyStreak()==0,"missing a day breaks streak");
-    DailyGenerate();
+    dailyMode=0;dailySeed=0;DailyGenerate();
     CHECK(!DailyForbidSprint() && !DailyForbidWrench() && DailyGoldTierBonus()==0,"daily restrictions do not leak into normal games");
 }
 
@@ -249,8 +257,8 @@ static void test_trees_shop(void) {
     for(int i=0;i<SKILL_COUNT;++i) CHECK(skillDefs[i].name && skillDefs[i].maxRank>0,"all thirty skills have definitions");
     int before=bankGold;CHECK(SkillBuy(0),"buy a permanent skill from bank");
     CHECK(bankGold==before-SkillCost(0)/2 || bankGold<before,"permanent purchase charges bank");
-    int cost=skillDefs[0].cost[0];int reward=g_achievements[29].unlocked?0:1500;
-    before=bankGold;SkillResetAll();CHECK(bankGold==before+cost+reward && skillRank[0]==0 && skillRank[SK_ORIGIN]==1,"meta reset refunds cost, keeps origin, grants achievement");
+    int cost=skillDefs[0].cost[0], archived=g_achievements[29].unlocked;
+    before=bankGold;SkillResetAll();CHECK(bankGold==before+cost && skillRank[0]==0 && skillRank[SK_ORIGIN]==1 && g_achievements[29].unlocked==archived,"meta reset refunds cost and preserves archived achievement state");
     bankGold=1000000;
     for(int pass=0;pass<30;++pass)for(int id=0;id<SKILL_COUNT;++id)if(SkillCanBuy(id))SkillBuy(id);
     /* 2026-11-08：硬编码 30 会随节点增加而假失败 —— 用 SKILL_COUNT */
@@ -596,28 +604,28 @@ static void test_three_archetypes_are_wired(void) {
  * ================================================================ */
 
 #include "training_stations.h"
+#include "map_topology.h"
 #include "shot_spec.h"
 
 static void test_training_has_seven_stations(void) {
-    int i, prevX = -1, ordered = 1, sameRow = 1;
-    CHECK(TRAIN_STATION_COUNT == 7, "the tutorial must have exactly 7 stations");
-
-    for (i = 0; i < TRAIN_STATION_COUNT; i++) {
-        int x = TrainingStationX(i), y = TrainingStationY(i);
-        CHECK(x >= 2 && x <= MAP_WIDTH - 3, "every station must sit inside the corridor");
-        CHECK(y == MAP_HEIGHT / 2, "every station must be on the corridor row");
-        if (x <= prevX) ordered = 0;
-        if (y != MAP_HEIGHT / 2) sameRow = 0;
-        prevX = x;
+    LoopQueueStart(START_TRAINING,0);
+    StartGame();
+    CHECK(trainingMode && !guideMode,"free practice opens independently of the guided course");
+    CHECK(TRAIN_STATION_COUNT == 7, "the arena must have seven stations");
+    MapTopology geometry=MapTopologyMeasure(&worldMap[0][0],MAP_WIDTH,MAP_HEIGHT);
+    CHECK(MapTopologyAccepts(geometry) && !Blocked(posX,posY) && !Blocked(exitX,exitY),
+          "all practice bays are connected to the spawn and exit");
+    unsigned quadrants=0;
+    for (int i=0;i<TRAIN_STATION_COUNT;i++) {
+        int x=TrainingStationX(i),y=TrainingStationY(i);
+        CHECK(x>0 && x<MAP_WIDTH-1 && y>0 && y<MAP_HEIGHT-1 && !worldMap[y][x],
+              "every practice station sits on reachable floor");
+        if(i>0) quadrants|=1u<<((x>=MAP_WIDTH/2)+2*(y>=MAP_HEIGHT/2));
+        const char *hint=TrainingStationText(i);
+        CHECK(hint && hint[0],"every station has a hint");
     }
-    CHECK(ordered, "stations must be ordered left to right so the player walks forward");
-    CHECK(sameRow, "all stations share the corridor row");
-
-    /* 每站都有文案 */
-    for (i = 0; i < TRAIN_STATION_COUNT; i++) {
-        const char* s = TrainingStationText(i);
-        CHECK(s && s[0], "every station needs a hint text");
-    }
+    CHECK(quadrants==15,"free practice has stations in all four bays");
+    ResetRunModeFlags();
 }
 
 

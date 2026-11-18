@@ -23,7 +23,8 @@ static const ScoreChart* chart;
 static int stationSession=0;
 static unsigned char judged[512];
 static float elapsed=0,drainBudget=0,leadIn=0;
-static double lastSpace=-10;
+static double lastSpace=-10, outroUntil;
+int CalibOutroActive(void) { return PlatNow() < outroUntil; }
 static int waitingForStart=0;
 static int errors=0,combo=0,pending=0,level=-1,startLatch=0;
 static int hits=0,bestCombo=0;static float restored=0,charged=0;
@@ -66,7 +67,7 @@ static void Finish(int result) {
     /* 2026-11-16（用户报告的 bug）：小游戏失败**不许把玩家踢出藏身点**。
        原来这里 `hiddenIn=-1; resetInputState=1;` 会把玩家从柜子里弹出来，
        等于失败一次就暴露在怪物面前。现在只结束音游，藏身状态保持不变。 */
-    MusicEndCalibration();waitingForStart=0;leadIn=0;
+    MusicEndCalibration();waitingForStart=0;leadIn=0;outroUntil=PlatNow()+.3;
     calibActive=0;calibResult=result;calibResultTimer=3;calibCooldown=guideMode?3:30;
     static char message[160];
     if(result==1){
@@ -180,7 +181,7 @@ void CalibHandleInput(int inSafe) {
         }
     }
 }
-void CalibResetRun(void) {MusicEndCalibration();waitingForStart=0;leadIn=0;stationSession=0;calibActive=calibResult=0;elapsed=calibCooldown=calibResultTimer=0;startLatch=0;chart=NULL;}
+void CalibResetRun(void) {outroUntil=0;MusicEndCalibration();waitingForStart=0;leadIn=0;stationSession=0;calibActive=calibResult=0;elapsed=calibCooldown=calibResultTimer=0;startLatch=0;chart=NULL;}
 
 void CalibStartAtStation(void) {
     if(calibActive || currentState!=STATE_SAFEHOUSE || calibCooldown>0)return;

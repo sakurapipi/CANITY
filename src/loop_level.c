@@ -1385,6 +1385,7 @@ static void PlaceFloorBreaker(const LevelBuildWorkspace* work) {
 void GenerateLevel(void) {
     static LevelBuildWorkspace work;
     ResetFloorSystems();
+    echoScanT = 0;
     CommitThreatTierForFloor(currentLevel);if(!SaveEvolutionCanPersist())ThreatTierRestore(currentLevel,0,0);EvolutionResetFloor();TacticalResetFloor();SpritesSetEvolutionTier(CurrentRunThreatTier());
     memset(&roomTheme,0,sizeof(roomTheme));
     if (trainingMode) {

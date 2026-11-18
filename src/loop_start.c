@@ -326,6 +326,8 @@ void StartGame(void) {
         isEndlessRun = 1;
     } else if (startMode == START_DAILY) {
         dailyMode = 1;
+        dailySeed = (int)DailySeedToday();
+        srand((unsigned)dailySeed);
     } else if (startMode == START_CAMPAIGN) {
         campaignMode = 1;
         campaignStage = startStage;

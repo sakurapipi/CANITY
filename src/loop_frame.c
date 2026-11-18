@@ -102,6 +102,7 @@ static void UpdateTrainingPad(float dt) {
         gluePots = 99;
         echoBolts = 99;
         decoys = 99;
+        phaseBeacons = 99;
         /* 已删的三种清零，免得老存档带进来 */
         bricks = 0; acids = 0; firePots = 0; mirrors = 0;
         sanity = 100.0f;
@@ -322,9 +323,9 @@ static int UpdateSurvival(float dt, int inSafe) {
         /* v2.0 SALVAGE：死亡时保留一半待上缴金币 */
     /* v6：这里原本是一加一减两个空操作（净效果 0），
        是合并货币时留下的。已删除。
-       死亡时的保留比例统一由 WalletSettle 的 BANK_DEATH_REFUND 处理。 */
+       死亡时按当前楼层已锁定的威胁档位结算返还。 */
     gameWon = 0;
-        BankSettle(0);          /* v3.4：死亡结算 —— 本金返还 50% */
+        BankSettle(0);
         /* v6 **死亡后不允许 Continue 复活** ——
            原来 hasSave 死亡后仍是 1，回主菜单点 Continue 能把死前存档救回来，
            死亡被完全撤销（银行还多扣一次死亡结算）。 */
@@ -428,6 +429,10 @@ static int UpdateCoverInput(void) {
         {
             static int hideKeyLatch = 0;
             if (!ActionIsDown(ACT_INTERACT)) hideKeyLatch = 0;
+            if (hiddenIn >= 0 && CalibOutroActive()) {
+                hideKeyLatch = 1;
+                keyPressed[g_bindings[ACT_INTERACT]] = 0;
+            }
             if (IsActionPressed(ACT_INTERACT) && hideKeyLatch) {
                 keyPressed[g_bindings[ACT_INTERACT]] = 0;
                 /* 吞掉这次重复，不切换 */
@@ -1341,11 +1346,7 @@ static int UpdateThrowInput(float dt) {
                     else if (sel == 4) { echoBolts--; {  echoCellsTotalRun += 15; } }
                     totalThrown++;   /* v3.3：逃生向成就用（整条链之后加） */
                     throwCd = 0.45f;
-                    if (trainingMode) {
-                        TutorialRecordThrow();
-                        /* P1-2：投掷同样是"制造噪音"，让 TUT_KNOCK 也走得了 */
-                        TutorialRecordNoise();
-                    }
+                    if (trainingMode && sel == 1) TutorialRecordThrow();
                 } else {
                     pickupMsg = "NO ROOM";
                     pickupMsgTimer = 1.0f;
@@ -1465,7 +1466,7 @@ static void UpdateWorldThreats(float dt, const PlayerFrameInput* movement) {
     /* v1.18：站在烟里 → **只把光压暗**（用户要求，不再收窄视野） */
     /* v1.21: in smoke go nearly black (like the old 0.09 ambient build) */
     /* v2.1：0.10 等于把画面关掉。要的是「看不清」不是「看不见」。 */
-    smokeDim = PlayerInSmoke() ? 0.45f : 1.0f;
+    smokeDim = PlayerInSmoke() ? .90f : 1.0f;
 
     UpdateSmokeBlindness();   /* 第 4 轮：抽成函数，位置不变 */
 
@@ -1769,7 +1770,6 @@ static void UpdateExitProgression(float dt) {
        只有「还没弹过、也不是刚选了深入」才弹。 */
     if (!trainingMode && !isFinalFloor && !exitChoiceOpen && !exitGoDeeper && atExit) {
         RunExitChoiceOpen();
-            {  HintOnce(3); }   /* v7 B4 */
         exitChoiceT = 0.0f;
         MusicNotify(MUSIC_EVENT_GATE);
         PlaySfx(SFX_GATE, 0.65f);
@@ -1805,7 +1805,7 @@ static void UpdateExitProgression(float dt) {
         /* 战役模式：每段连续 3 层；段内换层不重置资源，段间才切规则/重开资源。 */
         if (campaignMode) { CompleteCampaignExit(); return; }
         /* v2.2：每日挑战通关 —— 今天第一次给 1 核心 */
-        if (dailyMode && !dailyClearedToday) {
+        if (DailyCanProgress() && !dailyClearedToday) {
             dailyClearedToday = 1;
             WalletAddRun(GOLD_PER_CORE);   /* v3.4 */
         }

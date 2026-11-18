@@ -20,6 +20,7 @@
  * （箱子 / 撤离 / 成就 / 每日任务），强行统一反而不好读。
  */
 #include "common.h"
+#include "threat_tier.h"
 #include "loop_api.h"
 #include "state.h"
 #include "world_api.h"
@@ -130,7 +131,7 @@ int WalletPreviewSettle(int survived, int profit) {
         gain = value >= INT_MAX ? INT_MAX : (int)value;
 
     } else {
-        gain = (int)((double)(carryGold > 0 ? carryGold : 0) * (isEndlessRun && currentLevel>10?fmaxf(.05f,BANK_DEATH_REFUND/(1+(currentLevel-10)*.06f)):BANK_DEATH_REFUND) + 0.5);
+        gain = (int)((double)(carryGold > 0 ? carryGold : 0) * (ThreatTierRefundPercent(CurrentRunThreatTier()) / 100.0) + 0.5);
 
     }
 

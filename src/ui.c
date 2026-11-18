@@ -446,7 +446,7 @@ MenuGeo GetMenuGeo(void) {
             memset(&g, 0, sizeof(g));
             g.title = "ACHIEVEMENTS";
             /* v6：行数按当前分类筛选后的数量（否则会滚到空白行） */
-            {  g.count = AchVisibleCount(); }
+            {  g.count = AchVisibleCount() + 1; }
             if (g.count < 1) g.count = 1;
             g.rowH = A.rowH;
             g.panel = A.panel;
@@ -1391,7 +1391,6 @@ static void RenderFrameOcclusion(void) {
 }
 
 static void RenderFrameCalibration(void) {
-    DrawExitChoice();
     if(currentState==STATE_PLAYING){
         HushDraw();
         UiDrawRoomHint();
@@ -1442,7 +1441,7 @@ static void PresentComposedFrame(void) {
         }
 
         /* 拾取/事件提示：最顶层，但必须**在呈现之前**画进像素缓冲 */
-        DrawPickupToast();
+        if (!exitChoiceOpen && currentState != STATE_GAMEOVER) DrawPickupToast();
 
         pr.fullBleed = (pr.dx == 0 && pr.dy == 0 && pr.dw == cw && pr.dh == ch);
         PlatPresentFrame(&pr, pixels, renderW, renderH);
@@ -1454,6 +1453,16 @@ void RenderFrame(void) {
     if(previousState!=(int)currentState){if(pixels)memset(pixels,0,(size_t)renderW*renderH*sizeof(*pixels));previousState=(int)currentState;uiDirty=1;}
     UiLayoutBegin();
     RenderFrameScene();
+    if (currentState == STATE_PLAYING && exitChoiceOpen) {
+        DrawExitChoice();
+        PresentComposedFrame();
+        return;
+    }
+    if (currentState == STATE_GAMEOVER) {
+        RenderFrameMenus();
+        PresentComposedFrame();
+        return;
+    }
     if(currentState==STATE_PLAYING)UiDreamFrame();
     RenderFrameMenus();
     UiDecayFrame();

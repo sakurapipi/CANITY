@@ -964,8 +964,7 @@ static void HunterPerceive(Monster* M, float dt) {
             float ddy = M->y - decoysArr[di].y;
             if (ddx * ddx + ddy * ddy > 0.49f) continue;   /* 0.7 格内 */
 
-            decoysArr[di].active = 0;      /* 玩偶被扑碎 */
-            decoysArr[di].armed  = 0;
+            ShatterDecoy(di);
             M->stun = SkillDecoyHoldSeconds();             /* v2.4.15：**定身 10 秒**（用户要求） */
             M->state = 0;
             M->suspCool = SkillDecoyHoldSeconds();           /* **10 秒内不再刷新目标** */
@@ -973,16 +972,6 @@ static void HunterPerceive(Monster* M, float dt) {
             M->pathLen = 0;
             M->pathIdx = 0;
             M->repath = 0.0f;
-            PlaySfx(SFX_GLASS, 1.0f);
-            {
-
-
-
-
-                (void)0; /* Enemy encounter narration removed. */
-                (void)0; /* No encounter-toast timer. */
-                uiDirty = 1;
-            }
             break;
         }
     }
@@ -1443,7 +1432,19 @@ static void UpdateOneHunter(Monster* M, float dt) {
     HunterPerceive(M, dt);
     if(M->stun<=0 && EvolutionHunterOverride(M,dt))return;
     if (!HunterUpdateState(M, dt)) return;
+    float previousX = M->x, previousY = M->y;
     HunterFollowPath(M, dt);
+    int hunter = (int)(M - monHunters);
+    if (hunter > 0 && !monsterMuted && Dist2(previousX, previousY, M->x, M->y) > .000001f) {
+        static float stepTime[MON_HUNTER_MAX];
+        float interval = hunter == 1 ? .42f : .57f;
+        stepTime[hunter] += dt;
+        if (stepTime[hunter] >= interval) {
+            stepTime[hunter] = 0;
+            AudioPlayWorld(hunter == 1 ? SFX_HUNTER_STEP_2 : SFX_HUNTER_STEP_3,
+                           M->x, M->y, hunter == 1 ? .82f : .77f, 15, 1);
+        }
+    }
     if (!HunterResolveContact(M, dt)) return;
     HunterUpdateFacing(M, dt);
 }

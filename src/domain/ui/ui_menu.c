@@ -583,7 +583,7 @@ static void DrawMainMenu(const MainMenuLayout* M) {
         DrawTextWin(left+UIS(10),y+(M->rowH-th)/2,MenuLabel(i),i==menuSelection?UI_ACCENT:UI_INK);
     }
     BlendRectWin(left,M->footRuleY,winW-UIS(60),M->footRuleY+2,UI_EDGE,1);
-    DrawTextSmallWin(left,M->footY,Tr("ENTER / SPACE / CLICK","回车 / 空格 / 单击"),UI_INK_DIM);
+    DrawTextSmallWin(left,M->footY,Tr("ENTER / CLICK   |   B: PRACTICE ARENA","回车或单击   |   B：进入训练场"),UI_INK_DIM);
     DrawTextSmallWin(winW-TextSmallLiteralWidth(CANITY_VERSION_STR)-UIS(60),M->footY,CANITY_VERSION_STR,UI_INK_DIM);
 }
 
@@ -1005,7 +1005,7 @@ static void DrawBenchTree(MenuGeo g) {
     UiTrimSmallText(text,width);DrawTextSmallLiteralWin(x,bottom-UIS(21),text,UI_INFO);
     int x0,y0,x1,y1;BenchBuyButtonRect(&x0,&y0,&x1,&y1);
     UiRow(x0,y0,x1,y1,BenchCanBuy(id)?UI_ROW_SEL:UI_ROW_DISABLED,1);
-    DrawTextSmallLiteralWin(x0+UIS(15),y0+UIS(12),Tr("BUY","购买"),UI_ACCENT);
+    DrawTextSmallLiteralWin(x0+UIS(15),y0+UIS(12),Tr("2 CLICKS","双击购买"),UI_ACCENT);
 }
 
 
@@ -1238,7 +1238,7 @@ static void DrawBankPage(void) {
     y=UiDossierText(text,x,y,right-x,bottom,UI_INK)+UIS(12);
     snprintf(text,sizeof(text),Tr("EXIT REWARD x%.2f","撤离收益 x%.2f"),(double)BankRiskExitMul(bankRiskPlan));
     y=UiDossierText(text,x,y,right-x,bottom,UI_INK)+UIS(12);
-    snprintf(text,sizeof(text),Tr("DEFEAT REFUND %d%%","失败本金返还 %d%%"),(int)(BANK_DEATH_REFUND*100+.5f));
+    snprintf(text,sizeof(text),Tr("DEFEAT REFUND %d%%","失败返还 %d%%"),ThreatTierRefundPercent(PreviewThreatTier()));
     UiDossierText(text,x,y,right-x,bottom,UI_INK_DIM);
     /* All four plans remain selectable without a minimum bank balance. */
     static const char* tierNames[4] = {"I  / BLUE", "II / VIOLET", "III / AMBER", "IV / BLOOD"};
@@ -1261,8 +1261,8 @@ void UiDrawMenuPages(void) {
 }
 
 static const char* MainMenuVisibleLabel(int index) {
-    static const char* primaryEn[]={"Continue","New Run","Skill Web","Threat Bank","Field Guide","Archives / Modes","Training Camp","Quit"};
-    static const char* primaryZh[]={"继续游戏","开始新局","局外技能网","威胁银行","图鉴","档案与模式","自由训练营","退出游戏"};
+    static const char* primaryEn[]={"Continue","New Run","Skill Web","Threat Bank","Field Guide","Archives / Modes","Training Course","Quit"};
+    static const char* primaryZh[]={"继续游戏","开始新局","局外技能网","威胁银行","图鉴","档案与模式","新手教程","退出游戏"};
     static const char* moreEn[]={"Achievements","Help / Skill Index","Settings","Campaign","Daily Run","Endless","Back"};
     static const char* moreZh[]={"成就档案","帮助与技能索引","设置","战役","每日挑战","无尽模式","返回"};
     if(!mainMenuMore){index+=hasSave?0:1;return Tr(primaryEn[index],primaryZh[index]);}

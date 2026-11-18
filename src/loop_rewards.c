@@ -296,10 +296,16 @@ void CloseSkillPick(void) {
 void RewardResetPending(void) { pendingSkillDraft = 0; }
 
 /* One modal input path for desktop keys, mouse and mobile taps. */
-int exitChoiceConfirm=0,exitChoiceSelection=0;
+int exitChoiceConfirm=0, exitChoiceSelection=0, exitPointerVisible=0;
+void RunExitChoicePointer(void) {
+    if (!exitPointerVisible) {
+        exitPointerVisible = 1;
+        ForceCursor(1);
+    }
+}
 void RunExitChoiceOpen(void) {
     exitChoiceOpen=1;exitChoiceConfirm=0;exitChoiceSelection=0;exitChoiceT=0;
-    memset(keyPressed,0,sizeof(keyPressed));ForceCursor(1);uiDirty=1;
+    memset(keyPressed,0,sizeof(keyPressed));exitPointerVisible=1;ForceCursor(1);uiDirty=1;
 }
 static void ExtractCurrentRun(void) {
     exitChoiceOpen=0;exitChoiceConfirm=0;
@@ -315,12 +321,12 @@ void RunExitChoiceKey(int key) {
     if(exitChoiceConfirm) {
         if(key=='2' || (key==VK_RETURN && exitChoiceSelection==1)){ExtractCurrentRun();return;}
         if(key=='1' || key==VK_ESCAPE || key==VK_SPACE || key==VK_RETURN){
-            exitChoiceConfirm=0;exitChoiceSelection=0;exitChoiceT=0;uiDirty=1;
+            exitChoiceConfirm=0;exitChoiceSelection=0;exitChoiceT=0;exitPointerVisible=1;ForceCursor(1);uiDirty=1;
         }
         return;
     }
     if(key=='2' || (key==VK_RETURN && exitChoiceSelection==1)){
-        exitChoiceConfirm=1;exitChoiceSelection=0;exitChoiceT=0;uiDirty=1;return;
+        exitChoiceConfirm=1;exitChoiceSelection=0;exitChoiceT=0;exitPointerVisible=0;ForceCursor(0);uiDirty=1;return;
     }
     if(key=='1' || key==VK_SPACE || key==VK_RETURN){
         exitChoiceOpen=0;exitChoiceConfirm=0;exitGoDeeper=1;

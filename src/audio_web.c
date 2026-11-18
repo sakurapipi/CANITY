@@ -273,6 +273,18 @@ EM_JS(void, js_play, (int id, float vol, float pan), {
         noiseBurst(0.06, 2200, 1800, 0.16);
         break;
 
+    case 29: /* Heavy heel and cloth drag. */
+        osc('sine', 118, 72, 0.14, 0.42);
+        noiseBurst(0.10, 480, 300, 0.20);
+        break;
+    case 30: /* Dry, sharp nail tap. */
+        osc('triangle', 370, 215, 0.09, 0.32);
+        noiseBurst(0.075, 1900, 1100, 0.26);
+        break;
+    case 31: /* Quiet metal jingle. */
+        osc('sine', 1450, 1130, 0.055, 0.14);
+        noiseBurst(0.04, 1900, 900, 0.06);
+        break;
     default:
         osc('triangle', 420, 380, 0.09, 0.16);
         break;

@@ -12,6 +12,15 @@ void AudioBuildAtmosphere(short* output,int frames,int kind,int rate) {
         low+=(noise-low)*.08f;
         float high=noise-previous;previous=noise;
         switch(kind) {
+        case SFX_HUNTER_STEP_2 - SFX_IMPACT:
+            v = (sinf(2*pi*94*t)*.52f + low*.48f) * expf(-t*24);
+            break;
+        case SFX_HUNTER_STEP_3 - SFX_IMPACT:
+            v = (sinf(2*pi*280*t)*.28f + high*.36f) * expf(-t*32);
+            break;
+        case SFX_COLLECTOR_STEP - SFX_IMPACT:
+            v = (sinf(2*pi*1180*t)*.15f + high*.12f) * expf(-t*44);
+            break;
         case 0:v=sinf(2*pi*(33*t+3*(1-expf(-t*18))))*expf(-t*6);break;
         case 1:v=(sinf(2*pi*62*t)*expf(-t*24)+sinf(2*pi*56*(t-.22f))*expf(-fabsf(t-.22f)*28)*.7f)*.7f;break;
         case 2:v=(high*.24f+sinf(2*pi*(1700*t+500*t*t))*.13f)*expf(-t*3);break;

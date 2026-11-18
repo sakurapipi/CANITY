@@ -13,6 +13,7 @@
 
 /* 每帧调用（只在 trainingMode 时）。返回"这一步刚被触发"的站点下标，否则 -1。 */
 int TrainingStationsTick(float px, float py);
+int TrainingStationAt(float x, float y);
 
 /* 站点坐标（测试与地图标记用） */
 int TrainingStationX(int idx);

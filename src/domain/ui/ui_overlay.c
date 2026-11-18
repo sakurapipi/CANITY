@@ -1,5 +1,6 @@
 /* Foreground notifications; composition order remains in ui.c. */
 #include "ui_overlay.h"
+#include "training_stations.h"
 #include "common.h"
 #include "monster_rules.h"
 #include "hush.h"
@@ -54,8 +55,43 @@
 typedef struct { char message[384]; double until; } UiToastState;
 static UiToastState toast;
 
+static void DrawLessonMarker(float wx, float wy) {
+    float dx = wx - posX, dy = wy - posY;
+    float distance = sqrtf(dx*dx + dy*dy);
+    if (distance < .25f) return;
+    float depth = dx*dirX + dy*dirY;
+    float side = dy*dirX - dx*dirY;
+    float cone = fmaxf(.20f, sqrtf(planeX*planeX + planeY*planeY));
+    int cx = winW / 2;
+    float ratio = depth > .05f ? side / (depth * cone) : (side < 0 ? -2 : 2);
+    int x = cx + (int)(fmaxf(-.85f, fminf(.85f, ratio)) * cx);
+    int y = winH * 42 / 100, r = UIS(8);
+    for (int row=-r;row<=r;row++) {
+        int half = r-abs(row), py=y+row;
+        BlendRectWin(x-half-1,py,x+half+2,py+1,UI_BG_PANEL,.95f);
+        BlendRectWin(x-half,py,x+half+1,py+1,UI_ACCENT,.85f);
+    }
+    char label[80];
+    snprintf(label,sizeof(label),Tr("%s %.1f TILES","%s %.1f 格"),
+             ratio<-.85f?"<":ratio>.85f?">":"",distance);
+    int width=TextSmallLiteralWidth(label);
+    BlendRectWin(x-width/2-UIS(5),y+r+UIS(3),x+width/2+UIS(5),y+r+UIS(25),UI_BG_PANEL,.88f);
+    DrawTextSmallLiteralWin(x-width/2,y+r+UIS(6),label,UI_INK);
+}
+
 void DrawTutorialPanel(void) {
-    if(!trainingMode || !guideMode || currentState!=STATE_PLAYING || calibActive || lockActive)return;
+    if(!trainingMode || currentState!=STATE_PLAYING || calibActive || lockActive || (isMapOpen && mapFullScreen))return;
+    if (!guideMode) {
+        int station = TrainingStationAt(posX, posY);
+        if (station < 0) return;
+        char sign[240];
+        snprintf(sign,sizeof(sign),"%s",TrainingStationText(station));
+        UiTrimSmallText(sign,winW-UIS(40));
+        int width=TextSmallLiteralWidth(sign), x=(winW-width)/2;
+        BlendRectWin(x-UIS(8),UIS(9),x+width+UIS(8),UIS(43),UI_BG_PANEL,.95f);
+        DrawTextSmallLiteralWin(x,UIS(17),sign,UI_INK);
+        return;
+    }
     int w=winW*43/100;if(w>UIS(400))w=UIS(400);
     int x=winW-w-UIS(12),top=UIS(16),pad=UIS(9),line=UIS(27),y=top+pad;
     BlendRectWin(x,top,x+w,top+UIS(170),UI_BG_PANEL,.96f);FrameRectWin(x,top,x+w,top+UIS(170),UI_EDGE_HOT,1,1);
@@ -77,7 +113,11 @@ void DrawTutorialPanel(void) {
         memcpy(text,hint,(size_t)fit);text[fit]=0;DrawTextMediumLiteralWin(x+pad,y,text,UI_INK);hint+=fit;y+=line;
     }
     float tx,ty;TutorialTarget(&tx,&ty);
-    if(Dist2(tx,ty,posX,posY)>.1f){snprintf(text,sizeof(text),Tr("TARGET (%d,%d)","目标（%d,%d）"),(int)tx,(int)ty);DrawTextSmallLiteralWin(x+pad,top+UIS(150),text,UI_INFO);}
+    DrawLessonMarker(tx,ty);
+    const char *assist = TutorialNeedsHelp()
+        ? Tr("STUCK? B: FREE PRACTICE", "卡住了？按 B 自由练习")
+        : Tr("B: PRACTICE ARENA","B：进入训练场");
+    DrawTextSmallLiteralWin(x+pad,top+UIS(150),assist,UI_INFO);
 }
 
 void DrawSaveStatusBanner(void) {

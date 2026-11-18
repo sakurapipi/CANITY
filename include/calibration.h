@@ -30,4 +30,5 @@ void CalibAccumulateDrain(float amount);
 
 void CalibStartAtStation(void);
 void CalibInputKey(int key);
+int CalibOutroActive(void);
 #endif

@@ -46,10 +46,6 @@
                                        对比：寻声怪是「一进层就在」的常驻压力，
                                        清道夫是**额外**压力，120 秒几乎每层必触发，
                                        150 秒才让「快点走」这个决策有意义。 */
-#define SCAV_SPEED          1.55f   /* v2.4.40 平调：1.4→1.55。
-                                       玩家走速 2.0 / 冲刺 2.4 ——
-                                       1.4 让「走路也甩得掉」，压迫感不足；
-                                       1.55 逼你必须跑，才配得上「它一直追你」。 */    /* 格/秒（原来 1.0 太慢，追不上人） */
 #define SCAV_GRAB_WARN      1.5f    /* 拉出前的预警秒数 */
 /* ===== v2.4.36 **被撬柜子的理智惩罚重新设计** =====
    用户要求：改成**扣 20% 当前理智**，并且随「带入金币」和「强度档位」逐渐增加。
@@ -155,7 +151,7 @@ static float scavCooldown = 0.0f;   /* 走掉之后的冷却 */
 
 /* Live state queries. SpeedNow exposes the shared movement tuning constant. */
 int   ScavengerActive(void)   { return scavenger.active; }
-float ScavengerSpeedNow(void) { return fminf(MonsterMovementCap(),SCAV_SPEED*MonsterThreatScale(SPAWN_SCAVENGER)); }
+float ScavengerSpeedNow(void) { return fminf(MOVE_SPEED * SPRINT_MULT * .90f, (MOVE_SPEED + .18f) * MonsterThreatScale(SPAWN_SCAVENGER)); }
 int   ScavengerRifling(void) { /* FIXED_RESULT: Crate rifling is retired; legacy callers always receive false. */ return 0; }
 float ScavengerX(void)       { return scavenger.x; }
 float ScavengerY(void)       { return scavenger.y; }

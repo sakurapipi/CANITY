@@ -73,6 +73,16 @@ void ArmDecoy(void) {
     }
 }
 
+void ShatterDecoy(int slot) {
+    Decoy *decoy = &decoysArr[slot];
+    decoy->active = decoy->armed = 0;
+    decoy->hp = 0;
+    AudioPlayWorld(SFX_GLASS, decoy->x, decoy->y, .84f, 17, 3);
+    pickupMsg = Tr("DECOY DESTROYED", "傀儡已被击毁");
+    pickupMsgTimer = 2.4f;
+    uiDirty = 1;
+}
+
 int DecoyIntercept(void) {
     for (int i = 0; i < MAX_DECOY; i++) {
         if (!decoysArr[i].active || !decoysArr[i].armed) continue;
@@ -81,8 +91,8 @@ int DecoyIntercept(void) {
         if (Dist2(decoysArr[i].x, decoysArr[i].y, posX, posY) > 64.0f) continue;
         decoysArr[i].hp--;
         if (decoysArr[i].hp <= 0) {
-            decoysArr[i].active = 0;
-            pickupMsg = (g_lang == LANG_ZH) ? "玩偶散架了" : "DECOY BROKE";
+            ShatterDecoy(i);
+            return 1;
         } else {
             pickupMsg = (g_lang == LANG_ZH) ? "玩偶替你挨了一下" : "DECOY TOOK THE HIT";
         }

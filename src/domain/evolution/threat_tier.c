@@ -14,10 +14,17 @@ int ThreatTierFromPressure(float p) {
         return 0;
     return p >= 13 ? 3 : p >= 8 ? 2 : p >= 4 ? 1 : 0;
 }
+static float GoldPressure(int tier) { return tier * 1.5f; }
+
+int ThreatTierRefundPercent(int tier) {
+    static const int percent[] = {35, 28, 21, 15};
+    return percent[tier >= 0 && tier < 4 ? tier : 0];
+}
+
 static float PlannedPressure(void) {
     static const float floor[4] = {0, 4, 8, 13};
     int plan = bankRiskPlan >= 0 && bankRiskPlan < 4 ? bankRiskPlan : 1;
-    return fmaxf((float)BankPreviewTier(), floor[plan]);
+    return fmaxf(GoldPressure(BankPreviewTier()), floor[plan]);
 }
 int PreviewThreatTier(void) { return ThreatTierFromPressure(PlannedPressure()); }
 int CurrentRunThreatTier(void) { return trainingMode ? 0 : activeTier; }
@@ -32,7 +39,7 @@ void CommitThreatTierForFloor(int floor) {
     activeTier =
         trainingMode
             ? 0
-            : ThreatTierFromPressure(fmaxf(GoldTier() + ThreatValue() * .45f, confirmedPlan));
+            : ThreatTierFromPressure(fmaxf(GoldPressure(GoldTier()) + ThreatValue() * .45f, confirmedPlan));
 }
 void ThreatTierRestore(int floor, int tier, float plan) {
     activeFloor = floor > 0 ? floor : 0;

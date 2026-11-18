@@ -175,7 +175,6 @@ int throwHitCountRun = 0;    /* 整局投掷命中次数 */
 int echoCellsTotalRun = 0;   /* 整局回声弹揭示格数 */
 /* v7 第 ㊿ 轮：每日任务用 */
 int bountyRecovered = 0;   /* v7：从拾荒者手里抢回赃款的次数 */
-int metaResetDone = 0;     /* v7：局外技能树重置过一次 */
 int dailyEscapeCount = 0;    /* 当天累计撤离次数（每日目标 1） */
 int lastRunGold=0, lastRunKept=0, lastRunCaught=0;
 int wardenCleanFloors=0, fullHideDone=0;
@@ -958,11 +957,7 @@ void EchoMarksTick(float dt) {
 /* v2.0 每日挑战：日期当种子，武器/词条/地图都由它决定。
    同一天所有人拿到同一套随机数 —— 这才是"每日"的意义。 */
 void StartDailyRun(void) {
-    time_t t = time(NULL);
-    struct tm* tm = localtime(&t);
-    if (!tm) return;
-    dailySeed = (tm->tm_year + 1900) * 10000 + (tm->tm_mon + 1) * 100 + tm->tm_mday;
-    srand((unsigned)dailySeed);
+    /* Bind seed only when StartGame commits the requested mode. */
     /* 2026-11-05：原来 `curWeapon = dailySeed % WPN_COUNT` ——
        每日局会随机抽到信号枪/符印，屏幕上卡出已下线武器的建模。
        本作只有扳手，钉死。 */
@@ -1278,7 +1273,7 @@ void ActivateMenuItem(void) {
             StartDailyRun();
         } else if (sel == ixTutorial) {
             /* v3.1：训练营改成新手教程 —— 不删档，不影响正式进度 */
-            LoopQueueStart(START_TRAINING, 0);
+            LoopQueueStart(START_GUIDE, 0);
             StartGame();
             uiDirty = 1;
         } else {

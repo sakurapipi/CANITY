@@ -452,15 +452,12 @@ static void test_tutorial_and_keystone_contract(void) {
     char* src = read_loop_sources();
     strip_comments(src);
 
-    /* ---- P1-2：tutorialKnocked 必须真的被置 1（原来只有清零） ---- */
-    check(count_contains(src, "tutorialKnocked = 1") >= 1,
-          "CONTRACT: tutorialKnocked must be set somewhere, otherwise TUT_KNOCK can never advance");
     check(contains_tight(src,"caseTUT_KNOCK:done=(completedActions&(1u<<TUTOR_WRENCH))!=0;"),
           "CONTRACT: wrench lesson advances only from its real wrench action");
     {
         char* wrench=read_file("src/loop_wrench.c");strip_comments(wrench);
-        check(contains(wrench,"TutorialRecordAction(TUTOR_WRENCH)"),
-              "CONTRACT: the real wrench handler records the lesson action");
+        check(contains_tight(wrench,"if(ti==0&&(d<=.01f||ux*dirX+uy*dirY>.65f))TutorialRecordAction(TUTOR_WRENCH);"),
+              "CONTRACT: the wrench lesson only records a hit facing the training dummy");
         free(wrench);
     }
     /* Lesson wording may change language; its action binding must not drift. */
@@ -483,7 +480,7 @@ static void test_tutorial_and_keystone_contract(void) {
 
     /* ---- P1-4：会被外部条件卡死的那两步必须有超时兜底 ---- */
     check(contains(src, "TUTORIAL_STEP_TIMEOUT"),
-          "CONTRACT: tutorial steps must have a timeout fallback");
+          "CONTRACT: tutorial offers extra guidance after waiting without advancing the lesson");
 
     free(src);
 

@@ -3,6 +3,7 @@
 int ThreatTierFromPressure(float pressure);
 int PreviewThreatTier(void);
 int CurrentRunThreatTier(void);
+int ThreatTierRefundPercent(int tier);
 int MonsterTierAtLeast(int required);
 void ThreatTierConfirmPlan(void);
 void CommitThreatTierForFloor(int level);

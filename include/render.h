@@ -153,6 +153,7 @@ void DrawViewModel(void);
 void DrawOrbSprite(float wx, float wy, float z, float worldR,                           unsigned int coreCol, unsigned int haloCol,                           float alphaMul);
 void DrawNewMonsters(void);
 void DrawShotModel(int idx);
+void DrawEchoRadarPulse(void);
 void DrawGluePuddle(void);
 
 /* 2026-11-16：拆分后 render_props.c 也要用（原为 render.c 内部工具）。 */

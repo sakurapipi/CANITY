@@ -189,20 +189,7 @@ if (currentState == STATE_HUB) {
     }
 
     if (currentState == STATE_ACHIEVEMENTS) {
-        MenuGeo g = GetMenuGeo();
-        for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
-            RECT r = RowRect(g, i);
-            if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
-                achSelection = i;
-                if (i >= ACH_COUNT) {
-                    /* 点 Back 直接退出，不是只把光标移过去 */
-                    currentState = STATE_MAIN_MENU;
-                    menuSelection = 0;
-                    uiDirty = 1;
-                }
-                return;
-            }
-        }
+        CanityMouseClick(mx, my);
         return;
     }
 
@@ -339,6 +326,7 @@ void CanityToggleFlashlight(void) {
 
 void CanityMouseWheel(int delta, int mx, int my) {
     if (delta == 0) return;
+    if (currentState == STATE_HELP) { HelpBookKey(delta>0?VK_UP:VK_DOWN); return; }
 
     if(currentState==STATE_BESTIARY){
         MenuGeo g=UiArchiveGeometry();
@@ -471,7 +459,24 @@ void CanityMouseMove(int mx, int my) {
     }
 }
 
+static int benchClickNode = -1, benchClickButton;
+static double benchClickTime = -1;
+
+static void BenchClick(int node, int button) {
+    double now = PlatNow();
+    int confirm = node == shopNodeSel && node == benchClickNode &&
+                  button == benchClickButton && now - benchClickTime <= .45;
+    shopNodeSel = node;
+    benchClickNode = confirm ? -1 : node;
+    benchClickButton = button;
+    benchClickTime = now;
+    BenchDragEnd();
+    if (confirm) ShopActivate();
+    uiDirty = 1;
+}
+
 void CanityMouseClick(int mx, int my) {
+    if (currentState != STATE_SAFEHOUSE || shopPage != SHP_TREE) benchClickNode = -1;
     if(TacticalInputClick(mx,my) || UiArchiveTierClick(mx,my))return;
     if(exitChoiceOpen && currentState==STATE_PLAYING){
         for(int i=0;i<2;i++){RECT r;ExitChoiceButtonRect(i,&r);if(mx>=r.left && mx<r.right && my>=r.top && my<r.bottom){RunExitChoiceKey(i?'2':'1');break;}}return;
@@ -486,6 +491,22 @@ void CanityMouseClick(int mx, int my) {
 
     g_mousePos.x = mx;
     g_mousePos.y = my;
+
+    if (currentState == STATE_ACHIEVEMENTS) {
+        MenuGeo geo = GetMenuGeo();
+        for (int row = geo.scrollOffset; row < geo.count && row < geo.scrollOffset + geo.maxVisibleRows; row++) {
+            RECT rect = RowRect(geo, row);
+            if (mx < rect.left || mx >= rect.right || my < rect.top || my >= rect.bottom) continue;
+            achSelection = row;
+            if (row == AchVisibleCount()) {
+                currentState = STATE_MAIN_MENU;
+                menuSelection = 0;
+            }
+            uiDirty = 1;
+            break;
+        }
+        return;
+    }
 
     if (currentState == STATE_MAIN_MENU || currentState == STATE_PAUSED) {
         /* 2026-11-08（第 6 轮）：**点空白处不该激活"当前选中项"**
@@ -548,15 +569,16 @@ void CanityMouseClick(int mx, int my) {
     }
 
     if (currentState == STATE_SAFEHOUSE && shopPage == SHP_TREE) {
-        if (BenchBuyButtonAt(mx,my)) { BenchDragEnd(); ShopActivate(); return; }
+        if (BenchBuyButtonAt(mx,my)) { BenchClick(shopNodeSel, 1); return; }
         for (int tab = 0; tab < SAFEHOUSE_PAGES; tab++) {
             int x0,y0,x1,y1; PageTabRect(tab,&x0,&y0,&x1,&y1);
             if (mx>=x0 && mx<=x1 && my>=y0 && my<=y1) {
-                shopPage=ShopPageAtTab(tab); shopRow=0; uiDirty=1; return;
+                benchClickNode=-1;shopPage=ShopPageAtTab(tab); shopRow=0; uiDirty=1; return;
             }
         }
         int id = BenchNodeAt(mx,my);
-        if (id >= 0) { shopNodeSel=id; BenchDragEnd(); ShopActivate(); uiDirty=1; }
+        if (id >= 0) BenchClick(id, 0);
+        else benchClickNode = -1;
         return;
     }
     /* 技能树的 + / - 缩放按钮优先命中（点它们不该去选节点） */
@@ -645,7 +667,7 @@ static void KeyHandleMainMenu(const MenuKeyInput* key) {
                必须方向键+回车」。现在按数字 = 选中该行 + 立刻执行。 */
             /* 2026-11-08（用户要求）：按 B 进引导模式 */
             if (vk == 'B') {
-                LoopQueueStart(START_GUIDE, 0);
+                LoopQueueStart(START_TRAINING, 0);
                 StartGame();
                 uiDirty = 1;
                 return;
@@ -1260,6 +1282,8 @@ int CanityKeyDown(int vk, int repeat) {
     /* 2026-11-16（用户要求）：移除 K 键直接开小游戏的入口。
        原来按一下 K 就在任意位置启动音游，容易误触；现在只有
        藏身点内（空格/交互）与安全屋"休整服务"能进小游戏。 */
+    if (currentState == STATE_PLAYING && hiddenIn >= 0 && CalibOutroActive() &&
+        (strchr("QWER", vk) || vk == g_bindings[ACT_INTERACT])) return 0;
     if(TacticalInputKey(vk,repeat) || UiArchiveTierKey(vk))return 0;
     if(currentState==STATE_HELP) {
         if(!repeat) {
@@ -1271,13 +1295,13 @@ int CanityKeyDown(int vk, int repeat) {
         }
         return 0;
     }
-    if(currentState==STATE_PLAYING && vk=='B' && !repeat && !guideMode && !lockActive && !calibActive) {
+    if(currentState==STATE_PLAYING && vk=='B' && !repeat && (!trainingMode || guideMode) && !lockActive && !calibActive) {
         if(!trainingMode){SaveGame();if(g_saveState==2){
             pickupMsg=Tr("COULD NOT SAVE: GUIDE NOT OPENED. CHECK SAVE LOCATION.","无法保存：未进入引导层，请检查存档位置。");
             pickupMsgTimer=4;UiShowActionError(pickupMsg);PlaySfx(SFX_CRANK,.45f);uiDirty=1;return 0;
         }}
         LoopClearInputEdges();LoopCancelTransientInput();
-        LoopQueueStart(START_GUIDE,0);StartGame();return 0;
+        LoopQueueStart(START_TRAINING,0);StartGame();return 0;
     }
     if(currentState==STATE_SAFEHOUSE && vk==VK_F5) {if(!repeat)ShopRefresh();return 0;}
     if (KeyHandleGlobalShortcut(vk, repeat)) return 0;
@@ -1318,6 +1342,10 @@ static void MapCursorRefresh(void) {
 
 static LRESULT WindowMouseMove(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     (void)hwnd; (void)uMsg; (void)wParam; (void)lParam;
+    if (currentState == STATE_PLAYING && exitChoiceOpen) {
+        RunExitChoicePointer();
+        return 0;
+    }
     if(currentState==STATE_BANK || (currentState==STATE_SAFEHOUSE && shopPage!=SHP_TREE)) {
         int x=(short)LOWORD(lParam),y=(short)HIWORD(lParam);MouseToLogical(&x,&y);CanityMouseMove(x,y);return 0;
     }
@@ -1448,7 +1476,7 @@ static LRESULT WindowMouseMove(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 static LRESULT WindowMouseWheel(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     (void)hwnd; (void)uMsg; (void)wParam; (void)lParam;
 
-    if(currentState==STATE_BESTIARY){
+    if(currentState==STATE_BESTIARY || currentState==STATE_HELP){
         POINT point={(short)LOWORD(lParam),(short)HIWORD(lParam)};
         ScreenToClient(g_hwnd,&point);
         int x=point.x,y=point.y;MouseToLogical(&x,&y);
@@ -1541,6 +1569,12 @@ static LRESULT WindowMouseWheel(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 static LRESULT WindowLeftDown(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     (void)hwnd; (void)uMsg; (void)wParam; (void)lParam;
+    if (currentState == STATE_PLAYING && exitChoiceOpen) {
+        int x = (short)LOWORD(lParam), y = (short)HIWORD(lParam);
+        MouseToLogical(&x, &y);
+        CanityMouseClick(x, y);
+        return 0;
+    }
     if(currentState==STATE_BANK || (currentState==STATE_SAFEHOUSE && shopPage!=SHP_TREE)) {
         int x=(short)LOWORD(lParam),y=(short)HIWORD(lParam);MouseToLogical(&x,&y);CanityMouseClick(x,y);
         if(bankPointerSlider>=0)PlatSetCapture(1);
@@ -1607,6 +1641,7 @@ static LRESULT WindowLeftDown(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                     int x0, y0, x1, y1;
                     PageTabRect(t, &x0, &y0, &x1, &y1);
                     if (mx0 >= x0 && mx0 <= x1 && my0 >= y0 && my0 <= y1) {
+                        benchClickNode = -1;
                         shopPage = ShopPageAtTab(t);
                         shopRow = 0;
                         uiDirty = 1;
@@ -1624,7 +1659,7 @@ static LRESULT WindowLeftDown(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 if (shopPage == SHP_TREE) {
                     int id = BenchNodeAt(mx0,my0);
                     if (id >= 0) {
-                        BenchDragEnd(); shopNodeSel = id; ShopActivate(); uiDirty = 1; return 0;
+                        CanityMouseClick(mx0, my0); return 0;
                     }
                 }
             }
@@ -1731,7 +1766,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 /* 游戏中（含小窗地图）隐藏光标 —— 鼠标是锁定的。
                    只有全屏地图才显示箭头光标。 */
                 int mouseFree = (currentState != STATE_PLAYING) ||
-                                (isMapOpen && mapFullScreen) || lockActive || exitChoiceOpen || calibActive || TacticalPanelOpen();
+                                (isMapOpen && mapFullScreen) || lockActive || (exitChoiceOpen && exitPointerVisible) || calibActive || TacticalPanelOpen();
                 if (!mouseFree) SetCursor(NULL);
                 else /* 2026-11-06（R4）：光标样式归平台层；ForceCursor(1) 已处理可见性 */
                 return TRUE;

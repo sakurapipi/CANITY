@@ -108,8 +108,6 @@ void LoopCheckAchievements(void) {
     /* v7 第 56 轮：最后两个没有置位点的 flag */
     { 
       if (bountyRecovered >= 3) s.flags[ACH_FLAG_CLAWBACK] = 1; }              /* CLAWBACK */
-    { 
-      if (metaResetDone) s.flags[ACH_FLAG_META_RESET] = 1; }                    /* META RESET */
 
         /* ==================================================================
      * v7 第 ㊿ 轮：**每日任务 8 个目标，原来只有 1 个会推进**
@@ -135,7 +133,7 @@ void LoopCheckAchievements(void) {
         case 7: v = floorsNoSanityLoss;                     break;  /* 无伤层数 */
         default: break;
         }
-        DailyObserve(DailyGoalId(),v);
+        if (DailyCanProgress()) DailyObserve(DailyGoalId(),v);
     }
 
     AchCheck(&s);

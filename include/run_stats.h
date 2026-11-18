@@ -5,7 +5,7 @@
 #include "common.h"
 
 /* Run/floor bookkeeping, owned by game.c. Save layout is unchanged. */
-extern int bountyRecovered, metaResetDone;
+extern int bountyRecovered;
 extern int throwHitCountRun, echoCellsTotalRun, dailyEscapeCount;
 extern int lastRunGold, lastRunKept, lastRunCaught;
 extern int floorsNoLight, floorsFlawless, floorsPacifist, floorsFast, floorsQuiet;

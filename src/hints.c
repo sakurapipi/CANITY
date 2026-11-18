@@ -54,8 +54,7 @@ void HintOnce(int id) {
         zh = "金币会在结算时进银行。";        en = "GOLD GOES TO THE BANK WHEN YOU SETTLE.";
         break;
     case HINT_EXIT:
-        zh = "出口：1或空格继续，2撤离；撤离前需要确认。"; en = "EXIT: 1 / SPACE CONTINUES; 2 EXTRACTS AFTER CONFIRMATION.";
-        break;
+        return; /* The exit modal owns its instructions. */
     case HINT_CARRY_TIER:
         zh = "带的钱越多，怪物听得越清。";    en = "THE MORE YOU CARRY, THE BETTER THEY HEAR.";
         break;
@@ -63,7 +62,7 @@ void HintOnce(int id) {
         zh = "按 K 丢钱，它会被引开。";       en = "PRESS K TO DROP GOLD AND LURE IT AWAY.";
         break;
     case HINT_WRENCH:
-        zh = "扳手每层 2 次。升级可以变成冷却。"; en = "WRENCH: 2 USES PER FLOOR. UPGRADE FOR COOLDOWN.";
+        zh = "扳手使用后需要冷却。"; en = "THE WRENCH COOLS DOWN AFTER EACH SWING.";
         break;
     default:
         return;

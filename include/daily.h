@@ -41,6 +41,7 @@ void  DailyTick(void);          /* 每帧：跨天自动刷新 */
 void DailyGenerateForDate(unsigned int seed);
 void DailyBeginRun(void);
 void DailyResetProfile(void);
+int DailyCanProgress(void);
 void DailyObserve(int goal, int value);
 float DailyBatteryCapMul(void);
 float DailyCrateCountMul(void);

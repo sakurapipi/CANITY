@@ -317,7 +317,7 @@ static float SpriteShade(float ty, float minK) {
     float k = 1.0f - ty / 16.0f;
     if (k < minK) k = minK;
     if (k > 1.0f) k = 1.0f;
-    if(!flashlightOn || battery<=0)k*=.22f;
+    if(!flashlightOn || battery<=0 || smokeDim<1)k*=.22f;
     return k;
 }
 
@@ -929,41 +929,53 @@ static void DrawShotSprite(int idx) {
    每点单独投影 —— 远的点在屏幕上更靠上，自然就变成被压扁的地面椭圆，
    这才是正确的「地面贴花」画法。 */
 
+/* Clustered soft puffs use a cached silhouette and are clipped before blending. */
+static void DrawSmokePuff(float x, float y, float height, float scale, float opacity, int seed) {
+    enum { MASK = 32 };
+    static unsigned char density[3][MASK][MASK];
+    static int ready;
+    if (!ready) {
+        for (int layer=0;layer<3;layer++) for (int v=0;v<MASK;v++) for (int u=0;u<MASK;u++) {
+            float dx=(u+.5f)*2/MASK-1, dy=(v+.5f)*2/MASK-1;
+            float wiggle=.12f*sinf(dx*11+layer*2)*sinf(dy*9-layer);
+            float edge=fmaxf(0,1-dx*dx-dy*dy+wiggle);
+            density[layer][v][u]=(unsigned char)fminf(255,edge*edge*340);
+        }
+        ready=1;
+    }
+    SpriteBox box=ProjectSprite(x,y,height,scale);
+    if (!box.ok || box.x1<=box.x0 || box.y1<=box.y0) return;
+    int x0=box.x0<0?0:box.x0, x1=box.x1>renderW?renderW:box.x1;
+    int y0=box.y0<0?0:box.y0, y1=box.y1>renderH?renderH:box.y1;
+    unsigned tint=seed==0?0x343943:seed==1?0x252932:0x424751;
+    for (int py=y0;py<y1;py++) {
+        int v=(py-box.y0)*MASK/(box.y1-box.y0);
+        for(int px=x0;px<x1;px++) {
+            if (box.ty>=zBuffer[px]) continue;
+            int u=(px-box.x0)*MASK/(box.x1-box.x0);
+            int alpha=density[seed][v][u];
+            if (alpha>7) PutPixelBlend(px,py,tint,opacity*alpha/255);
+        }
+    }
+}
+
 static void DrawSmokeCloud(void) {
-    spriteLight = 1.0f;      /* v2.1：烟团不从精灵衰减继承 */
-
-
-    for (int i = 0; i < MAX_SMOKE; i++) {
+    spriteLight=1;
+    if (smokeDim < 1) return; /* Inside: use the same world shading as an unlit flashlight. */
+    static const float offsets[][3]={
+        {-1.24f,0,.00f},{.95f,.48f,.10f},{0,-1.2f,.05f},
+        {.28f,.85f,.35f},{-.55f,-.50f,.47f},{0,.05f,.7f}
+    };
+    for (int i=0;i<MAX_SMOKE;i++) {
         if (!smokes[i].active) continue;
-        float t = smokes[i].life / SMOKE_LIFE;      /* 1 → 0 */
-        float grow = 1.0f;                          /* v1.18：落地直接满尺寸，不再慢慢长大 */
-        /* v2.0：烟必须"减光"而不是"发光"。
-           原来用 DrawOrbSprite 是加法混合 —— 暗走廊里烟团亮得像三盏灯，
-           和"遮蔽视线"的机制完全矛盾。这里改成直接压暗画面。 */
-        {
-            SpriteBox sb = ProjectSprite(smokes[i].x, smokes[i].y, 0.0f, 1.15f * grow);
-            if (sb.ok) {
-                int cx = (sb.x0 + sb.x1) / 2, cyy = (sb.y0 + sb.y1) / 2;
-                int rx = (sb.x1 - sb.x0) / 2, ry = (sb.y1 - sb.y0) / 2;
-                float amt = 0.55f * t + 0.12f;
-                if (rx > 0 && ry > 0) {
-                    for (int y = -ry; y <= ry; y++) {
-                        int py = cyy + y;
-                        if (py < 0 || py >= renderH) continue;
-                        for (int x = -rx; x <= rx; x++) {
-                            int px = cx + x;
-                            if (px < 0 || px >= renderW) continue;
-                            /* v2.0 修复：烟原来完全不查深度，暗房里像墙上糊了一块灰 */
-                            if (sb.ty >= zBuffer[px]) continue;
-                            float u = (float)(x * x) / (float)(rx * rx) +
-                                      (float)(y * y) / (float)(ry * ry);
-                            if (u > 1.0f) continue;
-                            float a = amt * (1.0f - u * 0.7f);
-                            PutPixelBlend(px, py, 0x00303034u, a);
-                        }
-                    }
-                }
-            }
+        float remaining=fminf(1,smokes[i].life/SMOKE_LIFE);
+        float age=SMOKE_LIFE-smokes[i].life;
+        float growth=.68f+.32f*fminf(1,age*2.5f);
+        float opacity=.84f*fminf(1,remaining*3);
+        for (int part=0;part<6;part++) {
+            float x=smokes[i].x+growth*offsets[part][0]+.16f*sinf(age*1.9f+part);
+            float y=smokes[i].y+growth*offsets[part][1]+.14f*cosf(age*1.6f+part);
+            DrawSmokePuff(x,y,offsets[part][2]+.04f*age,growth*(part<3?1.18f:.92f),opacity,part%3);
         }
     }
 }
@@ -1301,6 +1313,7 @@ static void DrawSpriteOverlays(void) {
     DrawHearingMarker();   /* v3.0 听觉 */
     DrawSmokeCloud();
     DrawGluePuddle();   /* v3.3 地面胶水 */
+    DrawEchoRadarPulse();
     /* v3.3：诱饵玩偶 */
     {
 
@@ -1541,7 +1554,7 @@ static unsigned SafetyFloorMarker(unsigned color,float fx,float fy,float wx,floa
 #include "domain/render/legacy/render_246_floor.inc"
 static void RenderFloorBand(int y0, int y1) {
     if(!pitchLookEnabled) { RenderFloorBandLegacy246(y0,y1); return; }
-    int lightOnF = (flashlightOn && battery > 0.0f);
+    int lightOnF = (flashlightOn && battery > 0.0f && smokeDim >= 1);
     /* Fade in spatial filtering while looking down, instead of snapping between
        2-texel blocks as the horizon moves. OFF/level retains the original texture. */
     unsigned int floorFilter=pitchLookEnabled ? (unsigned int)(fmaxf(0,fminf(1,-pitchRatio))*256) : 0;
@@ -1788,7 +1801,7 @@ static void RenderWallSurface(int x, const WallRay* ray) {
          环境光 amb：永远很暗（开灯 0.42 倍，关灯更暗）
          手电项   ：有效距离 8 格，按 (1-d/8)² 衰减，超出即 0
        所以光照范围由"手电照到哪"决定，不再是"整条走廊"。 */
-    int lightOnW = (flashlightOn && battery > 0.0f);
+    int lightOnW = (flashlightOn && battery > 0.0f && smokeDim >= 1);
     float amb = 1.0f / (1.0f + perpWallDist * (lightOnW ? 0.70f : 0.50f));
     /* v1.12：手电换成和荧光棒同一套光效 ——
        锥形（横向 flashTab）× 平方距离衰减，再叠一层暖色加色。
@@ -2070,7 +2083,7 @@ void Render3D(void) {
 
     /* Stable illumination: no periodic low-charge or enemy-proximity strobe. */
     const float flick=perception.flicker;
-    int lightOn=(flashlightOn && battery>0.0f);
+    int lightOn=(flashlightOn && battery>0.0f && smokeDim >= 1);
     for (int x = 0; x < renderW; x++) {
         float f;
         if (lightOn) {

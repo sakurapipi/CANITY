@@ -38,55 +38,6 @@ extern int chargeBonus(float);
 extern float weaponAtkCharge;
 extern int   g_lang;
 
-/* ===== v2.3.2 THE ECHO 改成「连投三次」才触发 =====
-   每扔一次就出现一个小回声，太频繁也太奇怪，反而像 bug。
-   现在：8 秒内连扔到第 3 个，才在那个落点留下一次强回响。 */
-int   throwChain      = 0;    /* 连续扔了几个 */
-float throwChainTimer = 0.0f; /* 归零倒计时，8 秒不扔就断链 */
-#define THROW_CHAIN_NEED   3
-#define THROW_CHAIN_IDLE   8.0f
-
-/* ===== v2.3.6 回响统一入口 =====
-   规则：
-     · 任何投掷物都算进连投计数（8 秒内不扔就断链）
-     · 连投到第 3 个 → 触发一次强回响
-     · **全场最多只有一个回响** —— 触发前先清掉已有的，
-       否则多个 100 强度的假线索叠在一起会把怪物数值彻底搞乱。 */
-void EchoTryTrigger(float x, float y) {
-    /* ==================================================================
-     * 2026-11-05 修「回响触发机制」——用户报告「回响探测键有点小问题」
-     * ------------------------------------------------------------------
-     * 设计意图（原注释）：**任何投掷物都算进连投计数**。
-     *
-     * 但原来的接线只在「落在地面上」那一条分支里调了这个函数 ——
-     * 于是下面三种结束方式**完全不计数**：
-     *     · 撞墙      ← 走廊里最常见
-     *     · 打中怪
-     *     · 空中寿命到期
-     * 玩家实际感受就是「扔了半天不回响」，因为大部分投掷都撞墙了。
-     *
-     * 现在四个出口（落地 / 撞墙 / 打怪 / 空中到期）都会调到这里，
-     * 连投计数才和"扔了几次"真正对应上。
-     * ================================================================== */
-
-    throwChain++;
-    throwChainTimer = THROW_CHAIN_IDLE;
-    if (throwChain < THROW_CHAIN_NEED) return;
-    throwChain = 0;
-
-    /* 上限 1 个：先把旧的清掉 */
-    for (int i = 0; i < SUSP_MAX; i++)
-        if (susp[i].strength > 0.0f && susp[i].source == SUSP_THROW)
-            SuspicionConsume(i);
-
-    SuspicionAdd(x, y, 100.0f, 1.5f, 30.0f, SUSP_THROW);
-    /* B05：连锁回响也有位置 —— 它发生在你扔出去的那个地方 */
-    { 
-      AudioPlayWorld(SFX_ECHO, x, y, 0.95f, 24.0f, 2); }
-    pickupMsg = (g_lang == LANG_ZH) ? "回响炸开了" : "ECHO BURST";
-    pickupMsgTimer = 1.6f;
-}
-
 /* ==================================================================
  * 2026-11-05：**投石 → 破门石**（方案 B）
  * ------------------------------------------------------------------
@@ -104,9 +55,8 @@ void EchoTryTrigger(float x, float y) {
  * 和「宝箱怪的扳手解法」是同一族设计：
  *   同一个障碍（锁/伪装），给两种完全不同的应对（动手 / 动脑）。
  * ================================================================ */
-#define STONE_LOCK_RADIUS   2.5f     /* 命中判定的落点半径（格）—— 2.0 太严，放宽 */
+#define STONE_LOCK_RADIUS   1.35f
 #define STONE_LOCK_NOISE   20.0f     /* 砸锁的噪音 —— 这是它的代价 */
-#define STONE_LOCK_CHANCE   100      /* 100 = 必成。留个口子方便以后调成概率 */
 
 /* 落点 x,y 附近有没有锁箱；有就砸开。返回 1 = 砸开了。
    ⚠ 只处理 `locked`，不碰 `mimicHost`（宝箱怪不是锁箱）。 */
@@ -132,22 +82,22 @@ static int StoneBreakLockAt(float x, float y) {
         if (containers[i].mimicHost) continue;
         float dx = containers[i].x - x, dy = containers[i].y - y;
         float d2 = dx * dx + dy * dy;
-        if (d2 < bestD) { bestD = d2; best = i; }
+        if (d2 < bestD && HasLOS(x, y, containers[i].x, containers[i].y)) { bestD = d2; best = i; }
     }
     if (best < 0) return 0;
-    if ((rand() % 100) >= STONE_LOCK_CHANCE) return 0;
 
     containers[best].locked   = 0;      /* 锁崩开 */
     containers[best].lockType = 0;
     containers[best].lockCode = 0;
     containers[best].searched = 0;
 
-    /* 砸锁的动静比普通落地大得多 —— 这就是它的代价 */
-    MakeNoise(x, y, STONE_LOCK_NOISE);
-    /* B05：破锁的碎玻璃声来自**箱子那边** —— 隔墙听得到，也听得出方向 */
-    { 
-      AudioPlayWorld(SFX_GLASS, x, y, 1.0f, 24.0f, 3); }
-    {  AddShake(0.10f, 0.08f); }
+    float boxX = containers[best].x, boxY = containers[best].y;
+    MakeNoise(boxX, boxY, STONE_LOCK_NOISE);
+    AudioPlayWorld(SFX_IMPACT, boxX, boxY, .90f, 20, 3);
+    AudioPlayWorld(SFX_METAL_SCRAPE, boxX, boxY, .72f, 22, 3);
+    SpawnParticles(boxX, boxY, 2);
+    float kick = 1 / (1 + .24f * sqrtf(Dist2(posX, posY, boxX, boxY)));
+    AddShake(.21f, .23f * kick);
 
     pickupMsg = (g_lang == LANG_ZH) ? "石头砸开了锁！" : "THE STONE BROKE THE LOCK!";
     pickupMsgTimer = 1.6f;
@@ -165,15 +115,17 @@ void ThrowItem(int type, float charge) {
     float angle = 0.35f * charge;  /* 抛物线角度：蓄力越高越平直 */
 
     if (type == 1) {
-        /* 玻璃瓶：抛物线飞行弹丸 */
+        /* Quick throws arc over near obstacles; charging makes the stone fly flatter. */
+        const float stoneHorizontal = 6.8f + 9.6f * charge;
+        const float stoneLift = 3.0f - 1.55f * charge;
         for (int i = 0; i < MAX_SHOTS; i++) {
             if (shot[i].active) continue;
             shot[i].x = posX;
             shot[i].y = posY;
             shot[i].z = SHOT_HEIGHT;
-            shot[i].vx = dirX * speed * cosf(angle);
-            shot[i].vy = dirY * speed * cosf(angle);
-            shot[i].vz = speed * sinf(angle);  /* 向上分量 */
+            shot[i].vx = dirX * stoneHorizontal;
+            shot[i].vy = dirY * stoneHorizontal;
+            shot[i].vz = stoneLift;
             shot[i].life = 2.0f;
             shot[i].age = 0.0f;
             shot[i].charge = charge;
@@ -186,7 +138,10 @@ void ThrowItem(int type, float charge) {
             shot[i].active = 1; g_throwOk = 1;
             break;
         }
-        PlaySfx(SFX_THROW, 0.6f);  /* 投掷专用音效：呼啸+出手闷响 */
+        if (g_throwOk) {
+            PlaySfx(SFX_THROW, .42f + .36f * charge);
+            AddShake(.08f, .045f * charge);
+        }
         return;
     }
 
@@ -322,9 +277,7 @@ static void ShotImpact(int i, float x, float y) {
     const ShotSpec* sp = ShotSpecFor(shot[i].kind);
     int kind = shot[i].kind;
 
-    /* 任何投掷物落点都留一个"可疑位置"给听声怪 */
     if(sp->effect==FX_TACTICAL){TacticalImpact(kind,x,y);return;}
-    EchoTryTrigger(x, y);
 
     if (sp->effect == FX_SMOKE) {
         SpawnSmoke(x, y);
@@ -404,7 +357,8 @@ if (shot[index].kind == 1) {
     if (CollectorActive()) {
         float cdx = CollectorX() - shot[index].x;
         float cdy = CollectorY() - shot[index].y;
-        if (cdx * cdx + cdy * cdy < 1.44f) {      /* 1.2 格 */
+        if (cdx * cdx + cdy * cdy < 1.44f &&
+            HasLOS(shot[index].x, shot[index].y, CollectorX(), CollectorY())) {      /* 1.2 格 */
             CollectorBurstBounty();
         }
     }
@@ -431,13 +385,21 @@ if (shot[index].kind == 1) {
 }
 }
 
+static void EndStoneFlight(int index) {
+    Shot *stone = &shot[index];
+    float x = stone->x, y = stone->y;
+    if (!StoneBreakLockAt(x, y)) {
+        MakeNoise(x, y, 8 + 12 * stone->charge);
+        AudioPlayWorld(SFX_IMPACT, x, y, .45f + .25f * stone->charge, 16, 2);
+        AddShake(.09f, .06f / (1 + .3f * sqrtf(Dist2(posX, posY, x, y))));
+    }
+    SpawnShards(x, y, stone->vx * .25f, stone->vy * .25f, stone->charge);
+    StoneGroundReaction(index);
+    stone->active = 0;
+}
+
 /* 推进所有飞行中的玻璃瓶，结算命中 + 抛物线 + 金币 */
 void UpdateShots(float dt) {
-    /* v2.3.2：8 秒不扔就断链 */
-    if (throwChainTimer > 0.0f) {
-        throwChainTimer -= dt;
-        if (throwChainTimer <= 0.0f) throwChain = 0;
-    }
     for (int i = 0; i < MAX_SHOTS; i++) {
         if (!shot[i].active) continue;
         shot[i].life -= dt;
@@ -455,12 +417,15 @@ void UpdateShots(float dt) {
            从胸口直线飞出去、而且永远不落地（烟雾弹自然出不了烟）。 */
         /* Legacy projectiles retain their original integration. New tactical
          * objects integrate once, in substeps, rather than falling twice. */
-        if (ShotSpecFor(shot[i].kind)->effect != FX_TACTICAL) {
+        int stone = shot[i].kind == 1;
+        int singleIntegration = stone || ShotSpecFor(shot[i].kind)->effect == FX_TACTICAL;
+        if (!singleIntegration) {
             shot[i].vz -= 16.0f * dt;
             shot[i].z += shot[i].vz * dt;
         }
         if (shot[i].z <= 0.0f && shot[i].age > 0.02f) {
             shot[i].z = 0.0f;
+            if (stone) { EndStoneFlight(i); continue; }
             /* ---- v3.3 落地效果分派 ----
                kind 1 投石 / 4 烟雾 / 8 胶水 / 10 回声 ----
                噪音全部由**落点 + 蓄力**决定，不再固定：
@@ -480,7 +445,6 @@ void UpdateShots(float dt) {
                瓶子本来就该是"从远处打断它"的手段 —— 比扳手安全得多，
                代价是瓶子要花一个投掷格。
                命中半径 1.2 格（比扳手的 0.7 宽），因为瓶子有溅射。 */
-            StoneGroundReaction(i);
             {
                 /* 2026-11-08（第 6 轮）：噪音也读表 —— 不再按 kind 写死 */
                 const ShotSpec* nsp = ShotSpecFor(shot[i].kind);
@@ -503,15 +467,26 @@ void UpdateShots(float dt) {
             float beforeX = shot[i].x, beforeY = shot[i].y;
             shot[i].x += sdx;
             shot[i].y += sdy;
-            shot[i].z += ShotSpecFor(shot[i].kind)->effect == FX_TACTICAL ? shot[i].vz * dt / (float)steps : sdz;
-            shot[i].vz -= GRAVITY * (shot[i].kind == TOOL_SHOT_FIRST + TOOL_PRISM ? .08f : 1.0f) * dt / (float)steps;  /* 重力 */
+            float subDt = dt / (float)steps;
+            shot[i].z += singleIntegration ? shot[i].vz * subDt : sdz;
+            float gravity = stone ? 14.2f :
+                (shot[i].kind == TOOL_SHOT_FIRST + TOOL_PRISM ? GRAVITY * .08f : GRAVITY);
+            shot[i].vz -= gravity * subDt;
+            if (stone && ShotBlocked(shot[i].x, shot[i].y)) {
+                shot[i].x = beforeX; shot[i].y = beforeY;
+                EndStoneFlight(i);
+                break;
+            }
+            if (stone && shot[i].z <= 0) {
+                shot[i].z = 0;
+                EndStoneFlight(i);
+                break;
+            }
 
             /* 撞地面：碎裂生成金币 */
             if (shot[i].z <= 0.0f) {
                 shot[i].z = 0.0f;
                 /* 2026-11-05：**破门石** —— 落在锁箱旁边就把锁砸开。 */
-                int brokeGround = 0;
-                if (shot[i].kind == 1) brokeGround = StoneBreakLockAt(shot[i].x, shot[i].y);
                 /* 2026-11-07：子步落地原来只结算相位，烟雾/胶水/回声全丢 ——
                    和"全局落地"两套分派就是用户说的"有时候不生效"。
                    现在统一走 ShotImpact。 */
@@ -520,7 +495,7 @@ void UpdateShots(float dt) {
                 /* v2.4-alpha：**一次物理撞击只结算一次逻辑噪音**。
                    破锁时 StoneBreakLockAt 已经发过 20 格冲击声，
                    这里不能再叠一次 15 格落地声 —— 那是同一块石头。 */
-                if (!brokeGround && ShotSpecFor(shot[i].kind)->effect != FX_TACTICAL) MakeNoise(shot[i].x, shot[i].y, 15.0f);
+                if (ShotSpecFor(shot[i].kind)->effect != FX_TACTICAL) MakeNoise(shot[i].x, shot[i].y, 15.0f);
                 shot[i].active = 0;
                 break;
             }
@@ -535,14 +510,11 @@ void UpdateShots(float dt) {
                 /* 2026-11-05：**破门石** —— 锁箱贴着墙时，瓶子会先撞墙，
                    所以撞墙分支也要试一次，否则「贴着墙的锁箱永远砸不开」。 */
                 if(TacticalWallHit(i,beforeX,beforeY))break;
-                int brokeWall = 0;
-                if (shot[i].kind == 1) brokeWall = StoneBreakLockAt(shot[i].x, shot[i].y);
                 /* 2026-11-07：撞墙也走 ShotImpact —— 原来这里的回声只做了半套
                    （没揭地形、没 EchoMarksScan），和落地不是一回事。 */
                 ShotImpact(i, shot[i].x, shot[i].y);
                 PlaySfx(SFX_GLASS, 0.7f);
-                /* 同地面：破锁时这里不再叠一次 */
-                if (!brokeWall) MakeNoise(shot[i].x, shot[i].y, 15.0f);
+                MakeNoise(shot[i].x, shot[i].y, 15.0f);
                 shot[i].active = 0;
                 break;
             }
@@ -648,8 +620,6 @@ void UpdateShots(float dt) {
 
                     g_dmgIgnoreArmor = 0;
                     if (shot[i].pierce) { shot[i].pierce = 0; continue; }   /* v2.0：穿透一次 */
-                    /* 打在怪物身上同样是「这一次投掷结束了」 —— 回响要计数 */
-                    EchoTryTrigger(shot[i].x, shot[i].y);
                     shot[i].active = 0;
                     break;
                 }
@@ -670,19 +640,19 @@ void UpdateShots(float dt) {
                原来这里只有 `SpawnShards()` 就销毁 —— 瓶子在半空炸开、
                一点效果都没有（另一半"半空碎裂"报告就是这条）。
                寿命到期意味着"它飞到哪儿就在哪儿落地"，所以补一次落地效果。 */
-            EchoTryTrigger(shot[i].x, shot[i].y);   /* 空中到期也算一次投掷结束 */
-            if (shot[i].kind == 1) {
-                int brokeExp = StoneBreakLockAt(shot[i].x, shot[i].y);
-                if (!brokeExp) MakeNoise(shot[i].x, shot[i].y, 15.0f);
-                SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
+            if (ShotSpecFor(shot[i].kind)->effect == FX_ECHO_SCAN) {
+                ShotImpact(i, shot[i].x, shot[i].y);
+                shot[i].active = 0;
+                continue;
+            }
+            if (stone) {
+                EndStoneFlight(i);
+                continue;
             } else if (shot[i].kind == 4) {
                 SpawnSmoke(shot[i].x, shot[i].y);       /* 烟雾弹落地成云 */
             } else if (shot[i].kind == 8) {
                 SpawnGlue(shot[i].x, shot[i].y);
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
-            } else if (shot[i].kind == 10) {
-
-                EchoMarksScan(shot[i].x, shot[i].y, ECHO_RADIUS);
             } else if (shot[i].z > 0.0f) {
                 SpawnShards(shot[i].x, shot[i].y, shot[i].vx, shot[i].vy, shot[i].charge);
             }

@@ -994,7 +994,6 @@ void SkillResetAll(void) {
     }
     activeKeystone = -1;
     if (refund > 0) WalletAddBank(refund);
-    {  metaResetDone = 1; }
     {  AchRecordFlag(ACH_FLAG_META_RESET); }
     SaveGame();
 }

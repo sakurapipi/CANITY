@@ -34,14 +34,12 @@ extern int guideMode;
 const char* TutorialObjective(void);
 const char* TutorialHint(void);
 int TutorialStepNumber(void);
+int TutorialNeedsHelp(void);
 int TutorialStepTotal(void);
 void TutorialBegin(void);
 void TutorialResetMode(void);
-void TutorialRestartGuide(void);
 void TutorialRecordThrow(void);
-void TutorialRecordNoise(void);
 void TutorialRecordMapOpened(void);
-void TutorialVisitStation(int station);
 void TutorialUpdate(float dt);
 void TrainingBuildArena(void);
 

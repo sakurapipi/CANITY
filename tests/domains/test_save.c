@@ -5,6 +5,7 @@
  */
 #include "../test_common.h"
 #include "plat.h"
+#include "threat_tier.h"
 #include <stddef.h>
 
 static void test_legacy_fixture_one(const char* file, int oldVer, int wantPayload,
@@ -348,7 +349,13 @@ static void test_wallet_save(void) {
     clear_meta();bankGold=1000;bankHistMax=1000;bankCarryPct=5;
     StartFreshTestRun();CHECK(bankGold==750 && carryGold==250 && carryAtRunStart==250,"opening withdrawal stays in the player's pocket");
     carryGold=350;WalletSettle(1,100);CHECK(bankGold==1125,"settlement returns principal plus multiplied profit once");
-    carryGold=101;WalletSettle(0,0);CHECK(bankGold==1160,"death returns exactly rounded 35 percent");
+    static const int refunds[]={35,28,21,15};
+    for(int tier=0;tier<4;tier++) {
+        ThreatTierRestore(currentLevel,tier,ThreatTierCommittedPlan());
+        carryGold=101;
+        CHECK(WalletPreviewSettle(0,0)==refunds[tier],"death refund follows the floor tier");
+    }
+    WalletSettle(0,0);CHECK(bankGold==1140,"highest tier pays the rounded 15 percent refund");
     CHECK(carryGold==0 && carryAtRunStart==0,"settlement cannot be paid a second time");
     bankGold=6543;bankHistMax=8000;bankCarryPct=3;carryGold=321;carryAtRunStart=200;
     knockCountRun=7;throwHitCountRun=8;echoCellsTotalRun=99;
@@ -823,7 +830,8 @@ static void test_stable_training_and_snapshot(void){
     MoneyBagsResetForNewFloor();counterKillUsed=0;CHECK(LoadSettings(),"v45 money snapshot loads");ContinueRun();
     int total=0;for(int i=0;i<MAX_MONEYBAG;i++)total+=MoneyBagAmount(i);
     CHECK(total==73 && counterKillUsed==1,"ground money and consumed counter survive continue");
-    StartFreshTestRun();
+    LoopQueueStart(START_DAILY,0);StartGame();
+    if(LoopRunReplacementPending())LoopResolveRunReplacement(1);
     int daily[15]={DQ_KNOCK,8,4,0,0,(int)DailySeedToday(),0,0};daily[7+DQ_KNOCK]=4;
     DailyResetProfile();DailyLoadFrom(daily);knockCountRun=4;SaveGame();
     LoopQueueStart(START_GUIDE,0);StartGame();ContinueRun();DailyObserve(DQ_KNOCK,5);

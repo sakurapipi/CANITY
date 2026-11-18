@@ -248,6 +248,28 @@ static void DrawTacticalShot(int index,int cx,int cy,float unit,float depth) {
     }
 }
 
+void DrawEchoRadarPulse(void) {
+    if (echoScanT <= 0) return;
+    float age = 6 - echoScanT;
+    for (int wave = 0; wave < 3; wave++) {
+        float phase = (age - wave * .24f) / 1.35f;
+        if (phase <= 0 || phase >= 1) continue;
+        float radius = ECHO_RADIUS * phase;
+        for (int i = 0; i < 180; i++) {
+            float angle = i * (6.2831853f / 180);
+            float x = echoScanX + radius * cosf(angle), y = echoScanY + radius * sinf(angle);
+            int px, py;
+            float unit, depth;
+            if (!ProjectPoint(x, y, .045f, &px, &py, &unit, &depth)) continue;
+            if ((unsigned)px >= (unsigned)renderW || (unsigned)py >= (unsigned)renderH ||
+                depth >= zBuffer[px]) continue;
+            PutPixelBlend(px, py, 0x61F5D8, (1 - phase) * .82f);
+            if (py + 1 < renderH)
+                PutPixelBlend(px, py + 1, 0x3794CE, (1 - phase) * .50f);
+        }
+    }
+}
+
 void DrawShotModel(int idx) {
     float wx = shot[idx].x, wy = shot[idx].y, z = shot[idx].z;
     int cx, cy;
@@ -329,30 +351,25 @@ void DrawShotModel(int idx) {
         return;
     }
     if (kind == 10) {
-        /* 回声弹：细长哨形，投掷方向拉长，淡紫色，尖端带一点亮 */
-        float vlen = sqrtf(shot[idx].vx * shot[idx].vx + shot[idx].vy * shot[idx].vy);
-        int len = (int)(unit * 0.11f); if (len < 4) len = 4;
-        int rad = (int)(unit * 0.032f); if (rad < 2) rad = 2;
-        /* 沿飞行方向画一条细长的锥形 */
-        for (int s2 = -len; s2 <= len; s2++) {
-            float t2 = (float)s2 / (float)len;          /* -1 尾  +1 尖 */
-            int rr = (int)(rad * (1.0f - t2 * 0.55f));
-            if (rr < 1) rr = 1;
-            for (int d = -rr; d <= rr; d++) {
-                int px, py;
-                if (vlen > 0.01f) {
-                    float ux = shot[idx].vx / vlen, uy = shot[idx].vy / vlen;
-                    /* 屏幕方向近似：用 unit 缩放，不做完整透视旋转 */
-                    px = cx + (int)(ux * (float)s2 * unit * 0.02f) + d;
-                    py = cy + (int)(uy * (float)s2 * unit * 0.02f);
-                } else {
-                    px = cx + d; py = cy + s2;
-                }
-                if (px < 0 || px >= renderW || py < 0 || py >= renderH) continue;
-                unsigned int c = (t2 > 0.55f) ? 0x00E8D0FFu : 0x009878C8u;
-                PutPixelBlend(px, py, c, 0.94f);
+        /* Armored radar puck: beveled shell, inset lens and rotating indicator. */
+        int radius = (int)fminf(72, fmaxf(4, unit * .085f));
+        float sweep = g_timeSec * 12;
+        float sx = cosf(sweep), sy = sinf(sweep);
+        for (int y = -radius; y <= radius; y++)
+            for (int x = -radius; x <= radius; x++) {
+                int px = cx + x, py = cy + y;
+                if ((unsigned)px >= (unsigned)renderW || (unsigned)py >= (unsigned)renderH ||
+                    ty >= zBuffer[px]) continue;
+                int d = abs(x) + abs(y);
+                if (abs(x) > radius * .85f || d > radius * 1.3f) continue;
+                float r = (float)(x*x + y*y) / (radius*radius);
+                unsigned color = y < 0 ? 0x74869D : 0x344354;
+                if (d > radius) color = 0x111A27;
+                if (r < .50f) color = r > .37f ? 0x75E8DD : 0x154050;
+                if (r < .48f && x*sx + y*sy >= 0 && fabsf(y*sx - x*sy) < 1.2f)
+                    color = 0xD0FFF5;
+                PutPixelBlend(px, py, color, .98f);
             }
-        }
         return;
     }
 
@@ -422,7 +439,10 @@ void DrawGluePuddle(void) {
         float t = glues[i].life / GLUE_LIFE;         /* 1 → 0 */
         if (t > 1.0f) t = 1.0f;
         if (t < 0.0f) t = 0.0f;
-        float fade = 0.35f + 0.65f * t;
+        float fade = fminf(1, t*4);
+        float age = GLUE_LIFE*(1-t);
+        float ripple = fminf(1, age*1.7f);
+        float flow = (float)g_timeSec*1.9f;
 
         /* 网格密度：半径 2.5 格 → 采样 22x22，步长约 0.23 格。
            太稀会看到断点，太密单帧开销上去了（软件光栅，得省）。 */
@@ -437,7 +457,8 @@ void DrawGluePuddle(void) {
                 float wy = glues[i].y - GLUE_RADIUS + (float)gy * step;
                 float dx = wx - glues[i].x, dy = wy - glues[i].y;
                 float d2n = (dx * dx + dy * dy) / (GLUE_RADIUS * GLUE_RADIUS);
-                if (d2n > 1.0f) continue;              /* 圆外不画 */
+                float edge = .92f + .06f*sinf(gx*.81f+gy*.39f) + .06f*cosf(gy*.77f-gx*.53f);
+                if (d2n > fminf(1,edge)) continue;
 
                 int px, py;
                 float unit, ty;
@@ -461,6 +482,14 @@ void DrawGluePuddle(void) {
                     col = 0x003a6b4au;
                     a = (0.30f + 0.40f * core) * fade * wob;
                 }
+                float front = fabsf(d2n-ripple*ripple);
+                if (age < .65f && front < .12f) {
+                    col=0x94E7A6;
+                    a=fmaxf(a, (1-front/.12f)*(1-ripple)*.76f);
+                } else if ((gx*7+gy*11)%13==0 && sinf(gx*.7f+gy*.61f+flow)>.48f) {
+                    col=0xADD9A0;
+                    a*=.7f;
+                }
                 if (a > 0.85f) a = 0.85f;
                 if (a <= 0.02f) continue;
 
@@ -477,7 +506,7 @@ void DrawGluePuddle(void) {
                 if (y1 >= renderH) y1 = renderH - 1;
                 for (int yy = y0; yy <= y1; yy++)
                     for (int xx = x0; xx <= x1; xx++)
-                        PutPixelBlend(xx, yy, col, a);
+                        if (ty < zBuffer[xx]) PutPixelBlend(xx, yy, col, a);
             }
         }
     }
