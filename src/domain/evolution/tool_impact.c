@@ -24,27 +24,27 @@ static void Failed(const char *en, const char *zh) {
     uiDirty = 1;
 }
 float TacticalFootstepMul(float x, float y, float hush) {
-    float best = ProgressionInAcousticLink(x, y) ? fminf(hush, .10f) : hush;
+    float best = ProgressionInAcousticLink(x, y) ? fminf(hush, .20f) : hush;
     for (int i = 0; i < 2; i++)
         if (tactical.acoustic[i].ttl > 0 &&
             Dist2(x, y, tactical.acoustic[i].x, tactical.acoustic[i].y) <=
                 ProgressionToolValue(PG_DAMP_RADIUS) * ProgressionToolValue(PG_DAMP_RADIUS) &&
             HasLOS(x, y, tactical.acoustic[i].x, tactical.acoustic[i].y))
-            best = fminf(best, .10f);
+            best = fminf(best, .20f);
     return best / fmaxf(.01f, hush);
 }
 /* Newly emitted non-footstep sounds are absorbed too; existing heard events
  * and contact attacks are deliberately not erased. Solid walls block the field. */
 float TacticalNoiseMul(float x, float y) {
     if (ProgressionInAcousticLink(x, y))
-        return .20f;
+        return .30f;
     for (int i = 0; i < 2; i++) {
         const ToolZone *z = &tactical.acoustic[i];
         if (z->ttl > 0 &&
             Dist2(x, y, z->x, z->y) <=
                 ProgressionToolValue(PG_DAMP_RADIUS) * ProgressionToolValue(PG_DAMP_RADIUS) &&
             HasLOS(x, y, z->x, z->y))
-            return .20f;
+            return .30f;
     }
     return 1;
 }

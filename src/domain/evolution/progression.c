@@ -10,7 +10,8 @@
 #include "world_api.h"
 
 float ProgressionToolValue(int stat) {
-    static const float base[] = {4, 12, 4, 8, 1, 1.5f, 3, 1.8f};
+    static const float base[] = {TOOL_ACOUSTIC_RADIUS, TOOL_ACOUSTIC_SECONDS, TOOL_PRISM_BLIND_SECONDS,
+                                 8, 1, 1.5f, 3, 1.8f};
     static const int bonus[] = {BENCH_DAMP_RADIUS,  BENCH_DAMP_TIME,  BENCH_BLIND_TIME,
                                 BENCH_DUST_TIME,    BENCH_JAM_TIME,   BENCH_SOLVENT_TIME,
                                 BENCH_TETHER_RANGE, BENCH_TRACE_RANGE};

@@ -17,11 +17,11 @@
 TacticalState tactical = {.quick = {0, 1, 2, 6}};
 static const ToolDef definitions[TOOL_COUNT] = {
     {"DAMPENER", "吸声胶囊",
-     "Ground / 12s / radius 4 / footsteps -90%, other new sounds -80%; walls block field.",
-     "地面12秒，半径4格，脚步降噪90%、其他新噪音降80%；隔墙无效，旧声源仍保留。", 45, 2},
+     "Ground / 10s / radius 3 / footsteps -80%, other new sounds -70%; walls block field.",
+     "地面10秒，半径3格，脚步降噪80%、其他新噪音降70%；隔墙无效，旧声源仍保留。", 45, 2},
     {"LIGHT BREAKER", "断光棱镜",
-     "Forward mirror shard / hit: blind light beasts 4s / radius 1.5 / 10s resistance.",
-     "向前投出镜面冰刺，命中致盲追光怪4秒并取消蓄力；半径1.5格，目标10秒抗性。", 75, 2},
+     "Forward mirror shard / hit: blind light beasts 3s / radius 1.5 / 10s resistance.",
+     "向前投出镜面冰刺，命中致盲追光怪3秒并取消蓄力；半径1.5格，目标10秒抗性。", 75, 2},
     {"WEB SOLVENT", "解丝溶剂",
      "Clear nearby webs; selected or bound: press throw while webbed (-1.5s, floor 1s).",
      "清除附近蛛网；选中或绑定后，受控时按投掷减时1.5秒，保留1秒底线。", 60, 2},
@@ -49,8 +49,8 @@ const char *ToolDetail(int tool) {
     case TOOL_ACOUSTIC:
         snprintf(
             text, 360,
-            Tr("Radius %.1f / %.0fs / footsteps -90%% / new noise -80%%. Walls block the field.",
-               "半径%.1f格 / 持续%.0f秒 / 脚步降噪90%% / 新噪声降80%%；不穿墙。"),
+            Tr("Radius %.1f / %.0fs / footsteps -80%% / new noise -70%%. Walls block the field.",
+               "半径%.1f格 / 持续%.0f秒 / 脚步降噪80%% / 新噪声降70%%；不穿墙。"),
             (double)ProgressionToolValue(PG_DAMP_RADIUS),
             (double)ProgressionToolValue(PG_DAMP_TIME));
         break;
@@ -145,23 +145,28 @@ int ToolCanOffer(int tool) {
         return 0;
     switch (tool) {
     case TOOL_ACOUSTIC:
-        return monHunters[0].active || monHunters[1].active || monHunters[2].active;
+        return monHunters[0].active || monHunters[1].active || monHunters[2].active ||
+               MonsterEligible(SPAWN_HUNTER, currentLevel);
     case TOOL_PRISM:
-        return lightBeasts[0].active || lightBeasts[1].active;
+        return lightBeasts[0].active || lightBeasts[1].active ||
+               MonsterEligible(SPAWN_LIGHT, currentLevel);
     case TOOL_SOLVENT:
-        return SpiderActive();
+        return SpiderActive() ||
+               MonsterEligible(SPAWN_SPIDER, currentLevel);
     case TOOL_TETHER:
-        return CollectorActive();
+        return CollectorActive() ||
+               MonsterEligible(SPAWN_COLLECTOR, currentLevel);
     case TOOL_REVEAL:
         for (int i = 0; i < MIM_MAX; i++)
             if (mimics[i].state == MIM_DISGUISED)
                 return 1;
-        return 0;
+        return MonsterEligible(SPAWN_MIMIC, currentLevel);
     case TOOL_TRACE:
         return MonsterTierAtLeast(1) &&
                (ScavengerActive() || MonsterEligible(SPAWN_SCAVENGER, currentLevel));
     case TOOL_JAMMER:
-        return WardenActive();
+        return WardenActive() ||
+               MonsterEligible(SPAWN_WARDEN, currentLevel);
     default:
         return 0;
     }
@@ -172,6 +177,14 @@ void TacticalResetRun(void) {
     tactical.quick[1] = 1;
     tactical.quick[2] = 2;
     tactical.quick[3] = 6;
+    static const int defaultKeys[] = {'J', 'U', 'O', 'L'};
+    for (int slot = 0; slot < 4; slot++) {
+        int key = defaultKeys[slot];
+        for (int action = 0; action < ACT_COUNT; action++)
+            if (g_bindings[action] == key)
+                key = 0;
+        tactical.key[slot] = key;
+    }
 }
 void TacticalResetFloor(void) {
     memset(tactical.acoustic, 0, sizeof(tactical.acoustic));

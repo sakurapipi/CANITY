@@ -1306,7 +1306,9 @@ static int UpdateThrowInput(float dt) {
                5 诱饵                                     → **放在脚下**（不投）
                诱饵放下后要按 C 才激活（用户要求：C 是激活，右键才是放置）。 */
             if(sel>=TOOL_FIRST_ITEM){
-                (void)TacticalTryUse(sel,mouseCharge);mouseCharge=0;throwCd=.45f;
+                if (TacticalTryUse(sel, mouseCharge))
+                    throwCd = .45f;
+                mouseCharge = 0;
                 mouseLeftPrev=mouseLeftNow;mouseRightPrev=mouseRightNow;return 0;
             }
             if (sel == 5) {

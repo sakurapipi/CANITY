@@ -112,8 +112,8 @@ void EvolutionWebMiss(float x, float y, int anchors) {
         return;
     if (anchors && !Blocked(x - .8f, y) && !Blocked(x + .8f, y) && !Blocked(x, y - 1) &&
         !Blocked(x, y + 1)) {
-        evolution.zones[0] = (EvoZone){x - .65f, y, .55f, 2.5f, EVO_ZONE_WEB};
-        evolution.zones[1] = (EvoZone){x + .65f, y, .55f, 2.5f, EVO_ZONE_WEB};
+        evolution.zones[0] = (EvoZone){x - .65f, y, .70f, 2.5f, EVO_ZONE_WEB};
+        evolution.zones[1] = (EvoZone){x + .65f, y, .70f, 2.5f, EVO_ZONE_WEB};
     } else
         evolution.zones[0] = (EvoZone){x, y, .6f, 2, EVO_ZONE_WEB};
 }

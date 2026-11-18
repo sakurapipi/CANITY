@@ -13,7 +13,7 @@
 
 Creation workflow: add a stable catalog row and targeted effect, then update the relevant actor adapter, UI description, versioned codec (schema change if wire changes), art mapping and regression case. Never repurpose retired shot IDs or splice fields into SaveBlob. Never claim a case passed because its source was written.
 
-Tuning override (2026-11-18): four selectable bank plans set minimum pressures 0/4/8/13. UI colors are blue/violet/amber/blood. Dampener: 4-cell LOS field, 12s, footsteps -90%, other new noises -80%; existing heard events remain. Prism: fast mirror shard, 4s light blindness. Tactical projectiles integrate gravity once and dispatch one impact at the last free wall point. Power-room first 15s map use is free, derived from the saved 35s room-event timer.
+Tuning override (2026-11-18): four selectable bank plans set minimum pressures 0/4/8/13. UI colors are blue/violet/amber/blood. Dampener (RC2): 3-cell LOS field, 10s, footsteps -80%, other new noises -70%; existing heard events remain. Prism: fast mirror shard, 3s light blindness. Tactical projectiles integrate gravity once and dispatch one impact at the last free wall point. Power-room first 15s map use is free, derived from the saved 35s room-event timer.
 
 Art revision (2026-11-18): all four stages regenerate from the first reference silhouette, with incremental exposed ribs, fractured armour, cables and ragged strips. Native and shared click paths both route tier buttons before ordinary archive rows. AUTO uses the actual archive entrance (bank preview from main menu), never merely the presence of an old run. Reference creatures bypass the generic woven-doll postgrade; the same finish applies to guide and world targets.
 

@@ -125,6 +125,9 @@ int TacticalInputKey(int key, int repeat) {
         LoopClearInputEdges();
         return 1;
     }
+    for (int action = 0; action < ACT_COUNT; action++)
+        if (g_bindings[action] == key)
+            return 0;
     if (!repeat)
         for (int i = 0; i < 4; i++)
             if (tactical.key[i] > 0 && tactical.key[i] == key) {

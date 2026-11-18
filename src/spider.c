@@ -239,8 +239,12 @@ void SpiderTick(float dt) {
                   (d2 <= SPIDER_RANGE * SPIDER_RANGE * MonsterThreatScale(SPAWN_SPIDER)*MonsterThreatScale(SPAWN_SPIDER)) &&
                   HasLOS(s_spider.x, s_spider.y, posX, posY);
         EvoActor* a=&evolution.actors[EVO_SPIDER];
-        if(a->phase==1){if(HasLOS(s_spider.x,s_spider.y,a->aimX,a->aimY))EvolutionWebMiss(a->aimX,a->aimY,1);a->phase=0;EvolutionRelease(EVO_SPIDER);}
-        else if (hit) {
+        int dualAnchor = a->phase == 1;
+        if (dualAnchor) {
+            a->phase = 0;
+            EvolutionRelease(EVO_SPIDER);
+        }
+        if (hit) {
             /* 交给控制层。被拒（抱脸虫正在生效 / 免疫中）就直接进冷却，
                **绝不**再排队等下一次。 */
             /* 第 5 轮：这是现在唯一的"限时按键"事件，难度也要作用于它
@@ -262,7 +266,8 @@ void SpiderTick(float dt) {
                 (void)0; /* No encounter-toast timer. */
             }
         }
-        else if(HasLOS(s_spider.x,s_spider.y,a->aimX,a->aimY))EvolutionWebMiss(a->aimX,a->aimY,0);
+        else if (HasLOS(s_spider.x, s_spider.y, a->aimX, a->aimY))
+            EvolutionWebMiss(a->aimX, a->aimY, dualAnchor);
         s_spider.state = SPIDER_COOLDOWN;
         s_spider.cdT   = MonsterTierAtLeast(2)?7.5f:SPIDER_COOLDOWN_TIME;
         break;

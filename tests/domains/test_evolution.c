@@ -50,6 +50,13 @@ static void tool_commit_guards(void) {
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++)
             worldMap[y][x] = (x == 0 || y == 0 || x == MAP_WIDTH - 1 || y == MAP_HEIGHT - 1);
+    CHECK(tactical.key[0] == 'J' && tactical.key[1] == 'U' &&
+              tactical.key[2] == 'O' && tactical.key[3] == 'L',
+          "fresh runs can select all four quick slots without configuration");
+    ThreatTierRestore(1, 3, 13);
+    EvolutionWebMiss(posX, posY, 1);
+    CHECK(EvolutionWebSlow(posX, posY) == .85f, "joined web anchors slow movement at the midpoint");
+    CHECK(ToolCanOffer(TOOL_ACOUSTIC), "the shop can stock counters before a hunter spawns");
     tactical.inventory[TOOL_ACOUSTIC] = 2;
     for (int i = 0; i < MAX_SHOTS; i++)
         shot[i].active = 1;
@@ -67,7 +74,7 @@ static void tool_commit_guards(void) {
     CHECK(!TacticalEmergencySolvent() && tactical.inventory[TOOL_SOLVENT] == 1,
           "an ended control cannot consume emergency solvent");
     tactical.acoustic[0] = (ToolZone){posX, posY, 8, TOOL_ACOUSTIC};
-    CHECK(fabsf(TacticalFootstepMul(posX, posY, 1) - .10f) < .001f,
+    CHECK(fabsf(TacticalFootstepMul(posX, posY, 1) - .20f) < .001f,
           "capsule applies only its declared footstep reduction");
     CHECK(fabsf(TacticalFootstepMul(posX, posY, .05f) - 1) < .001f,
           "Hush wins; capsule does not multiply its reduction");
@@ -86,11 +93,12 @@ static void wire_boundaries(void) {
     EvolutionSnapshot a = {1, 3, 13, evolution}, b;
     Shot flights[MAX_SHOTS] = {{0}}, loaded[MAX_SHOTS];
     TacticalState inventory;
+    a.state.sharedCursor = SUSP_MAX - 1;
     a.state.actors[EVO_MIMIC].flags = 1;
     a.state.actors[EVO_WARDEN].flags = 2;
     CHECK(EvolutionWireEncode(&a, e, sizeof(e)) == sizeof(e),
           "evolution wire has an explicit byte count");
-    CHECK(EvolutionWireDecode(&b, e, sizeof(e)) && b.tier == 3 &&
+    CHECK(EvolutionWireDecode(&b, e, sizeof(e)) && b.tier == 3 && b.state.sharedCursor == SUSP_MAX - 1 &&
               b.state.actors[EVO_MIMIC].flags == 1,
           "tier and one-use markers round trip without C padding");
     CHECK(!EvolutionWireDecode(&b, e, sizeof(e) - 1), "truncated evolution chunk is rejected");
@@ -199,9 +207,9 @@ static void progression_mechanisms(void) {
                  (UINT64_C(1) << BENCH_PULSE_CAPACITOR) |
                  (UINT64_C(1) << BENCH_SOLVENT_CONCENTRATE) | (UINT64_C(1) << BENCH_MAGNET_REEL) |
                  (UINT64_C(1) << BENCH_TRACE_REACH);
-    CHECK(ProgressionToolValue(PG_DAMP_RADIUS) == 5 && ProgressionToolValue(PG_DAMP_TIME) == 16,
+    CHECK(ProgressionToolValue(PG_DAMP_RADIUS) == 4 && ProgressionToolValue(PG_DAMP_TIME) == 14,
           "local equipment increases real damping area and lifetime");
-    CHECK(ProgressionToolValue(PG_BLIND_TIME) == 5 && ProgressionToolValue(PG_SOLVENT_TIME) == 2,
+    CHECK(ProgressionToolValue(PG_BLIND_TIME) == 4 && ProgressionToolValue(PG_SOLVENT_TIME) == 2,
           "local optics and solvent change their actual effect parameters");
     runSkillMask = 1u << IR_DUSTCOAT;
     CHECK(ProgressionToolValue(PG_DUST_TIME) == 16,

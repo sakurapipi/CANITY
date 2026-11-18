@@ -52,8 +52,8 @@ const char *EvolutionGuideText(int id, int tier) {
         {"0.8s windup; timed web control; wrench disperses it for 30s. No damage.",
          "A missed shot leaves a 2s ground trace: -10% movement, no hard control.",
          "Ground trace; normal shot cooldown 7.5s. Web escape rules unchanged.",
-         "At most every third attack: 1s warning, two 2.5s edge anchors (-15% speed). No wall, no "
-         "extra hard control."},
+         "At most every third attack: 1s warning. A miss leaves connected webs for 2.5s "
+         "(-15% movement); a direct hit applies normal web control."},
         {"Three thefts per run: 20/30/40%; recover actual loot with a wrench.",
          "Once per theft: 0.18s bag feint, then an alternate legal escape branch.",
          "Feint + escape speed 2.34 instead of 2.30; theft rate and hit requirements unchanged.",

@@ -109,10 +109,13 @@ int EvolutionWireDecode(EvolutionSnapshot *v, const void *bytes, int length) {
     v->tier = (int)Get(&w);
     v->plan = FloatGet(&w);
     v->state.sequence = Get(&w);
-    v->state.sharedCursor = (int)Get(&w);
+    unsigned sharedCursor = Get(&w);
+    if (sharedCursor >= SUSP_MAX)
+        return 0;
+    v->state.sharedCursor = (int)sharedCursor;
     v->state.previousHide = (int)Get(&w) - 1;
     if (v->floor < 1 || v->floor > 100000 || v->tier < 0 || v->tier > 3 || v->plan < 0 ||
-        v->plan > 64 || v->state.sharedCursor < 0 || v->state.previousHide < -1 ||
+        v->plan > 64 || v->state.previousHide < -1 ||
         v->state.previousHide >= HIDESPOT_MAX)
         w.ok = 0;
     for (int i = 0; i < EVO_ACTORS; i++)

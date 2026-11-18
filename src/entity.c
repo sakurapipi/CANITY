@@ -358,10 +358,17 @@ float noiseSrcX = 0.0f, noiseSrcY = 0.0f;   /* v3.0：听觉用 */
 
 static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
     int walkingSource = footsteps || radius <= 14.0f;
-    if(radius<=14)RoomThemeRedirectNoise(&x,&y);
-    if(footsteps)radius*=HushNoiseMul()*TacticalFootstepMul(x,y,HushNoiseMul())*RoomThemeNoiseMul();
-    else if(radius<=14 && Dist2(x,y,posX,posY)<.16f)radius*=HushNoiseMul()*RoomThemeNoiseMul();
-    if (!footsteps) radius *= TacticalNoiseMul(x, y);
+    float sourceRadius = radius;
+    float hush = HushNoiseMul();
+    if (footsteps)
+        radius *= hush * TacticalFootstepMul(x, y, hush) * RoomThemeNoiseMul();
+    else {
+        if (sourceRadius <= 14 && Dist2(x, y, posX, posY) < .16f)
+            radius *= hush * RoomThemeNoiseMul();
+        radius *= TacticalNoiseMul(x, y);
+    }
+    if (sourceRadius <= 14)
+        RoomThemeRedirectNoise(&x, &y);
     /* ==================================================================
      * v7 第 ㊿ 轮：**事件的「怪物听觉」倍率一直是死的**
      * ==================================================================
