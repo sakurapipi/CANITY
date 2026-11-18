@@ -65,6 +65,7 @@ int SaveValidateBytes(const void* bytes, size_t length) {
         for (int j = 0; j < i; j++) if (ids[j] == desc.id) return 0;
         ids[i] = desc.id;
         if (!KnownSchemaSupported(desc.id, desc.schema) || !EvolutionChunkValid(desc.id,desc.schema,body,(int)desc.size)) return 0;
+        if (desc.id == SC_DAILY_CLEAR && desc.schema == 1 && desc.size != 4) return 0;
         used += desc.size;
         if (desc.id == SC_LEGACY29) {
             if (desc.schema != 1 || !BlobValid(body, desc.size)) return 0;

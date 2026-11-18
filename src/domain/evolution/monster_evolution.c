@@ -130,7 +130,8 @@ int EvolutionClearWeb(float x, float y, float r) {
     int n = 0;
     for (int i = 0; i < 2; i++)
         if (evolution.zones[i].ttl > 0 &&
-            Dist2(x, y, evolution.zones[i].x, evolution.zones[i].y) <= r * r) {
+            Dist2(x, y, evolution.zones[i].x, evolution.zones[i].y) <= r * r &&
+            HasLOS(x, y, evolution.zones[i].x, evolution.zones[i].y)) {
             evolution.zones[i].ttl = 0;
             n++;
         }

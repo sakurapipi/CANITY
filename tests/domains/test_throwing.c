@@ -372,6 +372,22 @@ static void test_shot_spec_unknown_kind_is_safe(void) {
     CHECK(sp->dmg <= 1, "unknown kind must not become a high-damage weapon");
 }
 
+static void test_stone_hits_each_actor_once(void) {
+    for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)
+        worldMap[y][x]=x==0 || y==0 || x==MAP_WIDTH-1 || y==MAP_HEIGHT-1;
+    memset(shot,0,sizeof(shot));
+    memset(monHunters,0,sizeof(monHunters));
+    memset(lightBeasts,0,sizeof(lightBeasts));
+    trainingMode=0;posX=5.5f;posY=8.5f;dirX=1;dirY=0;
+    monHunters[0].active=monHunters[2].active=1;
+    monHunters[0].x=6.0f;monHunters[0].y=8.5f;
+    monHunters[2].x=7.0f;monHunters[2].y=8.5f;
+    int before=throwHitCountRun;
+    ThrowItem(1,.6f);
+    for(int step=0;step<12;step++) UpdateShots(1.f/120);
+    CHECK(throwHitCountRun==before+2,"many substeps through two hunters count exactly two contacts");
+}
+
 void TestSuite_throwing(void) {
     test_flare_heal_budget();
     test_stone_hearing_range();
@@ -383,4 +399,5 @@ void TestSuite_throwing(void) {
     test_shot_spec_covers_every_kind_in_use();
     test_shot_spec_table_is_consistent();
     test_shot_spec_unknown_kind_is_safe();
+    test_stone_hits_each_actor_once();
 }

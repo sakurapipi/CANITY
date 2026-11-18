@@ -287,8 +287,10 @@ static void DrawHudRunHeader(int effDetail) {
          * ================================================================ */
         if (dailyMode) {
 
-            if (DailyDone()) {
-                sprintf(buf, "DAILY  COMPLETE");
+            if (!DailyCanProgress()) {
+                DrawTextWin(UIS(12), hy, Tr("ARCHIVED DAILY RULES", "往日挑战规则"), UI_INK_DIM);
+            } else if (DailyDone()) {
+                sprintf(buf, "%s", Tr("DAILY COMPLETE", "每日任务完成"));
                 DrawTextWin(UIS(12), hy, buf, UI_ACCENT);
             } else {
                 int cur = DailyCurrent(), goal = DailyGoalParam();

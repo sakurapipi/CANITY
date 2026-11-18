@@ -1,4 +1,5 @@
 #include "progression.h"
+#include "throwing.h"
 #include "bench.h"
 #include "upgrade_run.h"
 #include "economy.h"
@@ -268,6 +269,27 @@ static void progression_mechanisms(void) {
     RunUpgReset();
 }
 
+static void tool_clearance_and_web_visibility(void) {
+    TacticalResetRun();EvolutionResetFloor();
+    memset(shot,0,sizeof(shot));
+    memset(monHunters,0,sizeof(monHunters));
+    memset(lightBeasts,0,sizeof(lightBeasts));
+    for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)
+        worldMap[y][x]=x==0 || y==0 || x==MAP_WIDTH-1 || y==MAP_HEIGHT-1 || x==9;
+    posX=7.5f;posY=8.5f;dirX=1;dirY=0;trainingMode=0;
+    tactical.inventory[TOOL_ACOUSTIC]=1;
+    CHECK(TacticalTryUse(TOOL_FIRST_ITEM+TOOL_ACOUSTIC,1),"capsule can be thrown at a wall");
+    for(int step=0;step<100;step++) UpdateShots(.01f);
+    CHECK(tactical.acoustic[0].ttl>0 && tactical.acoustic[0].x<9 &&
+          !Blocked(tactical.acoustic[0].x,tactical.acoustic[0].y),
+          "a wall collision places the capsule at legal clearance on the near side");
+    evolution.zones[0]=(EvoZone){8.5f,8.5f,.55f,2,EVO_ZONE_WEB};
+    evolution.zones[1]=(EvoZone){10.5f,8.5f,.55f,2,EVO_ZONE_WEB};
+    CHECK(EvolutionClearWeb(8.5f,8.5f,2.5f)==1 &&
+          evolution.zones[0].ttl==0 && evolution.zones[1].ttl>0,
+          "solvent clears visible webs while leaving the web behind the wall");
+}
+
 void TestSuite_evolution(void) {
     tier_boundaries();
     tool_commit_guards();
@@ -275,6 +297,7 @@ void TestSuite_evolution(void) {
     sound_sharing_is_not_player_tracking();
     light_memory_and_cancellation();
     progression_mechanisms();
+    tool_clearance_and_web_visibility();
     TacticalResetRun();
     EvolutionResetFloor();
     ThreatTierRestore(1, 0, 0);

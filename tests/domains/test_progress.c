@@ -66,6 +66,17 @@ static void test_daily(void) {
     for(int i=0;i<7;++i) {dailySeed=(int)dates[i];DailyGenerateForDate(dates[i]);DailySetProgress(DailyGoalParam());}
     CHECK(DailyStreak()==7 && bankGold==7*400+300+900,"three/seven day streak bonuses across month boundary");
     DailyGenerateForDate(20260206);CHECK(DailyStreak()==0,"missing a day breaks streak");
+    dailySeed=20261101;
+    DailyGenerateForDate((unsigned)dailySeed);
+    float speed=DailyMonsterSpeedMul(), gold=DailyGoldMul(), drain=DailyBatteryDrainMul();
+    int theme=DailyVisualThemeNow(), noLight=DailyForbidLight(), noSprint=DailyForbidSprint();
+    for(unsigned day=2;day<=14;day++){
+        DailyGenerateForDate(20261100u+day);
+        CHECK(!DailyCanProgress() && speed==DailyMonsterSpeedMul() && gold==DailyGoldMul() &&
+              drain==DailyBatteryDrainMul() && theme==DailyVisualThemeNow() &&
+              noLight==DailyForbidLight() && noSprint==DailyForbidSprint(),
+              "an archived daily keeps its modifiers, restrictions and theme after rollover");
+    }
     dailyMode=0;dailySeed=0;DailyGenerate();
     CHECK(!DailyForbidSprint() && !DailyForbidWrench() && DailyGoldTierBonus()==0,"daily restrictions do not leak into normal games");
 }
@@ -625,6 +636,13 @@ static void test_training_has_seven_stations(void) {
         CHECK(hint && hint[0],"every station has a hint");
     }
     CHECK(quadrants==15,"free practice has stations in all four bays");
+    Monster *dummy=Hunter0();
+    posX=dummy->x-.15f;posY=dummy->y;
+    float x=dummy->x,y=dummy->y, before=sanity;
+    dummy->state=1;dummy->tx=posX;dummy->ty=posY;
+    UpdateMonster(.04f);
+    CHECK(dummy->x==x && dummy->y==y && sanity==before,
+          "practice dummy cannot move or capture a player standing next to it");
     ResetRunModeFlags();
 }
 

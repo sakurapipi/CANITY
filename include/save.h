@@ -31,6 +31,7 @@
 #ifndef SAVE_FILE
 #define SAVE_FILE "canity.sav"
 int SaveAwardTrainingGraduation(void);
+int SaveAwardDailyClear(void);
 #endif
 
 /* 存档结果（UI 要显示）：0 = 还没试过，1 = 写成功，2 = 一个位置都写不进去。

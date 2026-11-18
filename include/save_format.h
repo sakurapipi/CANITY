@@ -81,6 +81,7 @@ enum {
     SC_RUN      = 0x0003,   /* 当前对局的全部状态 */
     SC_EVOLUTION_V1 = 0x0005, /* Four-tier runtime, schema 1 */
     SC_TACTICAL_ITEMS_V1 = 0x0006, /* Inventory, bindings, zones, flights */
+    SC_DAILY_CLEAR = 0x0007, /* Profile clear reward date, four little-endian bytes */
     SC_WORLD    = 0x0004,   /* worldMap + explored */
     SC_LEGACY29 = 0x00FF,   /* 过渡期：整份 SaveBlob 原样字节 */
     SC_MAX_ID   = 0x00FF

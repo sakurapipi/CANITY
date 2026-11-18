@@ -2393,6 +2393,53 @@ void DeleteSave(void) {
     g_saveError = 0;
 }
 
+/* Gold and its claim marker share one atomic profile save. */
+int SaveAwardDailyClear(void) {
+    if (!DailyCanProgress() || currentState != STATE_GAMEOVER || !gameWon ||
+        runInProgress || currentLevel < WIN_LEVEL || s_saveReadOnly)
+        return 0;
+    unsigned date = (unsigned)dailySeed;
+    int index = -1, hasLegacy = 0;
+    for (int i = 0; i < s_carryCount; i++) {
+        if (s_carry[i].id == SC_DAILY_CLEAR) index = i;
+        if (s_carry[i].id == SC_LEGACY29) hasLegacy = 1;
+    }
+    SaveCarryChunk previous = {0};
+    int appended = index < 0;
+    if (appended) {
+        if (s_carryCount + 1 + !hasLegacy > SAVE_CARRY_MAX) return 0;
+        index = s_carryCount;
+    } else {
+        previous = s_carry[index];
+        if (previous.schema != 1 || previous.size != 4 || !previous.data) return 0;
+        unsigned claimed = 0;
+        for (int b = 0; b < 4; b++) claimed |= (unsigned)previous.data[b] << (8*b);
+        if (claimed >= date) return 0;
+    }
+    unsigned char *bytes = malloc(4);
+    if (!bytes) return 0;
+    for (int b = 0; b < 4; b++) bytes[b] = (unsigned char)(date >> (8*b));
+    s_carry[index] = (SaveCarryChunk){SC_DAILY_CLEAR, 1, 4, bytes};
+    if (appended) s_carryCount++;
+
+    int before = bankGold, history = bankHistMax, kept = lastRunKept;
+    WalletAddBank(GOLD_PER_CORE);
+    if (bankGold > bankHistMax) bankHistMax = bankGold;
+    int awarded = bankGold - before;
+    lastRunKept = awarded > INT_MAX - kept ? INT_MAX : kept + awarded;
+    SaveGame();
+    if (g_saveState == 1) {
+        free(previous.data);
+        return awarded;
+    }
+    bankGold = before; bankHistMax = history; lastRunKept = kept;
+    g_save.bankGoldSave = before; g_save.bankHistMaxSave = history; g_save.lastRunKeptSave = kept;
+    s_carry[index] = previous;
+    if (appended) s_carryCount--;
+    free(bytes);
+    return 0;
+}
+
 int SaveAwardTrainingGraduation(void) {
     SaveSettingsOnly();
     if(g_saveState==2)return 0;

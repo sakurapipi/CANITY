@@ -1428,6 +1428,11 @@ static void HunterUpdateFacing(Monster* M, float dt) {
 }
 
 static void UpdateOneHunter(Monster* M, float dt) {
+    if (trainingMode) {
+        M->speed = 0;
+        M->stun = fmaxf(0, M->stun - dt);
+        return;
+    }
     if (M->active) M->speed = HunterMoveSpeed((int)(M-monHunters),currentLevel,modSpeedMul,ThreatValue());
     HunterPerceive(M, dt);
     if(M->stun<=0 && EvolutionHunterOverride(M,dt))return;

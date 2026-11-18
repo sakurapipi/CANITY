@@ -499,45 +499,52 @@ float DailyProgress(void) {
 /* 修正池效果                                                          */
 /* ================================================================== */
 
+static const DailyScenario *DailyRunScenario(void) {
+    unsigned seed = dailyMode && dailySeed > 0 ? (unsigned)dailySeed : s_daily.seed;
+    return &scenarios[ScenarioIndex(seed)];
+}
+static int DailyRunMod(void) { return DailyRunScenario()->mod; }
+static int DailyRunRestriction(void) { return DailyRunScenario()->restriction; }
+
 float DailyMonsterSpeedMul(void) {
     if (!dailyMode) return 1.0f;
-    return (s_daily.modId == DM_FAST) ? 1.15f : 1.00f;
+    return (DailyRunMod() == DM_FAST) ? 1.15f : 1.00f;
 }
 float DailyBatteryDrainMul(void) {
     if (!dailyMode) return 1.0f;
-    return (s_daily.modId == DM_DARK) ? 1.30f : 1.00f;
+    return (DailyRunMod() == DM_DARK) ? 1.30f : 1.00f;
 }
 float DailyGoldMul(void) {
     if (!dailyMode) return 1.0f;
-    if (s_daily.modId == DM_GREED) return 1.50f;
-    if (s_daily.modId == DM_RICH)  return 1.80f;
+    if (DailyRunMod() == DM_GREED) return 1.50f;
+    if (DailyRunMod() == DM_RICH)  return 1.80f;
     return 1.00f;
 }
 int DailyGoldTierBonus(void) {
-    return (dailyMode && s_daily.modId == DM_GREED) ? 2 : 0;
+    return (dailyMode && DailyRunMod() == DM_GREED) ? 2 : 0;
 }
 float DailyNoiseMul(void) {
-    return (dailyMode && s_daily.modId == DM_SILENT) ? 0.60f : 1.00f;
+    return (dailyMode && DailyRunMod() == DM_SILENT) ? 0.60f : 1.00f;
 }
 float DailySecondSpawnOffset(void) {
-    return (dailyMode && s_daily.modId == DM_HUNT) ? -10.0f : 0.0f;
+    return (dailyMode && DailyRunMod() == DM_HUNT) ? -10.0f : 0.0f;
 }
 float DailyBatteryCapMul(void) {
-    return (dailyMode && s_daily.modId == DM_THIN) ? 0.75f : 1.00f;
+    return (dailyMode && DailyRunMod() == DM_THIN) ? 0.75f : 1.00f;
 }
 float DailyCrateCountMul(void) {
-    return (dailyMode && s_daily.modId == DM_RICH) ? 0.70f : 1.00f;
+    return (dailyMode && DailyRunMod() == DM_RICH) ? 0.70f : 1.00f;
 }
 
 /* ================================================================== */
 /* 限制池判定                                                          */
 /* ================================================================== */
 
-int DailyForbidSprint(void)     { return dailyMode && s_daily.restrictId == DR_NOSPRINT; }
-int DailyForbidLight(void)      { return dailyMode && s_daily.restrictId == DR_NOLIGHT; }
-int DailyForbidHide(void)       { return dailyMode && s_daily.restrictId == DR_NOHIDE; }
-int DailyForbidWrench(void)     { return dailyMode && s_daily.restrictId == DR_NOWRENCH; }
-int DailyForbidMonsterMap(void) { return dailyMode && s_daily.restrictId == DR_NOMAP; }
+int DailyForbidSprint(void)     { return dailyMode && DailyRunRestriction() == DR_NOSPRINT; }
+int DailyForbidLight(void)      { return dailyMode && DailyRunRestriction() == DR_NOLIGHT; }
+int DailyForbidHide(void)       { return dailyMode && DailyRunRestriction() == DR_NOHIDE; }
+int DailyForbidWrench(void)     { return dailyMode && DailyRunRestriction() == DR_NOWRENCH; }
+int DailyForbidMonsterMap(void) { return dailyMode && DailyRunRestriction() == DR_NOMAP; }
 
 /* ================================================================== */
 /* 文案                                                                */
@@ -562,5 +569,5 @@ const char* DailyRestrictTextZh(void) { return kResZh[s_daily.restrictId]; }
  * ================================================================== */
 typedef char daily_goal_table_check[(sizeof(kGoals) / sizeof(kGoals[0]) == DQ_COUNT) ? 1 : -1];
 
-int DailyVisualThemeNow(void){return scenarios[ScenarioIndex(s_daily.seed)].theme;}
+int DailyVisualThemeNow(void){return DailyRunScenario()->theme;}
 const char* DailyScenarioName(int chinese){const DailyScenario* s=&scenarios[ScenarioIndex(s_daily.seed)];return chinese?s->zh:s->en;}

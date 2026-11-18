@@ -296,7 +296,6 @@ int floorSpotted = 0;
 float floorStartTime = 0.0f;
 int dailyMode = 0;
 int dailySeed = 0;
-int dailyClearedToday = 0;   /* v2.2：今天是否已通 */
 int campaignMode = 0;
 int campaignStage = 0;
 /* StartGame() 统一清理模式标志；菜单入口先把要启动的模式排队，

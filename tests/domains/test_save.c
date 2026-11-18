@@ -970,6 +970,28 @@ static void test_full_chunk_capacity_and_schemas(void) {
     free(bytes);
 }
 
+static void test_daily_clear_reward_persists(void) {
+    ResetRunModeFlags();
+    dailyMode=1; dailySeed=(int)DailySeedToday();
+    DailyGenerateForDate((unsigned)dailySeed);
+    currentState=STATE_GAMEOVER;gameWon=1;runInProgress=0;
+    currentLevel=WIN_LEVEL-1;bankGold=500;
+    CHECK(SaveAwardDailyClear()==0 && bankGold==500,"daily clear reward cannot be claimed before the final floor");
+    currentLevel=WIN_LEVEL;
+    CHECK(SaveAwardDailyClear()==GOLD_PER_CORE && bankGold==500+GOLD_PER_CORE,
+          "first final daily clear deposits one fixed reward");
+    bankGold=0;
+    int resumable=LoadSettings();
+    CHECK(!resumable && bankGold==500+GOLD_PER_CORE,"final daily clear reloads the bank with no resumable run");
+    dailyMode=1; dailySeed=(int)DailySeedToday();
+    currentState=STATE_GAMEOVER;gameWon=1;runInProgress=0;currentLevel=WIN_LEVEL;
+    CHECK(SaveAwardDailyClear()==0 && bankGold==500+GOLD_PER_CORE,
+          "reloading the same date cannot pay the bonus twice");
+    dailySeed=20990101;DailyGenerateForDate((unsigned)dailySeed);
+    CHECK(SaveAwardDailyClear()==GOLD_PER_CORE && bankGold==500+2*GOLD_PER_CORE,
+          "another date has an independent final clear reward");
+}
+
 void TestSuite_save(void) {
     test_full_chunk_capacity_and_schemas();
     test_rc246_delete_results();
@@ -990,6 +1012,7 @@ void TestSuite_save(void) {
     test_difficulty_multipliers_differ();
     test_difficulty_roundtrips_through_save();
     test_wallet_save();
+    test_daily_clear_reward_persists();
     test_save_unknown_chunk_roundtrip();
     test_save_backend_errors();
 }

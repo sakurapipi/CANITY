@@ -26,7 +26,6 @@ extern int ultKind;
 extern int safehouseHoverRow;
 extern int safehouseHoverTab;
 extern float floorStartTime;
-extern int dailyClearedToday;
 extern int g_throwOk;
 
 void EnsureThrowSelectedValid(void);

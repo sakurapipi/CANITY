@@ -135,6 +135,7 @@ void ThrowItem(int type, float charge) {
             shot[i].mirrorRebounded = 0;
             shot[i].ignoreTarget = -1;
             shot[i].ignoreTargetTime = 0.0f;
+            shot[i].hitMask = 0;
             shot[i].active = 1; g_throwOk = 1;
             break;
         }
@@ -177,6 +178,7 @@ void ThrowItem(int type, float charge) {
             shot[i].mirrorRebounded = 0;
             shot[i].ignoreTarget = -1;
             shot[i].ignoreTargetTime = 0.0f;
+            shot[i].hitMask = 0;
             shot[i].active = 1;
             g_throwOk = 1;
             break;
@@ -221,6 +223,7 @@ void ThrowItem(int type, float charge) {
             shot[i].mirrorRebounded = 0;
             shot[i].ignoreTarget = -1;
             shot[i].ignoreTargetTime = 0.0f;
+            shot[i].hitMask = 0;
             shot[i].active = 1; g_throwOk = 1;
             break;
         }
@@ -330,14 +333,6 @@ static void ShotImpact(int i, float x, float y) {
     SpawnShards(x, y, shot[i].vx, shot[i].vy, shot[i].charge);
 }
 
-/* One collision adapter per tactical trigger; ShotImpact remains the sole
- * effect dispatcher for timeout, ground, wall and actor impacts. */
-static int TacticalWallHit(int index,float x,float y) {
-    if(ShotSpecFor(shot[index].kind)->effect!=FX_TACTICAL)return 0;
-    shot[index].x=x;shot[index].y=y;
-    ShotImpact(index,x,y);shot[index].active=0;
-    return 1;
-}
 static int TacticalPrismHit(int index) {
     Shot *projectile=&shot[index];
     if(projectile->kind!=TOOL_SHOT_FIRST+TOOL_PRISM || projectile->z>=2.6f)return 0;
@@ -351,38 +346,25 @@ static int TacticalPrismHit(int index) {
     return 0;
 }
 
-static void StoneGroundReaction(int index) {
-if (shot[index].kind == 1) {
-
-    if (CollectorActive()) {
-        float cdx = CollectorX() - shot[index].x;
-        float cdy = CollectorY() - shot[index].y;
-        if (cdx * cdx + cdy * cdy < 1.44f &&
-            HasLOS(shot[index].x, shot[index].y, CollectorX(), CollectorY())) {      /* 1.2 格 */
-            CollectorBurstBounty();
-        }
-    }
-    /* v2.4.58 瓶子增强：落点附近的普通怪被震一下（硬直 0.35 秒） */
-    {
-
-
-        if (!trainingMode) {
-            /* 落点 1.5 格内的**所有**猎手都被震一下。
-               原来只判 monster，第 2、3 只完全免疫。 */
-
-            /* 变量名别叫 near —— 那是 Windows 的宏（__near） */
-            Monster* inRange[MON_HUNTER_MAX + 1];
-            int nn = MonsterCollect(inRange, MON_HUNTER_MAX + 1, 1);
-            for (int q = 0; q < nn; q++) {
-                float mdx = inRange[q]->x - shot[index].x;
-                float mdy = inRange[q]->y - shot[index].y;
-                if (mdx * mdx + mdy * mdy < 2.25f) {  /* 1.5 格 */
-                    if (inRange[q]->stun < 0.35f) inRange[q]->stun = 0.35f;
-                }
-            }
-        }
-    }
+static Monster *StoneTarget(int slot) {
+    return slot < MON_HUNTER_MAX ? &monHunters[slot] : &lightBeasts[slot-MON_HUNTER_MAX];
 }
+
+static void StoneHitTargets(Shot *stone, float radius, int landed) {
+    for (int slot=0;slot<MON_HUNTER_MAX+LIGHTBEAST_MAX;slot++) {
+        Monster *actor=StoneTarget(slot);
+        unsigned bit=1u<<slot;
+        if (!actor->active || (stone->hitMask & bit) ||
+            Dist2(stone->x, stone->y, actor->x, actor->y) >= radius*radius ||
+            !HasLOS(stone->x, stone->y, actor->x, actor->y)) continue;
+        stone->hitMask |= bit;
+        if (landed) {
+            actor->stun=fmaxf(actor->stun,.35f);
+        } else {
+            ApplyDamage(actor,0,DT_SHARD,stone->x,stone->y);
+            SpawnShards(stone->x,stone->y,0,0,.25f);
+        }
+    }
 }
 
 static void EndStoneFlight(int index) {
@@ -394,7 +376,9 @@ static void EndStoneFlight(int index) {
         AddShake(.09f, .06f / (1 + .3f * sqrtf(Dist2(posX, posY, x, y))));
     }
     SpawnShards(x, y, stone->vx * .25f, stone->vy * .25f, stone->charge);
-    StoneGroundReaction(index);
+    if (CollectorActive() && Dist2(x,y,CollectorX(),CollectorY())<1.44f &&
+        HasLOS(x,y,CollectorX(),CollectorY())) CollectorBurstBounty();
+    if (!trainingMode) StoneHitTargets(stone,1.5f,1);
     stone->active = 0;
 }
 
@@ -418,7 +402,8 @@ void UpdateShots(float dt) {
         /* Legacy projectiles retain their original integration. New tactical
          * objects integrate once, in substeps, rather than falling twice. */
         int stone = shot[i].kind == 1;
-        int singleIntegration = stone || ShotSpecFor(shot[i].kind)->effect == FX_TACTICAL;
+        int tacticalShot = ShotSpecFor(shot[i].kind)->effect == FX_TACTICAL;
+        int singleIntegration = stone || tacticalShot;
         if (!singleIntegration) {
             shot[i].vz -= 16.0f * dt;
             shot[i].z += shot[i].vz * dt;
@@ -472,6 +457,12 @@ void UpdateShots(float dt) {
             float gravity = stone ? 14.2f :
                 (shot[i].kind == TOOL_SHOT_FIRST + TOOL_PRISM ? GRAVITY * .08f : GRAVITY);
             shot[i].vz -= gravity * subDt;
+            /* Impact and arming use the same clearance, including furniture. */
+            if (tacticalShot && Blocked(shot[i].x,shot[i].y)) {
+                ShotImpact(i,beforeX,beforeY);
+                shot[i].active=0;
+                break;
+            }
             if (stone && ShotBlocked(shot[i].x, shot[i].y)) {
                 shot[i].x = beforeX; shot[i].y = beforeY;
                 EndStoneFlight(i);
@@ -509,7 +500,6 @@ void UpdateShots(float dt) {
             if (shot[i].age > 0.02f && ShotBlocked(shot[i].x, shot[i].y)) {
                 /* 2026-11-05：**破门石** —— 锁箱贴着墙时，瓶子会先撞墙，
                    所以撞墙分支也要试一次，否则「贴着墙的锁箱永远砸不开」。 */
-                if(TacticalWallHit(i,beforeX,beforeY))break;
                 /* 2026-11-07：撞墙也走 ShotImpact —— 原来这里的回声只做了半套
                    （没揭地形、没 EchoMarksScan），和落地不是一回事。 */
                 ShotImpact(i, shot[i].x, shot[i].y);
@@ -523,6 +513,10 @@ void UpdateShots(float dt) {
 
             /* 撞怪：按 kind 分派（1 玻璃瓶 / 2 砖头 / 3 酸瓶 / 4 烟雾弹） */
             float r = SHOT_RADIUS + 0.24f;
+            if (stone) {
+                StoneHitTargets(&shot[i],r,0);
+                continue;
+            }
             {
                 /* 投掷物也要能打中第 2、3 只听声鬼 ——
                    原来这里是手写两条 push，扩到三只之后它们免疫投掷物。 */
@@ -591,25 +585,7 @@ void UpdateShots(float dt) {
                     } else if (shot[i].kind == 6) {     /* v2.0 信号枪弹 */
                         base = shot[i].dmg > 0 ? shot[i].dmg : 8;
                         type = WeaponDamageType(curWeapon);
-                    } else {                            /* 玻璃瓶 = 破门石 */
-                        /* ==========================================================
-                         * 2026-11-05 修「投掷物半空碎裂、没有效果」
-                         * ----------------------------------------------------------
-                         * 用户报告：**终点附近有两个物体时**，投掷物会在半空炸开、
-                         * 什么效果都没有。
-                         *
-                         * 根因就是这里：投石原本和别的投掷物走同一条通用管线 ——
-                         * 碰到第一只怪就 `shot[i].active = 0; break;` 销毁。
-                         * 而 NO_COMBAT 之后 ApplyDamage **不造成任何伤害**
-                         * （只有噪音 + 0.35 秒硬直），所以玩家看到的是：
-                         *   瓶子飞到一半 → 碰上一只怪 → 碎 → 什么都没发生。
-                         * 如果那只怪旁边还有第二只，视觉上更像"卡在半空"。
-                         *
-                         * 修法：**投石是工具，不是武器** —— 它穿过怪物，
-                         * 只给 0.35 秒硬直，然后继续飞到玩家真正瞄的落点
-                         * （那里才该砸锁 / 制造噪音）。
-                         * 这样"两个物体在终点"也不会再吃掉它。
-                         * ========================================================== */
+                    } else {
                         ApplyDamage(m, 0, DT_SHARD, shot[i].x, shot[i].y);
                         SpawnShards(shot[i].x, shot[i].y, 0, 0, 0.25f);
                         continue;        /* ← 不销毁，继续飞 */

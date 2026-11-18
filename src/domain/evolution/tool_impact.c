@@ -159,11 +159,27 @@ int TacticalTryUse(int item, float charge) {
     PlaySfx(SFX_THROW, .4f);
     return 1;
 }
+static int ResolveToolLanding(float *x,float *y) {
+    if (!isfinite(*x) || !isfinite(*y) || ShotBlocked(*x,*y)) return 0;
+    if (!Blocked(*x,*y)) return 1;
+    /* Old in-flight saves can start beside a corner. Stay on the same side. */
+    static const float direction[8][2]={{1,0},{.707f,.707f},{0,1},{-.707f,.707f},
+        {-1,0},{-.707f,-.707f},{0,-1},{.707f,-.707f}};
+    for (int step=1;step<=6;step++) for (int i=0;i<8;i++) {
+        float px=*x+direction[i][0]*step*.10f, py=*y+direction[i][1]*step*.10f;
+        if (!Blocked(px,py) && HasLOS(*x,*y,px,py)) {
+            *x=px; *y=py;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void TacticalImpact(int kind, float x, float y) {
     int tool = kind - TOOL_SHOT_FIRST;
     if (tool < 0 || tool >= TOOL_COUNT)
         return;
-    if (x < 1 || y < 1 || x >= MAP_WIDTH - 1 || y >= MAP_HEIGHT - 1 || Blocked(x, y))
+    if (!ResolveToolLanding(&x,&y))
         return;
     if (tool == TOOL_ACOUSTIC) {
         for (int i = 0; i < 2; i++)

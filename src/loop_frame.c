@@ -110,9 +110,6 @@ static void UpdateTrainingPad(float dt) {
            只做上限夹取，不再每帧强行充满。 */
         if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
         stamina = StaminaMax();
-        Hunter0()->active = 1;
-        Hunter0()->state = 2;              /* 原地不动，当标本 */
-        Hunter0()->stun = 0.0f;
         if (trainingDpsTimer > 0.0f) trainingDpsTimer -= dt;
         else trainingDps = 0;
 }
@@ -1804,11 +1801,6 @@ static void UpdateExitProgression(float dt) {
         /* Achievement conditions are evaluated from LoopCheckAchievements. */
         /* 战役模式：每段连续 3 层；段内换层不重置资源，段间才切规则/重开资源。 */
         if (campaignMode) { CompleteCampaignExit(); return; }
-        /* v2.2：每日挑战通关 —— 今天第一次给 1 核心 */
-        if (DailyCanProgress() && !dailyClearedToday) {
-            dailyClearedToday = 1;
-            WalletAddRun(GOLD_PER_CORE);   /* v3.4 */
-        }
         if (currentLevel >= WIN_LEVEL && !isEndlessRun) {
             /* 主线通关：走进第 10 层的出口就是结局，不再生成下一层 */
             gameWon = 1;
@@ -1825,7 +1817,7 @@ static void UpdateExitProgression(float dt) {
                 ScoreInput si = { currentLevel, 1, 0, runSearched, bottlesKilled, runTime, modsSeenCount };
                 ComputeScore(&si, &lastScore);
                 if (lastScore.score > bestMainScore) bestMainScore = lastScore.score;
-                WalletAddRun(GOLD_PER_CORE);   /* v3.4 */
+                if (!dailyMode) WalletAddRun(GOLD_PER_CORE);
             }
             AchRecordFlag(ACH_FLAG_FIRST_EXIT);
             {  dailyEscapeCount++; }   /* v7：每日「撤离 N 次」 */
@@ -1845,6 +1837,7 @@ static void UpdateExitProgression(float dt) {
 
             DailyObserve(DQ_ESCAPE,dailyEscapeCount);
             LoopCheckAchievements(); BankSettle(1); hasSave=0;
+            if (dailyMode) (void)SaveAwardDailyClear();
             uiDirty = 1;
             return;
         }
