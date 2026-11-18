@@ -23,7 +23,6 @@
 #include "ui_theme.h"
 #include "mimic.h"
 #include "spider.h"
-#include "extras.h"
 #include "neutral.h"
 
 enum { RELAY=1, SHELTER=2, TERMINAL=4, CORE=8, EVIDENCE=16, F01_LAYOUT_V2=32, AUTHORED_LAYOUT=64 };
@@ -72,12 +71,15 @@ void ProtocolClearStoryActors(void) {
     CollectorReset();
     SpiderReset();
     NeutralReset();
-    ExtrasReset();
 }
 static int LayoutFloor(void) {
     if (!ProtocolPeacefulStory()) return protocolRun.story;
     return protocolRun.story+((protocolRun.flags&PROTOCOL_EVAC_LAYOUT)?11:8);
 }
+int ProtocolDecoration(int index,StoryDecoration *out) {
+    return ProtocolPeacefulStory() && StoryDecorationAt(LayoutFloor(),protocolRun.story,index,out);
+}
+
 static struct {
     float time,contact,x,y;
     int captured,warned;
@@ -113,6 +115,7 @@ static void SetBox(int i,Cell c,int fuse) {
     containers[i]=(Container){.x=c.x+.5f,.y=c.y+.5f,.active=1,.content=fuse};
 }
 void ProtocolBuildFloor(void) {
+    StoryGuideInvalidate();
     const FloorDef *f=Def();
     int floor=protocolRun.story;
     CellMetaReset();RoomPropReset();HatchReset();RoomSetCount(0);
@@ -475,7 +478,8 @@ const char *ProtocolExitHint(void) {
 int ProtocolAdvance(void) {
     if (!ProtocolExitReady()) return 0;
     const FloorDef *f=Def();
-    WalletAddRun(f->reward);
+    int epilogue=ProtocolPeacefulStory() && protocolRun.story==3;
+    if (!epilogue) WalletAddRun(f->reward);
     if (f->unlock) protocolProfile.unlocked|=1u<<f->unlock;
     if (ProtocolPeacefulStory()) {
         ProtocolReleaseStoryNodes();
@@ -486,25 +490,33 @@ int ProtocolAdvance(void) {
         sanity=SanityMax();battery=BatteryMax();stamina=StaminaMax();
         return 1;
     }
-    if (protocolRun.story==8) {
-        unsigned bit=1u<<(protocolRun.ending-1);
-        if (!(protocolProfile.endings&bit)) {
-            WalletAddBank(protocolRun.ending==1?300:500);
-            protocolProfile.endings|=bit;
-        }
-        return 2;
-    }
+    if (protocolRun.story==8) return 2;
     currentLevel=++protocolRun.story;
     return 1;
 }
 
+int ProtocolClaimLegacyEndingBonus(void) {
+    if (ProtocolPeacefulStory() || protocolRun.story!=8 ||
+        !ProtocolExitReady() || protocolRun.ending<1 || protocolRun.ending>2) return 0;
+    unsigned bit=1u<<(protocolRun.ending-1);
+    if (protocolProfile.endings&bit) return 0;
+    protocolProfile.endings|=bit;
+    return protocolRun.ending==1?300:500;
+}
+
 int ProtocolStoryPayout(void) {
+    if (!ProtocolPeacefulStory() || protocolRun.story!=3 || !ProtocolExitReady() ||
+        (protocolRun.flags&PROTOCOL_STORY_PAID)) return 0;
+    protocolRun.flags|=PROTOCOL_STORY_PAID;
     int bankBefore=WalletBank();
     int bonus=(protocolProfile.endings&4u)?0:500;
-    int earnings=WalletRun()-PROTOCOL_STORY_SUPPLIES;
+    int completion=missions[2].reward;
+    int allowances=PROTOCOL_STORY_SUPPLIES+missions[0].reward+missions[1].reward;
+    int earnings=WalletRun()-allowances;
     if (earnings<0) earnings=0;
-    if (earnings>PROTOCOL_STORY_BANK_CAP) earnings=PROTOCOL_STORY_BANK_CAP;
-    WalletAddBank(earnings+bonus);
+    int limit=PROTOCOL_STORY_BANK_CAP-completion;
+    if (earnings>limit) earnings=limit;
+    WalletAddBank(completion+earnings+bonus);
     protocolProfile.endings|=4u;
     return WalletBank()-bankBefore;
 }

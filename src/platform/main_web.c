@@ -1,3 +1,4 @@
+#include "room_theme.h"
 #include "protocol.h"
 #include "tactical_tools.h"
 /*
@@ -485,7 +486,7 @@ int main(void) {
     return 0;
 }
 
-EMSCRIPTEN_KEEPALIVE int CanityUiFlags(void){return (currentState==STATE_PLAYING && !calibActive && !lockActive && !exitChoiceOpen && !TacticalPanelOpen() && !(isMapOpen && mapFullScreen)?1:0)|(calibActive?2:0)|(hiddenIn>=0?4:0)|((currentState==STATE_HUB || (currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE))?8:0);}
+EMSCRIPTEN_KEEPALIVE int CanityUiFlags(void){return (currentState==STATE_PLAYING && !calibActive && !lockActive && !exitChoiceOpen && !TacticalPanelOpen() && !(isMapOpen && mapFullScreen)?1:0)|(calibActive?2:0)|(hiddenIn>=0?4:0)|((currentState==STATE_HUB || (currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE))?8:0)|(currentState==STATE_PLAYING && RoomThemeGuideVisible()?16:0);}
 EMSCRIPTEN_KEEPALIVE void CanityWebPointer(int phase,int x,int y){
     if(phase==0)CanityPointerDown(x,y);else if(phase==1)CanityPointerMove(x,y);else if(phase==2)CanityPointerUp(x,y);else CanityPointerCancel();
 }

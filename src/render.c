@@ -1,3 +1,4 @@
+#include "render_story.h"
 #include "tactical_tools.h"
 #include "skills.h"
 #include "threat_tier.h"
@@ -32,7 +33,6 @@
 #include "art.h"
 #include "bench.h"
 #include "weapons.h"
-#include "extras.h"
 #include "sprites.h"
 #include "loop_api.h"
 #include "player_api.h"
@@ -143,8 +143,10 @@ void GenerateThemeTextures(int id) {
     storyMaterialActive=ProtocolPeacefulStory();
     if (storyMaterialActive) SetStoryLight(protocolRun.story);
 
-    floorBaseA=ArtDollGrade(RoomMaterialSample(id,8,8,1));
-    floorBaseB=ArtDollGrade(RoomMaterialSample(id,16,16,1));
+    floorBaseA=ArtDollGrade(storyMaterialActive?
+        StoryMaterialSample(protocolRun.story,8,8,1):RoomMaterialSample(id,8,8,1));
+    floorBaseB=ArtDollGrade(storyMaterialActive?
+        StoryMaterialSample(protocolRun.story,16,16,1):RoomMaterialSample(id,16,16,1));
     for (int material=0;material<THEME_COUNT;material++)
         for (int surface=0;surface<3;surface++)
             for (int y=0;y<TEX_HEIGHT;y+=2) for (int x=0;x<TEX_WIDTH;x+=2) {
@@ -340,10 +342,12 @@ static int themeLitR = 96, themeLitG = 98, themeLitB = 96;   /* 手电加色 */
 static int themeAmbR = 22, themeAmbG = 27, themeAmbB = 36;   /* 墙体环境雾 */
 
 static void SetStoryLight(int chapter) {
-    static const unsigned char fog[][3]={{28,22,17},{19,25,27},{23,25,17}};
+    static const unsigned char fog[][3]={{28,22,17},{33,21,48},{39,31,16}};
+    static const unsigned char lamps[][3]={{105,103,96},{103,87,120},{136,114,69}};
     const unsigned char *c=fog[chapter-1];
     themeFogR=c[0];themeFogG=c[1];themeFogB=c[2];
-    themeLitR=105;themeLitG=103;themeLitB=96;
+    c=lamps[chapter-1];
+    themeLitR=c[0];themeLitG=c[1];themeLitB=c[2];
 }
 static void SetThemeLight(int id) {
     switch (id) {
@@ -583,11 +587,6 @@ void DrawCreatureActor(int spr,float wx,float wy,float halfH,float lightK,
     SpritePose pose={(float)g_timeSec+spr*.27f,stride,fminf(1,activity+EvolutionPoseSignal(spr)*.4f),mirror};
     DrawSpriteCreature(use,box.centerX-size/2,box.baseY-size,size,size,light,1,zTest,box.ty,tint,tintMix,&pose);
 }
-static void DrawBakedMonster(int spr,float wx,float wy,float halfH,float lightK,int zTest,float facing,float walkPhase){
-    DrawCreatureActor(spr,wx,wy,halfH,lightK,zTest,facing,walkPhase,0,0,.6f);
-}
-
-
 /* ===== v2.4.6 **距离压迫感**（全部怪物共用的唯一入口）=====
    用户反馈：只有新怪有衰减，听声怪/追光怪还是老样子，整体不统一。
    所以抽成这个函数，所有怪物绘制都必须经过它。
@@ -787,17 +786,6 @@ static void DrawMoneyBagModel(int idx) {
 
 /* 带边界检查的绘制小工具（PutPixelBlend 本身不查边界） */
 
-
-static void DrawExtraSprite(int idx) {
-    const Extra* e = ExtraAt(idx);
-    if (!e || !e->active) return;
-    if (!SpritesReady()) return;
-    int spr = SPR_MON_ECHO;
-    if (e->kind == 0) spr = SPR_MON_SHADE;
-    else if (e->kind == 1) spr = SPR_MON_SPIDER;
-    float halfH = (e->kind == 0) ? 1.05f : (e->kind == 1 ? 0.42f : 0.95f);
-    DrawBakedMonster(spr, e->x, e->y, halfH, 0.85f, 1, 0.0f, (float)g_timeSec * 2.0f);
-}
 
 static void DrawSlashBlade(float wx, float wy, float scale, float alpha) {
     if (alpha <= 0.02f) return;
@@ -1202,7 +1190,7 @@ static void SortSpriteEntries(SpriteDrawEntry* list, int n) {
     }
 }
 
-static void DrawSpriteEntries(const SpriteDrawEntry* list, int n) {
+static void DrawSpriteEntries(const SpriteDrawEntry* list,int n,const StoryDecoration *story) {
     for (int i = 0; i < n; i++) {
         switch (list[i].kind) {
             case 0: DrawCrateSprite(list[i].idx); break;
@@ -1210,6 +1198,7 @@ static void DrawSpriteEntries(const SpriteDrawEntry* list, int n) {
             case 2: DrawMonsterSprite(); break;
             case 13: DrawMonster2Sprite(); break;   /* v2.4.12 第二只听声怪 */
             case 14: DrawMonster3Sprite(); break;   /* 第三只听声鬼 */
+            case STORY_DRAW_ENTRY: DrawStoryVisual(&story[list[i].idx]); break;
             case 23: DrawDecoyModel(list[i].idx); break;
             case 15: DrawMimicSprite(list[i].idx); break;   /* 2026-11-05 宝箱怪 */
         case 9: DrawLeechSprite(list[i].idx); break;
@@ -1278,7 +1267,6 @@ static void DrawSpriteEntries(const SpriteDrawEntry* list, int n) {
         }
         case 17: DrawListedHatch(list[i].idx); break;
         case 16: DrawListedRoomProp(list[i].idx); break;
-            case 11: DrawExtraSprite(list[i].idx); break;
             case 7: DrawFlowerSprite(); break;
             default: DrawExitBeamSprite(); break;
         }
@@ -1301,12 +1289,13 @@ static void DrawSpriteOverlays(void) {
 
 void RenderSprites(void) {
     SpriteDrawEntry list[MAX_SPRITES];
-    int n = 0;
+    StoryDecoration story[STORY_DRAW_COUNT];
+    int n=CollectStoryVisuals(list,0,story);
     n = CollectSpriteScenery(list, n);
     n = CollectSpriteActorsAndMarkers(list, n);
     n = CollectSpriteEffectsAndExit(list, n);
     SortSpriteEntries(list, n);
-    DrawSpriteEntries(list, n);
+    DrawSpriteEntries(list,n,story);
     DrawSpriteOverlays();
 }
 
@@ -1522,6 +1511,23 @@ static unsigned SafetyFloorMarker(unsigned color,float fx,float fy,float wx,floa
         return open?0xA8BEC7u:0xAA8560u;
     return color;
 }
+static unsigned char storyFloorTrail[MAP_WIDTH*MAP_HEIGHT];
+static int storyFloorTrailActive;
+
+static unsigned StoryFloorMark(unsigned color,int cx,int cy,float wx,float wy) {
+    if ((unsigned)cx>=MAP_WIDTH || (unsigned)cy>=MAP_HEIGHT) return color;
+    unsigned route=storyFloorTrail[cy*MAP_WIDTH+cx];
+    if (!route) return color;
+    float x=wx-cx-.5f,y=wy-cy-.5f;
+    float a=fabsf(x),b=fabsf(y);
+    float width=1.f;
+    if ((x>=0 && (route&1u)) || (x<=0 && (route&4u))) width=b;
+    if ((y>=0 && (route&2u)) || (y<=0 && (route&8u))) width=fminf(width,a);
+    if (a<.045f && b<.045f) width=fminf(a,b);
+    if (width>.072f) return color;
+    unsigned light=width<.031f?0x62c3f0u:0x2d698bu;
+    return ((color&0xfefefeu)>>1)+((light&0xfefefeu)>>1);
+}
 #include "domain/render/legacy/render_246_floor.inc"
 static void RenderFloorBand(int y0, int y1) {
     if(!pitchLookEnabled) { RenderFloorBandLegacy246(y0,y1); return; }
@@ -1597,6 +1603,7 @@ static void RenderFloorBand(int y0, int y1) {
 
                 if(safeRoom.active)color=SafetyFloorMarker(color,fx,fy,safeRoom.x,safeRoom.y,1);
                 if (!storyMaterialActive) color=SafetyFloorMarker(color,fx,fy,exitX,exitY,breakerOpen);
+                if (storyFloorTrailActive) color=StoryFloorMark(color,cX,cY,fx,fy);
 
                 /* 雾 + 光球的暖光（简化：只按距离加暖色） */
                 if (fogR | fogG | fogB) {
@@ -2035,6 +2042,7 @@ void Render3D(void) {
         ceilTab[x] = (int)((lightOn?.55f:.06f) * 150.0f + cone*.75f*150.0f);
     }
 
+    storyFloorTrailActive=PrepareStoryFloorTrail(storyFloorTrail);
     RunPhase(1);
     RunPhase(2);
     RenderSprites();

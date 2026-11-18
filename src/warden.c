@@ -625,8 +625,6 @@ float WardenSpotFrac(void) {
     float f = warden.spotT / total;
     return f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
 }
-int WardenLost(void)    { return warden.state == WD_LOST; }
-
 /* Private warden phases; keep the original short-circuit order. */
 static int WardenPreflight(float dt) {
 
@@ -1228,10 +1226,3 @@ void UpdateWarden(float dt) {
 
 
 /* 训练营用 —— 强制摆到指定位置当标本 */
-void WardenForcePlace(float x, float y) {
-    warden.active = 1;
-    warden.x = x;
-    warden.y = y;
-    warden.state = WD_PATROL;
-    warden.blockT = 0.0f;
-}

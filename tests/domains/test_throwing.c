@@ -38,8 +38,14 @@ static void test_flare_heal_budget(void) {
     sanity = SanityMax() * 0.5f;
     {
         float s0 = sanity;
-        ThrowItem(0, 1.0f);                 /* 扔一根照明棒 */
-        for (int i = 0; i < 300; i++) FlareHealTick(0.02f);
+        memset(thrown,0,sizeof thrown);
+        ThrowItem(0,1.f);
+        FlareHealTick(.02f);
+        CHECK(sanity==s0,"a flare in flight must not heal");
+        thrown[0].x=posX;thrown[0].y=posY;
+        thrown[0].z=0;
+        thrown[0].life=FLARE_LIFE_SECONDS;
+        for (int i=0;i<300;i++) FlareHealTick(.02f);
         CHECK(sanity > s0, "a landed flare must heal sanity even WITHOUT IR_BIOLUM");
         CHECK(sanity - s0 <= 1.6f * 6.5f,
               "the baseline heal must respect its own cap");
@@ -82,6 +88,11 @@ static void test_flare_heal_budget(void) {
         sanity = s1;
     }
 
+    FlareHealReset();
+    thrown[0].life=FLARE_LIFE_SECONDS-FLARE_HEAL_SECONDS-.01f;
+    float expiredSanity=sanity;
+    FlareHealTick(.02f);
+    CHECK(sanity==expiredSanity,"the landed flare cannot heal after its eight-second window");
     RunSkillsReset();
     for (int i = 0; i < RELIC_COUNT; i++) relicOwned[i] = 0;
     FlareHealReset();

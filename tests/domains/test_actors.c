@@ -276,8 +276,9 @@ static void test_floor_change_clears_field_state(void) {
     /* ---- ③ 治疗预算先花掉一点 ---- */
     RunSkillTake(IR_BIOLUM);
     sanity = SanityMax() * 0.2f;
-    ThrowItem(0, 1.0f);
-    for (int i = 0; i < 50; i++) FlareHealTick(0.02f);
+    memset(thrown,0,sizeof thrown);
+    thrown[0]=(Thrown){.x=posX,.y=posY,.active=1,.life=FLARE_LIFE_SECONDS};
+    for (int i=0;i<50;i++) FlareHealTick(.02f);
     float spent = FLARE_HEAL_FLOOR_BUDGET - FlareHealBudgetLeft();
     CHECK(spent > 0.0f, "some healing budget was spent on this floor");
 

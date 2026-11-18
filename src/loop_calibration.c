@@ -41,7 +41,7 @@ static float flash[4],hitSanity[4],hitBattery[4];
 static int judgement[4];
 static float HitWindow(void) {return fmaxf(.16f,.26f-(currentLevel-1)*.002f);}
 float CalibZoneScale(void) {return HitWindow()/.26f;}
-float CalibSpeedScale(void) {return 1.0f+fminf(.65f,fmaxf(0,elapsed)*.012f+fmaxf(0,(float)(currentLevel-1))*.008f);}
+float CalibSpeedScale(void) {return 1.2f+fminf(.65f,fmaxf(0,elapsed)*(.012f+fminf(10.f,fmaxf(0,(float)(currentLevel-1)))*.0008f));}
 int CalibReadyState(void) {return waitingForStart?1:leadIn>0?2:0;}
 float CalibLeadIn(void) {return leadIn;}
 float CalibProgress(void) {return fminf(1,fmaxf(0,elapsed/40.0f));}

@@ -21,7 +21,6 @@
 #include "art.h"
 #include "bench.h"
 #include "weapons.h"
-#include "extras.h"
 #include "loop_api.h"
 #include "present_api.h"
 #include "mimic.h"

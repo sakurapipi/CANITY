@@ -22,6 +22,12 @@ static float eventTime=0,noteTime=0;
 static char roomNote[384];
 void RoomThemeNotify(const char* text){snprintf(roomNote,sizeof(roomNote),"%s",text?text:"");noteTime=3.5f;uiDirty=1;}
 const char* RoomThemeNotification(void){return noteTime>0?roomNote:"";}
+int RoomThemeGuideVisible(void) {
+    return roomTheme.active && hatchCount>0 && (roomTheme.inside ||
+        RoomThemeContains(posX,posY) ||
+        (Dist2(posX,posY,roomTheme.landmarkX,roomTheme.landmarkY)<9.f &&
+         HasLOS(posX,posY,roomTheme.landmarkX,roomTheme.landmarkY)));
+}
 int RoomThemeForFloor(int level) {if(level<1)level=1;return ((level-1)/2)%7;}
 int RoomThemeMaterialForFloor(int level) {
     int material;
@@ -82,6 +88,7 @@ void RoomThemeBind(void) {
     roomTheme.target=-1;roomTheme.layoutVersion=ROOM_LAYOUT_LEGACY;
     if(hatchCount<=0)return;
     roomTheme.active=1;roomTheme.theme=hatches[0].kind;
+    roomTheme.guideExpanded=roomTheme.theme!=HATCH_BOILER;
     roomTheme.switchX=hatches[0].x;roomTheme.switchY=hatches[0].y;
     roomTheme.landmarkX=roomTheme.switchX;roomTheme.landmarkY=roomTheme.switchY;
     roomTheme.spent=hatches[0].state==HATCH_FIRED;
@@ -100,8 +107,9 @@ void RoomThemeBind(void) {
         roomTheme.variant=RoomLayoutVariant(roomSeedUsed);
         roomTheme.landmarkX=roomProps[i].x;roomTheme.landmarkY=roomProps[i].y;
     }
-    if (roomTheme.theme==HATCH_POWER && !RoomThemeIsCurrent(0)) {
-        if (RoomPropAdd(roomTheme.landmarkX,roomTheme.landmarkY,ROOMPROP_LANDMARK_FIRST+HATCH_POWER)) {
+    if ((roomTheme.theme==HATCH_POWER ||
+         RoomThemeContains(roomTheme.landmarkX,roomTheme.landmarkY)) && !RoomThemeIsCurrent(0)) {
+        if (RoomPropAdd(roomTheme.landmarkX,roomTheme.landmarkY,ROOMPROP_LANDMARK_FIRST+roomTheme.theme)) {
             RoomProp *prop=&roomProps[roomPropCount-1];
             prop->blocks=0;prop->searchLeft=0;prop->height=.94f;
         }
@@ -110,8 +118,7 @@ void RoomThemeBind(void) {
         hatches[0].x=roomTheme.landmarkX;hatches[0].y=roomTheme.landmarkY;
         roomTheme.switchX=roomTheme.landmarkX;roomTheme.switchY=roomTheme.landmarkY;
     }
-    if ((roomTheme.theme==HATCH_BRICK || roomTheme.theme==HATCH_POWER) &&
-        !roomTheme.spent && RoomThemeIsCurrent(0)) RestoreRoomControls(roomTheme.theme);
+    if (!roomTheme.spent && RoomThemeIsCurrent(0)) RestoreRoomControls(roomTheme.theme);
     roomTheme.ambientClock=1.0f;
     RoomThemeRebuildControls();
 }

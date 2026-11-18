@@ -1493,8 +1493,6 @@ void RenderFrame(void) {
 
 #define UI_INSET 20
 
-void UiInit(void) { /* FIXED_RESULT: UI has no initialization-owned state; resources are initialized by their owners. */ }
-
 void UiPanel9(int x0,int y0,int x1,int y1,int hot) {
     if(x1<=x0 || y1<=y0)return;
     BlendRectWin(x0,y0,x1,y1,UI_BG_PANEL,1.0f);

@@ -97,8 +97,6 @@ void DrawTutorialPanel(void) {
             DrawTextSmallLiteralWin(x+pad,top+pad,Tr("CURRENT OBJECTIVE","当前目标"),UI_ACCENT);
             DrawTextSmallLiteralWin(x+pad,top+2*pad+FONT_H,objective,UI_INK);
         }
-        float x,y;
-        if (ProtocolTarget(&x,&y)) DrawLessonMarker(x,y);
     }
     if(!trainingMode || currentState!=STATE_PLAYING || calibActive || lockActive || (isMapOpen && mapFullScreen))return;
     if (tutorialDone) {
@@ -289,70 +287,53 @@ void DrawPickupToast(void) {
     }
 }
 
-/* A persistent framed room panel is the only owner of room interaction text. */
 void UiDrawRoomHint(void) {
-    if(currentState!=STATE_PLAYING || !roomTheme.active || !roomTheme.inside ||
-       calibActive || lockActive || exitChoiceOpen || (isMapOpen && mapFullScreen))return;
-    int x=UIS(20),pad=UIS(7),width=winW*49/100;
-    if(width>UIS(425))width=UIS(425);
-    int well=roomTheme.theme==HATCH_BOILER;
-    int collapsed=well && !roomTheme.guideExpanded;
-    if (collapsed && width>UIS(220)) width=UIS(220);
-    int textH=TextMediumLiteralHeight(), rowH=textH+UIS(8);
-    int height=collapsed?2*FONT_H+3*pad:3*rowH+2*textH+FONT_H+6*pad,y;
-    int top=UIS(18)+3*(TextHeightWin()+UIS(4)),bottom=winH-UIS(110);
-    if(!UiFindFreeBand(x,top,width,height,bottom,&y))return;
-    BlendRectWin(x,y,x+width,y+height,UI_BG_PANEL,well?.52f:.97f);
-    FrameRectWin(x,y,x+width,y+height,UI_EDGE,well?.66f:.9f,1);
-    if (collapsed) {
-        int charged=!!(roomTheme.prepared&1u)+!!(roomTheme.prepared&2u)+!!roomTheme.spent;
-        char title[96];
-        snprintf(title,sizeof title,"%s  %d/3",RoomThemeName(roomTheme.theme,g_lang==LANG_ZH),charged);
-        UiTrimSmallText(title,width-2*pad);
-        DrawTextSmallLiteralWin(x+pad,y+pad,title,UI_ACCENT);
-        DrawTextSmallLiteralWin(x+pad,y+2*pad+FONT_H,Tr("X  SHOW GUIDE","X  展开引导"),UI_INK);
+    if (currentState!=STATE_PLAYING || !RoomThemeGuideVisible() || calibActive ||
+        lockActive || exitChoiceOpen || (isMapOpen && mapFullScreen) || TacticalPanelOpen()) return;
+    int pad=UIS(8),x=UIS(20),y=0;
+    int width=winW*48/100;
+    if (width>UIS(420)) width=UIS(420);
+    int font=TextMediumLiteralHeight(),rowH=font+UIS(8);
+    int top=UIS(18)+3*(TextHeightWin()+UIS(4)),bottom=winH-UIS(80);
+    int compact=!roomTheme.guideExpanded;
+    int height=font+3*rowH+4*(FONT_H+pad)+pad;
+    if (!compact && !UiFindFreeBand(x,top,width,height,bottom,&y)) compact=1;
+    if (compact) {
+        height=2*FONT_H+3*pad;
+        if (!UiFindFreeBand(x,top,width,height,winH-UIS(28),&y)) y=top;
+    }
+    BlendRectWin(x,y,x+width,y+height,UI_BG_PANEL,.65f);
+    FrameRectWin(x,y,x+width,y+height,UI_EDGE,.8f,1);
+    char line[384];
+    const char *name=RoomThemeName(roomTheme.theme,g_lang==LANG_ZH);
+    const char *key=VkName(g_bindings[ACT_INTERACT]);
+    const char *notice=RoomThemeNotification();
+    if (compact) {
+        const char *hint=roomTheme.guideExpanded?Tr("X  COLLAPSE GUIDE","按 X 收起引导"):
+            Tr("X  EXPAND GUIDE","按 X 展开引导");
+        UiDossierText(hint,x+pad,y+pad,width-2*pad,y+height,UI_ACCENT);
+        snprintf(line,sizeof line,"%s / %s",name,notice[0]?notice:RoomThemeNextStep());
+        UiTrimSmallText(line,width-2*pad);
+        DrawTextSmallLiteralWin(x+pad,y+2*pad+FONT_H,line,UI_INK);
         return;
     }
-    const char *title=RoomThemeName(roomTheme.theme,g_lang==LANG_ZH);
-    if(TextMediumLiteralWidth(title)<=width-pad*2) DrawTextMediumLiteralWin(x+pad,y+pad,title,UI_ACCENT);
-    else DrawTextSmallLiteralWin(x+pad,y+pad,title,UI_ACCENT);
-    if (well) {
-        const char *collapse=Tr("X HIDE","X 收起");
-        int right=x+width-pad-DrawTextSmallWidth(collapse);
-        if (right>x+pad+TextMediumLiteralWidth(title)+pad)
-            DrawTextSmallLiteralWin(right,y+pad,collapse,UI_INK);
-    }
-    int yy=y+textH+pad*2;
-    for(int step=0;step<3;step++,yy+=rowH){
+    int yy=y+pad;
+    snprintf(line,sizeof line,"%s   [%s]",name,Tr("X: COLLAPSE","按 X 收起"));
+    UiTrimSmallText(line,width-2*pad);
+    DrawTextSmallLiteralWin(x+pad,yy,line,UI_ACCENT);
+    yy+=FONT_H+pad;
+    for (int step=0;step<3;step++,yy+=rowH) {
         const char *label;float done;int alternate;
         RoomThemeGuideStep(step,&label,&done,&alternate);
-        char line[108];
         snprintf(line,sizeof line,"%d. %s%s",step+1,label,alternate?Tr(" (optional)","（备选）"):"");
-        if (TextMediumLiteralWidth(line)<=width-2*pad)
-            DrawTextMediumLiteralWin(x+pad,yy,line,alternate?UI_INK_DIM:UI_INK);
-        else {
-            UiTrimSmallText(line,width-2*pad);
-            DrawTextSmallLiteralWin(x+pad,yy,line,alternate?UI_INK_DIM:UI_INK);
-        }
+        UiTrimSmallText(line,width-2*pad);
+        DrawTextSmallLiteralWin(x+pad,yy,line,alternate?UI_INK_DIM:UI_INK);
         UiBar(x+pad,yy+rowH-UIS(6),width-2*pad,UIS(4),done,UI_BG_ROW,done>=1?UI_OK:UI_ACCENT);
     }
-    char line[320];
-    if(roomTheme.spent) snprintf(line,sizeof line,"%s",Tr("EFFECT COMMITTED","装置已启动"));
-    else if(roomTheme.theme==HATCH_WARD)
-        snprintf(line,sizeof line,"%s",Tr("CHOOSE ONE EXCHANGE, THEN START THE CENTER","只选一种资源转换，再启动中央装置"));
-    else snprintf(line,sizeof line,Tr("HOLD %s AT THE NEXT DEVICE","到对应装置按住 %s"),VkName(g_bindings[ACT_INTERACT]));
-    UiTrimSmallText(line,width-2*pad);
-    DrawTextSmallLiteralWin(x+pad,yy+pad,line,UI_ACCENT);
-    const char *notice=RoomThemeNotification();
-    if (!notice[0]) notice=RoomThemeInstruction();
-    snprintf(line,sizeof line,"%s",notice);
-    if(TextMediumLiteralWidth(line)<=width-2*pad)
-        DrawTextMediumLiteralWin(x+pad,yy+2*pad+FONT_H,line,UI_INK);
-    else {
-        UiTrimSmallText(line,width-2*pad);
-        DrawTextSmallLiteralWin(x+pad,yy+2*pad+FONT_H,line,UI_INK);
-    }
-
+    if (roomTheme.spent) snprintf(line,sizeof line,"%s",Tr("ACTIVATED / ONCE PER FLOOR","装置已启动，本层不可重复使用"));
+    else snprintf(line,sizeof line,Tr("NEXT: %s / HOLD %s","下一步：%s / 长按 %s"),RoomThemeNextStep(),key);
+    yy=UiDossierText(line,x+pad,yy,width-2*pad,y+height-pad,UI_ACCENT)+pad;
+    UiDossierText(notice[0]?notice:RoomThemeInstruction(),x+pad,yy,width-2*pad,y+height-pad,UI_INK);
 }
 static int threatNoticeKind=0;
 static double threatNoticeUntil=0;

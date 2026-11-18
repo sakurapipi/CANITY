@@ -25,7 +25,6 @@
 #include "art.h"
 #include "bench.h"
 #include "weapons.h"
-#include "extras.h"
 #include "sprites.h"
 #include "loop_api.h"
 #include "player_api.h"

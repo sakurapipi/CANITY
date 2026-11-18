@@ -64,7 +64,6 @@
 #include "upgrade_run.h"
 #include "relics.h"
 #include "sprites.h"
-#include "extras.h"
 #include "gamepad.h"
 #include "lang.h"
 #include "entity.h"
@@ -735,7 +734,6 @@ static int UpdateRestAndShop(float dt, int inSafe) {
 
 static void UpdateLegacyEffects(float dt) {
     /* ---- v2.9 绣刀：发射剑气（穿透、14 格射程），60 秒冷却，命中不再减半 ---- */
-    UpdateExtras(dt);      /* v2.0：额外威胁 */
 
     if (knifeCd > 0.0f) {
         knifeCd -= dt;
@@ -1494,7 +1492,6 @@ static void UpdateWorldThreats(float dt, const PlayerFrameInput* movement) {
     UpdateMonster(dt);
     {  UpdateMonster2(dt); }
     {  UpdateMonster3(dt); }   /* v2.4.12 第二只 */
-    {  FlankUpdate(dt); }   /* v2.4.95 包夹（必须在 AI 之后，否则目标被覆盖） */
     UpdateLightBeast(dt);
         {  UpdateLightBeast2(dt); }   /* 第二只 */
     /* 2026-11-06：跳脸怪已删除，UpdateParasite 不再调用。
@@ -1645,6 +1642,7 @@ static void UpdateWorldParticles(float dt) {
             }
             /* 落地 */
             if (thrown[i].z <= 0.0f) {
+                if (thrown[i].type==0) thrown[i].life=FLARE_LIFE_SECONDS+dt;
                 thrown[i].z = 0.0f;
                 thrown[i].vz = 0.0f;
                 thrown[i].vx *= 0.3f;  /* 滑动摩擦 */
@@ -1795,10 +1793,15 @@ static void UpdateExitProgression(float dt) {
             gameWon=1;runInProgress=0;
             ScoreInput result={currentLevel,1,0,runSearched,bottlesKilled,runTime,modsSeenCount};
             ComputeScore(&result,&lastScore);
-            lastRunGold=WalletRun();lastRunCaught=CatchCountThisRun();
-            lastRunKept=ProtocolPeacefulStory()?ProtocolStoryPayout():0;
-            WalletStealRun(WalletRun());
-            SaveGame();hasSave=SaveHasPendingRun();
+            if (ProtocolPeacefulStory()) {
+                lastRunGold=WalletRun();lastRunCaught=CatchCountThisRun();
+                lastRunKept=ProtocolStoryPayout();
+                WalletStealRun(WalletRun());
+                SaveGame();
+            } else {
+                BankSettleWithBonus(1,ProtocolClaimLegacyEndingBonus());
+            }
+            hasSave=SaveHasPendingRun();
             currentState=STATE_GAMEOVER;menuSelection=0;
             ProtocolCinematicTransition(1);
             ForceCursor(1);uiDirty=1;

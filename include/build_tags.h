@@ -43,7 +43,6 @@ const char* BuildName(BuildTag t, int zh);
 int  BuildSynergyCount(void);
 void BuildSynergyList(char* out, int cap);
 
-void BuildReset(void);
 
 
 /* Whether a draft card has an implemented gameplay effect. */

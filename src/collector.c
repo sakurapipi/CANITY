@@ -227,15 +227,6 @@ void CollectorSpawnIfEligible(void) {
     (void)0; /* No encounter-toast timer. */
 }
 
-void CollectorForceSpawnAt(float x, float y) {
-    CollectorReset();
-    collector.x = x;
-    collector.y = y;
-    collector.active = 1;
-    colBfsBuild();
-    {  BestiaryMarkSeen(BST_ID_COLLECTOR); BestiaryNoteFloor(BST_ID_COLLECTOR, currentLevel); }
-}
-
 void CollectorBurstBounty(void) {
     if (!collector.active) return;
 
@@ -474,12 +465,6 @@ void UpdateCollector(float dt) {
         cadence = 0;
         AudioPlayWorld(SFX_COLLECTOR_STEP, collector.x, collector.y, .42f, 9, 1);
     }
-}
-
-void CollectorForcePlace(float x, float y) {
-    collector.active = 1;
-    collector.x = x;
-    collector.y = y;
 }
 
 int CollectorMagneticPull(int apply) {

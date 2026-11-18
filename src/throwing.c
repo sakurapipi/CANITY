@@ -156,7 +156,7 @@ void ThrowItem(int type, float charge) {
         thrown[i].vx = dirX * flareSpeed * cosf(flareAngle);
         thrown[i].vy = dirY * flareSpeed * cosf(flareAngle);
         thrown[i].type = 0;        /* 0=荧光棒 */
-        thrown[i].life = 25.0f;    /* 落地后发光时长 */
+        thrown[i].life = FLARE_LIFE_SECONDS;    /* 落地后发光时长 */
         thrown[i].active = 1; g_throwOk = 1;
         break;
     }

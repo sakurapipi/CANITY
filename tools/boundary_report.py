@@ -86,7 +86,7 @@ def main(argv):
         'P1 循环/时间': ('game.c', 'core/tick.c'),
         'P2 世界': ('map_rooms.c', 'hatch_place.c', 'collapse.c', 'room_template.c'),
         'P3 实体/AI': ('entity.c', 'warden.c', 'collector.c', 'scavenger.c',
-                       'spider.c', 'mimic.c', 'flank.c', 'ai_common.c'),
+                       'spider.c', 'mimic.c', 'ai_common.c'),
         'P4 玩家': ('throwing.c', 'money.c', 'lockbox.c'),
         'P5 呈现': ('render.c', 'ui.c', 'domain/render/', 'domain/ui/', 'sprites.c', 'domain/sprites/'),
     }

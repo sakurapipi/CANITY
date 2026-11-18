@@ -862,12 +862,12 @@ static void DrawGenericMenuRows(MenuGeo g, int sel, int popupOpen, const int* id
 
         if (currentState == STATE_GAMEOVER && i > 0) {
             if (protocolRun.story) {
-                char settlement[96];
-                snprintf(settlement,sizeof settlement,Tr("EVIDENCE TRANSMITTED   BANK +%d","证词已传出   银行入账 +%d"),lastRunKept);
-                const char *label = i==1?ProtocolFloorName():
-                    !gameWon?Tr("Escape: return to main menu","按 Esc 返回主菜单"):
-                    ProtocolPeacefulStory()?settlement:
-                    protocolRun.ending==1?Tr("Ending: Departure","结局：离开设施"):Tr("Ending: Protocol Reset","结局：协议归零");
+                char settlement[112];
+                const char *ending=ProtocolPeacefulStory()?Tr("EVIDENCE TRANSMITTED","证词已传出"):
+                    protocolRun.ending==1?Tr("DEPARTURE","离开设施"):Tr("PROTOCOL RESET","协议归零");
+                snprintf(settlement,sizeof settlement,Tr("%s   BANK +%d","%s   银行入账 +%d"),ending,lastRunKept);
+                const char *label=i==1?ProtocolFloorName():
+                    !gameWon?Tr("Escape: return to main menu","按 Esc 返回主菜单"):settlement;
                 DrawTextInRow(label,RowRect(g,i),UI_INK);
                 continue;
             }

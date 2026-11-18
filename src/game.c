@@ -64,7 +64,6 @@
 #include "upgrade_run.h"
 #include "relics.h"
 #include "sprites.h"
-#include "extras.h"
 #include "gamepad.h"
 #include "lang.h"
 #include "entity.h"
@@ -624,14 +623,17 @@ int BankPreviewGain(int survived) {
 
 
 /* ==================== 进度 · 存档 ==================== */
-void BankSettle(int survived) {
+void BankSettle(int survived) { BankSettleWithBonus(survived,0); }
+
+void BankSettleWithBonus(int survived,int endingBonus) {
     lastRunGold=carryGold; lastRunCaught=CatchCountThisRun();
     int profit = EconomyRewardedProfit(survived,&lastPerfMul);
 
     /* v6：结算统一走 WalletSettle */
     {
         int beforeBank = WalletBank();
-        {  WalletSettle(survived, profit); }
+        WalletSettle(survived,profit);
+        WalletAddBank(endingBonus);
         lastRunKept=WalletBank()-beforeBank;
         /* v6 第 ⑲ 轮：**实测遥测** —— 每局结束写一行，
            玩几局之后就能算真实金币/局、真实时长，
@@ -705,18 +707,6 @@ float GoldSearchAt(int level)  {
 /* 怪物当前的威胁分（不含金币） */
 
 /* ==================== 实体 · 怪物 ==================== */
-float MonsterThreatScore(void) {
-
-    float sSpeed   = (THREAT_REF_SPEED  > 0.01f) ? Hunter0()->speed / THREAT_REF_SPEED : 1.0f;
-    float sHear    = 1.0f;                       /* 听觉基数，由 MakeNoise 的半径体现 */
-    float sPersist = 1.0f;                       /* 持久度，由 huntTimer 上限体现 */
-    float sReact   = 1.0f;                       /* 反应速度 */
-    return THREAT_W_SPEED   * sSpeed
-         + THREAT_W_HEAR     * sHear
-         + THREAT_W_PERSIST  * sPersist
-         + THREAT_W_REACT    * sReact;
-}
-
 /* v2.3：武器能量上限 */
 
 /* ---------------- 寻声怪 ---------------- */

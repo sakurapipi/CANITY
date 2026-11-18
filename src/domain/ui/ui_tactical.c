@@ -52,11 +52,9 @@ int TacticalPanelOpen(void) {
 static int KeyAllowed(int key) {
     if (key <= 0 || key >= 256 || key == VK_ESCAPE || key == VK_RETURN || key == VK_SPACE ||
         (key >= VK_F1 && key <= VK_F12) || key <= VK_MBUTTON || key == VK_SHIFT ||
-        key == VK_CONTROL || key == VK_MENU || strchr("1234567890ICEQTGBMRHJKL", key))
+        key == VK_CONTROL || key == VK_MENU || strchr("1234567890ICEQTGBMR", key) ||
+        TacticalQuickKeyConflicts(key))
         return 0;
-    for (int i = 0; i < ACT_COUNT; i++)
-        if (g_bindings[i] == key)
-            return 0;
     for (int i = 0; i < 4; i++)
         if (i != quickSlot && tactical.key[i] == key)
             return 0;
@@ -66,10 +64,6 @@ void TacticalInputWheel(int steps) {
     int position=InventoryPosition(selected);
     selected=InventoryAt((position+ITEM_SLOT_COUNT+steps%ITEM_SLOT_COUNT)%ITEM_SLOT_COUNT);
     uiDirty=1;
-}
-
-static int ReservedInventoryKey(int key) {
-    return key=='H' || key=='J' || key=='K' || key=='L';
 }
 
 int TacticalInputKey(int key, int repeat) {
@@ -140,10 +134,7 @@ int TacticalInputKey(int key, int repeat) {
         LoopClearInputEdges();
         return 1;
     }
-    for (int action = 0; action < ACT_COUNT; action++)
-        if (g_bindings[action] == key)
-            return 0;
-    if (!repeat && !ReservedInventoryKey(key))
+    if (!repeat && !TacticalQuickKeyConflicts(key))
         for (int i = 0; i < 4; i++)
             if (tactical.key[i] > 0 && tactical.key[i] == key) {
                 throwSelected = tactical.quick[i];

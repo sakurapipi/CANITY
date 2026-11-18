@@ -179,7 +179,7 @@ static void test_hatch_screenshot(void) {
 }
 
 static void hatch_effect_scene(int kind){
-    clear_meta();BenchResetRun();trainingMode=0;dailyMode=0;collapsedLevel=0;
+    clear_meta();BenchResetRun();CellMetaReset();trainingMode=0;dailyMode=0;collapsedLevel=0;
     for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)
         worldMap[y][x]=(x==0 || y==0 || x==MAP_WIDTH-1 || y==MAP_HEIGHT-1);
     roomPropCount=0;containerCount=0;posX=3.5f;posY=3.5f;sanity=60;battery=150;stamina=100;carryGold=500;
@@ -199,7 +199,10 @@ static void hatch_effect_scene(int kind){
     }
 }
 static void fire_test_hatch(void){
-    CHECK(HatchGateCheck(0,NULL,0),"effect fixture supplies current gate requirements");
+    char reason[192];
+    int ready=HatchGateCheck(0,reason,(int)sizeof reason);
+    if (!ready) fprintf(stderr,"hatch kind %d: %s\n",hatches[0].kind,reason);
+    CHECK(ready,"effect fixture supplies current gate requirements");
     HatchSetState(0,HATCH_OPENING);HatchTick(HATCH_OPEN_SECONDS+.02f);
     CHECK(hatches[0].state==HATCH_FIRED,"approved hatch completes its single-use transition");
 }

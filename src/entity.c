@@ -41,6 +41,7 @@ float ThreatHearMul(void);
 #include "loop_api.h"
 #include "player_api.h"
 #include "world_api.h"
+#include "map_rooms.h"
 #include "present_api.h"
 #include "skills.h"
 #include "loop_api.h"
@@ -49,7 +50,6 @@ float ThreatHearMul(void);
 #include "present_api.h"
 #include "render.h"
 #include "audio.h"
-#include "extras.h"
 
 
 float posX = 1.5f, posY = 1.5f;
@@ -199,7 +199,7 @@ static int MonPathFor(Monster* m, int sx, int sy, int tx, int ty) {
     m->pathIdx = 0;
     if (sx < 1 || sy < 1 || sx >= MAP_WIDTH - 1 || sy >= MAP_HEIGHT - 1) return 0;
     if (tx < 1 || ty < 1 || tx >= MAP_WIDTH - 1 || ty >= MAP_HEIGHT - 1) return 0;
-    if (worldMap[sy][sx] || worldMap[ty][tx]) return 0;
+    if (worldMap[sy][sx] || worldMap[ty][tx] || PropBlocksAt(tx,ty)) return 0;
     if (sx == tx && sy == ty) return 0;
 
     static int queue[MAP_WIDTH * MAP_HEIGHT];
@@ -219,7 +219,7 @@ static int MonPathFor(Monster* m, int sx, int sy, int tx, int ty) {
         for (int k = 0; k < 4; k++) {
             int nx = cx + dx[k], ny = cy + dy[k];
             if (nx < 1 || ny < 1 || nx >= MAP_WIDTH - 1 || ny >= MAP_HEIGHT - 1) continue;
-            if (worldMap[ny][nx]) continue;
+            if (worldMap[ny][nx] || PropBlocksAt(nx,ny)) continue;
             if (g_prev[ny][nx] != -1) continue;
             g_prev[ny][nx] = cur;
             queue[tail++] = ny * MAP_WIDTH + nx;
@@ -227,19 +227,19 @@ static int MonPathFor(Monster* m, int sx, int sy, int tx, int ty) {
     }
     if (g_prev[ty][tx] == -1) return 0;
 
-    int tmp[MON_MAXPATH][2], n = 0;
-    int cx = tx, cy = ty;
-    while (!(cx == sx && cy == sy) && n < MON_MAXPATH) {
-        tmp[n][0] = cx; tmp[n][1] = cy; n++;
-        int p = g_prev[cy][cx];
-        cx = p % MAP_WIDTH; cy = p / MAP_WIDTH;
+    int origin=sy*MAP_WIDTH+sx,goal=ty*MAP_WIDTH+tx;
+    int length=0;
+    for (int cell=goal;cell!=origin;cell=g_prev[cell/MAP_WIDTH][cell%MAP_WIDTH]) ++length;
+    int cell=goal;
+    for (int excess=length-MON_MAXPATH;excess>0;--excess)
+        cell=g_prev[cell/MAP_WIDTH][cell%MAP_WIDTH];
+    m->pathLen=length<MON_MAXPATH?length:MON_MAXPATH;
+    for (int i=m->pathLen-1;i>=0;i--) {
+        m->path[i][0]=cell%MAP_WIDTH;
+        m->path[i][1]=cell/MAP_WIDTH;
+        cell=g_prev[cell/MAP_WIDTH][cell%MAP_WIDTH];
     }
-    m->pathLen = n;
-    for (int i = 0; i < n; i++) {
-        m->path[i][0] = tmp[n - 1 - i][0];
-        m->path[i][1] = tmp[n - 1 - i][1];
-    }
-    return n;
+    return m->pathLen;
 }
 
 /* 老的无参封装 MonPath() 已删除：它写死 &monster，
@@ -459,16 +459,6 @@ static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
         radius *= EconomyHearMul() * CampaignNoiseAlertMul();   /* v6：金币 + 威胁 + 战役 */
     }
     radius *= RelicNoiseMul() * modNoiseMul;
-    /* v3.3：盲螨只认声音。它原来每帧直接朝玩家冲刺，所以玩家“静音走路”
-       也会被它追；现在只有噪音落在半径内才给它目标。 */
-    for (int i = 0; i < EXTRA_MAX; i++) {
-        Extra* e = &extras[i];
-        if (!e->active || e->kind != 1) continue;
-        if (Dist2(x, y, e->x, e->y) > radius * radius) continue;
-        e->hasTarget = 1;
-        e->tx = x; e->ty = y;
-        e->timer = 0.0f;
-    }
     if (!Hunter0()->active) return;
     if (Dist2(x, y, Hunter0()->x, Hunter0()->y) > radius * radius) return;
     Hunter0()->state = 1;
@@ -590,7 +580,7 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
     if (has) {
         float side=L==&lightBeasts[0]?-.28f:.28f;
         float ax=tx+side,ay=ty-side;
-        if(ax>1 && ay>1 && ax<MAP_WIDTH-1 && ay<MAP_HEIGHT-1 && !worldMap[(int)ay][(int)ax] && HasLOS(tx,ty,ax,ay)){tx=ax;ty=ay;}
+        if(ax>1 && ay>1 && ax<MAP_WIDTH-1 && ay<MAP_HEIGHT-1 && !Blocked(ax,ay) && HasLOS(tx,ty,ax,ay)){tx=ax;ty=ay;}
         L->state = 1;
         L->tx = tx; L->ty = ty;
         L->repath -= dt;
@@ -613,19 +603,24 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
         }
     }
 
-    if (L->pathIdx < L->pathLen) {
-        float px = L->path[L->pathIdx][0] + 0.5f;
-        float py = L->path[L->pathIdx][1] + 0.5f;
-        float dx = px - L->x, dy = py - L->y;
-        float d = sqrtf(dx * dx + dy * dy);
-        if (d < 0.12f) L->pathIdx++;
-        else {
-            /* v3.3：追光鬼同样会被胶水减速 */
-    float step = L->speed * dt * fminf(ProtocolHunterMul(L,1),InGlue(L->x,L->y)?GLUE_MONSTER_MUL:1);
-            if (step > d) step = d;
-            float nx=L->x+dx/d*step, ny=L->y+dy/d*step;
-            if(!worldMap[(int)ny][(int)nx]){L->x=nx;L->y=ny;}
-            else {L->pathLen=0;L->repath=0;}
+    while (L->pathIdx<L->pathLen &&
+           Dist2(L->x,L->y,L->path[L->pathIdx][0]+.5f,L->path[L->pathIdx][1]+.5f)<.12f*.12f)
+        ++L->pathIdx;
+    if (L->pathIdx>=L->pathLen) L->pathLen=L->pathIdx=0;
+
+    int direct=has && !Blocked(tx,ty) && HasLOS(L->x,L->y,tx,ty);
+    if (L->pathLen>0 || direct) {
+        float px=L->pathLen?L->path[L->pathIdx][0]+.5f:tx;
+        float py=L->pathLen?L->path[L->pathIdx][1]+.5f:ty;
+        float dx=px-L->x,dy=py-L->y,d=hypotf(dx,dy);
+        if (d>.001f) {
+            float speed=L->speed*fminf(ProtocolHunterMul(L,1),InGlue(L->x,L->y)?GLUE_MONSTER_MUL:1);
+            float fraction=fminf(1,speed*dt/d);
+            float x=L->x+dx*fraction,y=L->y+dy*fraction;
+            if (!Blocked(x,y)) { L->x=x;L->y=y; }
+            else if (fabsf(dx)>.001f && !Blocked(x,L->y)) L->x=x;
+            else if (fabsf(dy)>.001f && !Blocked(L->x,y)) L->y=y;
+            else { L->pathLen=L->pathIdx=0;L->repath=0;L->wanderTimer=0; }
         }
     }
 
@@ -652,6 +647,14 @@ LightContact: ;
 
 /* 2026-11-06：删除跳脸怪时把这两个包装一起删掉了，补回。
    UpdateOneLightBeast 是参数化实现，这两行是两只追光怪对外的入口。 */
+static void ResetHunterPursuitAfterCatch(void) {
+    if (Hunter0()->active) Hunter0()->huntTimer = 0.0f;
+    if (Hunter1()->active) {
+        Hunter1()->huntTimer = 0.0f;
+        Hunter1()->stun = 0.0f;
+    }
+}
+
 void UpdateLightBeast(float dt)  { UpdateOneLightBeast(&lightBeasts[0], dt); }
 void UpdateLightBeast2(float dt) { UpdateOneLightBeast(&lightBeasts[1], dt); }
 
@@ -755,16 +758,6 @@ float HunterHearMulAt(int idx) {
 }
 
 /* 兼容旧调用：返回"场上最好的耳朵"，只用于 HUD/调试显示 */
-float HunterHearMul(void) {
-    float best = 0.0f;
-    for (int i = 0; i < MON_HUNTER_MAX; i++) {
-        if (!monHunters[i].active) continue;
-        float k = HunterHearMulAt(i);
-        if (k > best) best = k;
-    }
-    return best > 0.0f ? best : 1.0f;
-}
-
 /* 第 3 只的移动速度倍率（长得最瘦、跑得最快） */
 /* 2026-11-06（A-5）：1.45 -> 1.30。
    基础速度上限提到 2.10 之后，1.45 倍会顶到 3.05 ——
@@ -1324,7 +1317,7 @@ static int HunterResolveContact(Monster* M, float dt) {
             CatchCountBump();   /* v2.4.93：这一次记账，下次更疼 */
             {  CatchCountBumpRun(); }
             {  BestiaryMarkCaught(BST_ID_HUNTER); }   /* 图鉴：任何一只听声鬼抓到都算 */
-            {  FlankOnCaught(); }   /* v2.4.96 封喉者扑上来 */
+            ResetHunterPursuitAfterCatch();
 
             /* ============================================================
              * **第 2 只（矮个子）的特殊能力：撞到就挂 20% 减速**

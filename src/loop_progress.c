@@ -50,7 +50,6 @@
 #include "upgrade_run.h"
 #include "relics.h"
 #include "sprites.h"
-#include "extras.h"
 #include "gamepad.h"
 #include "lang.h"
 #include "entity.h"

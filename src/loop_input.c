@@ -46,7 +46,6 @@
 #include "upgrade_run.h"
 #include "relics.h"
 #include "sprites.h"
-#include "extras.h"
 #include "lang.h"
 #include "render.h"
 #include "ui.h"

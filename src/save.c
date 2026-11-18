@@ -1,3 +1,4 @@
+#include "story_visual.h"
 #include "protocol.h"
 #include "evolution_save.h"
 #include "threat_tier.h"
@@ -21,6 +22,7 @@
 #include "economy.h"
 #include "hatch.h"
 #include "item_effects.h"
+#include "throwing.h"
 #include "map_rooms.h"
 #include "neutral.h"
 #include "phase.h"
@@ -1081,7 +1083,8 @@ static int CaptureEvolutionChunks(void) {
     }
     return 1;
 }
-static void RestoreEvolutionChunks(int tierOnly) {
+static int RestoreEvolutionChunks(int tierOnly) {
+    int adjustedKeys=0;
     int restored = 0;
     EvolutionSnapshot snapshot;
     for (int i = 0; i < s_carryCount; i++)
@@ -1094,7 +1097,7 @@ static void RestoreEvolutionChunks(int tierOnly) {
     ThreatTierRestore(restored ? snapshot.floor : g_save.level, restored ? snapshot.tier : 0,
                       restored ? snapshot.plan : 0);
     if (tierOnly)
-        return;
+        return 0;
     EvolutionResetFloor();
     TacticalResetRun();
     if (restored) {
@@ -1120,8 +1123,11 @@ static void RestoreEvolutionChunks(int tierOnly) {
             Shot flying[MAX_SHOTS];
             if (TacticalWireDecode(&state, flying, s_carry[i].data, (int)s_carry[i].size)) {
                 tactical = state;
-                for (int slot=0;slot<4;slot++)
-                    if (tactical.key[slot] && strchr("HJKL",tactical.key[slot])) tactical.key[slot]=0;
+                for (int slot=0;slot<4;slot++) {
+                    if (!TacticalQuickKeyConflicts(tactical.key[slot])) continue;
+                    tactical.key[slot]=0;
+                    adjustedKeys=1;
+                }
                 for (int k = 0; k < 2; k++)
                     if (tactical.acoustic[k].ttl > 0 &&
                         Blocked(tactical.acoustic[k].x, tactical.acoustic[k].y))
@@ -1133,6 +1139,7 @@ static void RestoreEvolutionChunks(int tierOnly) {
             break;
         }
     SpritesSetEvolutionTier(CurrentRunThreatTier());
+    return adjustedKeys;
 }
 
 static int captureStoryEntry;
@@ -2074,6 +2081,7 @@ int SaveSelectSlot(int slot){
 
 /* 把存档里的进度灌回运行时 */
 static void RestoreRunGeometry(void) {
+    StoryGuideInvalidate();
     /* v3.0：坐标必须夹在地图内且非 NaN */
     #define CLAMP_POS(v, wrap) do { \
         if (!((v) == (v)) || (v) < 1.0f || (v) > (float)(wrap) - 1.0f) (v) = 1.5f; \
@@ -2320,6 +2328,9 @@ static void RestoreUsableHideSpots(void){
 }
 
 static void ResumeRestoredRun(void) {
+    DecoyResetFloor();
+    memset(thrown,0,sizeof thrown);
+    FlareHealReset();
     /* 读档不重掷跳脸虫：本关不会突然蹦出来。
        触发器留成 -1，等下一层进关时再掷。 */
     jumperTrigger = -1.0f;
@@ -2489,12 +2500,17 @@ void ContinueRun(void) {
     else if (CampaignFlashlightLocked()) flashlightOn=1;
     CalibResetRun();
     ShopRestoreServices(g_save.serviceUsesV42);RunEconomyRestore(g_save.rewardFloorV42,g_save.escapeRewardMaskV42,g_save.rhythmGoldV42);
-    RestoreEvolutionChunks(0);
+    int adjustedKeys=RestoreEvolutionChunks(0);
     if (g_save.protocolRunSave.threatRaw > 0) ThreatSet(protocolRun.threatRaw);
     sanity=isfinite(sanity)?fminf(SanityMax(),fmaxf(0,sanity)):SanityMax();
     battery=isfinite(battery)?fminf((float)BatteryMax(),fmaxf(0,battery)):(float)BatteryMax();
     stamina=isfinite(stamina)?fminf(StaminaMax(),fmaxf(0,stamina)):StaminaMax();
     ResumeRestoredRun();
+    if (adjustedKeys) {
+        UiShowActionError(Tr("Conflicting item shortcuts cleared. Rebind in inventory.",
+                             "已清除冲突的道具快捷键，可在背包重新绑定。"));
+        SaveGame();
+    }
 }
 
 void DeleteSave(void) {

@@ -12,6 +12,7 @@
 
 #include "common.h"
 #include "hatch.h"
+#include "room_theme.h"
 
 /* 系统头统一由 common.h 提供（partition 检查要求） */
 
@@ -70,7 +71,9 @@ void HatchTick(float dt) {
             h->animT = HATCH_OPEN_SECONDS;
             /* Resources/target may change during the opening animation. A failed
                commit must remain retryable, never consume the single-use door. */
-            if(!HatchGateCheck(i,NULL,0)){
+            char reason[192];
+            if (!HatchGateCheck(i,reason,(int)sizeof reason)) {
+                RoomThemeNotify(reason);
                 HatchSetState(i,HATCH_SEALED);h->animT=0;continue;
             }
             if(!HatchFireEffect(i)) {

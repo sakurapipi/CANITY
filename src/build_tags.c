@@ -147,12 +147,6 @@ void BuildSynergyList(char* out, int cap) {
     snprintf(out, (size_t)cap, "%s", buf);
 }
 
-void BuildReset(void) { /* FIXED_RESULT: Build tags are stateless data; no reset state exists. */
-    /* 标签是静态表，没有运行时状态需要清。
-       保留这个函数是为了让"新局 / 换层 / 读档 / 崩塌"四条路径
-       有一个统一的调用点，将来加了状态不用改调用方。 */
-}
-
 /* ==================================================================
  * 2026-11-06（第 8 轮）：这张卡的效果**是否已经实现**
  * ------------------------------------------------------------------

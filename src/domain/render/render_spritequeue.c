@@ -16,7 +16,6 @@
 #include "art.h"
 #include "bench.h"
 #include "weapons.h"
-#include "extras.h"
 #include "loop_api.h"
 #include "present_api.h"
 #include "common.h"
@@ -76,6 +75,7 @@ int CollectSpriteScenery(SpriteDrawEntry* list, int n) {
 
         for (int i = 0; i < roomPropCount && i < MAX_ROOM_PROPS; i++) {
             if (!roomProps[i].active) continue;
+            if (ProtocolPeacefulStory() && !roomProps[i].blocks && roomProps[i].searchLeft==0) continue;
             if (n >= MAX_SPRITES) break;
             list[n].d2 = Dist2(roomProps[i].x, roomProps[i].y, posX, posY);
             list[n].kind = 16;
@@ -239,19 +239,6 @@ int CollectSpriteEffectsAndExit(SpriteDrawEntry* list, int n) {
         list[n].idx = i;
         n++;
     }
-    /* v2.0 额外威胁（影子/盲螨/回响） */
-    for (int i = 0; i < ExtrasCount(); i++) {
-        const Extra* e = ExtraAt(i);
-        if (!e || !e->active) continue;
-        /* 影子在开灯时不渲染 */
-        if (e->kind == 0 && flashlightOn && battery > 0.0f) continue;
-        if (n >= MAX_SPRITES) break;
-        list[n].d2 = Dist2(e->x, e->y, posX, posY);
-        list[n].kind = 11;
-        list[n].idx = i;
-        n++;
-    }
-
     /* v2.9 剑气 */
     if (slashActive) {
         if (n < MAX_SPRITES) {

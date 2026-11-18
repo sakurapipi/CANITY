@@ -30,6 +30,7 @@ void BakeMonster(int id, int kind, int pose);
 void BakeHatch(int id, int frame);
 void BakeProp(int id, int kind);
 void BakeProtocolProps(void);
+void BakeStorySceneArt(void);
 void BakeUiPanel(int id, int hot);
 void BakeUiCursor(void);
 void BakeUiRow(void);

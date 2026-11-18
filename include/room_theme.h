@@ -17,6 +17,8 @@ const char* RoomThemeName(int theme,int chinese);
 void RoomThemeBind(void);
 void RoomThemeNotify(const char* text);
 const char* RoomThemeNotification(void);
+int RoomThemeGuideVisible(void);
+const char *RoomThemeNextStep(void);
 void RoomThemeTick(float dt);
 const char* RoomThemeInstruction(void);
 float RoomThemeNoiseMul(void);

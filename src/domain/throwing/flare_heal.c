@@ -42,27 +42,26 @@ void FlareHealTick(float dt) {
     if (s_floorFlareHealed >= FLARE_HEAL_FLOOR_BUDGET) return;
 
     /* 找最近的一根"仍在有效治疗窗口内"的落地照明棒 */
-    int best = -1;
+    float windowLeft=0;
     float bestD2 = FLARE_HEAL_RADIUS * FLARE_HEAL_RADIUS;
     for (int i = 0; i < MAX_THROWN; i++) {
         if (!thrown[i].active) continue;
-        if (thrown[i].type != 0) continue;             /* 0 = 照明棒 */
+        if (thrown[i].type != 0 || thrown[i].z > 0) continue;             /* 0 = 照明棒 */
         float elapsed = FLARE_LIFE_SECONDS - thrown[i].life;
         if (elapsed < 0.0f) continue;
         if (elapsed >= FLARE_HEAL_SECONDS) continue;   /* 只在前 8 秒有效 */
         float d2 = Dist2(thrown[i].x, thrown[i].y, posX, posY);
         if (d2 > bestD2) continue;
         bestD2 = d2;
-        best = i;
+        windowLeft=FLARE_HEAL_SECONDS-elapsed;
     }
-    if (best < 0) return;
-    (void)best;
+    if (windowLeft<=0 || dt<=0) return;
 
     /* 单根上限靠"窗口 + 速率"自然成立：1.5/s × 8s = 12，
        正好等于 FLARE_HEAL_CAP。这里再用总量封一次顶，防止帧率异常。 */
     float rate = FLARE_HEAL_RATE * (boosted ? 2.0f : 1.0f);
     float cap  = FLARE_HEAL_CAP  * (boosted ? 2.0f : 1.0f);
-    float want = rate * dt;
+    float want = rate * fminf(dt,windowLeft);
     if (want > cap) want = cap;
     float room = FLARE_HEAL_FLOOR_BUDGET - s_floorFlareHealed;
     if (want > room) want = room;

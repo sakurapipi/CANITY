@@ -140,25 +140,21 @@ int InventoryCycle(int item,int step) {
     if(from<0)return step<0?list[count-1]:list[0];
     return list[(from+count+step%count)%count];
 }
+static int *InventoryQuantity(int item) {
+    static int *const standard[]={&flares,&bottles,&smokeBombs,&gluePots,&echoBolts,&decoys,&phaseBeacons};
+    if ((unsigned)item<sizeof standard/sizeof standard[0]) return standard[item];
+    if (item>=7 && item<ITEM_SLOT_COUNT) return &tactical.inventory[item-7];
+    return NULL;
+}
 int InventoryCount(int item) {
-    switch (item) {
-    case 0:
-        return flares;
-    case 1:
-        return bottles;
-    case 2:
-        return smokeBombs;
-    case 3:
-        return gluePots;
-    case 4:
-        return echoBolts;
-    case 5:
-        return decoys;
-    case 6:
-        return phaseBeacons;
-    default:
-        return item >= 7 && item < 14 ? tactical.inventory[item - 7] : 0;
-    }
+    const int *count=InventoryQuantity(item);
+    return count?*count:0;
+}
+int InventoryConsume(int item) {
+    int *count=InventoryQuantity(item);
+    if (!count || *count<=0) return 0;
+    --*count;
+    return 1;
 }
 void InventoryCounts(int *out) {
     for (int i = 0; i < ITEM_SLOT_COUNT; i++)
@@ -213,6 +209,13 @@ int ToolCanOffer(int tool) {
         return 0;
     }
 }
+int TacticalQuickKeyConflicts(int key) {
+    if (key=='J') return 1;
+    for (int action=0;action<ACT_COUNT;action++)
+        if (key && g_bindings[action]==key) return 1;
+    return 0;
+}
+
 void TacticalResetRun(void) {
     TacticalResetJammer();
     memset(&tactical, 0, sizeof(tactical));
@@ -222,11 +225,8 @@ void TacticalResetRun(void) {
     tactical.quick[3] = 6;
     static const int defaultKeys[] = {0, 'U', 'O', 0};
     for (int slot = 0; slot < 4; slot++) {
-        int key = defaultKeys[slot];
-        for (int action = 0; action < ACT_COUNT; action++)
-            if (g_bindings[action] == key)
-                key = 0;
-        tactical.key[slot] = key;
+        int key=defaultKeys[slot];
+        tactical.key[slot]=TacticalQuickKeyConflicts(key)?0:key;
     }
 }
 void TacticalResetFloor(void) {

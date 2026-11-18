@@ -58,7 +58,6 @@
 #include "upgrade_run.h"
 #include "relics.h"
 #include "sprites.h"
-#include "extras.h"
 #include "gamepad.h"
 #include "lang.h"
 #include "entity.h"
@@ -1302,8 +1301,8 @@ int CanityKeyDown(int vk, int repeat) {
        藏身点内（空格/交互）与安全屋"休整服务"能进小游戏。 */
     if (currentState == STATE_PLAYING && hiddenIn >= 0 && CalibOutroActive() &&
         (strchr("QWER", vk) || vk == g_bindings[ACT_INTERACT])) return 0;
-    if (vk=='X' && currentState==STATE_PLAYING && roomTheme.active && roomTheme.inside &&
-        roomTheme.theme==HATCH_BOILER && !lockActive && !TacticalPanelOpen() &&
+    if (vk=='X' && currentState==STATE_PLAYING && RoomThemeGuideVisible() &&
+        !lockActive && !TacticalPanelOpen() &&
         !(isMapOpen && mapFullScreen)) {
         if (!repeat) { roomTheme.guideExpanded=!roomTheme.guideExpanded;uiDirty=1; }
         return 0;

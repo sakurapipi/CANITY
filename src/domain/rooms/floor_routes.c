@@ -65,6 +65,44 @@ int FloorRoutesWithinDeadEndLimit(int targetPercent){
     if(limit<2)limit=2;
     return floors>0 && ends<=limit;
 }
+/* Search straight and single-bend links, with a maximum of four wall cells. */
+static int FindBraid(int x,int y,int *best) {
+    int bestCount=5;
+    for (int dir=0;dir<4;dir++) {
+        int chain[4];
+        for (int straight=1;straight<bestCount;straight++) {
+            int nx=x+routeDX[dir]*straight,ny=y+routeDY[dir]*straight;
+            if (!Interior(nx,ny)) break;
+            if (!worldMap[ny][nx]) {
+                if (straight>1) {
+                    bestCount=straight-1;
+                    memcpy(best,chain,(size_t)bestCount*sizeof *best);
+                }
+                break;
+            }
+            if (ProtectedWall(nx,ny)) break;
+            chain[straight-1]=ny*MAP_WIDTH+nx;
+            for (int turn=0;turn<4;turn++) {
+                if ((turn<2)==(dir<2)) continue;
+                for (int bend=1;straight+bend<=bestCount;bend++) {
+                    int tx=nx+routeDX[turn]*bend,ty=ny+routeDY[turn]*bend;
+                    if (!Interior(tx,ty)) break;
+                    if (!worldMap[ty][tx]) {
+                        /* Skip reconnecting to the dead end's original neighbor. */
+                        if (abs(tx-x)+abs(ty-y)>1) {
+                            bestCount=straight+bend-1;
+                            memcpy(best,chain,(size_t)bestCount*sizeof *best);
+                        }
+                        break;
+                    }
+                    if (straight+bend>=bestCount || ProtectedWall(tx,ty)) break;
+                    chain[straight+bend-1]=ty*MAP_WIDTH+tx;
+                }
+            }
+        }
+    }
+    return bestCount<5?bestCount:0;
+}
 void FloorRoutesBraid(int targetPercent){
     if(targetPercent<0)targetPercent=0;
     if(targetPercent>10)targetPercent=10;
@@ -77,19 +115,9 @@ void FloorRoutesBraid(int targetPercent){
         int changed=0;
         for(int y=1;y<MAP_HEIGHT-1;y++)for(int x=1;x<MAP_WIDTH-1;x++){
             if(worldMap[y][x] || Neighbors(x,y)!=1 || ProtectedWall(x,y))continue;
-            int bestDirection=-1,bestLength=5;
-            for(int k=0;k<4;k++)for(int length=1;length<=4;length++){
-                int nx=x+routeDX[k]*length,ny=y+routeDY[k]*length;
-                if(!Interior(nx,ny))break;
-                if(!worldMap[ny][nx]){
-                    if(length>1 && length<bestLength){bestDirection=k;bestLength=length;}
-                    break;
-                }
-                if(ProtectedWall(nx,ny))break;
-            }
-            if(bestDirection<0)continue;
-            /* Commit the entire wall chain only after its far end is existing floor. */
-            for(int n=1;n<bestLength;n++)worldMap[y+routeDY[bestDirection]*n][x+routeDX[bestDirection]*n]=0;
+            int chain[4],length=FindBraid(x,y,chain);
+            if (!length) continue;
+            for (int i=0;i<length;i++) worldMap[chain[i]/MAP_WIDTH][chain[i]%MAP_WIDTH]=0;
             changed++;
         }
         if(!changed)return;

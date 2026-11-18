@@ -33,6 +33,7 @@ void EnsureThrowSelectedValid(void);
 void UpdateExplored(void);
 
 void BankSettle(int survived);
+void BankSettleWithBonus(int survived, int endingBonus);
 
 float GoldSearchAt(int level);
 

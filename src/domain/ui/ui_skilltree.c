@@ -266,8 +266,6 @@ void SkillResetView(void) {
     uiDirty=1;
 }
 
-void SkillPanBy(float dx, float dy) { skillView.x += dx; skillView.y += dy; uiDirty = 1; }
-
 void SkillZoomAt(float factor, int mx, int my) {
     float k0 = skillView.zoom, k2 = k0 * factor;
     if (k2 < SK_K_MIN) k2 = SK_K_MIN;

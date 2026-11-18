@@ -1,3 +1,4 @@
+#include "decoy_runtime.h"
 #include "protocol.h"
 #include "save.h"
 #include "evolution_art.h"
@@ -45,7 +46,6 @@
 #include "campaign.h"
 #include "lockbox.h"
 #include "mimic.h"
-#include "extras.h"
 #include "render.h"
 #include "bestiary.h"
 #include "lang.h"
@@ -299,7 +299,7 @@ static void ApplyLockboxes(void) {
  * 原来这段只在**房间生成之前**跑，房间门外挖出来的新死路没人处理。
  * ================================================================ */
 static void BraidDeadEnds(void) {
-    FloorRoutesBraid(3);
+    FloorRoutesBraid(collapsedLevel?3:1);
 }
 
 int ThemeRoomBudgetForLevel(int level,int training) {(void)level;return training?0:1;}
@@ -323,6 +323,7 @@ static void ApplyCampaignRules(int stage) {
 }
 
 static void ResetFloorSystems(void) {
+    DecoyResetFloor();
 
     /* ==================================================================
      * **崩塌标记的生命周期**
@@ -354,7 +355,7 @@ static void ResetFloorSystems(void) {
         ScavengerReset(); floorTime = 0.0f; hideStreak = 0;
     {  EchoMarksReset(); }   /* v2.4.62 换层清空回声标记 */
     { 
-      FlankBuild(); ResetSecondSpawn();
+      ResetSecondSpawn();
       {  CatchCountResetFloor(); }
     }   /* v2.4.94 封喉表 + 第二只计时 + 理智档位重置 */
     }
@@ -1187,9 +1188,6 @@ static void SpawnFloorPopulation(void) {
     /* Battery leech is retired; clear any previous-floor transient state. */
     ResetLeeches();
     /* v1.8：随机事件（第 2 层起，按概率） */
-    /* 先生成基础游荡怪，再应用 MIRROR 的额外刷怪；否则事件刚加的怪会被
-       后面的 ExtrasSpawnForLevel() 清空，玩家只能看到速度/理智修正。 */
-    ExtrasSpawnForLevel(currentLevel);
     levelEvent = -1;
     if (!protocolRun.story && currentLevel >= 2 && (rand() % 100) < EVENT_CHANCE)
         {   /* v6：按权重抽（血月/空投更常见，幸运更少见） */
@@ -1217,16 +1215,6 @@ static void SpawnFloorPopulation(void) {
         if (fx->batteryCapPct != 100 && fx->batteryCapPct > 0) {
             float cap = (float)BatteryMax() * (float)fx->batteryCapPct / 100.0f;
             if (battery > cap) battery = cap;
-        }
-
-        /* 额外游荡怪 */
-        if (fx->extraMonsters > 0) {
-            int added = 0;
-            for (int i = 0; i < EXTRA_MAX && added < fx->extraMonsters; i++) {
-                if (extras[i].active) continue;
-                ExtrasSpawnOne(i);
-                if (extras[i].active) added++;
-            }
         }
 
         /* 空投：额外给投掷物 */

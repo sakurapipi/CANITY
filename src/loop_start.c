@@ -58,7 +58,6 @@
 #include "upgrade_run.h"
 #include "relics.h"
 #include "sprites.h"
-#include "extras.h"
 #include "gamepad.h"
 #include "lang.h"
 #include "entity.h"
@@ -122,7 +121,7 @@ void ResetRunModeFlags(void) {
 }
 
 static void InitializeRunEconomy(void) {
-    ThreatTierConfirmPlan();TacticalResetRun();
+    ThreatTierConfirmPlan();TacticalResetRun();DecoyResetFloor();
     ThreatReset();BenchResetRun();RunUpgReset();counterKillUsed=0;
     if(protocolRun.story){
         carryGold=PROTOCOL_STORY_SUPPLIES;carryAtRunStart=0;throwSelected=0;runInProgress=1;runTime=0;
@@ -244,7 +243,6 @@ static void InitializeRunScene(void) {
     shortcutUsed = 0;
     modSanityMul = modSpeedMul = modBatteryMul = modShardMul = 1.0f;   /* v2.0 修复 */
     modNoiseMul = 1.0f;
-    ExtrasReset();                  /* v2.0 */
     pickMode = 0;
     weaponAtkCharge = 0.0f;
     slashActive = 0;

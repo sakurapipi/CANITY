@@ -15,7 +15,6 @@
 #include "spider.h"
 #include "warden.h"
 #include "mimic.h"
-#include "extras.h"
 #include "lang.h"
 
 extern int chargeBonus(float);
@@ -196,8 +195,6 @@ static int OtherActorNear(float x, float y, float radius) {
     if (WardenActive() && NearActor(x,y,WardenX(),WardenY(),radius)) return 1;
     for (int i=0;i<LEECH_MAX;i++)
         if (leeches[i].active && NearActor(x,y,leeches[i].x,leeches[i].y,radius)) return 1;
-    for (int i=0;i<EXTRA_MAX;i++)
-        if (extras[i].active && NearActor(x,y,extras[i].x,extras[i].y,radius)) return 1;
     for (int i=0;i<MIM_MAX;i++)
         if (mimics[i].state==MIM_ANGRY && NearActor(x,y,mimics[i].x,mimics[i].y,radius)) return 1;
     return 0;

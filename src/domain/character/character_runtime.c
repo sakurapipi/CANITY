@@ -60,14 +60,27 @@ const char *ProtocolRoleBio(int role) {
     };
     return LangTr(bio[role][0],bio[role][1]);
 }
+static float AbilityDuration(int role,unsigned nodes,int tuning) {
+    float seconds=role==0?5+!!(nodes&2u):role==3?3+!!(nodes&1u):5+2*!!(nodes&4u);
+    seconds+=.5f*tuning;
+    return role==2?seconds*1.5f:seconds;
+}
+
 const char *ProtocolRoleAbility(int role) {
+    if (role==2) {
+        static char detail[224];
+        snprintf(detail,sizeof detail,LangTr(
+            "Spend 6 sanity for a %.1fs moving sound lure. It travels up to 6 tiles. Cooldown 40s.",
+            "消耗6点理智，放出持续%.1f秒的移动声源，最远6格。冷却40秒。"),
+            (double)AbilityDuration(role,0,0));
+        return detail;
+    }
     static const char *const detail[][2]={
         {"Costs 4 sanity. Restores 20 stamina, then grants +15% sprint speed and 20% lower sprint drain for 5s. Cooldown 45s.",
          "消耗4点理智，恢复20点体力。随后5秒内冲刺速度增加15%，冲刺体力消耗降低20%。冷却45秒。"},
         {"Cranking yields 10% more charge. Spend 12 battery for a 5s field. The first entry slows each hunter to 60% speed for 2s. Cooldown 36s.",
          "手摇充电量增加10%。消耗12点电量，在前方展开5秒阻滞区。听声鬼和追光鬼首次进入时，移速降至60%，持续2秒。冷却36秒。"},
-        {"Spend 6 sanity to send out a moving sound lure for 5s. It travels up to 6 tiles. Cooldown 40s.",
-         "消耗6点理智，在前方放出持续5秒的移动声源，最远6格。冷却40秒。"},
+        {NULL,NULL},
         {"Spend 16 stamina. The first eligible contact hit within 3s can lose up to 40% of its damage. Cooldown 38s.",
          "消耗16点体力。3秒内首次符合条件的接触伤害最多减免40%。冷却38秒。"}
     };
@@ -160,8 +173,7 @@ void ProtocolActivate(void) {
     memset(affected,0,sizeof affected);
     memset(slowUntil,0,sizeof slowUntil);
     memset(lostSight,0,sizeof lostSight);redirected=0;
-    active=(role==0?5+Own(1):role==3?3+Own(0):5+2*Own(2))+.5f*tuning;
-    if (role==2) active*=1.5f;
+    active=AbilityDuration(role,protocolRun.nodes,tuning);
     protocolRun.used|=1u;
     TutorialRecordAction(TUTOR_PULSE);
     PlaySfx(role==3?SFX_IMPACT:role==2?SFX_ECHO:SFX_POWER,.45f);
@@ -359,6 +371,11 @@ int ProtocolNodeAvailable(int id) {
     return (unsigned)id<PROTOCOL_NODE_COUNT && !ProtocolPeacefulStory() && !dailyMode && ValidNext(protocolRun.nodes,id) && WalletCanPayRun(costs[id]);
 }
 const char *ProtocolNodeStatus(int id) {
+    if ((unsigned)id>=PROTOCOL_NODE_COUNT) return "";
+    if (ProtocolPeacefulStory()) return LangTr("Role upgrades are unavailable in the story prologue",
+                                              "剧情序章不开放角色专属升级");
+    if (dailyMode) return LangTr("Role upgrades are unavailable in the daily challenge",
+                                 "每日挑战不开放角色专属升级");
     if (Own(id)) return LangTr("Owned","已拥有");
     if ((id==1 || id==2) && (protocolRun.nodes&6u))
         return LangTr("Another S2 is selected","已选另一项二阶分支");
@@ -401,7 +418,7 @@ void ProtocolRestore(void) {
     protocolRun.role = (protocolRun.role >= 0 && protocolRun.role <= 3) ? protocolRun.role : 0;
     if (protocolRun.story<0 || protocolRun.story>8) protocolRun.story=0;
     protocolRun.flags &= PROTOCOL_STORY_FLAG_MASK;
-    if (protocolRun.story<1 || protocolRun.story>3) protocolRun.flags &= ~(PROTOCOL_MISSIONS|PROTOCOL_MISSION_SOLVED|PROTOCOL_EVAC_LAYOUT);
+    if (protocolRun.story<1 || protocolRun.story>3) protocolRun.flags &= ~(PROTOCOL_MISSIONS|PROTOCOL_MISSION_SOLVED|PROTOCOL_EVAC_LAYOUT|PROTOCOL_STORY_PAID);
     if (protocolRun.flags&PROTOCOL_MISSIONS) protocolRun.role=protocolRun.story;
     else if ((protocolRun.role && !(protocolProfile.unlocked & (1u<<protocolRun.role))) || dailyMode) protocolRun.role=0;
     protocolRun.cooldown=isfinite(protocolRun.cooldown)?fmaxf(0,fminf(45,protocolRun.cooldown)):0;
@@ -444,7 +461,7 @@ static const RoleNodeText roleNodes[4][PROTOCOL_NODE_COUNT]={
     },{
         {{"Long Recording","延长录音"},{"The double travels at 1.6 tiles/s up to 8 tiles","替身移速提高至每秒1.6格，最远8格"}},
         {{"Compressed Memory","记忆压缩"},{"Activation costs 4 sanity","发动消耗降至4理智"}},
-        {{"Extended Playback","延时回放"},{"The double lasts 10.5s before shop upgrades","强化后替身基础持续时间为10.5秒"}},
+        {{"Extended Playback","延时回放"},{NULL,NULL}},
         {{"Clear Signal","清晰信号"},{"The double emits stronger, more frequent sounds","替身发声更频繁，传播强度更高"}},
         {{"Amplified Echo","回声放大"},{"Increases signal strength to 75","声源强度提高至75"}},
         {{"False Light","拟态灯光"},{"The double also draws light hunters in line of sight","替身也会诱导视线内的追光鬼"}},
@@ -479,6 +496,13 @@ const char *ProtocolNodeName(int id) {
     return LangTr(node->name[0],node->name[1]);
 }
 const char *ProtocolNodeDetail(int id) {
+    if (protocolRun.role==2 && id==2) {
+        static char detail[128];
+        snprintf(detail,sizeof detail,LangTr("Double duration becomes %.1fs before shop upgrades",
+                                             "替身基础持续时间延长至%.1f秒"),
+                 (double)AbilityDuration(2,4u,0));
+        return detail;
+    }
     const RoleNodeText *node=&roleNodes[protocolRun.role][id];
     return LangTr(node->detail[0],node->detail[1]);
 }

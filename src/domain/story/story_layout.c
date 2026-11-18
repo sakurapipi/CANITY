@@ -89,6 +89,23 @@ static const Layout levels[]={
 
 const Cell *StorySite(int floor,int site) { return &levels[floor-1].site[site]; }
 int StoryMaterial(int floor) { return levels[floor-1].material; }
+int StoryDecorationAt(int floor,int chapter,int index,StoryDecoration *out) {
+    static const struct { int site,dx,dy; float height; } mounts[3][STORY_DECOR_PER_CHAPTER]={
+        {{SITE_ENTRY,1,-1,.85f},{SITE_POWER,-2,1,.65f},{SITE_RECORD,1,-1,.92f},{SITE_RETURN,1,1,.78f}},
+        {{SITE_ENTRY,1,-1,.92f},{SITE_RECORD,1,1,.97f},{SITE_POWER,2,-1,.76f},{SITE_RETURN,1,-1,.71f}},
+        {{SITE_ENTRY,1,-1,.88f},{SITE_SERVICE,-1,-1,.62f},{SITE_POWER,2,-1,.98f},{SITE_EXIT,1,1,.95f}}
+    };
+    if ((unsigned)(chapter-1)>=3 || (unsigned)index>=STORY_DECOR_PER_CHAPTER) return 0;
+    const Layout *layout=&levels[floor-1];
+    const int site=mounts[chapter-1][index].site;
+    int x=layout->site[site].x+mounts[chapter-1][index].dx;
+    int y=layout->site[site].y+mounts[chapter-1][index].dy;
+    if (worldMap[y][x] || PropBlocksAt(x,y)) return 0;
+    *out=(StoryDecoration){x+.5f,y+.5f,mounts[chapter-1][index].height,
+                           (chapter-1)*STORY_DECOR_PER_CHAPTER+index};
+    return 1;
+}
+
 static void Open(int x0,int y0,int x1,int y1) {
     if(x0>x1){int q=x0;x0=x1;x1=q;}
     if(y0>y1){int q=y0;y0=y1;y1=q;}
@@ -125,6 +142,7 @@ void StoryLayOut(int floor) {
         Open(24,22,31,22);Open(31,22,31,29);Open(29,27,33,29);
         Furnish(l,SITE_RETURN,ROOMPROP_CONSOLE);
     }
+    if (floor>=12) return; /* Role-specific scenery is drawn from story fixtures. */
     if (floor>8) {
         static const int fixtures[3][3]={
             {ROOMPROP_CONSOLE,ROOMPROP_THEME_FIRST,ROOMPROP_CRATES},
@@ -135,11 +153,6 @@ void StoryLayOut(int floor) {
         Furnish(l,SITE_ENTRY,f[0]);
         Furnish(l,SITE_RECORD,f[1]);
         Furnish(l,SITE_TERMINAL,f[2]);
-        if (floor>=12) {
-            Furnish(l,SITE_SERVICE,ROOMPROP_CONSOLE);
-            Furnish(l,SITE_RETURN,floor==13?ROOMPROP_SHELF:ROOMPROP_CRATES);
-            Furnish(l,SITE_REFUGE,floor==14?ROOMPROP_SHELF:ROOMPROP_CRATES);
-        }
         return;
     }
     Furnish(l,SITE_SERVICE,floor==2 || floor==3 || floor==5?ROOMPROP_SHELF:ROOMPROP_CONSOLE);

@@ -278,6 +278,7 @@ void SpritesInit(void) {
         memset(g_sprites[i].px, 0, sizeof(unsigned int) * SPR_W * SPR_H);
     }
     BakeProtocolProps();
+    BakeStorySceneArt();
     BakeWrenchStrike();
     BakeWrench();
     /* 2026-11-05：BakePistol() / BakeSigil() 已删除 */

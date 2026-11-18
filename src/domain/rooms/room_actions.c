@@ -125,7 +125,7 @@ int RoomThemeCanActivate(int idx,char* reason,int cap) {
         if(stamina>=40 && RoomThemeSwapTarget()>=0)return 1;
         return Missing(reason,cap,Tr("NEED 40 STAMINA AND A SAFE TARGET 6-28 CELLS AWAY", "需要40体力和六至二十八格内的安全换位目标"));
     case HATCH_FLESH:
-        if(flares+bottles+smokeBombs+gluePots+echoBolts+decoys>0)return 1;
+        for (int item=0;item<ITEM_SLOT_COUNT;item++) if (InventoryCount(item)>0) return 1;
         return Missing(reason,cap,Tr("NEED ONE THROWABLE; PAID ONLY ON ACTIVATION", "需要一个投掷物，启动时才会消耗"));
     default:return 0;
     }
@@ -167,8 +167,7 @@ int RoomThemeActivate(int idx) {
         if(!WalletSpendRun(RoomThemeGoldCost(hatch->kind,carryGold)))return 0;
         RoomThemeSetMadness(1);MakeNoise(hatch->x,hatch->y,24);break;
     case HATCH_FLESH:
-        if(flares>0)flares--;else if(bottles>0)bottles--;else if(smokeBombs>0)smokeBombs--;
-        else if(gluePots>0)gluePots--;else if(echoBolts>0)echoBolts--;else decoys--;
+        for (int item=0;item<ITEM_SLOT_COUNT;item++) if (InventoryConsume(item)) break;
         MonsterStunAll(20);RoomThemeStartEvent(6,20);break;
     default:return 0;
     }

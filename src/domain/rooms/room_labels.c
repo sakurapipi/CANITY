@@ -19,7 +19,7 @@ static const char* roomControlEn[7][2]={
         {"SELECT: 20 BATTERY -> UP TO 35 SANITY", "SELECT: 20 SANITY -> UP TO 50 BATTERY (25 SAN REQUIRED)"},
         {"CALIBRATE LEFT SWAP RELAY", "CALIBRATE RIGHT SWAP RELAY"},
         {"ARM IRREVERSIBLE COVENANT: 35% CARRIED GOLD (MIN 80), LOOT +25%, NOISE +35%", "CANCEL COVENANT; NO COST UNTIL THE CENTRAL DEVICE OPENS"},
-        {"WIND THE MECHANICAL HEART", "PREPARE OFFERING: 1 THROWABLE / 20s STILLNESS / FINAL SCREAM"}
+        {"WIND THE MECHANICAL HEART", "ARM THE TRAY; THE CENTER CONSUMES ONE TOOL"}
     };
 static const char* roomControlZh[7][2]={
         {"校准发声管，消耗由中央装置统一结算", "校准回声管，完成后可启动中央装置"},
@@ -28,26 +28,26 @@ static const char* roomControlZh[7][2]={
         {"选择：20电量换最多35理智", "选择：20理智换最多50电量，需保有25理智"},
         {"校准左侧换位装置", "校准右侧换位装置"},
         {"确认不可撤销的契约：携带金币35%（至少80），收益+25%、噪音+35%", "取消确认，中央装置打开前不会扣费"},
-        {"为机械心脏上弦", "准备一个投掷物，静止20秒，结束时发出尖啸"}
+        {"为机械心脏上弦", "开启献祭托盘，中央装置启动时扣除一个道具"}
     };
 
 static const char* roomEffectEn[7]={
         "20 BATTERY / 45s: SOUND DECOY ATTRACTS HUNTERS WITHIN 28 CELLS, EVEN AFTER YOU LEAVE.",
         "25% CARRIED GOLD (MIN 40): VAULT CHESTS RETURN 80-120% OF STAKE IN TOTAL. 40% LOSS / 20% EVEN / 40% PROFIT.",
         "25 BATTERY / REVEAL ROUTES 35s / FIRST 15s: MINIMAP USES NO BATTERY. THE TOWER IS LOUD.",
-        "SELECT AN EXCHANGE AT EITHER SIDE POD; ACTIVATE HERE TO PAY ONCE.",
+        "CHOOSE ONE SIDE POD, THEN ACTIVATE THE CENTER TO EXCHANGE RESOURCES.",
         "40 STAMINA: SWAP WITH THE SELECTED SAFE HUNTER; STAGGER 5s / 6-28 CELLS / ONCE PER FLOOR. NO CAMERA ROTATION.",
         "IRREVERSIBLE THIS RUN: 35% CARRIED GOLD (MIN 80) / POLLUTION / LOOT +25% / NOISE +35%.",
-        "1 THROWABLE: HUNTERS STOP FOR 20s; THE HEART THEN SCREAMS AND DRAWS ATTENTION."
+        "1 THROWABLE: SOUND AND LIGHT HUNTERS STOP FOR 20s; THE HEART THEN SCREAMS AND DRAWS ATTENTION."
     };
 static const char* roomEffectZh[7]={
         "20电量：井口持续45秒诱导二十八格内猎手；离开后仍有效，替你制造逃离窗口。",
         "携带金币25%（至少40）：独立宝箱总回款为本金80%至120%；四成亏损、两成回本、四成盈利。",
         "25电量：35秒揭示路线，前15秒小地图免耗电；电塔巨响会暴露位置。",
-        "在两侧装置选择转换方向，在此启动并一次结算。",
+        "在两侧装置二选一，再启动中央装置完成资源转换。",
         "40体力：与安全目标交换位置，使其硬直5秒，六至二十八格，每层一次，不改变视角。",
         "本局不可撤销：携带金币35%（至少80），持续精神污染、搜刮+25%、噪音+35%。",
-        "一个投掷物：猎手静止20秒，结束时心脏尖啸引来注意。"
+        "一个投掷物：听声鬼和追光鬼停滞20秒，结束时心脏尖啸引来注意。"
     };
 
 const char* RoomThemeGuideEffect(int theme){
@@ -80,6 +80,21 @@ const char* RoomThemeEffectLine(int index) {
         snprintf(dynamic,sizeof(dynamic),Tr("GRID LINK / MINIMAP FREE %.1fs / FLASHLIGHT STILL DRAINS", "电网链路 / 小地图免耗电剩余%.1f秒 / 手电正常耗电"),(double)RoomThemeFreeMapRemaining());
         return dynamic;
     }
+    if (kind==HATCH_POWER && roomTheme.spent && RoomThemeMapRevealed()) {
+        snprintf(dynamic,sizeof dynamic,Tr("FULL MAP REVEALED %.1fs / NORMAL BATTERY DRAIN",
+                                           "全图揭示剩余%.1f秒 / 小地图正常耗电"),
+                 (double)RoomThemeEventRemaining());
+        return dynamic;
+    }
+    if (kind==HATCH_FLESH && roomTheme.spent && RoomThemeEventKind()==HATCH_FLESH) {
+        snprintf(dynamic,sizeof dynamic,Tr("HUNTERS STALLED %.1fs / SCREAM ON EXPIRY",
+                                           "猎手停滞剩余%.1f秒 / 结束时会发出尖啸"),
+                 (double)RoomThemeEventRemaining());
+        return dynamic;
+    }
+    if (kind==HATCH_HELL && RoomThemeMadness())
+        return Tr("COVENANT ACTIVE FOR THE RUN / LOOT +25% / NOISE +35%",
+                  "本局契约已生效 / 搜刮+25% / 噪音+35%");
     if(kind==HATCH_STORAGE && roomTheme.spent) {
         int stake=0,total=0;
         if(RoomThemeVaultResult(&stake,&total)) {
@@ -123,13 +138,13 @@ void RoomThemeGuideStep(int step,const char **label,float *progress,int *alterna
         {"Tune transmitter","Tune return pipe"},{"Authorize stake","Cancel authorization"},
         {"Charge left tower","Charge right tower"},{"Battery to sanity","Sanity to battery"},
         {"Calibrate left relay","Calibrate right relay"},{"Arm the covenant","Cancel authorization"},
-        {"Wind the heart","Prepare one throwable"}
+        {"Wind the heart","Arm the offering tray"}
     };
     static const char *const zh[7][2]={
         {"校准发声管","校准回声管"},{"确认投资","取消确认"},
         {"左塔充电","右塔充电"},{"电量换理智","理智换电量"},
         {"校准左侧","校准右侧"},{"确认契约","取消确认"},
-        {"为心脏上弦","准备投掷物"}
+        {"为心脏上弦","开启献祭托盘"}
     };
     int theme=roomTheme.theme;
     *alternate=0;*progress=0;*label="";
@@ -148,4 +163,19 @@ void RoomThemeGuideStep(int step,const char **label,float *progress,int *alterna
     if (!*progress && holdingNow && hoverKind==3 && hoverIndex>=0 && hoverIndex<roomPropCount &&
         roomProps[hoverIndex].kind==ROOMPROP_CONTROL_FIRST+theme*2+step)
         *progress=fminf(.98f,holdTimer/(SEARCH_TIME*RunSearchTimeMul()*BenchSearchTimeMul()));
+}
+
+const char *RoomThemeNextStep(void) {
+    if (roomTheme.spent) return Tr("Activated","已启动");
+    if (roomTheme.theme==HATCH_WARD && !roomTheme.choice)
+        return Tr("Choose either side pod","任选一侧转换舱");
+    if (hatches[0].state==HATCH_OPENING) return Tr("Starting the center","中央装置启动中");
+    for (int step=0;step<3;step++) {
+        const char *label;
+        float progress;
+        int alternate;
+        RoomThemeGuideStep(step,&label,&progress,&alternate);
+        if (!alternate && progress<1.f) return label;
+    }
+    return Tr("Start central device","启动中央装置");
 }

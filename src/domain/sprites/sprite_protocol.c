@@ -242,8 +242,8 @@ static void BakeMissionStation(int sprite,int on) {
 static void BakeChapterProp(int base,int chapter,int on) {
     static const unsigned skin[][3]={
         {0x9E7750,0x443127,0xF7BA77},
-        {0x728C92,0x273941,0xA9DDD8},
-        {0x828663,0x383C2C,0xDAD986}
+        {0x81699d,0x2e2044,0xd6acff},
+        {0xb18b47,0x41351e,0xffd45e}
     };
     const unsigned *p=skin[chapter];
     unsigned lit=p[2],dark=p[1],metal=p[0],signal=on?lit:0x776450;

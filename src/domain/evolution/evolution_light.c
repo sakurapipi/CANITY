@@ -137,8 +137,8 @@ int EvolutionLightUpdate(Monster *actor, int *has, int source, float *tx, float 
             EvolutionPermit(EVO_LIGHT + index, actor->x, actor->y, 2.7f)) {
             a->flags |= 1u;
             a->phase = 1;
-            a->aux = .9f;
-            a->signal = .9f;
+            a->aux = .4f;
+            a->signal = .4f;
             AudioPlayWorld(SFX_GLASS, actor->x, actor->y, .7f, 14, 3);
             return 1;
         }

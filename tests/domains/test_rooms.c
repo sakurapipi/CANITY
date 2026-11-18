@@ -104,6 +104,15 @@ static void route_repair_cases(void){
     worldMap[1][12]=0;
     CHECK(FloorRoutesConnect(6),"disconnected exterior corridor is joined within its wall budget");
     for(int x=6;x<12;x++)CHECK(!worldMap[1][x],"reconnection has no missing middle segment");
+    for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)worldMap[y][x]=1;
+    for(int x=3;x<=9;x++)worldMap[5][x]=0;
+    for(int y=5;y<=9;y++)worldMap[y][3]=0;
+    for(int x=3;x<=8;x++)worldMap[9][x]=0;
+    FloorRoutesBraid(0);
+    int openBelow=0;
+    for (int y=6;y<9;y++) for (int x=7;x<=9;x++) openBelow+=!worldMap[y][x];
+    CHECK(openBelow>=3 && FloorRoutesWithinDeadEndLimit(0),
+          "offset corridors acquire a bounded link without leaving an isolated stub");
     memcpy(worldMap,previous,sizeof(previous));memcpy(cellMeta,previousMeta,sizeof(previousMeta));roomCount=previousRooms;
 }
 static void vault_population_budget(void) {

@@ -7,14 +7,14 @@
 #include "audio.h"
 #include "tactical_tools.h"
 #include "sound_event.h"
-#include "sound_propagation.h"
-#include "extras.h"
 #include "entity.h"
 #include "spider.h"
 #include "warden.h"
 #include "mimic.h"
 
 Decoy decoysArr[MAX_DECOY];
+
+void DecoyResetFloor(void) { memset(decoysArr,0,sizeof decoysArr); }
 
 void PlaceDecoy(float x, float y) {
     int slot = -1;
@@ -96,14 +96,7 @@ void DecoyTick(float dt) {
                     .strength=strength,.decay=5,.ttl=DECOY_SHOUT_EVERY+.35f,
                     .maxRadius=DECOY_SHOUT_R,.sourceEntityId=-1};
                 SoundEmit(&ev);
-                SoundPropBuild(ev.x,ev.y);
-                for (int j=0;j<EXTRA_MAX;j++) {
-                    Extra *actor=&extras[j];
-                    if (!actor->active || actor->kind!=1 ||
-                        Dist2(actor->x,actor->y,ev.x,ev.y)>=DECOY_SHOUT_R*DECOY_SHOUT_R ||
-                        SoundPropCostAt(actor->x,actor->y)==PROP_UNREACHABLE) continue;
-                    actor->hasTarget=1;actor->tx=ev.x;actor->ty=ev.y;actor->timer=0;
-                }
+
             }
             AudioPlayWorld(SFX_DECOY,decoysArr[i].x,decoysArr[i].y,.70f,DECOY_SHOUT_R,3);
         }

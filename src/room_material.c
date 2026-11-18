@@ -60,24 +60,35 @@ unsigned RoomMaterialSample(int theme,int x,int y,int surface){
 }
 
 unsigned StoryMaterialSample(int chapter,int x,int y,int surface) {
-    static const int palette[3][3][3]={
-        {{109,91,72},{82,68,54},{48,40,33}},   /* Copper switching works. */
-        {{102,120,123},{71,87,90},{41,52,56}}, /* Blue-grey acoustic gallery. */
-        {{111,112,83},{80,83,57},{47,50,37}}   /* Olive spillway hardware. */
+    static const unsigned palette[3][3]={
+        {0x76634d,0x524433,0x302a24},
+        {0x594474,0x3a2b54,0x2c213e},
+        {0x78602f,0x54472b,0x383023}
     };
-    const int *base=palette[chapter-1][surface];
+    if ((unsigned)(chapter-1)>=3 || (unsigned)surface>=3) return 0;
+    unsigned color=palette[chapter-1][surface];
     x&=63;y&=63;
     int joint,detail;
     if (chapter==1) {
         joint=surface==0?x%32<2:(x%32<2 || y%32<2);
         detail=surface==1?(y==24 || y==26) && x%16<10:x%32==4 && y%32==4;
+        if (detail) return 0xa77c4e;
     } else if (chapter==2) {
-        joint=surface==0?x%16<2:(x%32<2 || y%32<2);
-        detail=surface==0?x%8==4 && y%8==4:x%32==4 && y%32==4;
+        joint=surface==0?x%32<2:(x%32<2 || y%32<2);
+        if (surface==0 && x>=8 && x<=56) {
+            if ((y>=16 && y<=18) || (y>=36 && y<=38 && x<42)) return 0x916bcb;
+            if (y>=24 && y<=31 && x%12<6) return 0x684f92;
+        }
+        if (surface==1 && ((x==10 && y%32<25) || (y==22 && x%16<10))) return 0x805eb9;
+        detail=x%32==4 && y%32==4;
     } else {
-        joint=surface==0?y%32<2:((x+(y/32)*16)%32<2 || y%32<2);
-        detail=surface==0?(x%16)<8 && (y==26 || y==28):(x+y)%16<2 && y%32<8;
+        joint=x%32<2 || y%32<2;
+        int hazard=surface==0?(y>=39 && y<49):surface==1?(x>=4 && x<12):0;
+        if (hazard) return (x+y)%16<8?0xcaa034:0x292622;
+        if (surface==0 && y>=7 && y<11 && x>=8 && x<=56) return 0x9e7426;
+        detail=x%32==4 && y%32==4;
     }
-    int delta=joint?-18:detail?12:(int)(((unsigned)x*29u+(unsigned)y*17u)%5u)-2;
-    return (unsigned)((base[0]+delta)<<16 | (base[1]+delta)<<8 | (base[2]+delta));
+    int delta=joint?-17:detail?12:(int)(((unsigned)x*29u+(unsigned)y*17u)%5u)-2;
+    int r=(int)((color>>16)&255)+delta,g=(int)((color>>8)&255)+delta,b=(int)(color&255)+delta;
+    return (unsigned)(r<<16|g<<8|b);
 }

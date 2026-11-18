@@ -18,7 +18,7 @@ const EventDef kEvents[] = {
         "Monsters move 20% faster. Gold +50%.",
         "怪物速度 +20%，金币 +50%。",
         12, 1500,
-        { 1.20f, 1.00f, NONE, NONE, 1.50f, NONE, NONE, 0, P100 }
+        { 1.20f, 1.00f, NONE, NONE, 1.50f, NONE, NONE, P100 }
     },
     /* ---- EV_BLACKOUT 停电：电量吃紧，视野变差 ---- */
     {
@@ -26,7 +26,7 @@ const EventDef kEvents[] = {
         "Battery drains 80% faster. Battery cap halved.",
         "耗电 +80%，本层电池上限砍半。",
         12, 1000,
-        { NONE, NONE, 1.80f, NONE, NONE, NONE, NONE, 0, 50 }
+        { NONE, NONE, 1.80f, NONE, NONE, NONE, NONE, 50 }
     },
     /* ---- EV_SILENCE 死寂：你更安静，但它们更灵敏 ---- */
     {
@@ -34,7 +34,7 @@ const EventDef kEvents[] = {
         "Your noise -60%, but monster hearing +40%.",
         "你的噪音 -60%，但怪物听觉 +40%。",
         10, 800,
-        { NONE, 1.40f, NONE, NONE, NONE, 0.40f, NONE, 0, P100 }
+        { NONE, 1.40f, NONE, NONE, NONE, 0.40f, NONE, P100 }
     },
     /* ---- EV_SUPPLY 空投：纯正面，金币和道具都多 ---- */
     {
@@ -42,7 +42,7 @@ const EventDef kEvents[] = {
         "Gold +30%. Extra throwables this floor.",
         "金币 +30%，本层多给投掷物。",
         12, 600,
-        { NONE, NONE, NONE, NONE, 1.30f, NONE, NONE, 0, P100 }
+        { NONE, NONE, NONE, NONE, 1.30f, NONE, NONE, P100 }
     },
     /* ---- EV_FLOOD 洪水：走不快，声音传得远 ---- */
     {
@@ -53,7 +53,7 @@ const EventDef kEvents[] = {
         "You are 40% louder on the wet floor.",
         "地板积水：噪音 +40%。",
         10, 1200,
-        { NONE, NONE, NONE, NONE, NONE, 1.40f, NONE, 0, P100 }
+        { NONE, NONE, NONE, NONE, NONE, 1.40f, NONE, P100 }
     },
     /* ---- EV_WHISPER 低语：拿理智换钱 ---- */
     {
@@ -61,18 +61,15 @@ const EventDef kEvents[] = {
         "Sanity drains 50% faster. Gold +40%.",
         "理智流失 +50%，金币 +40%。",
         10, 1300,
-        { NONE, NONE, NONE, 1.50f, 1.40f, NONE, NONE, 0, P100 }
+        { NONE, NONE, NONE, 1.50f, 1.40f, NONE, NONE, P100 }
     },
-    /* ---- EV_MIRROR 镜像：多刷三只游荡怪 ---- */
+    /* ---- EV_MIRROR 镜像：加快怪物和理智流失 ---- */
     {
         "MIRROR", "镜像", "MIRROR",
-        /* v7 第 60 轮：**删掉"3 只游荡怪"**
-           ExtrasSpawnOne() 是空函数（v7 删游荡怪后没接回来），
-           而 monsterSpeedMul=1.10 / sanityDrainMul=1.10 是真的。 */
         "Monsters 10% faster. Sanity drains 10% faster.",
         "本层怪速 +10%，理智流失 +10%。",
         8, 1600,
-        { 1.10f, NONE, NONE, 1.10f, NONE, NONE, NONE, 3, P100 }
+        { 1.10f, NONE, NONE, 1.10f, NONE, NONE, NONE, P100 }
     },
     /* ---- EV_HEAT 热浪：电池难受，怪略快 ---- */
     {
@@ -80,7 +77,7 @@ const EventDef kEvents[] = {
         "Battery cap -30%. Monsters 10% faster.",
         "电池上限 -30%，怪速 +10%。",
         10, 1100,
-        { 1.10f, NONE, NONE, NONE, NONE, NONE, NONE, 0, 70 }
+        { 1.10f, NONE, NONE, NONE, NONE, NONE, NONE, 70 }
     },
     /* ---- EV_FOG 浓雾：不容易被听见（"看不远"那条没实现，描述已删） ---- */
     {
@@ -88,7 +85,7 @@ const EventDef kEvents[] = {
         "Monster hearing -20% this floor.",
         "本层怪物听觉 -20%。",
         10, 1400,
-        { NONE, 0.80f, NONE, NONE, NONE, NONE, NONE, 0, P100 }
+        { NONE, 0.80f, NONE, NONE, NONE, NONE, NONE, P100 }
     },
     /* ---- EV_LUCKY 幸运：纯正面，低权重 ---- */
     {
@@ -96,7 +93,7 @@ const EventDef kEvents[] = {
         "Gold doubled this floor.",
         "本层金币翻倍。",
         8, 300,
-        { NONE, NONE, NONE, NONE, 2.00f, NONE, NONE, 0, P100 }
+        { NONE, NONE, NONE, NONE, 2.00f, NONE, NONE, P100 }
     },
 };
 
@@ -104,7 +101,7 @@ typedef char kEvents_count_check[(sizeof(kEvents)/sizeof(kEvents[0])==EVENT_COUN
 
 /* 越界时用的"无效果" */
 static const EventEffect kNoEffect = {
-    NONE, NONE, NONE, NONE, NONE, NONE, NONE, 0, P100
+    NONE, NONE, NONE, NONE, NONE, NONE, NONE, P100
 };
 
 /* v7：给 entity.c 用的取值函数（避免把结构体类型暴露出去） */

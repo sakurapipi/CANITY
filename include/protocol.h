@@ -7,7 +7,8 @@
 #define PROTOCOL_MISSIONS 128u
 #define PROTOCOL_MISSION_SOLVED 256u
 #define PROTOCOL_EVAC_LAYOUT 512u
-#define PROTOCOL_STORY_FLAG_MASK 1023u
+#define PROTOCOL_STORY_PAID 1024u
+#define PROTOCOL_STORY_FLAG_MASK 2047u
 #define PROTOCOL_ROLE_RANK_SHIFT 8
 #define SAVE_RUN_PLAY_DEAD_USED (1u<<4)
 #define SAVE_RUN_SHORTCUT_USED (1u<<5)
@@ -84,6 +85,7 @@ int ProtocolTrialVisual(float *x,float *y,float *signal);
 int ProtocolFieldContains(float x,float y);
 void ProtocolReleaseStoryNodes(void);
 int ProtocolStoryPayout(void);
+int ProtocolClaimLegacyEndingBonus(void);
 int ProtocolTier(int tier);
 int ProtocolFloorMaterial(void);
 float ProtocolMonsterThreat(float threat);

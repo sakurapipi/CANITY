@@ -28,7 +28,6 @@ typedef struct {
     float goldMul;           /* 金币收益倍率 */
     float noiseMul;          /* 玩家噪音倍率 */
     float fogMul;            /* 视野倍率（未接） */
-    int   extraMonsters;     /* 额外刷几只游荡怪 */
     int   batteryCapPct;     /* 本层电池上限百分比，100 = 不变 */
 } EventEffect;
 

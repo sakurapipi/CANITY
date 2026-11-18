@@ -76,6 +76,7 @@ static void RenderFloorBandLegacy246(int y0, int y1) {
 
                 if(safeRoom.active)color=SafetyFloorMarker(color,fx,fy,safeRoom.x,safeRoom.y,1);
                 if (!storyMaterialActive) color=SafetyFloorMarker(color,fx,fy,exitX,exitY,breakerOpen);
+                if (storyFloorTrailActive) color=StoryFloorMark(color,cX,cY,fx,fy);
 
                 /* 雾 + 光球的暖光（简化：只按距离加暖色） */
                 if (fogR | fogG | fogB) {

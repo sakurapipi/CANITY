@@ -204,7 +204,7 @@ body.touchControls #saveToggle{display:block}body.touchControls #entry.saveopen{
     <button data-act="FLASHLIGHT">手电</button>
     <button data-act="CRANK">摇电</button>
     <button data-act="PAUSE">菜单</button>
-    <button data-vk="74">背包</button><button data-vk="84">补给</button><button data-vk="81">相位</button><button data-act="ABILITY">角色能力</button><button data-act="SPRINT">冲刺</button>
+    <button id="roomGuideToggle" data-vk="88" style="display:none">房间引导</button><button data-vk="74">背包</button><button data-vk="84">补给</button><button data-vk="81">相位</button><button data-act="ABILITY">角色能力</button><button data-act="SPRINT">冲刺</button>
   </div>
 </div>
 
@@ -778,8 +778,9 @@ body.touchControls #saveToggle{display:block}body.touchControls #entry.saveopen{
       var flags=Module._CanityUiFlags();
       document.getElementById('treeZoom').style.display=(flags&8)?'flex':'none';
       var closeMap=document.getElementById('mapClose');if(closeMap)closeMap.style.display=Module._CanityWebInputState && Module._CanityWebInputState(0)===3?'inline-block':'none';
-      if(previous!==flags){
-        clearInput();previous=flags;
+      document.getElementById('roomGuideToggle').style.display=(flags&17)===17?'inline-block':'none';
+      if(previous!==(flags&15)){
+        clearInput();previous=flags&15;
         if(!(flags&1)){
           Module.requestLock=false;
           if(document.pointerLockElement && document.exitPointerLock){try{document.exitPointerLock();}catch(ignored){}}

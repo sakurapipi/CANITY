@@ -188,11 +188,6 @@ void CloseLockOverlay(void) {
 
 /* v3.0：上游这个入口和我们的 LockOpenFor 是**两套重复逻辑**（死代码，零调用点）。
    保留符号但改成委托，避免以后有人调它时拿到不一致的行为。 */
-void OpenLockOverlay(int index) {
-    if (index < 0 || index >= MAX_CONTAINERS) return;
-    LockOpenFor(index, g_lockType_[index]);
-}
-
 /* 开锁成功：三种锁型共用这一段 */
 static void LockUnlock(int idx) {
     if (idx < 0 || idx >= MAX_CONTAINERS) return;
