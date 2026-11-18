@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "evolution_save.h"
 #include "threat_tier.h"
 #include "evolution_art.h"
@@ -711,6 +712,7 @@ static void SaveSettingsOnly(void) {
         tmp.hasRun = 0;
     }
     CopyDisplaySettings(&tmp);
+    tmp.protocolProfileSave=protocolProfile;
     /* 训练场不写进度，但「通关过」和「无尽已解锁」是跨局记录，
        不能被一次只写设置的存档覆盖掉。 */
     tmp.gameClearedSave = gameCleared;
@@ -741,6 +743,12 @@ static void SaveSettingsOnly(void) {
 
 /* 训练/教程退出后，菜单要知道「真正的存档里还有没有一局」。
    直接读 g_save.hasRun，而不是沿用训练局强行置上的 hasSave。 */
+int SavePendingFloor(void) { return g_save.level; }
+int SavePendingStory(void) { return g_save.protocolRunSave.story; }
+int SavePendingRole(void) {
+    int role=g_save.protocolRunSave.role;
+    return role>=0 && role<4?role:0;
+}
 int SaveHasPendingRun(void) {
     return g_save.hasRun ? 1 : 0;
 }
@@ -784,6 +792,13 @@ static void CaptureSaveWorld(void) {
     g_save.trainingGraduated=graduated;g_save.runMadness=RoomThemeMadness();
     g_save.roomEventSpent=roomTheme.spent;
     g_save.restCooldownSave=ShopRestCooldown();g_save.refreshCooldownSave=ShopRefreshCooldown();
+    g_save.protocolProfileSave=protocolProfile;
+    g_save.protocolRunSave=protocolRun;
+    if (playDeadUsed) g_save.protocolRunSave.used|=SAVE_RUN_PLAY_DEAD_USED;
+    if (shortcutUsed) g_save.protocolRunSave.used|=SAVE_RUN_SHORTCUT_USED;
+    /* The high bits extend the existing wire field without moving v46 data. */
+    g_save.protocolRunSave.used |= (unsigned)RunUpgLevel(RUN_UPG_ROLE)<<PROTOCOL_ROLE_RANK_SHIFT;
+    g_save.protocolRunSave.threatRaw=ThreatRaw();
     g_save.commonRuntimeMask=HushRuntimeMask();g_save.commonRuntimeFloor=HushRuntimeFloor();
     g_save.magic = SAVE_MAGIC;
     g_save.version = SAVE_VERSION;
@@ -1118,8 +1133,32 @@ static void RestoreEvolutionChunks(int tierOnly) {
     SpritesSetEvolutionTier(CurrentRunThreatTier());
 }
 
+static int captureStoryEntry;
+
+static int StoryCheckpointIndex(void) {
+    for (int i=0;i<s_carryCount;i++) if (s_carry[i].id==SC_PROTOCOL_CHECKPOINT) return i;
+    return -1;
+}
+static int CaptureStoryEntry(void) {
+    int i=StoryCheckpointIndex();
+    unsigned char *bytes=malloc(sizeof g_save);
+    if (!bytes) return 0;
+    if (i<0) {
+        int legacy=0;
+        for (int n=0;n<s_carryCount;n++) legacy|=s_carry[n].id==SC_LEGACY29;
+        if (s_carryCount+!legacy>=SAVE_CARRY_MAX) {free(bytes);return 0;}
+        i=s_carryCount++;
+    } else free(s_carry[i].data);
+    memcpy(bytes,&g_save,sizeof g_save);
+    s_carry[i]=(SaveCarryChunk){SC_PROTOCOL_CHECKPOINT,1,sizeof g_save,bytes};
+    return 1;
+}
+
 static void WriteSaveCandidates(void) {
     if(!CaptureEvolutionChunks()){g_saveState=2;g_saveError=SaveEvolutionSchemaSupported()?SAVE_ERR_CAPACITY:SAVE_ERR_PAYLOAD;return;}
+    if (captureStoryEntry && !CaptureStoryEntry()) {
+        g_saveState=2;g_saveError=SAVE_ERR_CAPACITY;return;
+    }
     /* 逐个候选试写，第一个成功的就用它 */
     char p[MAX_PATH];
     int firstErr = 0;
@@ -1161,7 +1200,7 @@ static void WriteSaveCandidates(void) {
 void SaveGame(void) {
     /* 训练场不是正式进度：写进去的话 Continue 会读出一张走廊图。
        但设置项仍然要落盘，否则在教程里改完设置重开就白改了。 */
-    if (trainingMode) {
+    if (trainingMode || (currentState==STATE_GAMEOVER && protocolRun.story && !gameWon)) {
         SaveSettingsOnly();
         return;
     }
@@ -1209,7 +1248,7 @@ void SaveGame(void) {
     runSpans[1].off = offsetof(SaveBlob, isEndlessRunSaved);
     runSpans[1].len = sizeof(int);
     runSpans[3].off=offsetof(SaveBlob,roomEventSpent);
-    runSpans[3].len=sizeof(SaveBlob)-runSpans[3].off;
+    runSpans[3].len=offsetof(SaveBlob,protocolProfileSave)-runSpans[3].off;
     runSpans[2].off = offsetof(SaveBlob, roomSeed);
     /* 第 6 轮：末尾多了 rngVersion —— 它也是"运行态"（读档重放要用），
        所以这一段必须把它包进来，否则回主菜单存盘会把它清成 0（旧序列），
@@ -1249,6 +1288,38 @@ void SaveGame(void) {
     }
 
     WriteSaveCandidates();
+}
+
+void SaveStoryEntry(void) {
+    captureStoryEntry=1;
+    SaveGame();
+    captureStoryEntry=0;
+}
+
+int SaveRetryStory(void) {
+    int i=StoryCheckpointIndex();
+    if (i<0 || s_carry[i].schema!=1 || s_carry[i].size!=sizeof g_save) return 0;
+    SaveBlob entry;
+    memcpy(&entry,s_carry[i].data,sizeof entry);
+    if (entry.magic!=SAVE_MAGIC || entry.version!=SAVE_VERSION || !entry.hasRun ||
+        entry.saveSlot!=g_saveSlot || entry.protocolRunSave.story!=protocolRun.story) return 0;
+
+    /* Retry restores the run. Profile grants and the player's settings remain committed. */
+    memcpy(&g_save.hasRun,&entry.hasRun,offsetof(SaveBlob,hudDetail)-offsetof(SaveBlob,hasRun));
+    memcpy(&g_save.roomSeed,&entry.roomSeed,offsetof(SaveBlob,rngVersion)+sizeof(int)-offsetof(SaveBlob,roomSeed));
+    memcpy(&g_save.roomEventSpent,&entry.roomEventSpent,offsetof(SaveBlob,protocolProfileSave)-offsetof(SaveBlob,roomEventSpent));
+    g_save.threatSave=entry.threatSave;
+    g_save.isEndlessRunSaved=0;
+    g_save.campaignMode=0;
+    g_save.bankGoldSave=WalletBank();
+    g_save.bankHistMaxSave=bankHistMax;
+    ContinueRun();
+    ThreatTierRestore(currentLevel,ProtocolTier(0),0);
+    CommitThreatTierForFloor(currentLevel);
+    EvolutionResetFloor();
+    TacticalResetFloor();
+    SaveGame();
+    return 1;
 }
 
 /* v3.2：选择「最近保存过」的存档槽。
@@ -1689,7 +1760,7 @@ static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
     }
     /* v38 appends only mimic knowledge; the zero-filled tail preserves v37 reads. */
     /* Valid user display choices survive migration; normal validation clamps invalid values. */
-    if (g_save.version == 37 || g_save.version == 38 || g_save.version == 39 || g_save.version == 40 || g_save.version == 41 || g_save.version == 42 || g_save.version == 43 || g_save.version == 44) g_save.version = SAVE_VERSION;
+    if (g_save.version == 37 || g_save.version == 38 || g_save.version == 39 || g_save.version == 40 || g_save.version == 41 || g_save.version == 42 || g_save.version == 43 || g_save.version == 44 || g_save.version == 45) g_save.version = SAVE_VERSION;
     if(originalVersion>=25 && originalVersion<40){
         g_save.archivedJumperKnowledge[0]=(g_save.seenMonsters>>2)&1;
         for(int i=0;i<3;i++){g_save.archivedJumperKnowledge[i+1]=g_save.bestiaryKnowledge[i*6+2];g_save.bestiaryKnowledge[i*6+2]=0;}
@@ -1835,6 +1906,13 @@ static void ApplyLoadedSettings(const LoadedSaveInfo* info) {
 }
 
 static void RestoreLoadedProgress(const LoadedSaveInfo* info) {
+    protocolProfile=g_save.protocolProfileSave;
+    if (info->fileSize < offsetof(SaveBlob,protocolProfileSave)+sizeof(ProtocolProfile))
+        protocolProfile.briefSeen=1;
+    protocolProfile.unlocked &= 14u;
+    protocolProfile.endings &= 7u;
+    if (protocolProfile.guide<0 || protocolProfile.guide>2) protocolProfile.guide=0;
+    if (!ProtocolSelectRole((int)protocolProfile.selected)) protocolProfile.selected=0;
     /* v7 新增：恢复成就数据（如果存档里有）。
        v6 **判据改成「成就段是否完整在文件里」** ——
        原来用 info->fileSize >= sizeof(SaveBlob)，等于「文件必须包含当前结构体的全部尾部字段」。
@@ -1914,7 +1992,15 @@ static void RestoreLoadedProgress(const LoadedSaveInfo* info) {
 int LoadSettings(void) {
     LoadedSaveInfo info;
     memset(&info, 0, sizeof(info));
-    if (!ReadSettingsCandidate(&info)) return 0;
+    if (!ReadSettingsCandidate(&info)) {
+        memset(&protocolProfile,0,sizeof protocolProfile);
+        for (int i=0;i<SAVE_CAND_COUNT;i++) {
+            char path[MAX_PATH];
+            SavePathCand(i,path,sizeof path);
+            if (PlatFileTime(path)>0 || g_saveState==2) protocolProfile.briefSeen=1;
+        }
+        return 0;
+    }
     if (!MigrateSettingsCandidate(&info)) return 0;
     info.hasMusicField=info.fileSize>=offsetof(SaveBlob,musicVolume)+sizeof(float);
     info.hasDynamicResField=info.fileSize>=offsetof(SaveBlob,dynamicRes)+sizeof(int);
@@ -1946,6 +2032,7 @@ int SaveSelectSlot(int slot){
         g_save.bankRiskPlanPlus1=2;g_save.bankCarryPctSave=10;
         info.fileSize=sizeof(g_save);s_saveReadOnly=0;SaveCarryClear();
     }
+    if(!found) g_save.protocolProfileSave.briefSeen=0;
     g_save.saveSlot=slot;
     info.hasMusicField=info.fileSize>=offsetof(SaveBlob,musicVolume)+sizeof(float);
     info.hasDynamicResField=info.fileSize>=offsetof(SaveBlob,dynamicRes)+sizeof(int);
@@ -1981,7 +2068,7 @@ static void RestoreRunGeometry(void) {
         }
     }
     fusesHeld = g_save.fusesHeld<0?0:g_save.fusesHeld>MAX_CONTAINERS?MAX_CONTAINERS:g_save.fusesHeld;
-    fusesNeeded = g_save.fusesNeeded<1?1:g_save.fusesNeeded>MAX_CONTAINERS?MAX_CONTAINERS:g_save.fusesNeeded;
+    fusesNeeded = (protocolRun.flags&PROTOCOL_MISSIONS)?0:g_save.fusesNeeded<1?1:g_save.fusesNeeded>MAX_CONTAINERS?MAX_CONTAINERS:g_save.fusesNeeded;
     breakerOpen = g_save.breakerOpen;
     breaker.active = g_save.breakerActive;
     breaker.x = g_save.breakerX;
@@ -2139,10 +2226,13 @@ static void RestoreRunEquipment(void) {
     /* Preserve saved geometry, but use the room's own material for the whole floor. */
     if(hatchCount==1 && hatches[0].active && hatches[0].themeId>=0 && hatches[0].themeId<THEME_COUNT)
         themeId=hatches[0].themeId;
-    GenerateThemeTextures(themeId);
-    SpawnMonster();
-    SpawnLightBeast();
-    SpawnLightBeast2();   /* 2026-11-06：追光怪两只 */
+    GenerateThemeTextures(ProtocolPeacefulStory()?ProtocolFloorMaterial():themeId);
+    if (ProtocolPeacefulStory()) ProtocolClearStoryActors();
+    else {
+        SpawnMonster();
+        SpawnLightBeast();
+        SpawnLightBeast2();
+    }
     isEndlessRun = (g_save.isEndlessRunSaved == 1);  /* 恢复无尽模式标记 */
 }
 
@@ -2288,21 +2378,16 @@ void ContinueRun(void) {
     /* v3.0：**读档必须夹取** ——
        外部改过的档可能带 NaN：sanity=NaN 时 `sanity <= 0` 永不成立（死不掉），
        pos=NaN 时 Blocked() 失效（可以穿墙）。 */
-    if (currentLevel < 1) currentLevel = 1;
+    if (currentLevel < (campaignMode ? 0 : 1)) currentLevel = campaignMode ? 0 : 1;
     if (currentLevel > 999) currentLevel = 999;
-    sanity = g_save.sanity;
-    /* v3.0：NaN / 越界一律拉回合法区间 */
-    if (!(sanity == sanity)) sanity = 100.0f;
-    if (sanity < 0.0f) sanity = 0.0f;
-    if (sanity > 100.0f) sanity = 100.0f;
-    battery = g_save.battery;
-    if (!(battery == battery)) battery = 100.0f;
-    if (battery < 0.0f) battery = 0.0f;
-    if (battery > 100.0f) battery = 100.0f;
-    stamina = g_save.stamina;
-    if (!(stamina == stamina)) stamina = 100.0f;
-    if (stamina < 0.0f) stamina = 0.0f;
-    if (stamina > 130.0f) stamina = 130.0f;
+    protocolRun=g_save.protocolRunSave;
+    playDeadUsed=!!(protocolRun.used&SAVE_RUN_PLAY_DEAD_USED);
+    shortcutUsed=!!(protocolRun.used&SAVE_RUN_SHORTCUT_USED);
+    ProtocolRestore();
+    if (protocolRun.story) currentLevel=protocolRun.story;
+    sanity=g_save.sanity;
+    battery=g_save.battery;
+    stamina=g_save.stamina;
     energy = g_save.energy;
     benchOwned=(g_save.benchOwnedV42?g_save.benchOwnedV42:g_save.benchOwnedSave)&((UINT64_C(1)<<BENCH_COUNT)-1);
     hideSpotCount = g_save.hideSpotSaveCount;
@@ -2347,17 +2432,11 @@ void ContinueRun(void) {
     RestoreBankFromSave();
     if (hiddenIn >= hideSpotCount) hiddenIn = -1;
     RunUpgLoadFromSave(g_save.runUpgSave);
+    RunUpgSetLevel(RUN_UPG_ROLE,(int)((g_save.protocolRunSave.used>>PROTOCOL_ROLE_RANK_SHIFT)&3u));
     { 
       RunUpgLoadExtra(g_save.runUpgMinimapSave); }   /* v2.3：老存档没有这个字段（读出 0）→ 下面补满 */
     energy=isfinite(energy)?fmaxf(0,fminf((float)EnergyMax(),energy)):(float)EnergyMax();
     flashlightOn = g_save.flashlightOn;
-    /* v8：模式规则优先于存档里的开关状态 ——
-       每日“不能开手电”/ SALVAGE keystone 读档后必须保持关闭；
-       战役第 1 关“关不掉”读档后必须保持开启。 */
-    {
-        if (DailyForbidLight() || HasKeystone(SK_SALVAGE)) flashlightOn = 0;
-        else if (CampaignFlashlightLocked()) flashlightOn = 1;
-    }
     RestoreRunGeometry();
     RestoreUsableHideSpots();
     RestoreRunInventory();
@@ -2377,9 +2456,15 @@ void ContinueRun(void) {
     {int data[15]={g_save.dailyGoalId,g_save.dailyGoalParam,g_save.dailyProgress,g_save.dailyDone,g_save.dailyStreak,(int)g_save.dailyQuestDate,(int)g_save.dailyLastCompletedDate};
      for(int i=0;i<8;i++){data[7+i]=g_save.dailySamples[i];}
      DailyLoadFrom(data);}
+    if (DailyForbidLight()) flashlightOn=0;
+    else if (CampaignFlashlightLocked()) flashlightOn=1;
     CalibResetRun();
     ShopRestoreServices(g_save.serviceUsesV42);RunEconomyRestore(g_save.rewardFloorV42,g_save.escapeRewardMaskV42,g_save.rhythmGoldV42);
     RestoreEvolutionChunks(0);
+    if (g_save.protocolRunSave.threatRaw > 0) ThreatSet(protocolRun.threatRaw);
+    sanity=isfinite(sanity)?fminf(SanityMax(),fmaxf(0,sanity)):SanityMax();
+    battery=isfinite(battery)?fminf((float)BatteryMax(),fmaxf(0,battery)):(float)BatteryMax();
+    stamina=isfinite(stamina)?fminf(StaminaMax(),fmaxf(0,stamina)):StaminaMax();
     ResumeRestoredRun();
 }
 

@@ -8,6 +8,7 @@
  *   9×600 + 3×2000 + 3×1400 = 15600 金币，9 核心 —— 约 34 局主线
  */
 #include "common.h"
+#include "protocol.h"
 #include "lang.h"
 #include "achievements.h"
 #include "bench.h"
@@ -32,33 +33,33 @@
  *     这样技能树里画出来的竖线才有真实含义（不是你随便点，是真的有路）。 */
 const SkillDef skillDefs[] = {
     /* ---- 列 0：静（噪声的时与地） ---- */
-    {"LINKED SILENCE", "Link two dampeners with a quiet corridor; maximum span 6/8/10 cells",                          0, 3, {1300,2600,3900},       0, 25, 0},   /* v3.0 退役：纯属性，感知不到 */
+    {"LINKED SILENCE", "Link two dampeners with a quiet corridor; maximum span 6/8/10 cells",                          0, 3, {1300,2600,3900},       0, 25, 0},
     {"QUIET LID",    "Searching makes NO noise at max rank", 0, 3, {1300,2600,3900}, 0, 0, 0},
     {"GHOST STEP",   "Silent footsteps while light is off", 0, 3, {1300,2600,3900}, 0, 1, 0},
-    {"HUSH PULSE",   "G: suppress footsteps 85% for 4s; 8 battery, 24s cooldown", 0, 1, {4500,0,0},  1, 2, 0},
+    {"EMERGENCY SUPPLY", "After a confirmed escape, enter cover for one stone per floor", 0, 1, {4500,0,0},  1, 2, 0},
     /* ---- 列 1：筹（风险与经济） ---- */
-    {"SIPHON",       "Battery cap +25/rank; light OFF below 25%: regen 2-4/s, sanity drain +20%",                          1, 3, {1300,2600,3900},       0, 25, 0},   /* v3.0 退役 */
-    {"CRANK WALK",   "Crank while walking (move -40%, noise x2)", 1, 3, {1300,2600,3900}, 0, 4, 0},
-    {"REST",         "Safe-room recovery +25% base rate per rank",                          1, 3, {1300,2600,3900},       0, 5, 0},   /* v3.0 退役 */
+    {"SIPHON",       "Light off: refill to 25% at 2/3/4 per second, with 20% extra sanity drain and +25 maximum battery per rank",                          1, 3, {1300,2600,3900},       0, 25, 0},
+    {"CRANK WALK",   "Crank while walking; movement penalty drops to 20/12/6%", 1, 3, {1300,2600,3900}, 0, 4, 0},
+    {"CATCH YOUR BREATH", "After 3s in cover recover 6/9/12 sanity once per floor; passive drain falls 10% per rank",                          1, 3, {1300,2600,3900},       0, 5, 0},
     {"METABOLISM",   "50% of passive sanity loss burns battery (1:3); remainder still drains sanity",    1, 1, {4500,0,0}, 0, 6, 0},
     /* ---- 列 2：隐（藏匿与脱身） ----
        v3.0：整列重做。原来 4 个节点全是伤害（HEAVY HAND / STAGGER /
        TYPE WORK / RELOAD RHYTHM），无战斗后完全无效。
        换成逃生玩法的核心：怎么躲、怎么脱身。 */
-    {"BREATH",       "While hidden, detection risk is reduced by 45%", 2, 3, {1300,2600,3900}, 0, 25, 0},
-    {"SIGNAL BREAK", "Wrench hits cancel hunter evolution signals for 4/6/8 seconds",                          2, 3, {1300,2600,3900},       0, 8, 0},   /* v3.0 退役：和 HOLD BREATH 重叠 */
-    {"SLIP AWAY",    "Vanish after 2s out of sight (was 3s)", 2, 3, {1300,2600,3900}, 0, 9, 0},
+    {"COVER SCOUT", "Mark hiding spots within 4/6/8 cells on the minimap", 2, 3, {1300,2600,3900}, 0, 25, 0},
+    {"SIGNAL BREAK", "Wrench hits cancel hunter evolution signals for 4/6/8 seconds",                          2, 3, {1300,2600,3900},       0, 8, 0},
+    {"SALVAGE POCKETS", "Find an extra throwable in eligible supply cases; crate gold x0.75/0.90/1.00", 2, 3, {1300,2600,3900}, 0, 9, 0},
     {"PLAY DEAD",    "Once per run: escape a grab",        2, 1, {4500,0,0},  1, 10, 0},
     /* ---- 列 3：途（整局形状） ---- */
-    {"CARTO", "Reveal safe house + breaker; rank 2 senses hunter direction while hidden", 3, 2, {2000,3900,0}, 0, 0, 0},
-    {"POLARIZED GUIDE", "After prism blindness, a light beast investigates the hit point for 0.6s per rank",                        3, 3, {1300,2600,3900},       0, 12, 0},   /* v3.0 退役 */
+    {"CARTO", "Reveal the breaker and nearest hiding spot; rank 2 senses hunter direction while hidden", 3, 2, {2000,3900,0}, 0, 0, 0},
+    {"POLARIZED GUIDE", "After prism blindness, a light beast investigates the hit point for 0.6s per rank",                        3, 3, {1300,2600,3900},       0, 12, 0},
     {"FUSE SMITH",   "Fuse need -1 (min 2)",               3, 3, {1300,2600,3900}, 0, 13, 0},
     {"SHORTCUT",     "Skip one non-boss level per run",    3, 1, {4500,0,0}, 0, 14, 0},
     /* ---- 第 5 行：跨支 keystone（全局只持有一个） ---- */
-    {"SILENT RUN",   "Sprint makes no noise (stamina -30%)", 0, 1, {3900,0,0},  2, 33, 1},
-    {"GREED",   "Gold x1.5, gold threat tier +2", 1, 1, {3900,0,0},       0, 36, 1},   /* v3.0 退役 */
-    {"SECOND WIND",  "Sprint 3s after empty stamina, healing -50%", 2, 1, {3900,0,0},       0, 39, 1},   /* v3.0 退役：PLAY DEAD 覆盖 */
-    {"LIGHTLESS",      "Start with light off; movement noise -25%", 3, 1, {3900,0,0},       0, 31, 1},   /* v3.0 退役 */
+    {"SILENT RUN",   "Sprinting makes no noise; maximum stamina is 30% lower", 0, 1, {3900,0,0},  2, 33, 1},
+    {"GREED",   "Gold x1.5, gold threat tier +2", 1, 1, {3900,0,0},       0, 36, 1},
+    {"SECOND WIND",  "Sprint 3s after empty stamina, healing -50%", 2, 1, {3900,0,0},       0, 39, 1},
+    {"LIGHTLESS",      "Start with light off; movement noise -25%", 3, 1, {3900,0,0},       0, 31, 1},
 
     /* ==================================================================
      * v7 第 58 轮：**补回被 git checkout 冲掉的 6 个节点**
@@ -82,16 +83,16 @@ const SkillDef skillDefs[] = {
     {"GAMBLER", "10% per rank chance for double crate gold", 4, 3, {1300,2000,2250},0, 27,0},
     {"DESPERATE", "Below 30 sanity: move +4% per rank", 4, 3, {1300,2000,2250},0, 28,0},
     /* ---- 2026-11-08（第 7 轮）：幽灵流派 GHOST ---- */
-    {"BREATH SYNC", "Standing still halves sanity drain (max 20s)", 0, 2,
+    {"BREATH SYNC", "After 2s still, halves passive sanity drain for 12/20s", 0, 2,
      {2600,3900,0}, 0, 3, 0},
     {"SHADOW STEP", "Sprinting inside smoke makes no sound", 0, 1,
      {3200,0,0}, 0, 30, 0},
     {"SILENT LAND", "After standing 3s, your next 3s of steps are silent", 0, 1,
      {3900,0,0}, 0, 31, 0},
-    {"FORMLESS", "Stand still 3s to vanish from sight (move speed -25%)", 0, 1,
+    {"FORMLESS", "Stand still in darkness for 3s to evade hunter sight beyond 1.5 cells; noise still carries", 0, 1,
      {4500,0,0}, 0, 32, 1},
     /* ---- 2026-11-08（第 8 轮）：掠夺者流派 RAIDER ---- */
-    {"PAWN", "Below 30% sanity: auto-spend 200x floor gold for +20 sanity", 1, 1,
+    {"PAWN", "Below 30% sanity: auto-spend 200 x floor bank gold for +20 sanity", 1, 1,
      {2600,0,0}, 0, 29, 0},
     {"GAMBLER II", "Crate gold is 50% doubled, 50% nothing", 1, 1,
      {3200,0,0}, 0, 34, 0},
@@ -111,11 +112,11 @@ const SkillDef skillDefs[] = {
     {"READ THE OPENING", "Wrench cooldown recovers 50% faster near a stunned hunter", 2,1,{3200,0,0},0, 42,0},
     {"FALSE OPENING", "A shattered decoy distracts its hunter for four extra seconds", 2,1,{3900,0,0},0, 43,0},
 
-    {"LINGERING HUSH","Hush Pulse lasts six seconds instead of four",3,1,{1800,0,0},0, 3,0},
+    {"LIGHT RESERVE","Emergency supply also recovers a light orb",3,1,{1800,0,0},0, 3,0},
     {"BACKUP SPARK","Once per floor, an empty battery gains twelve charge",3,1,{1600,0,0},0, 4,0},
     {"EXIT MEMORY","Powering the breaker reveals the exit sector",3,1,{1900,0,0},0, 15,0},
     {"HIDDEN RECOVERY","Once per floor, hide still for three seconds to recover twenty stamina",3,1,{1800,0,0},0, 8,0},
-    {"ECHO MAPPING","Hush Pulse reveals nearby map cells within three tiles",3,1,{2100,0,0},0, 45,0},
+    {"CELL RESERVE","Emergency supply also restores up to 8 battery",3,1,{2100,0,0},0, 45,0},
     {"SILENT CRANK","Cranking below 25% battery makes no sound",3,1,{2000,0,0},0, 7,0},
 };
 
@@ -365,9 +366,6 @@ float SkillSearchNoiseMul(void) {
     if (r >= 3) return 0.0f;          /* 满级：翻箱零噪音 */
     return SkillOwned(SK_SILENTDEAL) ? 0.0f : 1.0f - 0.30f*(float)r;
 }
-float SkillRestAdd(void) {
-    return 0.25f * (float)skillRank[SK_REST];
-}
 
 
 /* ---- v2.8：Hub 的 6 项基础升级折进技能树 ------------------------------
@@ -392,12 +390,6 @@ float SkillSpeedAdd(void) {
 
     return sanity<30.0f ? 0.04f*skillRank[SK_DESPERATE] : 0.0f;
 }
-float SkillQuietMul(void) {
-    /* 2026-11-06：翻箱噪音 -15%/级 -> -18%/级。
-       地图变大后搜刮次数变多，噪音惩罚的绝对量也变大了。 */
-    return 1.0f - 0.18f * (float)skillRank[SK_SEARCHNOISE];
-}
-
 /* ===== v3.4 新增的三个机制查询（方案 v5 §4.2 局外树）===== */
 
 /* SPARE CELL 备用电池：满级时摇电一次 +55，且摇电时间 -30%
@@ -422,9 +414,6 @@ int SkillGhostSilent(void) {
 }
 
 /* CARTO 制图：满级开局直接标出安全屋 + 配电箱 */
-int SkillCartoMaxed(void) {
-    return (skillRank[SK_CARTO] >= 2) ? 1 : 0;
-}
 float SkillEcoMul(void) {
     /* 2026-11-06：省电 -10%/级 -> -12%/级。
        手电上限涨到 150 之后，每 1% 的绝对值也变大了，
@@ -459,7 +448,7 @@ float SkillPwrSiphonSanityMul(void) {
     return skillRank[SK_BATTERY] > 0 ? 1.20f : 1.0f;
 }
 
-/* CRANK WALK：可以边移动边摇电；移速惩罚随等级减轻（-20% / -12%） */
+/* CRANK WALK：边移动边摇电，移速惩罚随等级减轻 */
 float SkillCrankWalkPenalty(void) {
     int r = skillRank[SK_CRANK];
     if (r <= 0) return 0.0f;                    /* 0 = 没这个技能，摇电时不能动 */
@@ -471,7 +460,7 @@ float SkillCrankWalkPenalty(void) {
 float SkillGhostStepNoiseMul(void) {
     int r = skillRank[SK_GHOSTSTEP];
     if (r <= 0) return 1.0f;
-    return (r >= 2) ? 0.0f : 0.5f;              /* 1 级减半，2 级完全无声 */
+    return r>=3?0:r==2?.30f:.65f;              /* 1 级减半，2 级完全无声 */
 }
 float SkillGhostStepDrainMul(void) {
     return skillRank[SK_GHOSTSTEP] > 0 ? 1.15f : 1.0f;
@@ -648,7 +637,7 @@ int SkillCartoUnlock(void) {
 
 /* SHORTCUT：每局可以跳过一个非 Boss 层 */
 int SkillShortcutAvailable(void) {
-    return SkillOwned(SK_SHORTCUT) ? 1 : 0;
+    return SkillOwned(SK_SHORTCUT) && !protocolRun.story && !dailyMode && !trainingMode;
 }
 
 /* LAST RESORT：理智归零时免死一次 */
@@ -708,19 +697,11 @@ int SkillsSelfTest(void) {
  * ================================================================== */
 
 /* 屏息：藏身时被发现概率（越小越难被发现） */
-float HideStealthMul(void) {
-    float m = 1.0f;
-    if (SkillOwned(SK_BREATH)) m *= 0.55f;      /* 技能树 HOLD BREATH */
-    return m;
-}
 
 /* 静面：追捕者在藏身点旁放弃速度（越大放弃越快） */
 
 
 /* 脱身：脱离视线多久后隐身（技能树 SLIP AWAY 从 3 秒降到 2 秒） */
-float SlipAwaySeconds(void) {
-    return SkillOwned(SK_SLIP) ? 2.0f : 3.0f;
-}
 
 /* 假死：由局外技能树提供。 */
 int PlayDeadAvailable(void) {
@@ -898,7 +879,7 @@ static const char* kShortNames[SKILL_COUNT] = {
     "METAB", /*  7 */
     "BREATH",/*  8 */
     "SIGNAL", /*  9 */
-    "SLIP",  /* 10 */
+    "LOOT",  /* 10 */
     "DEAD",  /* 11 */
     "CARTO", /* 12 */
     "GUIDE", /* 13 */
@@ -937,7 +918,7 @@ static const char* kShortNames[SKILL_COUNT] = {
 const char* SkillShortName(int id) {
     if (id < 0 || id >= SKILL_COUNT) return "?";
     if(g_lang==LANG_ZH){
-        static const char* shortZh[SKILL_COUNT]={"连线","静盖","幽步","静息","蓄电","手摇","修整","代谢","屏息","断线","脱追","假死","制图","引导","保险","捷径","无声","贪约","阵风","暗行","交易","满载","学徒","电网","袖藏","起点","巧手","牵引","赌徒","绝境","同步","影步","静落","无形","典当","豪赌","金力","挣脱","反击","反制","内部","镇定","破局","识隙","佯攻","余音","火花","忆路","复苏","测绘","静摇"};
+        static const char* shortZh[SKILL_COUNT]={"连线","静盖","幽步","补给","蓄电","手摇","安神","代谢","找掩","断线","搜余","假死","制图","引导","保险","捷径","无声","贪约","阵风","暗行","交易","满载","学徒","电网","袖藏","起点","巧手","牵引","赌徒","绝境","同步","影步","静落","无形","典当","豪赌","金力","挣脱","反击","反制","内部","镇定","破局","识隙","佯攻","备光","火花","忆路","复苏","备电","静摇"};
         return shortZh[id];
     }
     if (kShortNames[id] && kShortNames[id][0]) return kShortNames[id];
@@ -1000,12 +981,12 @@ void SkillResetAll(void) {
 
 float SkillGoldMul(void) {
     float m=1.0f+0.20f*skillRank[SK_GREEDHAND];
-    if(SkillOwned(SK_SILENTDEAL)) m*=1.50f;
     if(HasKeystone(SK_WEATHERMAN)) m*=1.50f;
     return m;
 }
 float SkillCrateGoldMul(void) {
     float m=SkillGoldMul();
+    if (SkillOwned(SK_SILENTDEAL)) m*=1.5f;
     if((rand()%100)<10*skillRank[SK_GAMBLER]) m*=2.0f;
     return m;
 }
@@ -1015,14 +996,14 @@ static const char* kSkillNameZh[SKILL_COUNT]={
     "声障连线",
     "静盖",
     "鬼步",
-    "静息脉冲",
+    "应急补给",
     "备用电池",
     "移动摇电",
-    "休整",
+    "藏身安神",
     "能量代谢",
-    "屏息",
+    "掩体侦察",
     "反制断线",
-    "脱离追踪",
+    "余料搜寻",
     "假死",
     "制图",
     "偏振引导",
@@ -1057,22 +1038,22 @@ static const char* kSkillNameZh[SKILL_COUNT]={
     "利落脱身",
     "看准破绽",
     "佯攻诱敌",
-    "余音静息","备用火花","出口记忆","藏身复苏","回声测绘","静默手摇",
+    "照明预备","备用火花","出口记忆","藏身复苏","电量储备","静默手摇",
 };
 static const char* kSkillDescZh[SKILL_COUNT]={
     "两个吸声点之间形成一格宽静音走廊；两端须通视，跨度随等级为6/8/10格。",
     "搜箱噪音随等级降低，满级时搜箱无声。",
     "关灯时降低脚步声，满级完全无声。",
-    "G释放静息脉冲：四秒内脚步降噪85%，消耗8电量，冷却24秒。",
+    "确认甩脱追击后，进入藏身点自动补一颗投石，每层限一次。",
     "每级增加25电量上限；低电时涓流回电，但增加理智消耗。",
     "允许边走边摇电，以移动和噪音代价换取续航。",
-    "每级提高安全区域的恢复效率。",
+    "在藏身点停留3秒后恢复6/9/12点理智，每层限一次；同时降低被动理智流失。",
     "将被动理智流失转换为电量消耗；断电时有额外代价。",
-    "降低藏身时被发现的风险。",
+    "在小地图上标出4/6/8格内的藏身点，即使还没有走到那里。",
     "扳手命中听声鬼后打断其新增复查和声源分享，抑制4/6/8秒；不取消原有感知。",
-    "脱离视线后更快摆脱追踪。",
+    "搜查带补给的箱子时多获得一件投掷物。箱子金币为原来的75%/90%/100%。",
     "每局一次，从抓捕中脱身。",
-    "揭示安全屋与配电箱；二级时藏身可感知首位听声鬼的方向。",
+    "开层标出配电箱和最近的藏身点。二级时藏身可感知首位听声鬼的方向。",
     "棱镜致盲结束后，追光怪先调查命中点，每级0.6秒；不直接追踪你的新位置。",
     "减少通关所需保险丝，保留最低需求。",
     "每局一次，跳过非首领层。",
@@ -1090,11 +1071,11 @@ static const char* kSkillDescZh[SKILL_COUNT]={
     "磁索分离的钱袋向你拉回三分之一、三分之二、全部距离，赃款总额不变。",
     "开箱时有一定概率获得双倍金币。",
     "低理智时增加移动速度。",
-    "静止时降低理智流失，持续时间有上限。",
+    "静止2秒后，被动理智消耗减半，持续12/20秒。",
     "在烟雾中冲刺不发出脚步声。",
     "静止蓄势后，接下来的短暂移动无声。",
-    "静止三秒后隐去身形，以移动速度为代价。",
-    "低理智时自动花费局内金币换取理智。",
+    "关灯静止3秒后，可避开1.5格之外听声鬼的视线。声音仍可暴露位置。",
+    "理智低于30时，自动从银行支付200乘以当前层数的金币，恢复20理智。",
     "箱子金币有一半概率翻倍，一半概率落空。",
     "金币档位提供移动加成，最高20%。",
     "扩大被抓后的挣脱窗口。",
@@ -1105,7 +1086,7 @@ static const char* kSkillDescZh[SKILL_COUNT]={
     "扳手成功击退后，获得一秒反击疾行。",
     "附近存在被硬直的听声鬼时，扳手冷却恢复加快50%。",
     "玩偶被扑碎后，额外牵制该听声鬼四秒。",
-    "静息脉冲的持续时间从四秒延长至六秒。","每层一次，电量耗尽时自动恢复12电量。","配电箱通电后揭示出口附近区域。","每层一次，静止躲藏三秒后恢复20体力。","释放静息脉冲时揭示三格内的地图。","电量低于25%时手摇发电不会制造噪声。",
+    "应急补给额外恢复一根荧光棒，受携带上限限制。","每层一次，电量耗尽时自动恢复12电量。","配电箱通电后揭示出口附近区域。","每层一次，静止躲藏三秒后恢复20体力。","应急补给额外恢复至多8点电量。","电量低于25%时手摇发电不会制造噪声。",
 };
 const char* SkillDisplayName(int id) {
     if(id<0 || id>=SKILL_COUNT)return "?";

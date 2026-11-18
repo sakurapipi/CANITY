@@ -50,7 +50,6 @@ int SkillIsPlayerFacing(int id);
 const char* SkillDisplayName(int id);
 const char* SkillDisplayDescription(int id);
 int SkillFindByName(const char* query);
-int SkillHearing(void);
 int SkillPremonition(void);
 int SkillInnerEye(void);
 float SkillCounterCooldownRate(void);
@@ -91,11 +90,9 @@ const char* SkillName(int id);
 /* 局外效果查询：把 rank 换算成运行时倍率/加成 */
 float SkillNoiseMul(void);        /* 冲刺脚步噪声倍率 */
 float SkillSearchNoiseMul(void);  /* 翻箱噪声倍率 */
-float SkillRestAdd(void);
 /* v2.8：原本 Hub 的 6 项基础升级折进技能树节点，每级给属性 */
 int   SkillBatteryAdd(void);    /* SIPHON      +25 电量上限/级 */
 float SkillSpeedAdd(void);      /* LIGHT STEP  +3%  移速/级 */
-float SkillQuietMul(void);      /* QUIET LID   -15% 噪声/级 */
 float SkillEcoMul(void);        /* GHOST STEP  -12% 手电耗电/级 */
 float SkillCalmMul(void);       /* REST        -10% 理智流失/级 */
 int   SkillsAllMaxed(void);     /* 所有普通节点满级（成就用） */         /* 安全屋回智加成 */
@@ -171,11 +168,8 @@ int   SkillSpareCellMaxed(void);   /* 备用电池：摇电 +55 且快 30% */
 float SkillCrankBonus(void);       /* 摇电一次给多少电量 */
 float SkillCrankTimeMul(void);     /* 摇电所需时间倍率 */
 int   SkillGhostSilent(void);      /* 鬼步满级：关灯时脚步完全无声 */
-int   SkillCartoMaxed(void);       /* 制图满级：开局标出安全屋+配电箱 */
 
 /* ==================== v3.0 逃生向效果（统一入口） ==================== */
-float HideStealthMul(void);      /* 屏息：藏身被发现概率 */
-float SlipAwaySeconds(void);     /* 脱身：隐身所需脱战秒数 */
 int   PlayDeadAvailable(void);   /* 假死可用（技能树或改造树） */
 int   SilentRunOwned(void);      /* 静音冲刺 keystone */
 float QuietSoleMul(void);        /* 静底：走路噪音 */

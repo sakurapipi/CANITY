@@ -81,6 +81,5 @@ void ProgressionTetherLanding(float *x, float *y) {
     }
 }
 
-int SkillHearing(void) { return skillRank[SK_BREATH] >= 3; }
 int SkillPremonition(void) { return skillRank[SK_GHOSTSTEP] >= 3; }
 int SkillInnerEye(void) { return skillRank[SK_CARTO] >= 2; }

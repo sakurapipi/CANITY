@@ -9,7 +9,13 @@
 
 #define BENCH_COLS 4
 #define BENCH_ROWS 4
+/* Role branch IDs follow the persistent public nodes in the graph view. */
 #define BENCH_COUNT 40
+#define BENCH_GRAPH_COUNT (BENCH_COUNT + 10)
+int BenchGraphCount(void);
+int BenchNodeCost(int id);
+const char* BenchNodeName(int id);
+const char* BenchNodeDescription(int id);
 
 /* Saved bit positions: never reorder when changing UI layout or descriptions. */
 typedef enum {

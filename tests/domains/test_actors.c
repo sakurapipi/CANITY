@@ -4,6 +4,7 @@
  * 入口：TestSuite_actors()
  */
 #include "../test_common.h"
+#include "threat_tier.h"
 #include "monster_rules.h"
 #include "tutorial.h"
 #include "lang.h"
@@ -502,7 +503,16 @@ static void test_three_hunters(void) {
     CHECK(HunterActiveCount() == 3, "all three counted");
     CHECK(fabsf(HunterHearMulAt(0) - 1.00f) < 0.001f, "hunter 1 hears at 100%");
     CHECK(fabsf(HunterHearMulAt(1) - 0.75f) < 0.001f, "hunter 2 hears at 75%");
-    CHECK(fabsf(HunterHearMulAt(2) - 0.50f) < 0.001f, "hunter 3 hears at 50%");
+    int savedTier=CurrentRunThreatTier();
+    float previous=0;
+    for(int tier=0;tier<4;tier++){
+        ThreatTierRestore(currentLevel,tier,0);
+        float current=HunterHearMulAt(2);
+        CHECK(current>previous && current>=.60f && current<1.0f,
+              "third hunter hearing strengthens with the threat tier");
+        previous=current;
+    }
+    ThreatTierRestore(currentLevel,savedTier,0);
 
     CHECK(HunterIndex(&monHunters[0]) == 0, "index of hunter 1");
     CHECK(HunterIndex(&monHunters[1]) == 1, "index of hunter 2");

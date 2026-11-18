@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "monster_evolution.h"
 #include "threat_tier.h"
 #include "tactical_tools.h"
@@ -143,7 +144,7 @@ static float MonsterSpeedFor(int level, float base, float modMul) {
     float speed = base + MONSTER_SPEED_STEP * (float)(level - 1);
     if (speed > MONSTER_SPEED_MAX) speed = MONSTER_SPEED_MAX;
     /* Threat affects the result and its cap, instead of raising a cap after clipping. */
-    speed = speed * modMul + ThreatValue() * 0.008f;
+    speed = speed * modMul + ThreatEffective() * 0.008f;
     float cap = fminf(ThreatSpeedCap(),MonsterMovementCap());
     if (speed > cap) speed = cap;
     return speed;
@@ -289,9 +290,10 @@ int  CatchCountThisRun(void)  { return s_catchCountRun; }
 void CatchCountResetRun(void) { s_catchCountRun = 0; }
 
 void SpawnMonster(void) {
+    if (ProtocolPeacefulStory()) return;
     Hunter0()->active = 1;
     Hunter0()->state = 0;
-    Hunter0()->speed = HunterMoveSpeed(0,currentLevel,modSpeedMul,ThreatValue());
+    Hunter0()->speed = HunterMoveSpeed(0,currentLevel,modSpeedMul,ThreatEffective());
     Hunter0()->pathLen = 0;
     Hunter0()->pathIdx = 0;
     Hunter0()->repath = 0.0f;
@@ -359,12 +361,12 @@ float noiseSrcX = 0.0f, noiseSrcY = 0.0f;   /* v3.0：听觉用 */
 static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
     int walkingSource = footsteps || radius <= 14.0f;
     float sourceRadius = radius;
-    float hush = HushNoiseMul();
+
     if (footsteps)
-        radius *= hush * TacticalFootstepMul(x, y, hush) * RoomThemeNoiseMul();
+        radius *= TacticalFootstepMul(x, y, 1) * RoomThemeNoiseMul();
     else {
         if (sourceRadius <= 14 && Dist2(x, y, posX, posY) < .16f)
-            radius *= hush * RoomThemeNoiseMul();
+            radius *= RoomThemeNoiseMul();
         radius *= TacticalNoiseMul(x, y);
     }
     if (sourceRadius <= 14)
@@ -456,7 +458,7 @@ static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
 
         radius *= EconomyHearMul() * CampaignNoiseAlertMul();   /* v6：金币 + 威胁 + 战役 */
     }
-    radius *= SkillQuietMul() * RelicNoiseMul() * modNoiseMul;   /* QUIET LID + 遗物 + 事件 */
+    radius *= RelicNoiseMul() * modNoiseMul;
     /* v3.3：盲螨只认声音。它原来每帧直接朝玩家冲刺，所以玩家“静音走路”
        也会被它追；现在只有噪音落在半径内才给它目标。 */
     for (int i = 0; i < EXTRA_MAX; i++) {
@@ -529,9 +531,10 @@ static void SpawnOneLightBeast(Monster* L) {
     L->active = 0; /* No valid spawn cell: never stack bodies on the exit. */
 }
 
-void SpawnLightBeast(void) {memset(lightBeasts,0,sizeof(lightBeasts));if(rand()%100<MonsterFloorChance(SPAWN_LIGHT,currentLevel))SpawnOneLightBeast(&lightBeasts[0]);}
+void SpawnLightBeast(void) {memset(lightBeasts,0,sizeof(lightBeasts));if(!ProtocolPeacefulStory() && rand()%100<MonsterFloorChance(SPAWN_LIGHT,currentLevel))SpawnOneLightBeast(&lightBeasts[0]);}
 void SpawnLightBeast2(void) {
-    if(currentLevel>=3 || GoldTier()>=3 || ThreatValue()>=4)SpawnOneLightBeast(&lightBeasts[1]);
+    if (ProtocolPeacefulStory()) return;
+    if(currentLevel>=3 || GoldTier()>=3 || ThreatEffective()>=4)SpawnOneLightBeast(&lightBeasts[1]);
 }
 
 /* 2026-11-06：参数化成"更新指定那只"。
@@ -579,6 +582,8 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
         }
     }
 
+    if (!has && ProtocolOpticalTarget(&tx,&ty) && Dist2(tx,ty,L->x,L->y)<144 &&
+        HasLOS(L->x,L->y,tx,ty)) has=1;
     int evolutionAction=EvolutionLightUpdate(L,&has,lightSource,&tx,&ty,dt);
     if(evolutionAction==1)return;
     if(evolutionAction==2)goto LightContact;
@@ -616,7 +621,7 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
         if (d < 0.12f) L->pathIdx++;
         else {
             /* v3.3：追光鬼同样会被胶水减速 */
-    float step = L->speed * dt * (InGlue(L->x, L->y) ? GLUE_MONSTER_MUL : 1.0f);
+    float step = L->speed * dt * fminf(ProtocolHunterMul(L,1),InGlue(L->x,L->y)?GLUE_MONSTER_MUL:1);
             if (step > d) step = d;
             float nx=L->x+dx/d*step, ny=L->y+dy/d*step;
             if(!worldMap[(int)ny][(int)nx]){L->x=nx;L->y=ny;}
@@ -631,7 +636,7 @@ LightContact: ;
         L->hitCooldown = HIT_COOLDOWN_BASE;
     } else if (L->hitCooldown <= 0.0f && pd2 < MONSTER_CATCH_R * MONSTER_CATCH_R) {
             if (hiddenIn < 0) {   /* v3.0：藏起来抓不到 */
-        sanity -= 14.0f;
+        sanity -= ProtocolContactLoss(14.0f,14.0f);
             }
         if (sanity < 0.0f) sanity = 0.0f;
 
@@ -735,7 +740,7 @@ int HunterActiveCount(void) {
  *
  * 这样三只是三种威胁，不是「同一只怪的三份拷贝」。
  * ================================================================ */
-static const float kHunterHear[3] = { 1.00f, 0.75f, 0.50f };
+static const float kHunterHear[3] = { 1.00f, 0.75f, 0.62f };
 
 int HunterIndex(const Monster* m) {
     int i = (int)(m - monHunters);
@@ -745,7 +750,8 @@ int HunterIndex(const Monster* m) {
 
 float HunterHearMulAt(int idx) {
     if (idx < 0 || idx >= MON_HUNTER_MAX) return 1.0f;
-    return kHunterHear[idx];
+    static const float tierThree[]={.62f,.69f,.76f,.83f};
+    return idx==2?tierThree[CurrentRunThreatTier()]:kHunterHear[idx];
 }
 
 /* 兼容旧调用：返回"场上最好的耳朵"，只用于 HUD/调试显示 */
@@ -753,7 +759,7 @@ float HunterHearMul(void) {
     float best = 0.0f;
     for (int i = 0; i < MON_HUNTER_MAX; i++) {
         if (!monHunters[i].active) continue;
-        float k = kHunterHear[i];
+        float k = HunterHearMulAt(i);
         if (k > best) best = k;
     }
     return best > 0.0f ? best : 1.0f;
@@ -790,7 +796,7 @@ static int PlaceHunter(int idx) {
          * 路径算出来了、pathIdx 也在推进，但 step = speed*dt = 0，
          * 于是一动不动。调试输出里 hunter2/hunter3 的 speed 就是 0.00。
          * ============================================================ */
-        M->speed = HunterMoveSpeed(idx,currentLevel,modSpeedMul,ThreatValue());
+        M->speed = HunterMoveSpeed(idx,currentLevel,modSpeedMul,ThreatEffective());
         M->x = x;
         M->y = y;
         M->tx = posX;
@@ -883,7 +889,7 @@ void TickSecondSpawn(float dt) {
         s_breathT = 0.0f;
     }
     if (s_hunterSpawned >= MON_HUNTER_MAX || currentLevel==1) return;
-    int pressure=GoldTier()+(int)floorf(ThreatValue());
+    int pressure=GoldTier()+(int)floorf(ThreatEffective());
     if(s_hunterSpawned==1 && currentLevel<2 && pressure<2)return;
     if(s_hunterSpawned==2 && currentLevel<4 && pressure<6)return;
 
@@ -987,6 +993,7 @@ static void HunterPerceive(Monster* M, float dt) {
         /* v3.0：BLACKOUT 生效期间追捕者完全失明 */
 
         float sight = flashlightOn ? MONSTER_SIGHT : MONSTER_SIGHT_DARK;
+        if (!flashlightOn && SkillGhostFormOwned() && ghostStillT>=3) sight=fminf(sight,1.5f);
         if (ultTimer > 0.0f) sight = 0.0f;
         if (sd2 < sight * sight && HasLOS(M->x, M->y, posX, posY)) {
             /* v3.0 削弱：**连续看见 0.6 秒才真的发现** ——
@@ -1021,8 +1028,12 @@ static void HunterPerceive(Monster* M, float dt) {
          · 路径被每帧强制重算，A* 反复写 M->path[]
            → msvcrt 里 memcpy/memset 越界，c0000005 崩溃
        现在：只在「游荡中」才接新线索，且冷却 1.5 秒，路径只在真正换目标时清。 */
-    if (M->active && M->state == 0) {
-        if (M->suspCool > 0.0f) {
+    int hunter=HunterIndex(M);
+    int closeSprint=hunter==2 && sprinting && hiddenIn<0 && !playerInSafe &&
+        Dist2(posX,posY,M->x,M->y)<16 && HasLOS(M->x,M->y,posX,posY) &&
+        TacticalFootstepMul(posX,posY,1)>.5f;
+    if (M->active && (M->state==0 || (hunter==2 && M->state==2))) {
+        if (M->suspCool > 0.0f && !closeSprint) {
             M->suspCool -= dt;
         } else {
 #if CANITY_SOUND_PROP
@@ -1062,7 +1073,10 @@ static void HunterPerceive(Monster* M, float dt) {
             float need = 15.0f / (HunterHearMulAt(HunterIndex(M))*ThreatHearMul());
             /* B03：比较的是**有效强度**（强度 × 可达度），不是原始强度 */
             float effStrength = (idx >= 0) ? susp[idx].strength * reach : 0.0f;
-            if (idx >= 0 && effStrength > need) {
+            if (closeSprint && (idx<0 || effStrength<=need)) {
+                M->state=1;M->tx=posX;M->ty=posY;
+                M->repath=0;M->stateTimer=0;M->suspTarget=-1;M->suspCool=1.5f;
+            } else if (idx >= 0 && effStrength > need) {
                 M->state = 1;
                 EvolutionHunterHeard(HunterIndex(M),idx);
                 M->tx = susp[idx].x;
@@ -1082,6 +1096,14 @@ static void HunterPerceive(Monster* M, float dt) {
 #endif
             }
         }
+    }
+
+    float traceX,traceY;
+    int seesPlayer=!playerInSafe && hiddenIn<0 && M->sightHold>0;
+    if (ProtocolHearingTarget(HunterIndex(M),dt,M->state==1,seesPlayer,M->x,M->y,&traceX,&traceY)) {
+        M->tx=traceX;M->ty=traceY;M->suspTarget=-1;
+        M->suspCool=fmaxf(M->suspCool,1.5f);
+        M->repath=0;
     }
 
     /* 到达可疑点 → 消费掉（不然它会一直站在那儿） */
@@ -1252,7 +1274,7 @@ static void HunterFollowPath(Monster* M, float dt) {
             M->pathIdx++;
         } else {
             /* v3.3：踩到胶水 → 移速 x0.20（-80%）。还在动，只是变成慢动作。 */
-    float step = M->speed * dt * (InGlue(M->x, M->y) ? GLUE_MONSTER_MUL : 1.0f) * GoldSpeedMul();
+    float step = M->speed * dt * fminf(ProtocolHunterMul(M,0),InGlue(M->x,M->y)?GLUE_MONSTER_MUL:1) * GoldSpeedMul();
             if (step > d) step = d;
             M->x += dx / d * step;
             M->y += dy / d * step;
@@ -1263,7 +1285,7 @@ static void HunterFollowPath(Monster* M, float dt) {
     if(M->state==1 && M->pathIdx>=M->pathLen && hiddenIn<0 && !playerInSafe && ultTimer<=0 &&
        Dist2(M->x,M->y,posX,posY)<4 && HasLOS(M->x,M->y,posX,posY)){
         float dx=posX-M->x,dy=posY-M->y,d=sqrtf(dx*dx+dy*dy);
-        if(d>.04f){float step=fminf(d,M->speed*dt*GoldSpeedMul()*(InGlue(M->x,M->y)?GLUE_MONSTER_MUL:1));
+        if(d>.04f){float step=fminf(d,M->speed*dt*GoldSpeedMul()*fminf(ProtocolHunterMul(M,0),InGlue(M->x,M->y)?GLUE_MONSTER_MUL:1));
             float nx=M->x+dx/d*step,ny=M->y+dy/d*step;
             if(!Blocked(nx,ny)){M->x=nx;M->y=ny;}
             else if(!Blocked(nx,M->y))M->x=nx;
@@ -1326,7 +1348,7 @@ static int HunterResolveContact(Monster* M, float dt) {
 
         if (hiddenIn < 0) {
             /* v3.0：厚皮三层叠加 —— 改造树 -15%、局内 THICK HIDE -35% */
-            sanity -= catchLoss * RunDamageTakenMul() * BenchFearDamageMul() * ThickHideMul();
+            sanity -= ProtocolContactLoss(catchLoss * RunDamageTakenMul() * BenchFearDamageMul() * ThickHideMul(),catchLoss);
             CatchCountBump();   /* v2.4.93：这一次记账，下次更疼 */
             {  CatchCountBumpRun(); }
             {  BestiaryMarkCaught(BST_ID_HUNTER); }   /* 图鉴：任何一只听声鬼抓到都算 */
@@ -1433,7 +1455,7 @@ static void UpdateOneHunter(Monster* M, float dt) {
         M->stun = fmaxf(0, M->stun - dt);
         return;
     }
-    if (M->active) M->speed = HunterMoveSpeed((int)(M-monHunters),currentLevel,modSpeedMul,ThreatValue());
+    if (M->active) M->speed = HunterMoveSpeed((int)(M-monHunters),currentLevel,modSpeedMul,ThreatEffective());
     HunterPerceive(M, dt);
     if(M->stun<=0 && EvolutionHunterOverride(M,dt))return;
     if (!HunterUpdateState(M, dt)) return;

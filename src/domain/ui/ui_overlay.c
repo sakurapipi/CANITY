@@ -38,8 +38,11 @@
 #include "bench.h"
 #include "lockbox.h"   /* v3.0 锁盘 */   /* v2.7 改造树 */
 #include "ui_theme.h"
+#include "ui_archive.h"
 #include "sprites.h"
 #include "relics.h"
+#include "protocol.h"
+#include "tactical_tools.h"
 #include "loop_api.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -51,6 +54,7 @@
 #include "render.h"
 #include "save.h"
 #include "ui_theme.h"
+#include "ui_archive.h"
 
 typedef struct { char message[384]; double until; } UiToastState;
 static UiToastState toast;
@@ -80,7 +84,19 @@ static void DrawLessonMarker(float wx, float wy) {
 }
 
 void DrawTutorialPanel(void) {
+    if (!trainingMode && currentState==STATE_PLAYING && !calibActive && !lockActive &&
+        !isMapOpen && !ProtocolCinematicActive() && ProtocolShowGuide()) {
+        float x,y;
+        if (ProtocolTarget(&x,&y)) DrawLessonMarker(x,y);
+    }
     if(!trainingMode || currentState!=STATE_PLAYING || calibActive || lockActive || (isMapOpen && mapFullScreen))return;
+    if (tutorialDone) {
+        int x=winW/2,y=winH/3;
+        BlendRectWin(winW/5,y-UIS(16),winW*4/5,y+UIS(100),UI_BG_PANEL,.97f);
+        DrawTextCenterWin(x,y,Tr("BASIC COURSE COMPLETE","基础课程完成"),UI_ACCENT);
+        DrawTextCenterWin(x,y+UIS(40),Tr("Enter: practice arena / Esc: main menu","回车进入训练场 / Esc 返回主菜单"),UI_INK);
+        return;
+    }
     if (!guideMode) {
         int station = TrainingStationAt(posX, posY);
         if (station < 0) return;
@@ -163,6 +179,15 @@ void DrawPickupToast(void) {
     /* 锁盘打开时不画任何拾取/藏身 toast；它原来画在锁盘之后，
        会和锁盘底部说明文字直接叠在一起。 */
     if (lockActive) return;
+    const char *radio=ProtocolRadioLine();
+    if (radio && currentState==STATE_PLAYING && !calibActive && !isMapOpen && !TacticalPanelOpen()) {
+        int w=winW*58/100;
+        int x=(winW-w)/2,y=winH*63/100;
+        BlendRectWin(x,y,x+w,y+UIS(40),UI_BG_PANEL,.97f);
+        FrameRectWin(x,y,x+w,y+UIS(40),UI_EDGE,.85f,1);
+        UiDossierText(radio,x+UIS(8),y+UIS(4),w-UIS(16),y+UIS(40),UI_GOLD);
+        return;
+    }
     if(toast.message[0] && PlatNow()<toast.until &&
        (currentState==STATE_PLAYING || currentState==STATE_SAFEHOUSE)){
         int width=DrawTextSmallWidth(toast.message),x=(winW-width)/2,y=UIS(90);

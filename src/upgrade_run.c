@@ -32,6 +32,8 @@ int RunUpgCost(int kind) {
     static const int costs[RUN_UPG_MAX]  = { 60, 130, 220 };
     /* v7：扳手是「拿到就能用」的能力升级，价格单独一档 */
     static const int wrench[RUN_UPG_MAX] = { 300, 800, 1800 };
+    static const int role[RUN_UPG_MAX]={180,390,720};
+    if (kind==RUN_UPG_ROLE) return role[upg[kind]];
     if (kind == 4) return wrench[upg[kind]];
     return costs[upg[kind]];
 }
@@ -65,6 +67,7 @@ const char* RunUpgName(int kind) {
     case 2: return "STAMINA";
     case 3: return "FLASHLIGHT";
     case 4: return "WRENCH KNOCK";
+    case RUN_UPG_ROLE: return "ABILITY TUNING";
     default: return "MINIMAP";
     }
 }
@@ -76,6 +79,7 @@ const char* RunUpgNameZh(int kind) {
     case 2: return "体能";
     case 3: return "手电效率";
     case 4: return "扳手击退";
+    case RUN_UPG_ROLE: return "角色能力强化";
     default: return "小地图省电";
     }
 }
@@ -87,6 +91,7 @@ const char* RunUpgDesc(int kind) {
     case 2: return "Sprint stamina -15% / lv";
     case 3: return "Flashlight drain -15% / lv";
     case 4: return "Cooldown 8/7/6/5s; knockback and stagger improve.";
+    case RUN_UPG_ROLE: return "Ability cooldown -3s and duration +0.5s per rank.";
     default: return "Minimap drain -2% / lv (10 to 4 per second)";
     }
 }
@@ -98,6 +103,7 @@ const char* RunUpgDescZh(int kind) {
     case 2: return "冲刺体力消耗 -15% / 级";
     case 3: return "手电耗电 -15% / 级";
     case 4: return "冷却8/7/6/5秒；逐级提升击退与硬直。";
+    case RUN_UPG_ROLE: return "每级技能冷却缩短3秒，持续时间增加0.5秒。";
     default: return "小地图每秒耗电 -2%（10 → 4）";
     }
 }
@@ -117,7 +123,7 @@ float RunUpgFlashMul(void)    { return 1.0f - 0.15f * (float)upg[3]; }
    **大地图不耗电**（见 game.c：全屏地图暂停且不扣电），
    所以这条只作用于小窗地图。 */
 int RunUpgMapDrainLevel(void) {
-    int lv = upg[5];
+    int lv = upg[RUN_UPG_MINIMAP];
     if (lv < 0) lv = 0;
     if (lv > RUN_UPG_MAX) lv = RUN_UPG_MAX;
     return lv;
@@ -133,7 +139,7 @@ void RunUpgLoadExtra(int minimapLevel) {
     int v = minimapLevel;
     if (v < 0) v = 0;
     if (v > RUN_UPG_MAX) v = RUN_UPG_MAX;
-    upg[5] = v;
+    upg[RUN_UPG_MINIMAP] = v;
 }
 
 /* ===== 扳手击退（2026-11-06 改为纯冷却）=====

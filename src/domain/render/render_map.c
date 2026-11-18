@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "room_theme.h"
 /* 2026-11-16：从 render.c 拆出的**地图渲染**（域内解耦，行为不变）。
    为什么单独成文件：render.c 已到 4200 行，超出模块预算（2500）；
@@ -31,13 +32,22 @@ static int LegendWidth(void) {
 static void DrawMapLegend(void) {
     static const struct {int kind;const char* en;const char* zh;} items[]={
         {-1,"YOU","你"}, {MAP_ICON_EXIT,"EXIT","出口"},
+        {MAP_ICON_COIL,"DISPATCH COIL","调度线圈"}, {MAP_ICON_RECEIVER,"WITNESS RECEIVER","证词接收器"},
+        {MAP_ICON_SHUTTER,"PRESSURE SHUTTER","泄压闸"}, {MAP_ICON_TERMINAL,"TERMINAL","剧情终端"},
         {MAP_ICON_CRATE,"CHEST","宝箱"}, {MAP_ICON_FUSE,"FUSE CHEST","保险丝箱"},
         {MAP_ICON_BREAKER,"BREAKER","配电箱"}, {MAP_ICON_SAFE,"SAFE ROOM","安全屋"},
         {MAP_ICON_HIDE,"HIDE SPOT","隐藏点"}, {MAP_ICON_BROKEN,"BROKEN HIDE","损坏隐藏点"},
         {MAP_ICON_DEVICE,"ROOM DEVICE","主题装置"}, {MAP_ICON_SPENT,"DEVICE USED","装置已使用"},
         {MAP_ICON_THREAT,"ECHO THREAT","回声威胁"}, {MAP_ICON_MIMIC,"MIMIC","宝箱怪"}
     };
-    int count=(int)(sizeof(items)/sizeof(items[0]));
+    int indices[sizeof(items)/sizeof(items[0])],count=0;
+    for (unsigned i=0;i<sizeof(items)/sizeof(items[0]);i++) {
+        int kind=items[i].kind;
+        if (kind>=MAP_ICON_COIL && kind<MAP_ICON_TERMINAL &&
+            (!(protocolRun.flags&PROTOCOL_MISSIONS) || kind!=MAP_ICON_COIL+protocolRun.story-1)) continue;
+        if (kind==MAP_ICON_TERMINAL && !protocolRun.story) continue;
+        indices[count++]=(int)i;
+    }
     int row=UIS(18);if(row<FONT_H+5)row=FONT_H+5;
     int width=LegendWidth(),height=row*(count+1)+UIS(12);
     int visible=count;
@@ -47,8 +57,9 @@ static void DrawMapLegend(void) {
     if(y<UIS(6))y=UIS(6);
     BlendRectWin(x,y,x+width,y+height,0x0A1018,.95f);
     FrameRectWin(x,y,x+width,y+height,0x526A80,.8f,1);
-    for(int i=0;i<visible;i++) {
-        int ix=x+6,iy=y+6+i*row;
+    for(int rowIndex=0;rowIndex<visible;rowIndex++) {
+        int i=indices[rowIndex];
+        int ix=x+6,iy=y+6+rowIndex*row;
         unsigned color=items[i].kind<0?0x30FF60:MapIconColor(items[i].kind);
         for(int gy=0;gy<5;gy++)for(int gx=0;gx<5;gx++)
             if(items[i].kind<0?(gx==2 || gy==2):MapIconPixel(items[i].kind,gx,gy))

@@ -1,5 +1,6 @@
 /* Settings own their tables, category routing and configured values. */
 #include "common.h"
+#include "protocol.h"
 #include "present_api.h"
 #include "player_api.h"
 #include "world_api.h"
@@ -40,6 +41,7 @@ int popupItem = -1;
 int rebindingAct = -1;       /* >=0 = 正在等待按键改绑的动作（ActionId），-1 = 未在改绑 */
 int rebindConflict = -1;     /* 改绑确认中：目标键被该动作占用（ActionId），-1 = 无冲突 */
 int resetDefaultsFlag = 0;   /* Reset to Defaults 行的哨兵变量（见 settings 表） */
+static const char *optGuidance[]={"Automatic","Basic","Off"};
 static int resetDisplayFlag = 0;
 int sliderDragging = 0;
 float volumeF = 0.8f;     /* 0..1，音效音量，0 = 静音 */
@@ -114,7 +116,7 @@ SettingItem settings[] = {
     /* 2026-11-08（第 2 轮联通修复）：这三个动作有默认键、游戏里在用，
        但设置表里一直没有行 —— 玩家查不到也改不了。 */
     {"Attack (wrench)", SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_SWING],         NULL,      0,    0,    0, 5},
-    {"Make Noise",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DECOY],         NULL,      0,    0,    0, 5},
+    {"Character Ability",      SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DECOY],         NULL,      0,    0,    0, 5},
     {"Drop Gold",       SET_LIST,   optKeys,  OPT_KEY_COUNT, &g_bindings[ACT_DROP_GOLD],     NULL,      0,    0,    0, 5},
 
     /* ========== 分类: KEY BINDINGS / MENU KEYS ========== */
@@ -147,6 +149,7 @@ SettingItem settings[] = {
     {"QTE Hint",        SET_LIST,   optQte,      2, &qteHint,           NULL,      0,    0,    0, 6},
     /* Reset to Defaults：一次性动作行。value 指向 resetDefaultsFlag（没有真选项），
        ActivateSettingRow 里单独拦截执行。 */
+    {"Objective Guidance", SET_LIST, optGuidance, 3, &protocolProfile.guide, NULL, 0, 0, 0, 6},
     {"Reset to Defaults", SET_LIST, optOnOff,    2, &resetDefaultsFlag, NULL,      0,    0,    0, 6},
 };
 int settingsPage = 0;

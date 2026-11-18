@@ -1,4 +1,6 @@
+#include "tactical_tools.h"
 /* 2026-11-16：从 render.c 拆出的**精灵绘制队列收集**（域内解耦，行为不变）。 */
+#include "protocol.h"
 #include "threat_telegraph.h"
 #include "perception.h"
 #include "room_material.h"
@@ -97,6 +99,16 @@ int CollectSpriteScenery(SpriteDrawEntry* list, int n) {
 }
 
 int CollectSpriteActorsAndMarkers(SpriteDrawEntry* list, int n) {
+    for (int i=0;i<PROTOCOL_DEVICE_COUNT && n<MAX_SPRITES;i++) {
+        float x,y;
+        int state=i==3?ProtocolAbilityMarker(&x,&y):ProtocolProp(i,&x,&y);
+        if (!state) continue;
+        list[n].d2=Dist2(x,y,posX,posY);list[n].kind=20;list[n].idx=i;n++;
+    }
+    float impactX,impactY;
+    if (n<MAX_SPRITES && TacticalJammerEffect(&impactX,&impactY)>0) {
+        list[n].d2=Dist2(impactX,impactY,posX,posY);list[n].kind=21;list[n].idx=0;n++;
+    }
     if (breaker.active) {
         if (n < MAX_SPRITES) {
             list[n].d2 = Dist2(breaker.x, breaker.y, posX, posY);

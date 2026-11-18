@@ -138,6 +138,10 @@ void CalibTick(float dt) {
         sanity=fminf(SanityMax(),sanity+HIDE_SANITY_REGEN*dt);
     }
 
+    float recoveryDt=fmaxf(0,dt-staminaIdle);
+    staminaIdle=fmaxf(0,staminaIdle-dt);
+    stamina=fminf(StaminaMax(),stamina+STAMINA_REGEN*recoveryDt*
+        (hiddenIn>=0?HIDE_STAMINA_REGEN_MUL:1.f));
     if(waitingForStart){uiDirty=1;return;}
     if(leadIn>0){
         leadIn=fmaxf(0,leadIn-dt);

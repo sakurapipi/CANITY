@@ -1,4 +1,5 @@
 /* Tutorial progression and arena: private timers, event-driven input. */
+#include "protocol.h"
 #include "common.h"
 #include "training_stations.h"
 #include "tutorial.h"
@@ -150,12 +151,12 @@ const char* TutorialObjective(void) {
     static const char* en[TUT_DONE+1]={
         "01 MOVE","02 LOOK AROUND","03 SPRINT","04 FLASHLIGHT","05 MAP","06 SEARCH",
         "07 CRANK BATTERY","08 SELECT AN ITEM","09 THROW","10 PHASE RETURN","11 ARM A DECOY",
-        "12 WRENCH","13 HIDE AND LEAVE","14 HUSH PULSE","15 UNLOCK A CRATE","16 BUY A SUPPLY",
+        "12 WRENCH","13 HIDE AND LEAVE","14 CHARACTER ABILITY","15 UNLOCK A CRATE","16 BUY A SUPPLY",
         "17 BUY A RUN UPGRADE","18 RHYTHM CONSOLE","19 POWER THE EXIT","20 EXTRACT","TRAINING COMPLETE"};
     static const char* zh[TUT_DONE+1]={
         "01 移动","02 转动视角","03 冲刺","04 手电开关","05 打开与关闭地图","06 搜查容器",
         "07 手摇充电","08 切换道具","09 蓄力投掷","10 相位返回","11 激活诱饵",
-        "12 扳手挥击","13 躲藏与离开","14 静息脉冲","15 打开锁箱","16 购买补给",
+        "12 扳手挥击","13 躲藏与离开","14 角色能力","15 打开锁箱","16 购买补给",
         "17 购买局内强化","18 节律校准","19 接通配电箱","20 抵达出口","课程完成"};
     int step=tutorialStep>=0 && tutorialStep<=TUT_DONE?tutorialStep:TUT_MOVE;
     return LangTr(en[step],zh[step]);
@@ -177,7 +178,7 @@ const char* TutorialHint(void) {
     case TUT_DECOY:return LangTr("Select and throw a DECOY, then press C to arm it.","滚轮选择诱饵玩偶并投出，等落地后按C激活；用来引开听声鬼。");
     case TUT_KNOCK:return LangTr("Get close to the marked dummy and hit it with a wrench swing.","靠近标记的训练靶，蓄力挥击并命中。");
     case TUT_HIDE:snprintf(hint,sizeof(hint),LangTr("At (18,22), use %s to enter a hiding place. Use it again to leave.","到（18,22）的藏身点，按 %s 进入；之后再按一次离开。"),VkName(g_bindings[ACT_INTERACT]));return hint;
-    case TUT_PULSE:snprintf(hint,sizeof(hint),LangTr("Leave cover, then use %s for Hush Pulse. The camp lends this ability.","先离开藏身点，再按 %s 释放静息脉冲。训练时临时开放，不改动永久技能。"),VkName(g_bindings[ACT_DECOY]));return hint;
+    case TUT_PULSE:snprintf(hint,sizeof(hint),LangTr("Leave cover, then use %s to activate your character ability.","离开藏身点后，按 %s 使用角色能力。"),VkName(g_bindings[ACT_DECOY]));return hint;
     case TUT_LOCKS:return LangTr("Open any marked lockbox. The other locks are available for free practice.",
         "打开任意一个上锁的练习箱。其余锁具可留到自由训练场练习。");
     case TUT_SHOP:return LangTr("Enter a hiding place, then T opens supplies. Buy one item, Esc returns. Practice gold: 1200.","先进入南侧藏身点，再按T开商店。买一件商品后ESC返回。练习金币1200，不带出。");
@@ -222,8 +223,13 @@ void TutorialUpdate(float dt) {
             if(tutorialTimer>=2.0f){rewardResult=SaveAwardTrainingGraduation();tutorialTimer=0;}
             return;
         }
-        tutorialTimer+=dt;
-        if(tutorialTimer<5)return;
+        if (IsActionPressed(ACT_MENU_CANCEL)) {
+            ResetRunModeFlags();
+            hasSave=SaveHasPendingRun();currentState=STATE_MAIN_MENU;menuSelection=0;
+            ForceCursor(1);uiDirty=1;
+            return;
+        }
+        if (!IsActionPressed(ACT_MENU_CONFIRM)) return;
         LoopQueueStart(START_TRAINING, 0);
         StartGame();
         return;

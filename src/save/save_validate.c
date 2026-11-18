@@ -25,6 +25,7 @@ static size_t MinimumBlobBytes(int version) {
     case 43: return offsetof(SaveBlob, collectorRunV44);
     case 44: return offsetof(SaveBlob, moneyBagPositionsV45);
     case 45: return offsetof(SaveBlob, pitchLook); /* Original v45 lacked this optional setting. */
+    case 46: return sizeof(SaveBlob);
     default: return SIZE_MAX;
     }
 }
@@ -65,6 +66,7 @@ int SaveValidateBytes(const void* bytes, size_t length) {
         for (int j = 0; j < i; j++) if (ids[j] == desc.id) return 0;
         ids[i] = desc.id;
         if (!KnownSchemaSupported(desc.id, desc.schema) || !EvolutionChunkValid(desc.id,desc.schema,body,(int)desc.size)) return 0;
+        if (desc.id == SC_PROTOCOL_CHECKPOINT && (desc.schema != 1 || !BlobValid(body, desc.size))) return 0;
         if (desc.id == SC_DAILY_CLEAR && desc.schema == 1 && desc.size != 4) return 0;
         used += desc.size;
         if (desc.id == SC_LEGACY29) {

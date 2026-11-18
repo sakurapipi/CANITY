@@ -83,8 +83,8 @@ static void test_global_balance_invariants(void) {
         }
         CHECK(first == 50,
               "at floor 1 the beacon costs exactly 5% of 1000 gold");
-        CHECK(prev == 50,
-              "deep floors preserve the same 5% price");
+        CHECK(prev == 150,
+              "deep floors reach the 15% price cap");
 
         currentLevel = 1;
         carryGold = 0;

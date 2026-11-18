@@ -21,4 +21,5 @@ void PlayerApplyMovement(float dt, const PlayerFrameInput* input);
 
 extern int counterKillUsed;
 void PlayerTickBatteryWarning(float dt);
+float PlayerQuietStepTime(void);
 #endif

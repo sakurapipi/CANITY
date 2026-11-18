@@ -39,8 +39,6 @@ static inline float RenderProjectionRowSlope(int y) {
 
 /* ---- 贴图 ---- */
 extern unsigned int texture[TEX_HEIGHT][TEX_WIDTH];
-extern unsigned int floorTexture[TEX_HEIGHT][TEX_WIDTH];
-extern unsigned int ceilTexture[TEX_HEIGHT][TEX_WIDTH];
 
 /* ---- 按列预计算表 ---- */
 extern float zBuffer[MAX_SCREEN];

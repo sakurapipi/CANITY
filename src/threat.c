@@ -5,6 +5,7 @@
 #include "common.h"
 #include "skills.h"
 #include "threat.h"
+#include "protocol.h"
 
 /* ---- 累积 ---- */
 
@@ -17,12 +18,12 @@ void ThreatReset(void) {
 void ThreatAdd(float v) {
     if (!isfinite(v) || v <= 0.0f) return;
     s_threat += v;
-    if (s_threat > THREAT_MAX) s_threat = THREAT_MAX;
+    if (s_threat > 1024.0f) s_threat = 1024.0f;
 }
 
 void ThreatSet(float v) {
     if (!isfinite(v) || v < 0.0f) v = 0.0f;
-    if (v > THREAT_MAX) v = THREAT_MAX;
+    if (v > 1024.0f) v = 1024.0f;
     s_threat = v;
 }
 
@@ -30,6 +31,7 @@ void ThreatRestoreTotal(float savedTotal) {
     float skill = (float)SkillClampRank(SK_GREEDHAND, skillRank[SK_GREEDHAND]);
     ThreatSet(savedTotal - skill);
 }
+float ThreatRaw(void) { return s_threat; }
 float ThreatValue(void) {
     float value = s_threat + (float)SkillClampRank(SK_GREEDHAND, skillRank[SK_GREEDHAND]);
     return value > THREAT_MAX ? THREAT_MAX : value;
@@ -38,6 +40,7 @@ float ThreatValue(void) {
 
 /* 0..1 的比例，UI 画进度用 */
 float ThreatRatio(void) { return ThreatValue() / THREAT_MAX; }
+float ThreatEffective(void) { return ProtocolMonsterThreat(ThreatValue()); }
 
 /* ==================================================================
  * 速度上限 —— **随点技能变化**（这是本项目最关键的一条数值约束）
@@ -47,7 +50,7 @@ float ThreatRatio(void) { return ThreatValue() / THREAT_MAX; }
  *   T=18  → 2.20（使用统一硬顶）
  */
 float ThreatSpeedCap(void) {
-    float cap = THREAT_SPEED_BASE + ThreatValue() * THREAT_SPEED_PER_POINT;
+    float cap = THREAT_SPEED_BASE + ThreatEffective() * THREAT_SPEED_PER_POINT;
     if (cap > THREAT_SPEED_HARD_CAP) cap = THREAT_SPEED_HARD_CAP;
     return cap;
 }
@@ -56,28 +59,28 @@ float ThreatSpeedCap(void) {
 
 /* 抓捕冷却：越强越短（−0.03/点，最多 −0.54） */
 float ThreatCooldownDelta(void) {
-    float d = ThreatValue() * THREAT_CD_PER_POINT;
+    float d = ThreatEffective() * THREAT_CD_PER_POINT;
     if (d > THREAT_CD_MAX) d = THREAT_CD_MAX;
     return -d;
 }
 
 /* 追逐时长：越强追得越久（+0.25/点，最多 +4.5 秒） */
 float ThreatChaseBonus(void) {
-    float d = ThreatValue() * THREAT_CHASE_PER_POINT;
+    float d = ThreatEffective() * THREAT_CHASE_PER_POINT;
     if (d > THREAT_CHASE_MAX) d = THREAT_CHASE_MAX;
     return d;
 }
 
 /* 第二只出场提前（−0.4/点，最多 −7.2 秒） */
 float ThreatSpawnAdvance(void) {
-    float d = ThreatValue() * THREAT_SPAWN_PER_POINT;
+    float d = ThreatEffective() * THREAT_SPAWN_PER_POINT;
     if (d > THREAT_SPAWN_MAX) d = THREAT_SPAWN_MAX;
     return d;
 }
 
 /* 听觉半径倍率（+1.5%/点，最多 +27%） */
 float ThreatHearMul(void) {
-    float m = 1.0f + ThreatValue() * THREAT_HEAR_PER_POINT;
+    float m = 1.0f + ThreatEffective() * THREAT_HEAR_PER_POINT;
     if (m > THREAT_HEAR_MAX) m = THREAT_HEAR_MAX;
     return m;
 }

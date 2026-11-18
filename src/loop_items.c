@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "tactical_tools.h"
 /* Transient item pools: smoke, glue and decoys. */
 #include "common.h"
@@ -166,7 +167,7 @@ void UpdateSmokes(float dt) {
     }
 
     MoneyTick(dt);
-    {  UpdateWarden(dt); }   /* v8 B1: 守门人 */   
+    {  if (!ProtocolPeacefulStory()) UpdateWarden(dt); }   /* v8 B1: 守门人 */
 
     /* v3.3：诱饵心跳 —— 每 DECOY_SHOUT_EVERY 秒叫一次，把怪引过去 */
     for (int i = 0; i < MAX_DECOY; i++) {

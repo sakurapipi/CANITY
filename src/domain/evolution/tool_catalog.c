@@ -172,6 +172,7 @@ int ToolCanOffer(int tool) {
     }
 }
 void TacticalResetRun(void) {
+    TacticalResetJammer();
     memset(&tactical, 0, sizeof(tactical));
     tactical.quick[0] = 0;
     tactical.quick[1] = 1;
@@ -187,6 +188,7 @@ void TacticalResetRun(void) {
     }
 }
 void TacticalResetFloor(void) {
+    TacticalResetJammer();
     memset(tactical.acoustic, 0, sizeof(tactical.acoustic));
     memset(tactical.dust, 0, sizeof(tactical.dust));
     memset(&tactical.solvent, 0, sizeof(tactical.solvent));

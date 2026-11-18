@@ -4,7 +4,7 @@
 #include "common.h"
 
 enum { START_NORMAL = 0, START_ENDLESS, START_DAILY, START_CAMPAIGN, START_TRAINING,
-       START_GUIDE };
+       START_GUIDE, START_STORY };
 
 void LoopQueueStart(int mode, int stage);
 void LoopResetDecoyCooldown(void);

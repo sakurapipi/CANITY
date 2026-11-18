@@ -77,6 +77,7 @@ const char* ShopProductName(int row);
 const char* ShopProductDescription(int row);
 int ShopProductSprite(int row);
 int ShopBasePriceAt(int row);
+int ShopBeaconPercentAt(int row);
 int ShopCanBuyProduct(int row);
 int ShopServiceCanUse(int row);
 float ShopServiceGain(int row);

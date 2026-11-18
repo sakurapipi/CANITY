@@ -1,6 +1,7 @@
 #include "progression.h"
 /* Wrench charge -> swing -> contact; private per-swing and key state. */
 #include "common.h"
+#include "protocol.h"
 #include "tutorial.h"
 #include "lockbox.h"
 #include "wrench.h"
@@ -79,7 +80,7 @@ static void WrenchApplyHit(float power) {
             wrenchHitMask|=tbits[ti];
             /* 第 1 轮：命中闪光 —— 让玩家**看得见**自己打中了 */
             {  wrenchHitFlashT = 0.22f; }
-            target->stun=RunUpgWrenchStun()*BenchKnockStunMul();
+            target->stun=RunUpgWrenchStun()*BenchKnockStunMul()+ProtocolWrenchStunBonus();
             ProgressionWrenchContact(target);
             SpawnParticles(target->x, target->y, 1);   /* v3.6：受击血/墨粒子 */
             knockCountRun++;

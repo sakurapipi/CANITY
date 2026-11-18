@@ -6,6 +6,7 @@
 #ifndef CANITY_SAVE_H
 #define CANITY_SAVE_H
 
+#include "protocol.h"
 #include "common.h"
 #include "cell_meta.h"
 #include "map_rooms.h"
@@ -21,7 +22,7 @@
 /* v28: 末尾追加 Dynamic Res + 通关记录；v25/v26/v27 都按前缀迁移。
    v27 及更早的存档没有这两个字段，读档时按文件长度取默认值。 */
 /* v38 appends isolated mimic knowledge; all v37 field offsets stay unchanged. */
-#define SAVE_VERSION 45   /* v37: 末尾追加 ghostSkillRanks[4]（幽灵流派 4 个节点） */   /* v36（2026-11-08）：末尾追加 difficultyPlus1
+#define SAVE_VERSION 46   /* v37: 末尾追加 ghostSkillRanks[4]（幽灵流派 4 个节点） */   /* v36（2026-11-08）：末尾追加 difficultyPlus1
                            *   （0 = 老档 → 按标准难度；1/2/3 = 轻松/标准/硬核）
                            * v35：末尾追加 rngVersion（v34 及更早按旧 rand 序列重放）
                            * v34：末尾追加投掷物/信标/爆脸怪计数（v33 短档仍然可读） */
@@ -344,6 +345,8 @@ typedef struct {
     /* v2.4.5-rc1 追加（仍然只在末尾，旧档按偏移判断是否存在）：
        Vertical Look 开关。审计发现它只活在进程内存里，重启就丢。 */
     int pitchLook;
+    ProtocolRun protocolRunSave;
+    ProtocolProfile protocolProfileSave;
 } SaveBlob;
 
 /* ==================================================================
@@ -372,6 +375,11 @@ int SaveEvolutionCanPersist(void);
 void ContinueRun(void);
 /* 存档里是否还有一局可继续（训练局退出后恢复菜单用） */
 int SaveHasPendingRun(void);
+int SavePendingFloor(void);
+int SavePendingStory(void);
+int SavePendingRole(void);
+void SaveStoryEntry(void);
+int SaveRetryStory(void);
 void DeleteSave(void);
 
 int SaveAwardTrainingGraduation(void);

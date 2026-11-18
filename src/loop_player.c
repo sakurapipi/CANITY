@@ -2,6 +2,7 @@
  *
  * 依赖的 modBatteryMul 等乘法器已声明在 player_api.h。
  */
+#include "protocol.h"
 #include "common.h"
 #include "entity.h"
 #include "state.h"
@@ -38,13 +39,13 @@ float BatteryDrainRate(void) {
 int EnergyMax(void) { return (int)ENERGY_MAX; }
 
 float SanityMax(void) {
-    float m = 100.0f + RelicMaxSanAdd()+BenchSanityAdd();
+    float m = (float)ProtocolBase(0) + RelicMaxSanAdd()+BenchSanityAdd();
     if (m < 25.0f) m = 25.0f;
     return m;
 }
 
 float SafeHealRate(void) {
-    return SAFE_HEAL_RATE * (1.0f + SkillRestAdd() + RelicHealAdd())*(HasKeystone(SK_LASTRESORT)?0.5f:1.0f) * BenchHealMul();   /* REST + IRON LUNG */
+    return SAFE_HEAL_RATE * (1.0f + RelicHealAdd())*(HasKeystone(SK_LASTRESORT)?0.5f:1.0f) * BenchHealMul();   /* REST + IRON LUNG */
 }
 
 
@@ -57,7 +58,7 @@ int BatteryMax(void) {
      * 原来的 100 电量撑不到图另一头 —— 手电变成"前一半能用"。
      * 同时保留所有加成/惩罚链（技能、遗物、每日、改造树）不变。
      * ================================================================ */
-    int m = (int)((150 + SkillBatteryAdd() + RunBatteryCapDelta() + 30*relicOwned[3]) * DailyBatteryCapMul() * BenchBatteryCapMul());
+    int m = (int)((ProtocolBase(1) + SkillBatteryAdd() + RunBatteryCapDelta() + 30*relicOwned[3]) * DailyBatteryCapMul() * BenchBatteryCapMul());
     if (m < 30) m = 30;
     return m;
 }
@@ -80,6 +81,6 @@ int BottleCap(void) {
 }
 
 float StaminaMax(void) {
-    float m = 100.0f + (float)RunStaminaAdd();
-    return m*BenchStaminaMul();
+    float m = (float)ProtocolBase(2) + (float)RunStaminaAdd();
+    return m*BenchStaminaMul()*(SilentRunOwned()?.70f:1.0f);
 }

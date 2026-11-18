@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "monster_evolution.h"
 #include "threat_tier.h"
 #include "tactical_tools.h"
@@ -507,7 +508,7 @@ static int ScavengerPreflight(float dt) {
             if (hiddenIn >= 0 && hiddenIn == spot) {
                 /* ---- (a) 玩家还在柜里：原样结算并把他踢出来 ---- */
                 /* v2.4.36：按当前理智的 20%~50% 扣，随金币和强度档成长 */
-                sanity -= scavSanityLoss() * RunDamageTakenMul();
+                sanity -= ProtocolContactLoss(scavSanityLoss() * RunDamageTakenMul(),scavSanityLoss());
                 if (sanity < 0.0f) sanity = 0.0f;
                 AddHitFlash(0.85f);
                 AddShake(0.28f, 0.20f);
@@ -571,7 +572,7 @@ static int ScavengerEncounter(float d) {
                            + SCAV_CATCH_STEP * (float)(currentLevel > 0 ? currentLevel - 1 : 0)
                              * (SCAV_CATCH_SAN_MAX - SCAV_CATCH_SAN_MIN);
                 if (loss > SCAV_CATCH_SAN_MAX) loss = SCAV_CATCH_SAN_MAX;
-                sanity -= loss * RunDamageTakenMul();
+                sanity -= ProtocolContactLoss(loss * RunDamageTakenMul(),loss);
                 /* 2026-11-08（第 4 轮）：第一次被抓住时教"按 K 丢钱引开" */
                 /* Automatic encounter hint removed. */
                 /* 第 9 轮「以牙还牙」：挨了一下之后 3 秒跑更快 */

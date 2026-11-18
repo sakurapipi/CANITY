@@ -475,8 +475,15 @@ static void test_tutorial_and_keystone_contract(void) {
         }
         free(tutorial);
     }
-    check(contains_tight(src,"(SkillOwned(SK_DECOY)||trainingMode)"),
-          "CONTRACT: training temporarily exposes the current Hush ability without buying it");
+    {
+        char *ability=read_file("src/domain/character/character_runtime.c");
+        strip_comments(ability);
+        check(contains_tight(src,"ProtocolTickAbilityInput()") &&
+              contains_tight(ability,"IsActionPressed(ACT_DECOY)") &&
+              contains_tight(ability,"TutorialRecordAction(TUTOR_PULSE)"),
+              "CONTRACT: training uses the real role ability binding and records a successful activation");
+        free(ability);
+    }
 
     /* ---- P1-4：会被外部条件卡死的那两步必须有超时兜底 ---- */
     check(contains(src, "TUTORIAL_STEP_TIMEOUT"),
@@ -837,7 +844,7 @@ static void test_map_drain_contract(void) {
           "full-screen map still drains the battery");
     check(contains(game, "RunUpgMapDrainPct()"),
           "minimap drain does not consult the upgrade level");
-    check(contains(upgh, "RUN_UPG_COUNT 6"),
+    check(contains(upgh, "RUN_UPG_MINIMAP 5"),
           "the minimap upgrade slot is missing");
     check(contains(upg, "MAP_BATTERY_DRAIN - 2.0f"),
           "minimap saving does not subtract 2 percent per rank");
@@ -1295,7 +1302,7 @@ static void test_mode_leak_contract(void) {
 
     check(contains(savec, "ResetRunModeFlags();"),
           "ContinueRun must reset stale mode flags before loading");
-    check(contains(savec, "if (trainingMode)"),
+    check(contains_tight(savec, "if(trainingMode||") && contains_tight(savec, "SaveSettingsOnly();return;"),
           "training runs must not serialize the tutorial world");
     check(contains(savec, "keepPendingRun"),
           "leaving the tutorial must preserve the suspended real run");

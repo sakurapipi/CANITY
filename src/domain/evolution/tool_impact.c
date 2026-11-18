@@ -18,6 +18,12 @@
 #include "present_api.h"
 #include "mimic.h"
 #include "warden.h"
+static ToolZone jammerEffect;
+void TacticalResetJammer(void) { jammerEffect.ttl=0; }
+float TacticalJammerEffect(float *x,float *y) {
+    *x=jammerEffect.x;*y=jammerEffect.y;
+    return jammerEffect.ttl/.72f;
+}
 static void Failed(const char *en, const char *zh) {
     pickupMsg = Tr(en, zh);
     pickupMsgTimer = 1.5f;
@@ -60,6 +66,7 @@ int TacticalEmergencySolvent(void) {
     return 1;
 }
 void TacticalTick(float dt) {
+    jammerEffect.ttl=fmaxf(0,jammerEffect.ttl-dt);
     if (tactical.solvent.ttl > 0) {
         tactical.solvent.ttl = fmaxf(0, tactical.solvent.ttl - dt);
         EvolutionClearWeb(tactical.solvent.x, tactical.solvent.y, 2.5f);
@@ -175,6 +182,23 @@ static int ResolveToolLanding(float *x,float *y) {
     return 0;
 }
 
+int TacticalInterruptWarden(float x,float y,float radius) {
+    if (!WardenActive() || Dist2(x,y,WardenX(),WardenY())>radius*radius ||
+        !HasLOS(x,y,WardenX(),WardenY())) return 0;
+    EvoActor *actor=&evolution.actors[EVO_WARDEN];
+    if (actor->resist>0) return -1;
+    actor->resist=12;
+    actor->signal=ProgressionToolValue(PG_JAM_TIME);
+    actor->flags|=8;
+    if (actor->phase==2) {
+        actor->phase=0;
+        actor->flags|=2;
+        EvolutionRelease(EVO_WARDEN);
+    }
+    actor->aux=0;
+    return 1;
+}
+
 void TacticalImpact(int kind, float x, float y) {
     int tool = kind - TOOL_SHOT_FIRST;
     if (tool < 0 || tool >= TOOL_COUNT)
@@ -231,21 +255,12 @@ void TacticalImpact(int kind, float x, float y) {
             }
         if (best >= 0)
             tactical.dust[best] = ProgressionToolValue(PG_DUST_TIME);
-    } else if (tool == TOOL_JAMMER && WardenActive() &&
-               Dist2(x, y, WardenX(), WardenY()) <= (RunSkillOwned(IR_WIDEPULSE) ? 9.0f : 6.25f) &&
-               HasLOS(x, y, WardenX(), WardenY())) {
-        EvoActor *a = &evolution.actors[EVO_WARDEN];
-        if (a->resist > 0)
-            return;
-        a->resist = 12;
-        a->signal = ProgressionToolValue(PG_JAM_TIME);
-        a->flags |= 8;
-        if (a->phase == 2) {
-            a->phase = 0;
-            a->flags |= 2;
-            EvolutionRelease(EVO_WARDEN);
-        }
-        a->aux = 0;
+    } else if (tool==TOOL_JAMMER) {
+        jammerEffect=(ToolZone){x,y,.72f,TOOL_JAMMER};
+        (void)TacticalInterruptWarden(x,y,RunSkillOwned(IR_WIDEPULSE)?3:2.5f);
+        AudioPlayWorld(SFX_POWER,x,y,.45f,6,1);
+        SpawnParticles(x,y,0);
+        return;
     }
     AudioPlayWorld(SFX_ECHO, x, y, .25f, 5, 1);
 }

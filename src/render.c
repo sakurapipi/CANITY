@@ -1,3 +1,4 @@
+#include "tactical_tools.h"
 #include "skills.h"
 #include "threat_tier.h"
 #include "monster_evolution.h"
@@ -6,6 +7,7 @@
  *
  * 代码从原 main.c 原样搬出，函数体未做任何逻辑改动。
  */
+#include "protocol.h"
 #include "threat_telegraph.h"
 #include "common.h"
 #include "room_theme.h"
@@ -51,8 +53,7 @@ unsigned int* pixels = NULL;
 unsigned char* vignetteMask = NULL;
 
 unsigned int texture[TEX_HEIGHT][TEX_WIDTH];
-unsigned int floorTexture[TEX_HEIGHT][TEX_WIDTH];
-unsigned int ceilTexture[TEX_HEIGHT][TEX_WIDTH];
+static unsigned int sceneTexture[THEME_COUNT][3][TEX_HEIGHT][TEX_WIDTH];
 
 float zBuffer[MAX_SCREEN];
 float flashTab[MAX_SCREEN];
@@ -102,33 +103,27 @@ void UpdatePitch(void) {
     horizon = renderH > 0 ? (int)((float)renderH *
         tanf(pitchRatio * RENDER_LOOK_LIMIT_RADIANS)) : 0;
 }
-/* ---- 地板/天花板预乘表 ----
-   地板是全屏最贵的部分（占 Render3D 的一半以上），每像素原本要做
-   3 次「贴图通道 × 亮度」的乘法 + 3 次截断比较。
+#define PREMUL_LEVELS 256
+#define PREMUL_K8_SHIFT 2
+static int storyMaterialActive;
+static int SceneMaterialAt(int x,int y) {
+    if (storyMaterialActive) return themeId;
+    if ((unsigned)x<MAP_WIDTH && (unsigned)y<MAP_HEIGHT) {
+        const CellMeta *m=&cellMeta[y][x];
+        if ((m->roomId || (m->flags&CELLFLAG_ROOMWALL)) && m->themeId<THEME_COUNT)
+            return m->themeId;
+    }
+    return themeId;
+}
 
-   关键观察：程序化生成的地板贴图**只有 4 种颜色**（复古化把颜色量化到 8 级，
-   再加上 2x2 块对齐，同一主题内实际用到的颜色极少）。
-   所以可以把「颜色 × 亮度」预先乘好，做成一张很小的表：
+static unsigned SurfaceTexel(int material,int surface,int x,int y,int level) {
+    unsigned c=sceneTexture[material][surface][y][x];
+    unsigned r=(((c>>16)&255)*level)>>6;
+    unsigned g=(((c>>8)&255)*level)>>6;
+    unsigned b=((c&255)*level)>>6;
+    return ((r>255?255:r)<<16)|((g>255?255:g)<<8)|(b>255?255:b);
+}
 
-       premulFloor[颜色索引][亮度等级]  →  最终像素
-
-   表大小 = 4 色 × 256 级 × 4 字节 = 4KB（地板）+ 4KB（天花板），
-   完全落在 L1 缓存里。
-
-   > 注意：HANDOFF §13.2 记录过「墙壁预乘成 512KB 查表反而更慢」——
-   > 那是表太大导致 L2 未命中。这里表只有 4KB，结论正好相反。
-
-   亮度等级怎么定：
-   地板的 k8（shadeLut 校正后的亮度）实测只到 **250**（手电最亮处），
-   所以等级用 8 级步长就够：level = k8 >> 3 -> 0..31，表只要 4*32*4 = 512 字节。
-   但为了留余量（Gamma 调大时 shadeLut 输出范围不变，实际 k8 上限也不变），
-   这里仍按 256 级建表（k8 >> 2，步长 4），精度足够且表才 4KB。 */
-#define PREMUL_LEVELS 256          /* 亮度等级数 */
-#define PREMUL_MAXCOL 16           /* 单张贴图最多用到的颜色数（实测 4） */
-#define PREMUL_K8_SHIFT 2          /* k8 >> 2 -> 0..255 的等级索引 */
-
-static unsigned int premulFloor[PREMUL_MAXCOL][PREMUL_LEVELS];
-static unsigned int premulCeil[PREMUL_MAXCOL][PREMUL_LEVELS];
 /* v2.0：墙面凹凸光照 —— 由贴图亮度算梯度，墙上不再是纯平面。
    每像素只多一次 byte load + 一次加法。 */
 static signed char bump[TEX_HEIGHT][TEX_WIDTH];
@@ -137,80 +132,7 @@ static signed char bump[TEX_HEIGHT][TEX_WIDTH];
    （128 贴图的细节反而变成噪点）。这里预生成 5 级，按每像素 texel 数选级。 */
 #define MIP_LEVELS 5
 static unsigned int mipChain[MIP_LEVELS][TEX_WIDTH * TEX_HEIGHT];
-static unsigned char floorColorIdx[TEX_HEIGHT][TEX_WIDTH];  /* 贴图 -> 颜色索引 */
-static unsigned char ceilColorIdx[TEX_HEIGHT][TEX_WIDTH];
-static int nFloorColors = 0, nCeilColors = 0;
-
-/* 把贴图重新索引成「颜色索引」，并建好预乘表。
-   贴图本身保持不变（墙体、精灵等还在用），只是额外存一份索引。 */
-/* v1.8：配色数硬上限。
-   地板/天花板预乘表按颜色数分配列（PREMUL_MAXCOL），
-   贴图颜色一旦超过这个数就会写越界 —— 加纹理细节时踩过（直接崩溃）。
-   统计阶段就夹住，宁可少几种颜色也绝不越界。 */
-
-static void BuildPremulTables(void) {
-    unsigned int fcols[PREMUL_MAXCOL], ccols[PREMUL_MAXCOL];
-    /* v2.7：从 0 起算。原来从 1 开始，导致下面第一轮 fcols[0]/ccols[0]
-       读到的是未初始化的栈内容（今天恰好第一个真颜色拿索引 1 才没显现）。 */
-    nFloorColors = 0;
-    nCeilColors = 0;
-
-    for (int y = 0; y < TEX_HEIGHT; y++) {
-        for (int x = 0; x < TEX_WIDTH; x++) {
-            unsigned int c = floorTexture[y][x] & 0xFFFFFFu;
-            int fi = -1;
-            for (int i = 0; i < nFloorColors; i++) if (fcols[i] == c) { fi = i; break; }
-            if (fi < 0) {
-                if (nFloorColors < PREMUL_MAXCOL) { fi = nFloorColors; fcols[nFloorColors++] = c; }
-                else fi = PREMUL_MAXCOL - 1;      /* 颜色用超了，退回最后一个 */
-            }
-            floorColorIdx[y][x] = (unsigned char)fi;
-
-            unsigned int cc = ceilTexture[y][x] & 0xFFFFFFu;
-            int gi = -1;
-            for (int i = 0; i < nCeilColors; i++) if (ccols[i] == cc) { gi = i; break; }
-            if (gi < 0) {
-                if (nCeilColors < PREMUL_MAXCOL) { gi = nCeilColors; ccols[nCeilColors++] = cc; }
-                else gi = PREMUL_MAXCOL - 1;
-            }
-            ceilColorIdx[y][x] = (unsigned char)gi;
-        }
-    }
-
-    /* 亮度等级 l -> k8 = l * 4（k8 上限 1023，256 级正好铺满） */
-    for (int ci = 0; ci < nFloorColors; ci++) {
-        int r = (int)((fcols[ci] >> 16) & 0xFF), g = (int)((fcols[ci] >> 8) & 0xFF), b = (int)(fcols[ci] & 0xFF);
-        for (int l = 0; l < PREMUL_LEVELS; l++) {
-            int k = l * 4;
-            int rr = (r * k) >> 8, gg = (g * k) >> 8, bb = (b * k) >> 8;
-            if (rr > 255) rr = 255;
-            if (gg > 255) gg = 255;
-            if (bb > 255) bb = 255;
-            premulFloor[ci][l] = (unsigned int)((rr << 16) | (gg << 8) | bb);
-        }
-    }
-    /* 天花板用的乘数 ceilTab[x] 是 0..255 量纲（(通道*ck)>>8），
-       而表里统一用 k8 量纲（0..1023），所以等级 = ck（对应 k = ck*4）。 */
-    for (int ci = 0; ci < nCeilColors; ci++) {
-        int r = (int)((ccols[ci] >> 16) & 0xFF), g = (int)((ccols[ci] >> 8) & 0xFF), b = (int)(ccols[ci] & 0xFF);
-        for (int l = 0; l < PREMUL_LEVELS; l++) {
-            int k = l * 4;
-            int rr = (r * k) >> 8, gg = (g * k) >> 8, bb = (b * k) >> 8;
-            if (rr > 255) rr = 255;
-            if (gg > 255) gg = 255;
-            if (bb > 255) bb = 255;
-            premulCeil[ci][l] = (unsigned int)((rr << 16) | (gg << 8) | bb);
-        }
-    }
-}
-
-/* v1.8：7 种关卡主题，纹理全部在**进层时**生成一次（运行时零成本）。
-   0 砖墙 / 1 监狱 / 2 地狱 / 3 病房 / 4 冰窖 / 5 锈工厂 / 6 血肉洞窟
-   统一规范：
-     · 所有贴图按 2x2 像素块生成（复古观感）
-     · 颜色量化到 5 位（每通道 8 档），供 premul 查表使用
-     · 墙面/地板/天花板各有一套花纹，细节靠 hash（px*py 之类）而非随机，
-       省 rand() 调用，也保证同一主题每次生成结果一致 */
+static void SetStoryLight(int chapter);
 static void SetThemeLight(int id);   /* v2.1 主题光色（雾/手电），定义在下面 */
 static void DrawGroundShadow(int cx, int cyFloor, int halfW, float ty);   /* v2.1 落地阴影 */
 
@@ -218,23 +140,25 @@ void GenerateThemeTextures(int id) {
     if (id < 0 || id >= THEME_COUNT) id = 0;
     SetThemeLight(id);      /* Material, fog and flashlight share one validated identity. */
     themeId = id;
+    storyMaterialActive=ProtocolPeacefulStory();
+    if (storyMaterialActive) SetStoryLight(protocolRun.story);
 
     floorBaseA=ArtDollGrade(RoomMaterialSample(id,8,8,1));
     floorBaseB=ArtDollGrade(RoomMaterialSample(id,16,16,1));
-    for(int y=0;y<TEX_HEIGHT;y++)for(int x=0;x<TEX_WIDTH;x++){
-        /* 2026-11-11：布偶画风的材质分级在**烘焙期**落地（一次）。
-           classic 模式下 ArtDollGrade 原样返回，贴图逐像素不变。 */
-        texture[y][x]=ArtDollGrade(RoomMaterialSample(id,x&~1,y&~1,0));
-        floorTexture[y][x]=ArtDollGrade(RoomMaterialSample(id,x&~1,y&~1,1));
-        ceilTexture[y][x]=ArtDollGrade(RoomMaterialSample(id,x&~1,y&~1,2));
-    }
-
+    for (int material=0;material<THEME_COUNT;material++)
+        for (int surface=0;surface<3;surface++)
+            for (int y=0;y<TEX_HEIGHT;y+=2) for (int x=0;x<TEX_WIDTH;x+=2) {
+                unsigned c=ArtDollGrade(storyMaterialActive && material==id?
+                    StoryMaterialSample(protocolRun.story,x,y,surface):RoomMaterialSample(material,x,y,surface));
+                sceneTexture[material][surface][y][x]=sceneTexture[material][surface][y][x+1]=c;
+                sceneTexture[material][surface][y+1][x]=sceneTexture[material][surface][y+1][x+1]=c;
+            }
+    memcpy(texture,sceneTexture[id][0],sizeof texture);
 
     if (!noiseReady) {
         for (int i = 0; i < 256; i++) noiseTab[i] = (unsigned char)(rand() % 40);
         noiseReady = 1;
     }
-    BuildPremulTables();   /* 地板/天花板预乘表（贴图变了就要重建） */
     /* v2.0：生成 mip 链（只在换主题时跑一次） */
     for (int y = 0; y < TEX_HEIGHT; y++)
         for (int x = 0; x < TEX_WIDTH; x++)
@@ -415,6 +339,12 @@ static int themeFogR = 20, themeFogG = 25, themeFogB = 33;   /* 距离雾 */
 static int themeLitR = 96, themeLitG = 98, themeLitB = 96;   /* 手电加色 */
 static int themeAmbR = 22, themeAmbG = 27, themeAmbB = 36;   /* 墙体环境雾 */
 
+static void SetStoryLight(int chapter) {
+    static const unsigned char fog[][3]={{28,22,17},{19,25,27},{23,25,17}};
+    const unsigned char *c=fog[chapter-1];
+    themeFogR=c[0];themeFogG=c[1];themeFogB=c[2];
+    themeLitR=105;themeLitG=103;themeLitB=96;
+}
 static void SetThemeLight(int id) {
     switch (id) {
     case 0: themeFogR=22; themeFogG=24; themeFogB=28; themeLitR=104; themeLitG=100; themeLitB=92;  break; /* BRICK    暖灰 */
@@ -435,9 +365,11 @@ static void DrawCrateSprite(int i) {
     /* 2026-11-05：这个槽被宝箱怪占着 —— 它由 DrawMimicSprite 自己画。
        这里再画一次就会出现「箱子上叠一个箱子」。 */
     if (c->mimicHost) return;
-    int material=themeId>=0 && themeId<7?themeId:0;
+    int material=SceneMaterialAt((int)c->x,(int)c->y);
     int state=c->searched?1:c->locked?2:0;
-    DrawBakedPropArt(SPR_THEME_CRATE_BASE+material*3+state,c->x,c->y,0,.34f,c->searched?.78f:1.0f);
+    int sprite=storyMaterialActive?SPR_MISSION_CASE+2*(protocolRun.story-1)+!!c->searched:
+        SPR_THEME_CRATE_BASE+material*3+state;
+    DrawBakedPropArt(sprite,c->x,c->y,0,.34f,c->searched?.78f:1.0f);
 }
 
 /* 2026-11-05：宝箱怪。
@@ -451,8 +383,10 @@ static void DrawMimicSprite(int i) {
     if (m->state == MIM_ANGRY) {
         DrawCreatureActor(SPR_MON_MIMIC,m->x,m->y,.52f,1,1,0,m->breathPh,0,0,1);
     } else {
-        /* 破绽①：呼吸。用相位算，不依赖全局时钟 —— 每只相位不同 */
-        DrawBakedPropArt(SPR_PROP_CRATE_MIMIC,m->x,m->y,0,.42f,1);
+        int material=SceneMaterialAt((int)m->x,(int)m->y);
+        int locked=m->containerIdx>=0 && m->containerIdx<containerCount && containers[m->containerIdx].locked;
+        float breath=.34f+.008f*sinf(m->breathPh);
+        DrawBakedPropArt(SPR_THEME_CRATE_BASE+material*3+(locked?2:0),m->x,m->y,0,breath,1);
     }
 }
 
@@ -466,13 +400,18 @@ static void DrawHideSpotSprite(int i) {
     HideSpot* h = &hideSpots[i];
     if (!h->active) return;
     float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.90f : 0.82f);
-    int material=themeId>=0 && themeId<7?themeId:0;
-    DrawBakedPropArt(SPR_THEME_HIDE_BASE+material,h->x,h->y,0,.62f,.9f*k);
+    int material=SceneMaterialAt((int)h->x,(int)h->y);
+    if (!(protocolRun.flags&PROTOCOL_MISSIONS) && protocolRun.story==1 && i==0) {
+        DrawBakedPropArt(SPR_STORY_PROP_BASE+STORY_POD*2+ProtocolShelterPowered(),h->x,h->y,0,.73f,1);
+        return;
+    }
+    int sprite=storyMaterialActive?SPR_MISSION_COVER+2*(protocolRun.story-1):SPR_THEME_HIDE_BASE+material;
+    DrawBakedPropArt(sprite,h->x,h->y,0,.67f,.9f*k);
 }
 static void DrawBreakerSprite(void) {
     if (!breaker.active) return;
     float k = breakerOpen ? 1.15f : 0.95f;
-    int material=themeId>=0 && themeId<7?themeId:0;
+    int material=SceneMaterialAt((int)breaker.x,(int)breaker.y);
     DrawBakedPropArt(SPR_THEME_BREAKER_BASE+material*2+!!breakerOpen,breaker.x,breaker.y,0,.58f,k);
 }
 
@@ -1050,12 +989,16 @@ static void DrawExitBeamSprite(void) {
     if (!s.ok || s.ty < 0.55f) return;
     int w=s.x1-s.x0,h=s.y1-s.y0;
     if(w<3 || h<3)return;
-    DrawBakedPropArt(breakerOpen?SPR_PROP_EXIT_OPEN:SPR_PROP_EXIT,exitX,exitY,0,1.0f,1);
+    int open=breakerOpen && ProtocolExitReady();
+    int sprite=storyMaterialActive?SPR_MISSION_EXIT+2*(protocolRun.story-1)+open:
+        protocolRun.story?SPR_STORY_PROP_BASE+STORY_HATCH*2+open:
+        (open?SPR_PROP_EXIT_OPEN:SPR_PROP_EXIT);
+    DrawBakedPropArt(sprite,exitX,exitY,0,1.0f,1);
     float light=SpriteShade(s.ty,0.12f)*ArtPropLight(exitX,exitY);
     float pulse=breakerOpen?.82f+.18f*sinf(gameTime*2.4f):1;
 
     /* ---- 光柱：地标。有序抖动让它像像素画的光，不是模糊渐变 ---- */
-    if (breakerOpen) {
+    if (open && !storyMaterialActive) {
         int cxp = (s.x0 + s.x1) / 2;
         int beamHalf = (w / 8 > 2) ? w / 8 : 2;
         int beamH = (int)((s.y1 - s.y0) * 1.15f);
@@ -1105,16 +1048,6 @@ static void DrawHideSpotHighlight(void) {
        现在只保留作者的垃圾桶。靠近提示改由 HUD 的 PRESS E / HIDE 承担，
        不再额外画一层模型。 */
     (void)h;
-}
-
-static void DrawHearingMarker(void) {
-    if (!SkillHearing()) return;
-
-    if (noiseDisplay <= 0.01f) return;
-    float dx = noiseSrcX - posX, dy = noiseSrcY - posY;
-    if (dx * dx + dy * dy > 400.0f) return;   /* 20 格内才显示 */
-    /* 在地面投影一个闪烁的点（用 billboard 精灵代替） */
-    DrawBakedProp(SPR_PROP_CRATE, noiseSrcX, noiseSrcY, 0.0f, 0.18f, 0.45f + 0.3f * noiseDisplay);
 }
 
 /* ==================================================================
@@ -1298,6 +1231,41 @@ static void DrawSpriteEntries(const SpriteDrawEntry* list, int n) {
             DrawBakedPropArt(SPR_PROP_PHASE, phaseX, phaseY, 0.0f, 0.50f, 1.25f);
             break;
         }
+        case 21: {
+            float x,y,life=TacticalJammerEffect(&x,&y);
+            if (life>0) {
+                DrawBakedPropArt(SPR_JAMMER_BURST,x,y,.09f,.28f+(1-life)*.88f,.45f+life*1.55f);
+            }
+            break;
+        }
+        case 20: {
+            float x,y;
+            int id=list[i].idx;
+            int state=id==3?ProtocolAbilityMarker(&x,&y):ProtocolProp(id,&x,&y);
+            if (state) {
+                float light=state==2?1.6f:1.0f;
+                if (id==PROTOCOL_TRACE) {
+                    float pulse=1.1f+.22f*sinf((float)g_timeSec*(state==1?7.f:4.f));
+                    DrawBakedPropArt(state==1?SPR_ABILITY_FIELD:SPR_ABILITY_DOUBLE,x,y,0,
+                                     state==1?.55f:.73f,pulse);
+                }
+                else if (protocolRun.flags&PROTOCOL_MISSIONS) {
+                    int stage=2*(protocolRun.story-1);
+                    int sprite=id==PROTOCOL_TERMINAL?SPR_MISSION_TERMINAL+stage:
+                        id==PROTOCOL_RELAY?SPR_MISSION_RECORD+stage:SPR_MISSION_COIL+stage;
+                    float height=id==PROTOCOL_TERMINAL?.66f:protocolRun.story==3?.93f:.74f;
+                    DrawBakedPropArt(sprite+state-1,x,y,0,height,light);
+                }
+                else {
+                    const int models[PROTOCOL_DEVICE_COUNT]={
+                        STORY_RADIO, STORY_CAPACITOR, STORY_CORE, STORY_RADIO, STORY_ROUTE, STORY_ROUTE
+                    };
+                    float height=id==PROTOCOL_RELAY?.45f:.65f;
+                    DrawBakedPropArt(SPR_STORY_PROP_BASE+models[id]*2+state-1,x,y,0,height,light);
+                }
+            }
+            break;
+        }
         case 17: DrawListedHatch(list[i].idx); break;
         case 16: DrawListedRoomProp(list[i].idx); break;
             case 11: DrawExtraSprite(list[i].idx); break;
@@ -1310,7 +1278,6 @@ static void DrawSpriteEntries(const SpriteDrawEntry* list, int n) {
 static void DrawSpriteOverlays(void) {
     /* v1.18：烟幕团（不参与深度排序，直接在最后叠加） */
     DrawHideSpotHighlight();   /* v3.0 藏身点靠近提示 */
-    DrawHearingMarker();   /* v3.0 听觉 */
     DrawSmokeCloud();
     DrawGluePuddle();   /* v3.3 地面胶水 */
     DrawEchoRadarPulse();
@@ -1528,7 +1495,7 @@ static unsigned int LerpSurfaceColor(unsigned int a,unsigned int b,unsigned int 
     return rb|g;
 }
 
-static unsigned int SampleSmoothFloor(float wx,float wy,int level) {
+static unsigned int SampleSmoothFloor(int material,float wx,float wy,int level) {
     float u=wx*TEX_WIDTH,v=wy*TEX_HEIGHT;
     int ix=(int)floorf(u),iy=(int)floorf(v);
     unsigned int fu=(unsigned int)((u-ix)*256),fv=(unsigned int)((v-iy)*256);
@@ -1536,10 +1503,10 @@ static unsigned int SampleSmoothFloor(float wx,float wy,int level) {
     if(fv>255)fv=255;
     int x0=ix&(TEX_WIDTH-1),x1=(ix+1)&(TEX_WIDTH-1);
     int y0=iy&(TEX_HEIGHT-1),y1=(iy+1)&(TEX_HEIGHT-1);
-    unsigned int a=premulFloor[floorColorIdx[y0][x0]][level];
-    unsigned int b=premulFloor[floorColorIdx[y0][x1]][level];
-    unsigned int c=premulFloor[floorColorIdx[y1][x0]][level];
-    unsigned int d=premulFloor[floorColorIdx[y1][x1]][level];
+    unsigned int a=SurfaceTexel(material,1,x0,y0,level);
+    unsigned int b=SurfaceTexel(material,1,x1,y0,level);
+    unsigned int c=SurfaceTexel(material,1,x0,y1,level);
+    unsigned int d=SurfaceTexel(material,1,x1,y1,level);
     return LerpSurfaceColor(LerpSurfaceColor(a,b,fu),LerpSurfaceColor(c,d,fu),fv);
 }
 
@@ -1606,33 +1573,13 @@ static void RenderFloorBand(int y0, int y1) {
         unsigned int fogG = (unsigned int)(fogAmt * (float)themeFogG);
         unsigned int fogB = (unsigned int)(fogAmt * (float)themeFogB);
 
-        /* ==================================================================
-         * 2026-11-06（v2.4-rc）：**地板和天花板也要按房间上色**
-         * ------------------------------------------------------------------
-         * 实测反馈：「还是只有一些发光的墙，其他什么都没有。」
-         *
-         * 那是必然的 —— 我只给墙面加了补光，**地板没加**。
-         * 而第一人称视角里，画面下半部分几乎全是地板；
-         * 只让墙发光，结果就是"角落里有一段墙在发亮"，
-         * 完全构不成"我走进了一个房间"。
-         *
-         * 这里用每行的 shadow 预乘一个系数，所以远处/暗处的地板
-         * 补光同样会被压下去，不会出现"远处的房间亮得反常"。
-         * 成本：每像素一次数组取值 + 一次移位 —— 地板本来就最贵，
-         * 这点增量实测无感。
-         * ================================================================ */
-        int tintMul = (int)(shadow * 256.0f * 1.7f);
-        if (tintMul < 0) tintMul = 0;
-        if (tintMul > 1024) tintMul = 1024;
-
-
-
         for (int x = 0; x < renderW; x++) {
             int cX = (int)fx, cY = (int)fy;
             int tx2 = ((int)((fx - cX) * (float)TEX_WIDTH)) & (TEX_WIDTH - 1);
             int ty2 = ((int)((fy - cY) * (float)TEX_HEIGHT)) & (TEX_HEIGHT - 1);
             tx2 &= ~1; ty2 &= ~1;
 
+            int material=SceneMaterialAt(cX,cY);
             unsigned int color;
             if (!isCeil) {
                 int k8 = (shadowI * floorGainI[x]) >> 8;
@@ -1640,44 +1587,12 @@ static void RenderFloorBand(int y0, int y1) {
                 else if (k8 > SHADE_LUT_MAX - 1) k8 = SHADE_LUT_MAX - 1;
                 k8 = shadeLut[k8];
                 int lvl = k8 >> PREMUL_K8_SHIFT;
-                color = premulFloor[floorColorIdx[ty2][tx2]][lvl];
+                color = SurfaceTexel(material,1,tx2,ty2,lvl);
                 if(floorFilter)
-                    color=LerpSurfaceColor(color,SampleSmoothFloor(fx,fy,lvl),floorFilter);
-
-                /* 房间补光：先叠，后面安全屋/出口的特效可以覆盖它 */
-                if (roomCount > 0 &&
-                    (unsigned)cX < (unsigned)MAP_WIDTH && (unsigned)cY < (unsigned)MAP_HEIGHT) {
-                    unsigned char rid = cellMeta[cY][cX].roomId;
-                    if (rid != 0 && !(cellMeta[cY][cX].flags&CELLFLAG_ROOM_V2)) {
-                        int t = cellMeta[cY][cX].themeId;
-                        if (t < 0 || t >= THEME_COUNT) t = 0;
-                        int tr = CellThemeTintR(t), tg = CellThemeTintG(t), tb = CellThemeTintB(t);
-                        int cr = (int)((color >> 16) & 0xFFu) + ((tr * tintMul) >> 8);
-                        int cg = (int)((color >> 8) & 0xFFu)  + ((tg * tintMul) >> 8);
-                        int cb = (int)(color & 0xFFu)         + ((tb * tintMul) >> 8);
-                        if (cr > 255) cr = 255;
-                        if (cg > 255) cg = 255;
-                        if (cb > 255) cb = 255;
-                        /* ================================================================
-                         * 2026-11-06（用户要求）：**房间地面铺砖**
-                         * ----------------------------------------------------------------
-                         * 房间地面按格子奇偶做一点明暗差（±6%），
-                         * 读起来是"铺过地砖"，走廊则保持原来的连续面。
-                         * 成本：一次异或 + 一次与 —— 进了逐像素路径，但只多两条指令。
-                         * ================================================================ */
-                        {
-                            int odd = ((cX ^ cY) & 1);
-                            int f = odd ? 246 : 255;      /* 256 基准 */
-                            cr = (cr * f) >> 8;
-                            cg = (cg * f) >> 8;
-                            cb = (cb * f) >> 8;
-                        }
-                        color = (unsigned int)((cr << 16) | (cg << 8) | cb);
-                    }
-                }
+                    color=LerpSurfaceColor(color,SampleSmoothFloor(material,fx,fy,lvl),floorFilter);
 
                 if(safeRoom.active)color=SafetyFloorMarker(color,fx,fy,safeRoom.x,safeRoom.y,1);
-                color=SafetyFloorMarker(color,fx,fy,exitX,exitY,breakerOpen);
+                if (!storyMaterialActive) color=SafetyFloorMarker(color,fx,fy,exitX,exitY,breakerOpen);
 
                 /* 雾 + 光球的暖光（简化：只按距离加暖色） */
                 if (fogR | fogG | fogB) {
@@ -1691,7 +1606,7 @@ static void RenderFloorBand(int y0, int y1) {
                 int cl = ceilTab[x] >> PREMUL_K8_SHIFT;
                 if (cl < 0) cl = 0;
                 else if (cl > PREMUL_LEVELS - 1) cl = PREMUL_LEVELS - 1;
-                color = premulCeil[ceilColorIdx[ty2][tx2]][cl];
+                color = SurfaceTexel(material,2,tx2,ty2,cl);
             }
 
             row[x] = color;
@@ -1754,8 +1669,9 @@ static void RenderWallSurface(int x, const WallRay* ray) {
     int mapX = ray->mapX;
     int mapY = ray->mapY;
     int architectureMaterial=-1;
-    if(mapX>=0 && mapY>=0 && mapX<MAP_WIDTH && mapY<MAP_HEIGHT &&
-       (cellMeta[mapY][mapX].flags&CELLFLAG_ROOM_V2))architectureMaterial=cellMeta[mapY][mapX].themeId;
+    if(!storyMaterialActive && mapX>=0 && mapY>=0 && mapX<MAP_WIDTH && mapY<MAP_HEIGHT &&
+       (cellMeta[mapY][mapX].flags&(CELLFLAG_ROOM_V2|CELLFLAG_ROOMWALL)))
+        architectureMaterial=SceneMaterialAt(mapX,mapY);
     int side = ray->side;
     float perpWallDist = ray->perpWallDist;
     /* Both endpoints share forward depth. Pitch cannot turn one of them
@@ -1853,7 +1769,7 @@ static void RenderWallSurface(int x, const WallRay* ray) {
     {
 
         int tr = 0, tg = 0, tb = 0;
-        if (architectureMaterial<0 && CellTintRGB(mapX, mapY, &tr, &tg, &tb)) {
+        if (!storyMaterialActive && architectureMaterial<0 && CellTintRGB(mapX, mapY, &tr, &tg, &tb)) {
             float k = smokeDim;          /* 浓烟里补光同样被压 */
             addR += (int)(tr * k);
             addG += (int)(tg * k);
@@ -1893,7 +1809,9 @@ static void RenderWallSurface(int x, const WallRay* ray) {
         int texY = ((int)texPos) & (TEX_HEIGHT - 1);
         texPos += step;
         /* v2.0：走了 mip 就按低位采样（lod 0 时与原路径完全等价） */
-        unsigned int t = mipSrc[((texY >> mipShift) & mipMaskY) * mipW + (texX >> mipShift)];
+        unsigned int t = architectureMaterial>=0
+            ?sceneTexture[architectureMaterial][0][texY&~1][texX&~1]
+            :mipSrc[((texY >> mipShift) & mipMaskY) * mipW + (texX >> mipShift)];
         int vy = (int)(((float)(y - drawStart) * 64.0f) / (float)(drawEnd - drawStart + 1));
         /* The current room's lighting is attached to the actual wall, not
            the clipped viewport span: walking closer cannot stretch the wash. */

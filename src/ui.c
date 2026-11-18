@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "monster_evolution.h"
 #include "tactical_tools.h"
 /*
@@ -1392,7 +1393,6 @@ static void RenderFrameOcclusion(void) {
 
 static void RenderFrameCalibration(void) {
     if(currentState==STATE_PLAYING){
-        HushDraw();
         UiDrawRoomHint();
     }
     if((currentState!=STATE_PLAYING && currentState!=STATE_SAFEHOUSE) || !calibActive)return;
@@ -1441,7 +1441,7 @@ static void PresentComposedFrame(void) {
         }
 
         /* 拾取/事件提示：最顶层，但必须**在呈现之前**画进像素缓冲 */
-        if (!exitChoiceOpen && currentState != STATE_GAMEOVER) DrawPickupToast();
+        if (!exitChoiceOpen && !ProtocolCinematicActive() && currentState != STATE_GAMEOVER) DrawPickupToast();
 
         pr.fullBleed = (pr.dx == 0 && pr.dy == 0 && pr.dw == cw && pr.dh == ch);
         PlatPresentFrame(&pr, pixels, renderW, renderH);
@@ -1452,6 +1452,11 @@ void RenderFrame(void) {
     static int previousState=-1;
     if(previousState!=(int)currentState){if(pixels)memset(pixels,0,(size_t)renderW*renderH*sizeof(*pixels));previousState=(int)currentState;uiDirty=1;}
     UiLayoutBegin();
+    if (ProtocolCinematicActive()) {
+        ProtocolCinematicDraw();
+        PresentComposedFrame();
+        return;
+    }
     RenderFrameScene();
     if (currentState == STATE_PLAYING && exitChoiceOpen) {
         DrawExitChoice();

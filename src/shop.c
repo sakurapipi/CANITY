@@ -841,12 +841,23 @@ int ShopTabOfPage(int page) {
     for(int i=0;i<SAFEHOUSE_PAGES;i++)if(ShopPageAtTab(i)==page)return i;
     return 0;
 }
+int ShopBeaconPercentAt(int row) {
+    int kind=row==8?8:row>=0 && row<SHOP_OFFERS?shopOffer[row]:-1;
+    if (kind!=8) return 0;
+    int depth=currentLevel>1?currentLevel-1:0;
+    return depth>=10?15:5+depth;
+}
 int ShopBasePriceAt(int row) {
     int kind=row==8?8:(row>=0 && row<SHOP_OFFERS?shopOffer[row]:-1);
     const ToolDef* tool=ToolDefinition(kind-TOOL_SHOP_FIRST);
     if((kind<0 || kind>=SHOP_ITEM_KINDS) && !tool)return 0;
-    if(kind==8)return WalletRun()>0?(int)(((long long)WalletRun()+19)/20):1;
-    double multiplier=1.0+floor(fmaxf(0,runTime)/120)*.025;
+    int percent=ShopBeaconPercentAt(row);
+    if (percent) {
+        int gold=WalletRun();
+        return gold>0?(int)(((long long)gold*percent+99)/100):1;
+    }
+    double depth=currentLevel>1?currentLevel-1:0;
+    double multiplier=(1.0+depth*.08)*(1.0+floor(fmaxf(0,runTime)/120)*.025);
     double price=ceil((tool?tool->price:kItemPrice[kind])*multiplier);
     return price>=INT_MAX?INT_MAX:price<1?1:(int)price;
 }

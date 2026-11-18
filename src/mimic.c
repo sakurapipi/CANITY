@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "monster_evolution.h"
 #include "threat_tier.h"
 #include "tactical_tools.h"
@@ -75,7 +76,7 @@ void MimicTrySpawn(int level, int containerTotal) {
         if (!containers[i].active) continue;
         if (containers[i].locked) continue;
         if (containers[i].content != 0) continue;   /* 保险丝箱永不替换 */
-        if (containers[i].searched) continue;
+        if (containers[i].searched || containers[i].mimicHost) continue;
         cand[n++] = i;
     }
     if (n <= 0) return;
@@ -294,7 +295,7 @@ void MimicTick(float dt) {
             float dx = posX - m->x, dy = posY - m->y;
             float d2 = dx * dx + dy * dy;
             if (d2 < MIM_CATCH_R * MIM_CATCH_R && hiddenIn < 0) {
-                sanity -= MIM_CATCH_SANITY;
+                sanity -= ProtocolContactLoss(MIM_CATCH_SANITY,MIM_CATCH_SANITY);
                 if (sanity < 0.0f) sanity = 0.0f;
                 /* 强制脱手全部投掷物 */
                 { 

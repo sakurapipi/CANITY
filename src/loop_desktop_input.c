@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "tactical_tools.h"
 #include "threat_tier.h"
 /* Orchestration ownership split; stage ordering remains in the entry point. */
@@ -109,7 +110,7 @@ void CanityMouseRelease(void) {
 }
 static void ClickMenu(int mx, int my) {
     MouseToLogical(&mx, &my);
-    if(LoopRunReplacementPending() || currentState==STATE_SKILL_PICK){CanityMouseClick(mx,my);return;}
+    if(ProtocolCinematicActive() || LoopRunReplacementPending() || currentState==STATE_SKILL_PICK){CanityMouseClick(mx,my);return;}
     if (currentState == STATE_HELP) { HelpBookClick(mx,my); return; }
 
     /* v1.8：主菜单 / 暂停菜单鼠标点击直接执行。
@@ -476,6 +477,7 @@ static void BenchClick(int node, int button) {
 }
 
 void CanityMouseClick(int mx, int my) {
+    if(ProtocolCinematicSkip()) return;
     if (currentState != STATE_SAFEHOUSE || shopPage != SHP_TREE) benchClickNode = -1;
     if(TacticalInputClick(mx,my) || UiArchiveTierClick(mx,my))return;
     if(exitChoiceOpen && currentState==STATE_PLAYING){
@@ -507,6 +509,9 @@ void CanityMouseClick(int mx, int my) {
         }
         return;
     }
+
+    int trial=MainMenuTrialRole(mx,my);
+    if (trial>=0) {LoopQueueStart(START_TRAINING,trial+1);StartGame();return;}
 
     if (currentState == STATE_MAIN_MENU || currentState == STATE_PAUSED) {
         /* 2026-11-08（第 6 轮）：**点空白处不该激活"当前选中项"**
@@ -569,7 +574,7 @@ void CanityMouseClick(int mx, int my) {
     }
 
     if (currentState == STATE_SAFEHOUSE && shopPage == SHP_TREE) {
-        if (BenchBuyButtonAt(mx,my)) { BenchClick(shopNodeSel, 1); return; }
+        if (BenchBuyButtonAt(mx,my)) { benchClickNode=-1; BenchDragEnd(); ShopActivate(); uiDirty=1; return; }
         for (int tab = 0; tab < SAFEHOUSE_PAGES; tab++) {
             int x0,y0,x1,y1; PageTabRect(tab,&x0,&y0,&x1,&y1);
             if (mx>=x0 && mx<=x1 && my>=y0 && my<=y1) {
@@ -660,6 +665,11 @@ static void KeyHandleMainMenu(const MenuKeyInput* key) {
     const int menuUp = key->up;
     const int menuDown = key->down;
     const int menuConfirm = key->confirm;
+    if (!key->repeat && key->cancel && MainMenuBack()) return;
+    if (!key->repeat && vk=='T') {
+        int role=MainMenuTrialRole(-1,-1);
+        if (role>=0) {LoopQueueStart(START_TRAINING,role+1);StartGame();return;}
+    }
 
             /* v3.3 **数字键直接选中并确认** ——
                左边那列 1 2 3 … 本来就是快捷键暗示，但从来没接。
@@ -774,6 +784,11 @@ static void KeyHandleSettings(const MenuKeyInput* key) {
 }
 
 static void KeyHandleGameOver(const MenuKeyInput* key) {
+    if (protocolRun.story && !gameWon && key->cancel) {
+        menuSelection=1;
+        ActivateMenuItem();
+        return;
+    }
     const int menuConfirm = key->confirm;
 
             if (menuConfirm) ActivateMenuItem();
@@ -1123,7 +1138,13 @@ static int KeyHandleGlobalShortcut(int vk, int repeat) {
         if(currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE && vk=='R') {
             static DWORD lastReset=0; DWORD now=PlatTicksMs();
             if(repeat) return 1;
-            if(lastReset && now-lastReset<2000) { BenchRefundRun();lastReset=0;pickupMsg=Tr("MODS RESET - GOLD REFUNDED","改造已重置，金币已退还"); }
+            if(lastReset && now-lastReset<2000) { if (shopNodeSel>=BENCH_COUNT) {
+                int refunded=ProtocolRefund();
+                lastReset=0;pickupMsgTimer=2;uiDirty=1;
+                pickupMsg=refunded?Tr("ROLE NODES REFUNDED","角色节点已退款"):
+                    Tr("REFUND AVAILABLE NEXT FLOOR AFTER USING AN ABILITY","本层已使用能力，下层才能退回角色节点");
+                return 1;
+            } BenchRefundRun();lastReset=0;pickupMsg=Tr("MODS RESET - GOLD REFUNDED","改造已重置，金币已退还"); }
             else {lastReset=now;pickupMsg=Tr("PRESS R AGAIN TO RESET MODS","再按 R 重置本局改造");}
             pickupMsgTimer=2.0f;uiDirty=1;return 1;
         }
@@ -1269,6 +1290,14 @@ static int KeyPrepareInput(int* code, int repeat) {
 }
 
 int CanityKeyDown(int vk, int repeat) {
+    if (ProtocolCinematicActive()) {
+        if (!repeat && (vk==VK_ESCAPE || vk==VK_RETURN || vk==VK_SPACE)) {
+            ProtocolCinematicSkip();
+            LoopClearInputEdges();
+            resetInputState=1;
+        }
+        return 0;
+    }
     if(LoopRunReplacementPending()){
         if(!repeat){if(vk==VK_ESCAPE || vk=='N')LoopResolveRunReplacement(0);else if(vk=='Y')LoopResolveRunReplacement(1);else if(vk==VK_LEFT || vk==VK_RIGHT || vk==VK_TAB){LoopToggleRunReplacement();}else if(vk==VK_RETURN || vk==VK_SPACE)LoopResolveRunReplacement(LoopRunReplacementChoice());}return 0;
     }
@@ -1777,7 +1806,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_MOUSEWHEEL: return WindowMouseWheel(hwnd, uMsg, wParam, lParam);
 
-        case WM_LBUTTONDOWN: return WindowLeftDown(hwnd, uMsg, wParam, lParam);
+        case WM_LBUTTONDOWN:
+            if(ProtocolCinematicSkip())return 0;
+            return WindowLeftDown(hwnd, uMsg, wParam, lParam);
 
         case WM_RBUTTONDOWN:
             if (currentState == STATE_SETTINGS && rebindingAct >= 0) {

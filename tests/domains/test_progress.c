@@ -300,7 +300,13 @@ static void test_trees_shop(void) {
     CHECK(BenchSanityAdd()>=20 && BenchHealMul()>1 && BenchFearDamageMul()<1,"mind attributes affect real survival stats");
     CHECK(BenchWrenchCooldownMul()<1 && BenchKnockExtra()==2.5f && BenchShock(),"gear line upgrades cooldown, push and memory wipe");
     CHECK(BankPreviewGain(1)>=carryGold,"exit previews a valid settlement");
-    int carry=carryGold;BenchRefundRun();CHECK(carryGold>carry && ThreatValue()==0 && !BenchHas(0),"run respec refunds money and removes added threat");
+    hiddenIn=-1;
+    int carry=carryGold;
+    BenchRefundRun();
+    CHECK(carryGold==carry && BenchHas(0),"run respec is unavailable outside cover");
+    open_shop_from_test_cover(1);
+    BenchRefundRun();
+    CHECK(carryGold>carry && ThreatValue()<.0001f && !BenchHas(0),"run respec in cover refunds money and removes added threat");
     SafeLevelReset();open_shop_from_test_cover(1);int offers[4],prices[4];
     for(int i=0;i<SHOP_OFFERS;++i) {offers[i]=shopOffer[i];prices[i]=ShopPriceAt(i);CHECK(prices[i]>0,"every offer has a positive effective price");for(int j=0;j<i;++j)CHECK(offers[i]!=offers[j],"four supplies are distinct");}
     CHECK(shopDiscountRow>=0 && shopDiscountRow<SHOP_OFFERS,"one supply is discounted every floor");
@@ -1030,16 +1036,17 @@ static void test_triangular_paths_and_run_wallet(void) {
     CHECK(fabsf(ThreatValue()-quoted)<0.0001f,"displayed threat quote equals applied build pressure");
     CHECK(fabsf(ThreatRatio()-ThreatValue()/THREAT_MAX)<0.0001f,"pressure ratio uses the same value as runtime effects");
     {
-        unsigned char reached[BENCH_COUNT]={0};int queue[BENCH_COUNT],head=0,tail=1;
+        int count=BenchGraphCount();
+        unsigned char reached[BENCH_GRAPH_COUNT]={0};int queue[BENCH_GRAPH_COUNT],head=0,tail=1;
         const int dx[4]={1,-1,0,0},dy[4]={0,0,1,-1};queue[0]=BENCH_ENDURANCE;reached[queue[0]]=1;
         while(head<tail){int from=queue[head++];
             for(int d=0;d<4;d++){
                 int to=BenchNavNearest(from,dx[d],dy[d]);
-                CHECK(to>=0 && to<BENCH_COUNT,"keyboard navigation never returns an invalid node");
+                CHECK(to>=0 && to<count,"keyboard navigation never returns an invalid node");
                 if(!reached[to]){reached[to]=1;queue[tail++]=to;}
             }
         }
-        CHECK(tail==BENCH_COUNT,"all current run-tree nodes are reachable using only the keyboard");
+        CHECK(tail==count,"all current run-tree nodes are reachable using only the keyboard");
     }
     CHECK(!WalletSpendRun(-1) && !WalletSpendBank(-1),"negative transaction prices are rejected");
     BenchResetRun(); ThreatReset(); clear_meta();

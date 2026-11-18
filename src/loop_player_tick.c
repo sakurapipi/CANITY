@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "monster_evolution.h"
 /* Player stages; callers preserve pause/lock/transition ordering. */
 #include "common.h"
@@ -27,6 +28,8 @@
 #include "lang.h"
 
 static int secondWindUsed = 0;
+static float quietStepTime;
+float PlayerQuietStepTime(void) { return quietStepTime; }
 float secondWindTimer = 0.0f;   /* v3.0 二次呼吸：体力归零后的宽限秒数 */
 float ghostStillT = 0.0f;
 float pawnCd = 0.0f;
@@ -40,16 +43,18 @@ int PlayerTickVitals(float dt,int inSafe){
     if(!(dt>0) || !isfinite(dt) || calibActive || trainingMode)return 1;
     if(!isfinite(sanity))sanity=SanityMax();
     if(!isfinite(battery))battery=0;
+    if (ProtocolPeacefulStory()) return 1;
     float drain=SanityDrainRate()*PositiveDrainFactor(SkillCalmMul())*
         PositiveDrainFactor(modSanityMul)*(1+fmaxf(0,FxStrength(FX_DRAIN))*1.5f)*
         PositiveDrainFactor(RelicSanityMul());
     if(hiddenIn<0 && Hunter0()->active && Hunter0()->state==1){
         float range=flashlightOn?MONSTER_SIGHT:MONSTER_SIGHT_DARK;
-        if(Dist2(posX,posY,Hunter0()->x,Hunter0()->y)<range*range)drain+=SEEN_SANITY_EXTRA;
+        if(Dist2(posX,posY,Hunter0()->x,Hunter0()->y)<range*range)drain+=SEEN_SANITY_EXTRA*ProtocolPursuitDrain();
     }
     int composed=SkillOwned(SK_COUNTER_COMPOSE) && isfinite(retaliateT) && retaliateT>0 && retaliateT<=10;
     if(!inSafe && hiddenIn<0 && !composed){
-        float ghostMul=SkillGhostBreathRank()>0 && ghostStillT>2 && ghostStillT<=22?.5f:1;
+        int breath=SkillGhostBreathRank();
+        float ghostMul=breath>0 && ghostStillT>2 && ghostStillT<=6+8*breath?.5f:1;
         float siphonMul=SkillPwrSiphonActive() && !flashlightOn && battery<BatteryMax()*.25f?SkillPwrSiphonSanityMul():1;
         float loss=fmaxf(SanityDrainRate()*.05f,drain)*PositiveDrainFactor(siphonMul)*DiffSanityDrainMul()*ghostMul*dt;
         if(HasKeystone(SK_METAB)){
@@ -84,7 +89,7 @@ int PlayerTickVitals(float dt,int inSafe){
 }
 
 void PlayerTickBattery(float dt){
-    if(!(dt>0) || !isfinite(dt) || calibActive || trainingMode)return;
+    if(!(dt>0) || !isfinite(dt) || calibActive || trainingMode || ProtocolPeacefulStory())return;
     if(!isfinite(battery))battery=0;
     if(!flashlightOn && hiddenIn<0 && SkillPwrSiphonActive()){
         float threshold=BatteryMax()*.25f;
@@ -101,11 +106,13 @@ void PlayerTickBattery(float dt){
 void PlayerResetSprintGrace(void) {
     secondWindUsed = 0;
     secondWindTimer = 0.0f;
+    quietStepTime=0;
 }
 
 void PlayerTickSprintGrace(float dt, int wantSprint) {
     if (!HasKeystone(SK_LASTRESORT)) {
-        PlayerResetSprintGrace();
+        secondWindUsed=0;
+        secondWindTimer=0;
         return;
     }
     /* Recovery must be checked outside the empty-stamina trigger branch. */
@@ -152,6 +159,8 @@ PlayerFrameInput PlayerPrepareMovement(float dt) {
      * 玩家原话「流派感不明显」：30 个节点里 25 个是倍率，没有一个
      * 改变"什么时候该站着不动"。这四个把静止变成战术。
      * ================================================================ */
+    quietStepTime=fmaxf(0,quietStepTime-dt);
+    if (moving && ghostStillT>=3 && SkillGhostLandOwned()) quietStepTime=3;
     if (moving) ghostStillT = 0.0f;
     else if (ghostStillT < 99.0f) ghostStillT += dt;
     /* v2.1：走路相位，手持模型和准星都跟着动 */
@@ -159,11 +168,12 @@ PlayerFrameInput PlayerPrepareMovement(float dt) {
     if (bobPhase > 6283.0f) bobPhase -= 6283.0f;
 
     /* v3.0：二次呼吸宽限期内，体力为 0 也允许冲刺 */
-    sprinting = (wantSprint && moving && (stamina > 1.0f || secondWindTimer > 0.0f));
+    int roleGrace=ProtocolSprintGrace(dt,wantSprint && moving);
+    sprinting = (wantSprint && moving && (stamina > 1.0f || secondWindTimer > 0.0f || roleGrace));
     if (sprinting) {
         sprintedThisLevel = 1;  /* 标记本局冲刺过 */
         sprintedAnyFloor = 1;   /* v3.3：跨层不清零，SILENT SHADOW 用 */
-        stamina -= STAMINA_DRAIN * BenchSprintCostMul() * RunUpgStaminaMul() * dt;   /* v3.0 体能强化 */
+        stamina -= STAMINA_DRAIN * BenchSprintCostMul() * RunUpgStaminaMul() * ProtocolSprintDrain() * dt;   /* v3.0 体能强化 */
         if (stamina < 0.0f) stamina = 0.0f;
         staminaIdle = 0.5f;
     } else if (staminaIdle > 0.0f) {
@@ -234,12 +244,8 @@ void PlayerApplyMovement(float dt, const PlayerFrameInput* input) {
             sp *= (1.0f + add);
         }
     }
-    /* 第 7 轮「无形」：隐身期间移速 -25%（代价） */
-    {
-
-        if (SkillGhostFormOwned() && ghostStillT >= 3.0f) sp *= 0.75f;
-    }
     if (sprinting && sp < 2.25f*dt) sp=2.25f*dt;
+    if (sprinting) sp += fminf(sp*ProtocolSprintBonus(),ProtocolSprintCap()*dt);
         {  playerMoveSpeedNow = dt>0.0f ? sp/dt : 0.0f; }   /* v8: 守门人据此判断在动/冲刺 */
     float perpX = -dirY, perpY = dirX;      /* 单位侧向，与 FOV 无关 */
     float dx = 0.0f, dy = 0.0f;

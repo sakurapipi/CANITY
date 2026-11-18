@@ -133,7 +133,7 @@ typedef struct { LONG x, y; } POINT;
 #include <time.h>
 
 /* ---- 版本号：改玩法或存档结构时必须同步升这两个 ---- */
-#define CANITY_VERSION_NUM 47         /* 整数版本，进存档做记录 */
+#define CANITY_VERSION_NUM 49         /* 整数版本，进存档做记录 */
 /* v3.0：**逃生试炼方向** —— 怪物不可击杀，玩家没有武器。
    置 1 = 攻击不再造成伤害，怪物永远打不死（只追不杀）。
    置 0 = 回到旧的战斗版本。 */
@@ -175,7 +175,7 @@ typedef struct { LONG x, y; } POINT;
 
 /* v2.4.2：双端稳定性补丁 —— 旧档迁移 / 运行段隔离 / 相位与舱门 /
    网页动作绑定与存档导出。存档结构**未变**（仍是 v34）。 */
-#define CANITY_VERSION_STR "2.4.9"
+#define CANITY_VERSION_STR "2.5.0 RC1"
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -346,7 +346,7 @@ extern int bestEndlessScore;
 
 /* 设置表的项数。定义在 game.c，这里给出常量供 .h 里的 extern 使用；
    game.c 里有编译期断言保证它与实际表项数一致。 */
-#define SETTING_COUNT 45   /* Includes Vertical Look and display-only reset action. */
+#define SETTING_COUNT 46   /* Includes objective guidance and display-only reset. */
 /* 按键选项表的项数（None + 数字 + 字母 + 功能键 + 鼠标键） */
 #define OPT_KEY_COUNT 54
 

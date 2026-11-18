@@ -2,6 +2,7 @@
 #include "common.h"
 #include "tutorial.h"
 #include "interaction.h"
+#include "protocol.h"
 #include "entity.h"
 #include "state.h"
 #include "world_api.h"
@@ -25,6 +26,10 @@ static int RoomDeviceVisible(float x,float y) {
 void InteractionRefreshTargets(void) {
     hoverKind = 0;
     hoverIndex = -1;
+    if (protocolRun.story) {
+        int device=ProtocolNearestDevice();
+        if (device>=0) {hoverKind=INTERACT_STORY_DEVICE;hoverIndex=device;return;}
+    }
     /* The saved hatch controller is co-located with the central mechanism. */
     float deviceDistance=INTERACT_RANGE*INTERACT_RANGE;
     for(int i=0;i<hatchCount;i++)if(RoomThemeIsCurrent(i) && hatches[i].state==HATCH_SEALED && RoomDeviceVisible(hatches[i].x,hatches[i].y)) {

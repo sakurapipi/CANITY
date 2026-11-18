@@ -8,6 +8,8 @@
 #define TOOL_PRISM_BLIND_SECONDS 3.0f
 #define TOOL_SHOT_FIRST 32
 #define TOOL_SHOP_FIRST 32
+int TacticalInterruptWarden(float x,float y,float radius);
+
 enum { TOOL_ACOUSTIC, TOOL_PRISM, TOOL_SOLVENT, TOOL_TETHER, TOOL_REVEAL, TOOL_TRACE, TOOL_JAMMER };
 typedef struct {
     const char *en;
@@ -37,6 +39,8 @@ int ToolCanOffer(int tool);
 int TacticalTryUse(int item, float charge);
 void TacticalImpact(int kind, float x, float y);
 void TacticalTick(float dt);
+float TacticalJammerEffect(float *x,float *y);
+void TacticalResetJammer(void);
 void TacticalResetRun(void);
 void TacticalResetFloor(void);
 float TacticalFootstepMul(float x, float y, float hush);

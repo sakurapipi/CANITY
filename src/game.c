@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "tactical_tools.h"
 #include "threat_tier.h"
 /*
@@ -984,7 +985,7 @@ void StartCampaign(int stage) {
 /* v2.0 SHORTCUT：跳过当前层，直接生成下一层。
    不给金币、不给遗物 —— 换的是时间，不是资源。 */
 void SkipOneLevel(void) {
-    if (shortcutUsed) return;
+    if (shortcutUsed || protocolRun.story) return;
     if (bossLevel) return;                     /* Boss 层不能跳 */
     shortcutUsed = 1;
     currentLevel++;
@@ -1170,114 +1171,43 @@ void ActivateMenuItem(void) {
         return;
     }
     if (currentState == STATE_MAIN_MENU) {
-        int base = hasSave ? 1 : 0;
-        int endlessUnlocked = EndlessUnlocked();
-        int sel = MainMenuLegacySelection();
-        if(sel<0)return;
-
-        /* ===== v6 **菜单索引彻底重写** =====
-           原来是一堆 base+N 和 MainMenuCount()-N 混着写，
-           插了「Bank」一行之后全部错位：
-             · 点 Bank 匹配不到任何分支 → 掉进最后的 else → **直接退出游戏**
-             · Achievements / Bestiary 的条件重复
-             · Help / Settings 各偏了一格
-           现在改成**一张显式索引表**，行序和 MenuLabel() 的表严格一一对应：
-
-             无存档                   有存档
-             base+0  New Run          base+0  Continue
-             base+1  Hub              base+1  New Run
-             base+2  Bank             base+2  Hub
-             base+3  Achievements     base+3  Bank
-             base+4  Bestiary         base+4  Achievements
-             base+5  Help             base+5  Bestiary
-             base+6  Settings         base+6  Help
-             base+7  Campaign         base+7  Settings
-             base+8  Daily Run        base+8  Campaign
-             base+9  Tutorial         base+9  Daily Run
-             base+10 Quit             base+10 Tutorial
-                                      base+11 Quit
-
-           无尽解锁后「Endless」插在 New Run 后面，后面全部 +1，
-           所以下面用 `int eo = endlessUnlocked ? 1 : 0;` 统一偏移。 */
-        int eo = endlessUnlocked ? 1 : 0;
-        int ixNew      = base;
-        int ixHub      = base + 1 + eo;
-        int ixBank     = base + 2 + eo;
-        int ixAch      = base + 3 + eo;
-        int ixBest     = base + 4 + eo;
-        int ixHelp     = base + 5 + eo;
-        int ixSettings = base + 6 + eo;
-        int ixCampaign = base + 7 + eo;
-        int ixDaily    = base + 8 + eo;
-        int ixTutorial = base + 9 + eo;
-
-        if (sel == 0 && hasSave) {
-            ContinueRun();
-        } else if (endlessUnlocked && sel == base + 1) {
-            /* Endless 模式（v29：和战役/每日一样，不静默删旧档） */
-            LoopQueueStart(START_ENDLESS, 0);
-            StartGame();
-        } else if (sel == ixNew) {
-            /* Queue first. Never clear saves/mode flags before human confirmation. */
-            LoopQueueStart(START_NORMAL,0);
-            StartGame();
-        } else if (sel == ixHub) {
-            /* v2.8：HUB = 技能树，一进来光标就在第一个节点上 */
-            currentState = STATE_HUB;
-            hubPage = 1;
-            /* v6：**光标要落在活着的节点上** ——
-               SkillNodeIdAt(0,0) 是 LIGHT STEP，已退役（无矩形），
-               进去之后选中框画不出来，玩家以为界面坏了。 */
-            hubSelection = 1;   /* id 1 = QUIET LID（列 0 第一层，活着） */
-            menuScrollOffsets[STATE_HUB] = 0;
-            uiDirty = 1;
-        } else if (sel == ixBank) {
-            /* v6 **BANK 是独立状态**，不再寄居在 Hub 的第 3 页 */
-            currentState = STATE_BANK;
-            uiDirty = 1;
-        } else if (sel == ixAch) {
-            currentState = STATE_ACHIEVEMENTS;
-            achSelection = 0;
-            menuScrollOffsets[STATE_ACHIEVEMENTS] = 0;
-            InitAchievements();
-            uiDirty = 1;
-        } else if (sel == ixBest) {
-            /* Remember the actual entrance, never infer it from an old save. */
-            prevState = currentState;
-            currentState = STATE_BESTIARY;
-            UiArchiveOpen();
-            uiDirty = 1;
-        } else if (sel == ixHelp) {
-            prevState = STATE_MAIN_MENU;
-            currentState = STATE_HELP;
-            uiDirty = 1;
-        } else if (sel == ixSettings) {
-            prevState = currentState;
-            currentState = STATE_SETTINGS;
-            settingsPage = 0;
-            settingsSelection = 0;
-            settingsPopupOpen = 0;
-            rebindingAct = -1;
-            rebindConflict = -1;
-            uiDirty = 1;
-        } else if (sel == ixCampaign) {
-            /* v2.2：战役模式。
-               v29：不再先 SaveGame() 再 DeleteSave() ——
-               那两句等于「刚存一份、马上删掉」，正在进行的普通局会被静默丢弃。
-               现在保留原存档，等战役第一次存档时自然覆盖；即使开局就崩溃，
-               玩家也还能 Continue 回原来的进度。 */
-            StartCampaign(0);
-        } else if (sel == ixDaily) {
-            /* v2.2：每日挑战（同上：不静默删档） */
-            StartDailyRun();
-        } else if (sel == ixTutorial) {
-            /* v3.1：训练营改成新手教程 —— 不删档，不影响正式进度 */
-            LoopQueueStart(START_GUIDE, 0);
-            StartGame();
-            uiDirty = 1;
-        } else {
-            SaveGame();
-            PlatRequestQuit();
+        switch (MainMenuResolve()) {
+        case MENU_CONTINUE: ContinueRun(); break;
+        case MENU_STORY: LoopQueueStart(START_STORY,0); StartGame(); break;
+        case MENU_FIRST_STORY: LoopQueueStart(START_STORY,1); StartGame(); break;
+        case MENU_CLASSIC: LoopQueueStart(START_NORMAL,0); StartGame(); break;
+        case MENU_ENDLESS: LoopQueueStart(START_ENDLESS,0); StartGame(); break;
+        case MENU_TRAINING: LoopQueueStart(START_GUIDE,0); StartGame(); break;
+        case MENU_PRACTICE_ARENA: LoopQueueStart(START_TRAINING,0); StartGame(); break;
+        case MENU_DAILY: StartDailyRun(); break;
+        case MENU_UPGRADES:
+            currentState=STATE_HUB;hubPage=1;hubSelection=1;
+            menuScrollOffsets[STATE_HUB]=0;uiDirty=1;
+            break;
+        case MENU_BANK:
+            currentState=STATE_BANK;uiDirty=1;
+            break;
+        case MENU_ACHIEVEMENTS:
+            currentState=STATE_ACHIEVEMENTS;achSelection=0;
+            menuScrollOffsets[STATE_ACHIEVEMENTS]=0;
+            InitAchievements();uiDirty=1;
+            break;
+        case MENU_BESTIARY:
+            prevState=currentState;currentState=STATE_BESTIARY;
+            UiArchiveOpen();uiDirty=1;
+            break;
+        case MENU_HELP:
+            prevState=currentState;currentState=STATE_HELP;uiDirty=1;
+            break;
+        case MENU_SETTINGS:
+            prevState=currentState;currentState=STATE_SETTINGS;
+            settingsPage=settingsSelection=settingsPopupOpen=0;
+            rebindingAct=rebindConflict=-1;uiDirty=1;
+            break;
+        case MENU_QUIT:
+            SaveGame();PlatRequestQuit();
+            break;
+        default: break;
         }
     } else if (currentState == STATE_SAFEHOUSE) {
         ShopActivate();
@@ -1330,8 +1260,10 @@ void ActivateMenuItem(void) {
             uiDirty = 1;
         }
     } else if (currentState == STATE_GAMEOVER) {
+        if (protocolRun.story && !gameWon && menuSelection==0 && SaveRetryStory()) return;
         /* 结算已落盘：清掉本局模式标志，避免带进下一次开局/继续。 */
         ResetRunModeFlags();
+        hasSave=SaveHasPendingRun();
         currentState = STATE_MAIN_MENU;
         menuSelection = 0;
         uiDirty = 1;

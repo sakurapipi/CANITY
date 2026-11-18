@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "monster_evolution.h"
 #include "threat_tier.h"
 #include "tactical_tools.h"
@@ -123,6 +124,10 @@ void ResetRunModeFlags(void) {
 static void InitializeRunEconomy(void) {
     ThreatTierConfirmPlan();TacticalResetRun();
     ThreatReset();BenchResetRun();RunUpgReset();counterKillUsed=0;
+    if(protocolRun.story){
+        carryGold=150;carryAtRunStart=0;throwSelected=0;runInProgress=1;runTime=0;
+        RunEconomyReset();return;
+    }
     if(trainingMode){
         for(int i=0;i<TOOL_COUNT;i++)tactical.inventory[i]=1;
         carryGold=0;carryAtRunStart=0;throwSelected=0;runInProgress=1;runTime=0;
@@ -208,19 +213,11 @@ static void InitializeRunScene(void) {
     {
         ShopResetCooldowns();   /* v3.4：新局清空商店冷却 */
     }
-    /* v3.4 CARTO 满级：开局直接把安全屋和配电箱所在格子标记为已探索，
-       地图上能看见。原来只是「通关更快」，玩家感知不到。 */
-    if (SkillCartoUnlock()) {
-        int sx = (int)safeRoom.x, sy = (int)safeRoom.y;
-        if (sx >= 0 && sx < MAP_WIDTH && sy >= 0 && sy < MAP_HEIGHT) explored[sy][sx] = 1;
-        int bx = (int)breaker.x, by = (int)breaker.y;
-        if (bx >= 0 && bx < MAP_WIDTH && by >= 0 && by < MAP_HEIGHT) explored[by][bx] = 1;
-    }
     floorStartTime = 0.0f;
     lowSanitySeconds = 0.0f;
     fusesCollectedRun = 0;
     searchedCount = 0;
-    sanity = 100.0f;
+    sanity = SanityMax();
     battery = (float)BatteryMax();
     flashlightOn = DailyForbidLight() || HasKeystone(SK_SALVAGE) ? 0 : 1;
     stamina = StaminaMax();
@@ -339,6 +336,9 @@ void StartGame(void) {
         guideMode = 1;
     }
 
+    ProtocolBegin(startMode==START_STORY, startMode==START_DAILY || startMode==START_GUIDE || (startMode==START_STORY && startStage==1));
+    if (startMode==START_TRAINING && startStage>=1 && startStage<=4)
+        protocolRun.role=startStage-1;
     currentState = STATE_PLAYING;
 
     /* ==================================================================
@@ -400,4 +400,8 @@ void StartGame(void) {
     firePots = 0; mirrors = 0;
     InitializeRunEconomy();
     InitializeRunScene();
+    if (protocolRun.story) {
+        ProtocolCinematicStart();
+        SaveStoryEntry();
+    }
 }

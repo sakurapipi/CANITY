@@ -40,6 +40,8 @@ void  ThreatAdd(float v);
 void  ThreatSet(float v);
 void  ThreatRestoreTotal(float savedTotal);
 float ThreatValue(void);
+float ThreatRaw(void);
+float ThreatEffective(void);
 float ThreatRatio(void);
 
 float ThreatCostForTier(int tier, int isCapstone);

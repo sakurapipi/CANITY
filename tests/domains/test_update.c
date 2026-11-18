@@ -14,6 +14,8 @@
 #include "run_rewards.h"
 #include "entity.h"
 #include "throwing.h"
+#include "protocol.h"
+#include "mimic.h"
 
 extern void Update(float dt);
 extern int  flares, bottles, smokeBombs, gluePots, echoBolts, decoys;
@@ -471,6 +473,38 @@ static void test_exit_choices_require_confirmation(void) {
     CHECK(currentState==STATE_GAMEOVER && !runInProgress && !exitChoiceOpen,"only explicit confirmed extraction ends and settles the run");
     StartFreshTestRun();
 }
+static void test_three_peaceful_missions(void) {
+    enter_playing();
+    ProtocolBegin(1,0);
+    for (int chapter=1;chapter<=3;chapter++) {
+        GenerateLevel();
+        CHECK(ProtocolPeacefulStory() && currentLevel==chapter && protocolRun.role==chapter,
+              "story starts each chapter with its assigned role");
+        CHECK(!ProtocolExitReady() && ProtocolAdvance()==0,"story gate requires its objectives");
+        CHECK(!mimicCount && !WardenActive() && !CollectorActive() && !SpiderActive(),
+              "peaceful story has no special encounter population");
+        for (int i=0;i<MON_HUNTER_MAX;i++)
+            CHECK(!monHunters[i].active,"peaceful story has no hunters");
+        for (int i=0;i<LIGHTBEAST_MAX;i++)
+            CHECK(!lightBeasts[i].active,"peaceful story has no light beasts");
+        float x,y;
+        CHECK(ProtocolProp(PROTOCOL_EVIDENCE,&x,&y)==1,"unsolved station is available");
+        posX=x-(chapter==2?2.1f:1.0f);posY=y;
+        dirX=1;dirY=0;
+        ProtocolActivate();
+        if (chapter==2)
+            for (int tick=0;tick<10;tick++) ProtocolTick(.1f);
+        CHECK((protocolRun.flags&PROTOCOL_MISSION_SOLVED) && !ProtocolExitReady(),
+              "the actual role ability solves the station while exit awaits terminal");
+        CHECK(ProtocolProp(PROTOCOL_TERMINAL,&x,&y)==1,"terminal is reachable after solving");
+        posX=x-1;posY=y;
+        CHECK(ProtocolInteract(PROTOCOL_TERMINAL) && ProtocolExitReady(),
+              "reading the terminal opens evacuation");
+        CHECK(ProtocolAdvance()==(chapter==3?2:1),"chapter advances or completes the campaign");
+    }
+    StartFreshTestRun();
+}
+
 void TestSuite_update(void) {
     test_comfortable_vertical_projection();
     test_pitch_gate_and_near_wall_input();
@@ -544,4 +578,5 @@ void TestSuite_update(void) {
     test_smoke_blinds_the_monster();
     test_empty_wrench_swing_leaves_a_visible_marker();
     test_hiding_recharges_battery_even_with_light_on();
+    test_three_peaceful_missions();
 }

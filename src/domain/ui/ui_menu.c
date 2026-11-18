@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "threat_tier.h"
 /* src/domain/ui/ui_menu.c —— 主菜单页（含改造树 / 银行页 / 校准条）
  *
@@ -59,24 +60,71 @@ static const char* kBranchName[7] = { "SILENCE", "ECONOMY", "CONCEAL",
 static const char* kBranchNameZh[7] = { "沉寂", "节流", "藏匿",
                                         "塑形", "冒险", "跨支", "起点" };
 
-void MainMenuCompute(MainMenuLayout* L) {
-    memset(L,0,sizeof(*L));int th=TextHeightWin();if(th<8)th=8;
-    L->count=MainMenuRowCount();L->padX=UIS(30);
-    L->panel.left=UIS(30);L->panel.right=winW*3/5;
-    L->panel.top=UIS(25);L->panel.bottom=winH-UIS(25);
-    L->titleY=UIS(55);L->subY=L->titleY+th+UIS(16);
-    L->firstY=winH/4;L->rowH=(winH*3/5)/L->count;
-    if(L->rowH<th+UIS(5))L->rowH=th+UIS(5);
-    L->footRuleY=winH-UIS(78);L->footY=winH-UIS(56);
-}
+static int InRoleDossier(void);
 
+void MainMenuCompute(MainMenuLayout* L) {
+    memset(L,0,sizeof(*L));
+    int margin=UIS(20);
+    int th=TextMediumLiteralHeight();
+    L->count=MainMenuRowCount();
+    L->padX=UIS(12);
+    L->titleY=winH*7/100;
+    L->subY=L->titleY+th+UIS(9);
+    L->firstY=winH*22/100;
+    L->footRuleY=winH*89/100;
+    L->footY=L->footRuleY+UIS(12);
+    int bottom=L->footRuleY-UIS(10);
+    int wide=winW*5>=winH*6;
+    int split=wide?winW*55/100:winW-margin;
+    int rowsBottom=wide?bottom:bottom-(bottom-L->firstY)/(InRoleDossier()?2:4);
+    L->rowH=(rowsBottom-L->firstY)/L->count;
+    L->panel=(RECT){margin,L->firstY,split,L->firstY+L->count*L->rowH};
+    L->detail=wide?(RECT){split+margin,L->firstY,winW-margin,bottom}:
+        (RECT){margin,L->panel.bottom+UIS(8),winW-margin,bottom};
+}
 
 static int MainMenuRowCount(void) {
     return MainMenuCount();
 }
 
-int MainMenuCount(void) {return mainMenuMore?(EndlessUnlocked()?7:6):(hasSave?8:7);}
-
+enum { PM_ROOT, PM_MORE, PM_ROLES };
+static int InRoleDossier(void) { return mainMenuMore==PM_ROLES; }
+static const MainMenuAction rootActions[]={
+    MENU_CONTINUE,MENU_STORY,MENU_CLASSIC,MENU_ROLES,MENU_TRAINING,
+    MENU_UPGRADES,MENU_BANK,MENU_MORE,MENU_QUIT,MENU_NONE
+};
+static const MainMenuAction moreActions[]={
+    MENU_DAILY,MENU_ENDLESS,MENU_PRACTICE_ARENA,MENU_BESTIARY,
+    MENU_ACHIEVEMENTS,MENU_HELP,MENU_SETTINGS,MENU_BACK,MENU_NONE
+};
+static const MainMenuAction roleActions[]={
+    MENU_ROLE_0,MENU_ROLE_1,MENU_ROLE_2,MENU_ROLE_3,MENU_BACK,MENU_NONE
+};
+static const MainMenuAction welcomeActions[]={
+    MENU_FIRST_STORY,MENU_WELCOME_PRACTICE,MENU_WELCOME_SKIP,MENU_NONE
+};
+static int WelcomeOpen(void) { return protocolProfile.briefSeen==0; }
+static const MainMenuAction *CurrentActions(void) {
+    if (WelcomeOpen()) return welcomeActions;
+    if (mainMenuMore==PM_ROLES) return roleActions;
+    if (mainMenuMore==PM_MORE) return moreActions;
+    return rootActions;
+}
+static int MenuActionVisible(MainMenuAction action) {
+    return (action!=MENU_CONTINUE || hasSave) && (action!=MENU_ENDLESS || EndlessUnlocked());
+}
+static MainMenuAction MenuActionAt(int row) {
+    for (const MainMenuAction *p=CurrentActions();*p!=MENU_NONE;p++) {
+        if (MenuActionVisible(*p) && row--==0) return *p;
+    }
+    return MENU_NONE;
+}
+int MainMenuCount(void) {
+    int count=0;
+    for (const MainMenuAction *p=CurrentActions();*p!=MENU_NONE;p++)
+        count+=MenuActionVisible(*p);
+    return count;
+}
 
 static int MenuItemIndex(void) {
     if (currentState == STATE_SETTINGS) return settingsSelection;
@@ -269,7 +317,8 @@ static const char* MenuLabel(int i) {
             else sprintf(hb, "%s   LV%d/%d   %d GOLD", UpgradeName(i), UpgradeLevel(i), UPG_MAX, cost);
             return hb;
         }
-        case STATE_GAMEOVER: return "Return to Menu";
+        case STATE_GAMEOVER:
+            return protocolRun.story && !gameWon?Tr("Retry floor checkpoint","从楼层检查点重试"):Tr("Return to Menu","返回主菜单");
         case STATE_ACHIEVEMENTS: {
             /* v6：**按分类筛选 + 用表里的真实奖励**
                原来这里写着 "+1C/250S" —— 那是已删除的「核心 / 金币」，
@@ -565,28 +614,153 @@ y - TH/2，主菜单第 10 行「Quit」正好被这条线横切
     }
 }
 
-static void DrawMainMenu(const MainMenuLayout* M) {
-    if(menuSelection<0 || menuSelection>=M->count)menuSelection=0;
-    int th=TextHeightWin(),left=M->panel.left+M->padX;
-    BlendRectWin(0,0,winW,winH,0x00040C17u,1);
-    /* Perspective doorway fills the screen; selection remains on one coherent axis. */
-    int cx=winW*4/5,cy=winH/2;
-    for(int depth=0;depth<8;depth++) {
-        int w=winW/(3+depth),h=winH/(2+depth);
-        FrameRectWin(cx-w/2,cy-h/2,cx+w/2,cy+h/2,UI_EDGE,.65f-depth*.06f,2);
+static const unsigned roleColors[]={0x84c7b3,0x8dbbe2,0xb7a4d2,0xe3b770};
+
+static RECT RoleTrialRect(RECT card) {
+    int pad=UIS(10);
+    return (RECT){card.left+pad,card.bottom-pad-TextMediumLiteralHeight()-UIS(10),
+                  card.right-pad,card.bottom-pad};
+}
+int MainMenuTrialRole(int x,int y) {
+    if (currentState!=STATE_MAIN_MENU || WelcomeOpen() || mainMenuMore!=PM_ROLES ||
+        menuSelection<0 || menuSelection>3) return -1;
+    if (x<0) return menuSelection;
+    MainMenuLayout layout;MainMenuCompute(&layout);
+    RECT button=RoleTrialRect(layout.detail);
+    return x>=button.left && x<button.right && y>=button.top && y<button.bottom?menuSelection:-1;
+}
+static void DrawRoleDetails(RECT card,int role) {
+    int pad=UIS(10),th=TextMediumLiteralHeight();
+    int x=card.left+pad,right=card.right-pad,y=card.top+pad;
+    int width=right-x;
+    RECT button=RoleTrialRect(card);
+    int bottom=button.top-UIS(8);
+    if (width<UIS(60) || y+th>bottom) return;
+    unsigned color=roleColors[role];
+    int portrait=width/4;
+    if (portrait>bottom-y) portrait=bottom-y;
+    if (portrait>=UIS(52) && card.bottom-card.top>UIS(160)) {
+        int pixel=portrait/21;
+        BlendRectWin(x,y,x+portrait,y+portrait,0x101a23,1);
+        FrameRectWin(x,y,x+portrait,y+portrait,color,.5f,1);
+        UiDrawCharacterPortrait(role,x+portrait/2,y+portrait/2,pixel);
+        x+=portrait+pad;width=right-x;
     }
-    UiTitle((M->panel.left+M->panel.right)/2,M->titleY,"C  A  N  I  T  Y");
-    DrawTextSmallWin(left,M->subY,Tr("LISTEN. HIDE. RETURN.","倾听。藏匿。归来。"),UI_INK_DIM);
-    for(int i=0;i<M->count;i++) {
-        int y=M->firstY+i*M->rowH;
-        if(i==menuSelection)UiRowSel(left-UIS(12),y,M->panel.right,y+M->rowH-UIS(4),.7f);
-        DrawTextWin(left+UIS(10),y+(M->rowH-th)/2,MenuLabel(i),i==menuSelection?UI_ACCENT:UI_INK);
-    }
-    BlendRectWin(left,M->footRuleY,winW-UIS(60),M->footRuleY+2,UI_EDGE,1);
-    DrawTextSmallWin(left,M->footY,Tr("ENTER / CLICK   |   B: PRACTICE ARENA","回车或单击   |   B：进入训练场"),UI_INK_DIM);
-    DrawTextSmallWin(winW-TextSmallLiteralWidth(CANITY_VERSION_STR)-UIS(60),M->footY,CANITY_VERSION_STR,UI_INK_DIM);
+    y=UiDossierText(ProtocolRoleName(role),x,y,width,bottom,color)+UIS(6);
+    char line[160];
+    snprintf(line,sizeof line,Tr("SAN %d   CELL %d   STA %d","理智 %d   电量 %d   体力 %d"),
+             ProtocolRoleBase(role,0),ProtocolRoleBase(role,1),ProtocolRoleBase(role,2));
+    y=UiDossierText(line,x,y,width,bottom,UI_INK)+UIS(7);
+    if (role && !(protocolProfile.unlocked&(1u<<role)))
+        snprintf(line,sizeof line,Tr("Unlocks after chapter %d","完成第%d章后解锁"),role);
+    else snprintf(line,sizeof line,"%s",protocolProfile.selected==(unsigned)role?
+                  Tr("Selected for the next run","已选为下一局角色"):Tr("Enter to select","回车选择此角色"));
+    y=UiDossierText(line,x,y,width,bottom,UI_INK_DIM)+UIS(12);
+    y=UiDossierText(ProtocolAbilityName(role),x,y,width,bottom,color)+UIS(5);
+    y=UiDossierText(ProtocolRoleAbility(role),x,y,width,bottom,UI_INK)+UIS(10);
+    UiDossierText(ProtocolRoleBio(role),x,y,width,bottom,UI_INK_DIM);
+    BlendRectWin(button.left,button.top,button.right,button.bottom,0x183039,1);
+    FrameRectWin(button.left,button.top,button.right,button.bottom,color,.65f,1);
+    DrawTextSmallLiteralWin(button.left+pad,button.top+(button.bottom-button.top-FONT_H)/2,
+                            Tr("T / TRY IN PRACTICE","T / 进入训练场试用"),color);
 }
 
+static unsigned MenuTone(unsigned a,unsigned b,int strength) {
+    unsigned result=0;
+    for (int i=0;i<3;i++) {
+        unsigned v=(((a>>(i*8))&255)*(100-strength)+((b>>(i*8))&255)*strength)/100;
+        result|=v<<(i*8);
+    }
+    return result;
+}
+static void DrawFacilityArt(RECT art) {
+    const unsigned accent=0x799BAB;
+    int w=art.right-art.left,h=art.bottom-art.top;
+    if (w<20 || h<20) return;
+    int cx=art.left+w*47/100,cy=art.top+h*49/100;
+    int dw=w/10,dh=h/3;
+    for (int y=art.top;y<art.bottom;y++) {
+        float d=(float)abs(y-cy)/fmaxf(1,h/2);
+        int left=cx-dw-(int)(d*w*.28f);
+        int right=cx+dw+(int)(d*w*.28f);
+        unsigned wall=MenuTone(0x18242d,accent,9+(int)(d*12));
+        unsigned middle=y<cy?MenuTone(0x253740,accent,14):MenuTone(0x0d151d,accent,8);
+        BlendRectWin(art.left,y,left,y+1,wall,1);
+        BlendRectWin(left,y,right,y+1,middle,1);
+        BlendRectWin(right,y,art.right,y+1,wall,1);
+    }
+    int edge=UIS(2);
+    for (int n=1;n<=5;n++) {
+        int offset=n*n*w/106;
+        int y=n*n*h/108;
+        int x0=cx-dw-offset,x1=cx+dw+offset;
+        BlendRectWin(x0,cy-dh/2-y,x1,cy-dh/2-y+edge,accent,.35f);
+        BlendRectWin(x0,cy+dh/2+y,x1,cy+dh/2+y+edge,accent,.24f);
+        BlendRectWin(x0,cy-dh/2-y,x0+edge,cy+dh/2+y,accent,.24f);
+        BlendRectWin(x1-edge,cy-dh/2-y,x1,cy+dh/2+y,accent,.24f);
+    }
+    BlendRectWin(cx-dw,cy-dh/2,cx+dw,cy+dh/2,0x0c131a,1);
+    FrameRectWin(cx-dw,cy-dh/2,cx+dw,cy+dh/2,accent,.9f,2);
+    BlendRectWin(cx-1,cy-dh/2,cx+1,cy+dh/2,accent,.28f);
+    for (int i=0;i<4;i++) {
+        int y=cy+dh/2+h/20+i*h/21;
+        int half=dw/6+i*w/45;
+        BlendRectWin(cx-half,y,cx+half,y+edge,accent,.95f);
+    }
+    FrameRectWin(art.left,art.top,art.right,art.bottom,accent,.55f,1);
+}
+static void DrawMainMenuDetails(const MainMenuLayout *M) {
+    RECT card=M->detail;
+    if (card.right<=card.left || card.bottom<=card.top) return;
+    if (!WelcomeOpen() && mainMenuMore==PM_ROLES) {
+        if (menuSelection<4) {
+            BlendRectWin(card.left,card.top,card.right,card.bottom,0x0e1b26,1);
+            FrameRectWin(card.left,card.top,card.right,card.bottom,UI_EDGE,.75f,1);
+            DrawRoleDetails(card,menuSelection);
+        }
+        return;
+    }
+    DrawFacilityArt(card);
+}
+
+static void DrawMainMenu(const MainMenuLayout* M) {
+    if (menuSelection<0 || menuSelection>=M->count) menuSelection=0;
+    int left=M->panel.left+M->padX;
+    int th=TextMediumLiteralHeight();
+    unsigned tint=ThreatTierColor(PreviewThreatTier());
+    BlendRectWin(0,0,winW,winH,MenuTone(0x09131b,tint,8),1);
+    BlendRectWin(0,0,winW,UIS(2),tint,1);
+    BlendRectWin(M->panel.left,M->titleY,M->panel.left+UIS(2),M->subY+FONT_H,tint,.85f);
+    DrawTextMediumLiteralWin(left,M->titleY,"C A N I T Y",0xe4e7de);
+    DrawTextSmallLiteralWin(left,M->subY,Tr("DISORDER PROTOCOL","失序协议"),UI_INK_DIM);
+    for(int i=0;i<M->count;i++) {
+        int y=M->firstY+i*M->rowH,sel=i==menuSelection;
+        MainMenuAction action=MenuActionAt(i);
+        int primary=action==MENU_CONTINUE || action==MENU_STORY || action==MENU_FIRST_STORY || action==MENU_CLASSIC;
+        int bottom=y+M->rowH-UIS(3);
+        BlendRectWin(M->panel.left,y,M->panel.right,bottom,sel?MenuTone(0x112332,tint,28):primary?0x172a32:0x111e28,1);
+        FrameRectWin(M->panel.left,y,M->panel.right,bottom,sel?tint:MenuTone(0x314653,tint,10),.85f,1);
+        if (sel) BlendRectWin(M->panel.left,y,M->panel.left+UIS(3),bottom,tint,1);
+        const char *label=MenuLabel(i);
+        char line[128];
+        if (action==MENU_CONTINUE && hasSave)
+            snprintf(line,sizeof line,Tr("%s  /  %s F%02d","%s  /  %s 第%d层"),label,
+                     SavePendingStory()?Tr("Story","剧情"):Tr("Saved","存档"),SavePendingFloor());
+        else snprintf(line,sizeof line,"%s",label);
+        int width=M->panel.right-left-UIS(8);
+        unsigned color=sel?MenuTone(0xe7f2f0,tint,50):UI_INK;
+        if (th<=M->rowH-UIS(2) && TextMediumLiteralWidth(line)<=width)
+            DrawTextMediumLiteralWin(left,y+(M->rowH-th)/2,line,color);
+        else {
+            UiTrimSmallText(line,width);
+            DrawTextSmallLiteralWin(left,y+(M->rowH-FONT_H)/2,line,color);
+        }
+    }
+    DrawMainMenuDetails(M);
+    BlendRectWin(M->panel.left,M->footRuleY,winW-UIS(20),M->footRuleY+1,UI_EDGE,.85f);
+    DrawTextSmallLiteralWin(left,M->footY,Tr("Enter / Click","回车或单击"),UI_INK_DIM);
+    DrawTextSmallLiteralWin(winW-TextSmallLiteralWidth(CANITY_VERSION_STR)-UIS(20),M->footY,CANITY_VERSION_STR,UI_INK_DIM);
+}
 
 static void DrawGenericMenuTitle(MenuGeo g) {
     unsigned int titleColor = (currentState == STATE_MAIN_MENU) ? UI_ACCENT : UI_ACCENT;
@@ -687,6 +861,14 @@ static void DrawGenericMenuRows(MenuGeo g, int sel, int popupOpen, const int* id
         else c = (i == sel) ? 0x008CFF8Cu : 0x009B9B9Bu;
 
         if (currentState == STATE_GAMEOVER && i > 0) {
+            if (protocolRun.story) {
+                const char *label = i==1?ProtocolFloorName():
+                    !gameWon?Tr("Escape: return to main menu","按 Esc 返回主菜单"):
+                    (protocolRun.flags&PROTOCOL_MISSIONS)?Tr("Ending: Evidence transmitted","结局：证词已传出"):
+                    protocolRun.ending==1?Tr("Ending: Departure","结局：离开设施"):Tr("Ending: Protocol Reset","结局：协议归零");
+                DrawTextInRow(label,RowRect(g,i),UI_INK);
+                continue;
+            }
             /* 复盘：第 2、3 行放统计（通关与失败共用这一页，标题区分） */
             char line[112];
             int mins = (int)(runTime / 60.0f);
@@ -955,17 +1137,25 @@ static void DrawBenchTree(MenuGeo g) {
     char line[160];
     snprintf(line,sizeof(line),Tr("RUN GOLD %d","局内金币 %d"),WalletRun());
     DrawTextWin(winW-m-UIS(12)-TextWidthWin(line),m,line,UI_ACCENT);
+    unsigned branchColor=roleColors[protocolRun.role];
     int w,h; BenchNodeBoxSize(&w,&h);
-    for (int id = 0; id < BENCH_COUNT; id++) {
+    for (int id = 0; id < BenchGraphCount(); id++) {
         int pre = BenchPrereqId(id);
         int px = pre >= 0 ? (int)(BenchNodeWorldX(pre)*treeVK+treeVX) : (int)treeVX;
         int py = pre >= 0 ? (int)(BenchNodeWorldY(pre)*treeVK+treeVY) : (int)treeVY;
         int x = (int)(BenchNodeWorldX(id)*treeVK+treeVX), y = (int)(BenchNodeWorldY(id)*treeVK+treeVY);
         int lit = pre < 0 || BenchHas(pre);
-        BenchGraphLink(px,py,x,y,id==shopNodeSel || pre==shopNodeSel?UI_INFO:(lit?UI_ACCENT:UI_EDGE_DIM),lit);
+        if (id==BENCH_COUNT+3) {
+            int other=pre==BENCH_COUNT+1?BENCH_COUNT+2:BENCH_COUNT+1;
+            BenchGraphLink((int)(BenchNodeWorldX(other)*treeVK+treeVX),
+                           (int)(BenchNodeWorldY(other)*treeVK+treeVY),
+                           x,y,BenchHas(other)?UI_ACCENT:UI_EDGE_DIM,BenchHas(other));
+        }
+        unsigned path=id>=BENCH_COUNT?branchColor:UI_ACCENT;
+        BenchGraphLink(px,py,x,y,id==shopNodeSel || pre==shopNodeSel?UI_INFO:(lit?path:UI_EDGE_DIM),lit);
     }
-    const unsigned int colors[4] = {0x79CDD5u,UI_ACCENT,UI_DANGER,0xC1B4E4u};
-    for (int id = 0; id < BENCH_COUNT; id++) {
+    const unsigned int colors[4] = {0x79CDD5u,UI_ACCENT,UI_DANGER,branchColor};
+    for (int id = 0; id < BenchGraphCount(); id++) {
         int cx = (int)(BenchNodeWorldX(id)*treeVK+treeVX), cy = (int)(BenchNodeWorldY(id)*treeVK+treeVY);
         int x = cx-w/2, y = cy-h/2;
         if (x < winW*.30f || x+w > winW-UIS(20) || y < UIS(70) || y+h > winH-UIS(178)) continue;
@@ -980,7 +1170,7 @@ static void DrawBenchTree(MenuGeo g) {
             DrawTextSmallLiteralWin(cx-TextSmallLiteralWidth(name)/2,cy-5,name,owned?0x00BCF0C9u:0x00BCC8D5u);
         else BlendRectWin(cx-2,cy-2,cx+2,cy+2,owned?UI_OK:colors[group],1);
         if (treeVK > .5f && h >= th+18) {
-            snprintf(line,sizeof(line),"%d",benchNodes[id].cost);
+            snprintf(line,sizeof(line),"%d",BenchNodeCost(id));
             DrawTextSmallWin(x+4,y+h-12,line,0x00D1B373u);
         }
     }
@@ -992,20 +1182,28 @@ static void DrawBenchTree(MenuGeo g) {
         if (cx > winW*.34f && cx < winW*.93f && cy > UIS(70) && cy < winH-UIS(178))
             DrawTextSmallWin(cx-DrawTextSmallWidth(name)/2,cy,name,colors[group]);
     }
-    int id=shopNodeSel;if(id<0 || id>=BENCH_COUNT)id=0;
+    if (BenchGraphCount()>BENCH_COUNT) {
+        int x=winW*.30f+UIS(14),y=UIS(55);
+        char role[120];snprintf(role,sizeof role,Tr("SOUTH / %s","正南 / %s"),ProtocolAbilityName(protocolRun.role));
+        UiTrimSmallText(role,winW*2/3-UIS(22));
+        DrawTextSmallLiteralWin(x,y,role,branchColor);
+    }
+    int id=shopNodeSel;if(id<0 || id>=BenchGraphCount())id=0;
     int x=(int)(winW*.30f)+UIS(12),y=winH-UIS(166),right=winW-m-UIS(12),bottom=winH-m;
     int width=right-x-UIS(140);BlendRectWin(x,y,right,bottom,UI_BG_PANEL,1);
-    char text[192];snprintf(text,sizeof(text),"%s",Tr(benchNodes[id].name,benchNodes[id].nameZh));
+    char text[192];snprintf(text,sizeof(text),"%s",BenchNodeName(id));
     while(text[0] && TextMediumLiteralWidth(text)>width){size_t n=strlen(text)-1;while(n && ((unsigned char)text[n]&0xC0)==0x80)n--;text[n]=0;}
     DrawTextMediumLiteralWin(x,y+UIS(5),text,UI_ACCENT);y+=TextMediumLiteralHeight()+UIS(10);
-    snprintf(text,sizeof(text),Tr("COST %d / THREAT +%.1f","价格 %d金币 / 威胁 +%.1f"),benchNodes[id].cost,(double)BenchThreatCostOf(id));UiTrimSmallText(text,width);DrawTextSmallLiteralWin(x,y,text,UI_GOLD);y+=UIS(23);
-    y=UiDossierText(Tr(benchNodes[id].desc,benchNodes[id].descZh),x,y,width,bottom-UIS(27),UI_INK);
+    snprintf(text,sizeof(text),Tr("COST %d / THREAT +%.1f","价格 %d金币 / 威胁 +%.1f"),BenchNodeCost(id),(double)BenchThreatCostOf(id));UiTrimSmallText(text,width);DrawTextSmallLiteralWin(x,y,text,UI_GOLD);y+=UIS(23);
+    y=UiDossierText(BenchNodeDescription(id),x,y,width,bottom-UIS(27),UI_INK);
     int parent=BenchPrereqId(id);
-    snprintf(text,sizeof(text),Tr("FIRST: %s / %s","前置：%s / %s"),parent>=0?Tr(benchNodes[parent].name,benchNodes[parent].nameZh):Tr("START","起点"),BenchHas(id)?Tr("OWNED","已拥有"):BenchCanBuy(id)?Tr("CAN BUY","可购买"):Tr("CHECK FUNDS / PREREQUISITE","检查金币或前置"));
+    const char *status=id>=BENCH_COUNT?ProtocolNodeStatus(id-BENCH_COUNT):
+                       BenchHas(id)?Tr("OWNED","已拥有"):BenchCanBuy(id)?Tr("CAN BUY","可购买"):Tr("CHECK FUNDS / PREREQUISITE","检查金币或前置");
+    snprintf(text,sizeof(text),Tr("FIRST: %s / %s","前置：%s / %s"),parent>=0?BenchNodeName(parent):Tr("START","起点"),status);
     UiTrimSmallText(text,width);DrawTextSmallLiteralWin(x,bottom-UIS(21),text,UI_INFO);
     int x0,y0,x1,y1;BenchBuyButtonRect(&x0,&y0,&x1,&y1);
     UiRow(x0,y0,x1,y1,BenchCanBuy(id)?UI_ROW_SEL:UI_ROW_DISABLED,1);
-    DrawTextSmallLiteralWin(x0+UIS(15),y0+UIS(12),Tr("2 CLICKS","双击购买"),UI_ACCENT);
+    DrawTextSmallLiteralWin(x0+UIS(15),y0+UIS(12),Tr("BUY","购买"),UI_ACCENT);
 }
 
 
@@ -1023,7 +1221,20 @@ void SafehouseCardRect(int row,RECT* rect) {
         int width=(right-left)*52/100,height=(bottom-top-gap*4)/5;
         *rect=(RECT){left,top+row*(height+gap),left+width,top+row*(height+gap)+height};return;
     }
-    int columns=shopPage==SHP_SHOP?(winW>=1000?4:2):(winW>=1000?3:2);
+    if (shopPage==SHP_UPGRADE) {
+        int columns=(right-left)>=UIS(410)?3:2;
+        int rows=1+(RUN_UPG_ROLE+columns-1)/columns;
+        int height=(bottom-top-gap*(rows-1))/rows;
+        if (row==RUN_UPG_ROLE) {
+            *rect=(RECT){left,top,right,top+height};
+            return;
+        }
+        int width=(right-left-gap*(columns-1))/columns;
+        int x=left+(row%columns)*(width+gap),y=top+(row/columns+1)*(height+gap);
+        *rect=(RECT){x,y,x+width,y+height};
+        return;
+    }
+    int columns=winW>=1000?4:2;
     int rows=(count+columns-1)/columns,width=(right-left-gap*(columns-1))/columns,height=(bottom-top-gap*(rows-1))/rows;
     int col=row%columns,line=row/columns;
     *rect=(RECT){left+col*(width+gap),top+line*(height+gap),left+col*(width+gap)+width,top+line*(height+gap)+height};
@@ -1071,7 +1282,9 @@ static void DrawSupplyCard(int row,RECT r) {
     DrawSupplyIcon(row,icon);
     y=icon.bottom+UIS(4);
     char price[64];
-    snprintf(price,sizeof(price),Tr("%d RUN GOLD","%d 局内金币"),ShopPriceAt(row));
+    int percent=ShopBeaconPercentAt(row);
+    if (percent) snprintf(price,sizeof price,Tr("%d GOLD (%d%% OF BALANCE)","%d金币（余额的%d%%）"),ShopPriceAt(row),percent);
+    else snprintf(price,sizeof price,Tr("%d RUN GOLD","%d 局内金币"),ShopPriceAt(row));
     y=UiDossierText(price,r.left+pad,y,width,r.bottom-th-pad,UI_GOLD);
     if(ShopIsDiscounted(row) && y+12<r.bottom-th-pad) {
         char base[48];
@@ -1122,10 +1335,8 @@ static void DrawUpgradeCard(int row,RECT r) {
         else FrameRectWin(x,y,x+pip,y+pip,UI_EDGE,.95f,1);
     }
     y+=pip+UIS(8);
-    static const char* en[RUN_UPG_COUNT]={"+2 capacity / rank","-10% grab loss / rank","-15% sprint cost / rank","-15% light drain / rank","-1s cooldown / rank (base min 5s)","-2 points map drain / rank"};
-    static const char* zh[RUN_UPG_COUNT]={"每级携带上限 +2","每级抓捕理智损失 -10%","每级冲刺耗体 -15%","每级手电耗电 -15%","每级基础冷却 -1秒，最低5秒","每级地图耗电 -2个百分点"};
     char effect[128];
-    snprintf(effect,sizeof(effect),"%s",Tr(en[row],zh[row]));
+    snprintf(effect,sizeof effect,"%s",Tr(RunUpgDesc(row),RunUpgDescZh(row)));
     UiTrimSmallText(effect,width);
     if(y+12<r.bottom-pad-12)DrawTextSmallLiteralWin(r.left+pad,y,effect,UI_INK_DIM);
     char price[64];
@@ -1261,31 +1472,61 @@ void UiDrawMenuPages(void) {
 }
 
 static const char* MainMenuVisibleLabel(int index) {
-    static const char* primaryEn[]={"Continue","New Run","Skill Web","Threat Bank","Field Guide","Archives / Modes","Training Course","Quit"};
-    static const char* primaryZh[]={"继续游戏","开始新局","局外技能网","威胁银行","图鉴","档案与模式","新手教程","退出游戏"};
-    static const char* moreEn[]={"Achievements","Help / Skill Index","Settings","Campaign","Daily Run","Endless","Back"};
-    static const char* moreZh[]={"成就档案","帮助与技能索引","设置","战役","每日挑战","无尽模式","返回"};
-    if(!mainMenuMore){index+=hasSave?0:1;return Tr(primaryEn[index],primaryZh[index]);}
-    if(!EndlessUnlocked() && index==5)index=6;
-    return Tr(moreEn[index],moreZh[index]);
+    static const char *const labels[][2]={
+        [MENU_CONTINUE]={"Continue","继续游戏"},
+        [MENU_STORY]={"Story: Disorder Protocol","剧情：失序协议"},
+        [MENU_FIRST_STORY]={"Enter the Facility","进入设施（推荐）"},
+        [MENU_CLASSIC]={"Classic Exploration","经典探索"},
+        [MENU_ROLES]={"Character Dossiers","角色档案"},
+        [MENU_TRAINING]={"Training Course","基础训练"},
+        [MENU_UPGRADES]={"Permanent Skills","局外技能"},
+        [MENU_BANK]={"Threat Bank","威胁银行"},
+        [MENU_MORE]={"Modes & Extras","更多模式与资料"},
+        [MENU_QUIT]={"Quit","退出游戏"},
+        [MENU_PRACTICE_ARENA]={"Practice Arena","自由训练场"},
+        [MENU_DAILY]={"Daily Challenge","每日挑战"},
+        [MENU_ENDLESS]={"Endless","无尽模式"},
+        [MENU_BESTIARY]={"Field Guide","图鉴"},
+        [MENU_ACHIEVEMENTS]={"Achievements","成就档案"},
+        [MENU_HELP]={"Help & Skill Index","帮助与技能索引"},
+        [MENU_SETTINGS]={"Settings","设置"},
+        [MENU_BACK]={"Back","返回"},
+        [MENU_WELCOME_PRACTICE]={"Practice First","先练习"},
+        [MENU_WELCOME_SKIP]={"Go to Main Menu","直接进入主菜单"}
+    };
+    MainMenuAction action=MenuActionAt(index);
+    if (action>=MENU_ROLE_0 && action<=MENU_ROLE_3) return ProtocolRoleName(action-MENU_ROLE_0);
+    return action==MENU_NONE?"":Tr(labels[action][0],labels[action][1]);
 }
-int MainMenuLegacySelection(void) {
-    int index=menuSelection,base=hasSave?1:0,eo=EndlessUnlocked()?1:0;
-    if(index<0 || index>=MainMenuCount()){menuSelection=0;index=0;}
-    if(!mainMenuMore){
-        index+=hasSave?0:1;
-        if(index==5){mainMenuMore=1;menuSelection=0;uiDirty=1;return -1;}
-        if(index==0)return 0;
-        if(index==1)return base;
-        if(index==2)return base+1+eo;
-        if(index==3)return base+2+eo;
-        if(index==4)return base+4+eo;
-        if(index==6)return base+9+eo;
-        return base+10+eo;
+static void OpenMenu(int page,MainMenuAction focus) {
+    mainMenuMore=page;menuSelection=0;uiDirty=1;
+    for (int i=0;i<MainMenuCount();i++) if (MenuActionAt(i)==focus) {menuSelection=i;break;}
+}
+int MainMenuBack(void) {
+    if (WelcomeOpen() || mainMenuMore==PM_ROOT) return 0;
+    OpenMenu(PM_ROOT,mainMenuMore==PM_ROLES?MENU_ROLES:MENU_MORE);
+    return 1;
+}
+MainMenuAction MainMenuResolve(void) {
+    MainMenuAction action=MenuActionAt(menuSelection);
+    if (action==MENU_NONE) {menuSelection=0;return MENU_NONE;}
+    if (WelcomeOpen()) {
+        protocolProfile.briefSeen=1;
+        SaveGame();
+        OpenMenu(PM_ROOT,MENU_STORY);
+        if (action==MENU_WELCOME_SKIP) return MENU_NONE;
+        if (action==MENU_WELCOME_PRACTICE) return MENU_TRAINING;
+        return action;
     }
-    if(index==(EndlessUnlocked()?6:5)){mainMenuMore=0;menuSelection=0;uiDirty=1;return -1;}
-    static const int offsets[5]={3,5,6,7,8};
-    return index<5?base+offsets[index]+eo:base+1;
+    if (action==MENU_BACK) {MainMenuBack();return MENU_NONE;}
+    if (action==MENU_ROLES) {OpenMenu(PM_ROLES,MENU_ROLE_0+(int)protocolProfile.selected);return MENU_NONE;}
+    if (action==MENU_MORE) {OpenMenu(PM_MORE,MENU_DAILY);return MENU_NONE;}
+    if (action>=MENU_ROLE_0 && action<=MENU_ROLE_3) {
+        if (ProtocolSelectRole(action-MENU_ROLE_0)) SaveGame();
+        uiDirty=1;
+        return MENU_NONE;
+    }
+    return action;
 }
 
 void ShopRefreshButtonRect(RECT* rect) {

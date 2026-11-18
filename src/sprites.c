@@ -277,6 +277,7 @@ void SpritesInit(void) {
         if (!g_sprites[i].px || !g_sprites[i].shade) { g_ready = 0; return; }
         memset(g_sprites[i].px, 0, sizeof(unsigned int) * SPR_W * SPR_H);
     }
+    BakeProtocolProps();
     BakeWrenchStrike();
     BakeWrench();
     /* 2026-11-05：BakePistol() / BakeSigil() 已删除 */

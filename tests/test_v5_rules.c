@@ -14,7 +14,7 @@ Monster monHunters[MON_HUNTER_MAX];
 Monster lightBeasts[LIGHTBEAST_MAX];
 int isEndlessRun=0;
 int GoldTier(void){return 0;}
-float ThreatValue(void){return 0;}
+float ThreatEffective(void){return 0;}
 
 #define EXPECT(condition) do { if(!(condition)){fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#condition);return 1;} } while(0)
 int main(void) {
@@ -26,8 +26,11 @@ int main(void) {
         if(level>1)EXPECT(HunterSpawnDelay(level)<=HunterSpawnDelay(level-1));
     }
     EXPECT(MonsterFloorChance(SPAWN_LIGHT,1)==0);
-    EXPECT(MonsterFloorChance(SPAWN_MIMIC,2)==0);
-    EXPECT(MonsterFloorChance(SPAWN_MIMIC,8)>0);
+    EXPECT(MonsterFloorChance(SPAWN_MIMIC,1)==0);
+    int mimicEarly=MonsterFloorChance(SPAWN_MIMIC,2);
+    EXPECT(mimicEarly>=45 && mimicEarly<100);
+    EXPECT(MonsterFloorChance(SPAWN_MIMIC,8)>mimicEarly);
+    EXPECT(MonsterFloorChance(SPAWN_MIMIC,99)<100);
     EXPECT(MonsterFloorChance(SPAWN_COLLECTOR,2)==28);
     EXPECT(MonsterFloorChance(SPAWN_COLLECTOR,12)==90);
     EXPECT(HunterMoveSpeed(0,1,1,0)<1.4f);

@@ -1,6 +1,7 @@
 /*
  * Canity — 当前 20 节点属性改造树；节点编号兼容既有存档。
  */
+#include "protocol.h"
 #include "common.h"
 #include "run_economy.h"
 #include "skills.h"
@@ -71,7 +72,16 @@ void BenchResetRun(void) {
     benchOwned = 0u;
 }
 
+int BenchGraphCount(void) { return dailyMode?BENCH_COUNT:BENCH_GRAPH_COUNT; }
+int BenchNodeCost(int id) { return id>=BENCH_COUNT?ProtocolNodeCost(id-BENCH_COUNT):benchNodes[id].cost; }
+const char* BenchNodeName(int id) {
+    return id>=BENCH_COUNT?ProtocolNodeName(id-BENCH_COUNT):LangTr(benchNodes[id].name,benchNodes[id].nameZh);
+}
+const char* BenchNodeDescription(int id) {
+    return id>=BENCH_COUNT?ProtocolNodeDetail(id-BENCH_COUNT):LangTr(benchNodes[id].desc,benchNodes[id].descZh);
+}
 int BenchHas(int id) {
+    if (id>=BENCH_COUNT && id<BENCH_GRAPH_COUNT) return ProtocolNodeOwned(id-BENCH_COUNT);
     if (id < 0 || id >= BENCH_COUNT) return 0;
     return (benchOwned & (UINT64_C(1) << id)) ? 1 : 0;
 }
@@ -93,12 +103,14 @@ static int capstonePartner(int id) {
 /* v7：给 UI 用 —— 这个节点买下去会涨多少 THREAT。
    算法必须和 BenchTryBuy 里的一致（ThreatAddForTier(row+1, star)）。 */
 float BenchThreatCostOf(int id) {
+    if (id>=BENCH_COUNT && id<BENCH_GRAPH_COUNT) return ProtocolNodeThreat(id-BENCH_COUNT);
     if (id < 0 || id >= BENCH_COUNT || BenchHas(id)) return 0.0f;
     return ThreatCostForTier(benchNodes[id].row + 1, benchNodes[id].star);
 }
 
 
 int BenchCanBuy(int id) {
+    if (id>=BENCH_COUNT && id<BENCH_GRAPH_COUNT) return ProtocolNodeAvailable(id-BENCH_COUNT);
     if (id < 0 || id >= BENCH_COUNT) return 0;
     if (BenchHas(id)) return 0;
     if (!BenchPrereqOk(id)) return 0;
@@ -125,6 +137,8 @@ int BenchCanBuy(int id) {
  *   4 = 金币不够 / 5 = 已被对面的顶点锁死
  * ================================================================ */
 int BenchTryBuy(int id) {
+    if (id>=BENCH_COUNT && id<BENCH_GRAPH_COUNT)
+        return ProtocolBuyNode(id-BENCH_COUNT)?1:BenchHas(id)?2:3;
     if (id < 0 || id >= BENCH_COUNT)   return 3;
     if (BenchHas(id))                  return 2;
     if (!BenchPrereqOk(id))            return 3;
@@ -207,12 +221,17 @@ static const float kBenchPosition[BENCH_COUNT][2]={
     {-12.53773f,5.00553f},
     {10.60378f,8.35523f},
 };
+static const float rolePositions[10][2] = {
+    {0,3},{-2,5},{2,5},{0,7},{-3,9},{0,9},{3,9},{-3,11},{0,11},{3,11}
+};
 float BenchNodeWorldX(int id) {
+    if (id>=BENCH_COUNT && id<BENCH_GRAPH_COUNT) return rolePositions[id-BENCH_COUNT][0]*BENCH_NODE_WX;
     return id >= 0 && id < BENCH_COUNT ? kBenchPosition[id][0] * BENCH_NODE_WX : 0.0f;
 }
 
 
 float BenchNodeWorldY(int id) {
+    if (id>=BENCH_COUNT && id<BENCH_GRAPH_COUNT) return rolePositions[id-BENCH_COUNT][1]*BENCH_NODE_WY;
     return id >= 0 && id < BENCH_COUNT ? kBenchPosition[id][1] * BENCH_NODE_WY : 0.0f;
 }
 
@@ -256,7 +275,7 @@ void BenchZoomAt(float factor, int mx, int my) {
 
 void BenchResetView(void) {
     float minX=0,maxX=0,minY=0,maxY=0;
-    for(int i=0;i<BENCH_COUNT;i++){float x=BenchNodeWorldX(i),y=BenchNodeWorldY(i);minX=fminf(minX,x);maxX=fmaxf(maxX,x);minY=fminf(minY,y);maxY=fmaxf(maxY,y);}
+    for(int i=0;i<BenchGraphCount();i++){float x=BenchNodeWorldX(i),y=BenchNodeWorldY(i);minX=fminf(minX,x);maxX=fmaxf(maxX,x);minY=fminf(minY,y);maxY=fmaxf(maxY,y);}
     treeVK=fminf(winW*.60f/(maxX-minX+200),winH*.52f/(maxY-minY+130));
     if(treeVK<TREE_K_MIN)treeVK=TREE_K_MIN;
     treeVX=winW*.64f-(minX+maxX)*.5f*treeVK;treeVY=winH*.42f-(minY+maxY)*.5f*treeVK;uiDirty=1;
@@ -280,10 +299,24 @@ float BenchKnockStunMul(void) { return (BenchHas(BENCH_HEAVY_HEAD)?1.5f:1.0f)*(B
 int BenchShock(void) { return BenchHas(BENCH_SHOCK); }
 void BenchRefundRun(void) {
     int refund=0; for(int i=0;i<BENCH_COUNT;++i) if(BenchHas(i)) refund+=benchNodes[i].cost;
-    BenchResetRun(); ThreatReset(); WalletAddRun(refund); SaveGame();
+    if (hiddenIn<0 || !refund) return;
+    float pressure=0;
+    for (int i=0;i<BENCH_COUNT;i++) if (BenchHas(i))
+        pressure+=ThreatCostForTier(benchNodes[i].row+1,benchNodes[i].star);
+    BenchResetRun(); ThreatSet(ThreatRaw()-pressure); WalletAddRun(refund);
+    sanity=fminf(sanity,SanityMax());
+    battery=fminf(battery,(float)BatteryMax());
+    stamina=fminf(stamina,StaminaMax());
+    SaveGame();
 }
 
 int BenchPrereqId(int id) {
+    if (id>=BENCH_COUNT && id<BENCH_GRAPH_COUNT) {
+        static const signed char parents[10]={-1,0,0,1,3,3,3,4,5,6};
+        int parent=parents[id-BENCH_COUNT];
+        if (id==BENCH_COUNT+3 && ProtocolNodeOwned(2)) parent=2;
+        return parent<0?-1:BENCH_COUNT+parent;
+    }
     static const signed char parents[BENCH_COUNT]={-1,0,1,2,-1,4,5,6,-1,8,9,10,20,12,13,14,2,6,10,14,4,13,9,33,0,8,24,23,25,1,28,22,5,32,26,17,35,29,31,37};
     return id>=0 && id<BENCH_COUNT?parents[id]:-1;
 }
@@ -310,7 +343,7 @@ void BenchNodeBoxSize(int* width, int* height) {
 int BenchNodeAt(int x, int y) {
     if (x < winW * .30f || x > winW - UIS(20) || y < UIS(70) || y > winH - UIS(178)) return -1;
     int w, h; BenchNodeBoxSize(&w, &h);
-    for (int id = 0; id < BENCH_COUNT; id++) {
+    for (int id = 0; id < BenchGraphCount(); id++) {
         int cx = (int)(BenchNodeWorldX(id) * treeVK + treeVX);
         int cy = (int)(BenchNodeWorldY(id) * treeVK + treeVY);
         if (cx-w/2 < winW*.30f || cx+w/2 > winW-UIS(20) || cy-h/2 < UIS(70) || cy+h/2 > winH-UIS(178)) continue;
@@ -319,11 +352,11 @@ int BenchNodeAt(int x, int y) {
     return -1;
 }
 int BenchNavNearest(int from, int dx, int dy) {
-    if (from < 0 || from >= BENCH_COUNT) return 0;
+    if (from < 0 || from >= BenchGraphCount()) return 0;
     if (!dx && !dy) return from;
     float bestScore = 1e30f; int best = from;
     for(int pass=0;pass<2;pass++){
-    for (int id = 0; id < BENCH_COUNT; id++) {
+    for (int id = 0; id < BenchGraphCount(); id++) {
         if(!pass && BenchPrereqId(id)!=from && BenchPrereqId(from)!=id)continue;
         if (id == from) continue;
         float x = BenchNodeWorldX(id) - BenchNodeWorldX(from);
@@ -351,7 +384,8 @@ int BenchBuyButtonAt(int x,int y) {
 float BenchWrenchCooldownMul(void) { return (BenchHas(BENCH_TOOL_COOLING)?.88f:1.0f)*(BenchHas(BENCH_RETURN_SPRING)?.92f:1.0f); }
 
 const char* BenchShortName(int id) {
-    return id>=0 && id<BENCH_COUNT?(g_lang==LANG_ZH?benchNodes[id].nameZh:benchNodes[id].name):"?";
+    if (id>=BENCH_COUNT && id<BenchGraphCount()) return ProtocolNodeShortName(id-BENCH_COUNT);
+    return id>=0 && id<BENCH_COUNT?BenchNodeName(id):"?";
 }
 
 float BenchCrateGoldMul(void){return BenchHas(BENCH_SCAVENGE)?1.15f:1;}

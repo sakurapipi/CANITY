@@ -58,3 +58,26 @@ unsigned RoomMaterialSample(int theme,int x,int y,int surface){
     if(b>255)b=255;
     return (unsigned)(((r>>3)<<3)<<16|((g>>3)<<3)<<8|((b>>3)<<3));
 }
+
+unsigned StoryMaterialSample(int chapter,int x,int y,int surface) {
+    static const int palette[3][3][3]={
+        {{109,91,72},{82,68,54},{48,40,33}},   /* Copper switching works. */
+        {{102,120,123},{71,87,90},{41,52,56}}, /* Blue-grey acoustic gallery. */
+        {{111,112,83},{80,83,57},{47,50,37}}   /* Olive spillway hardware. */
+    };
+    const int *base=palette[chapter-1][surface];
+    x&=63;y&=63;
+    int joint,detail;
+    if (chapter==1) {
+        joint=surface==0?x%32<2:(x%32<2 || y%32<2);
+        detail=surface==1?(y==24 || y==26) && x%16<10:x%32==4 && y%32==4;
+    } else if (chapter==2) {
+        joint=surface==0?x%16<2:(x%32<2 || y%32<2);
+        detail=surface==0?x%8==4 && y%8==4:x%32==4 && y%32==4;
+    } else {
+        joint=surface==0?y%32<2:((x+(y/32)*16)%32<2 || y%32<2);
+        detail=surface==0?(x%16)<8 && (y==26 || y==28):(x+y)%16<2 && y%32<8;
+    }
+    int delta=joint?-18:detail?12:(int)(((unsigned)x*29u+(unsigned)y*17u)%5u)-2;
+    return (unsigned)((base[0]+delta)<<16 | (base[1]+delta)<<8 | (base[2]+delta));
+}

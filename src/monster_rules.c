@@ -14,13 +14,14 @@ int MonsterFloorChance(int kind,int level) {
     if(!MonsterEligible(kind,level))return 0;
     if(kind==SPAWN_COLLECTOR){int chance=14+level*7;return chance>90?90:chance;}
     if(kind==SPAWN_SCAVENGER)return 100; /* Trigger/time policy decides when. */
-    if(kind==SPAWN_SPIDER){int chance=55+(level-2)*6+GoldTier()*2+(int)ThreatValue();return chance>85?85:chance;}
+    if(kind==SPAWN_SPIDER){int chance=55+(level-2)*6+GoldTier()*2+(int)ThreatEffective();return chance>85?85:chance;}
+    if(kind==SPAWN_MIMIC)return (int)fminf(88,48+5*(level-2)+GoldTier()*2+ThreatEffective());
     static const int initial[SPAWN_KIND_COUNT]={100,65,32,65,25,100,100};
-    int chance=initial[kind]+GoldTier()*2+(int)ThreatValue();return chance>100?100:chance;
+    int chance=initial[kind]+GoldTier()*2+(int)ThreatEffective();return chance>100?100:chance;
 }
 float HunterSpawnDelay(int level) {
     if(level<1)level=1;
-    return fmaxf(isEndlessRun?16.0f:24.0f,60.0f-(level-1)*2.0f-GoldTier()*1.3f-ThreatValue()*.8f);
+    return fmaxf(isEndlessRun?16.0f:24.0f,60.0f-(level-1)*2.0f-GoldTier()*1.3f-ThreatEffective()*.8f);
 }
 float HunterMoveSpeed(int index,int level,float modifier,float threat) {
     if(level<1)level=1;
@@ -40,9 +41,9 @@ int MonsterChaseActive(void) {
 
 int MonsterEligible(int kind,int level){
     if(kind<0 || kind>=SPAWN_KIND_COUNT || level<MonsterMinimumFloor(kind))return 0;
-    if(kind==SPAWN_HUNTER || kind==SPAWN_COLLECTOR || kind==SPAWN_SCAVENGER)return 1;
+    if(kind==SPAWN_HUNTER || kind==SPAWN_COLLECTOR || kind==SPAWN_SCAVENGER || kind==SPAWN_MIMIC)return 1;
     if(level==1 && kind!=SPAWN_LIGHT)return 0;
-    float strength=GoldTier()+ThreatValue()*.65f+fmaxf(0,level-1)*.85f;
+    float strength=GoldTier()+ThreatEffective()*.65f+fmaxf(0,level-1)*.85f;
     static const float threshold[SPAWN_KIND_COUNT]={0,1.4f,3,4,2.5f,6,7};
     return strength>=threshold[kind];
 }
@@ -50,5 +51,5 @@ int MonsterEligible(int kind,int level){
 float MonsterThreatScale(int kind) {
     static const float gain[SPAWN_KIND_COUNT]={.27f,.20f,.30f,.15f,.12f,.20f,-.30f};
     if(kind<0 || kind>=SPAWN_KIND_COUNT)return 1;
-    return 1+gain[kind]*fmaxf(0,fminf(1,ThreatValue()/THREAT_MAX));
+    return 1+gain[kind]*fmaxf(0,fminf(1,ThreatEffective()/THREAT_MAX));
 }

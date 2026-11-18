@@ -35,6 +35,7 @@
  */
 #include "difficulty.h"
 #include "common.h"
+#include "protocol.h"
 #include "ui.h"
 #include "monster_rules.h"
 #include "bestiary.h"
@@ -115,7 +116,8 @@ static float wdSpotTimeNow(void) {
 
     int lv = currentLevel > 0 ? currentLevel : 1;
     float base=fmaxf(WARDEN_SPOT_MIN,WARDEN_SPOT_MAX-WARDEN_SPOT_STEP*(float)(lv-1));
-    float t=base*MonsterThreatScale(SPAWN_WARDEN);
+    static const float scale[]={.88f,.78f,.68f,.60f};
+    float t=base*scale[CurrentRunThreatTier()];
     if(t>WARDEN_SPOT_MAX)t=WARDEN_SPOT_MAX;
     if(t<.7f)t=.7f;
     return t;
@@ -438,7 +440,7 @@ void WardenReset(void) {
 
 /* 通电之后才出现：站在配电箱旁边 */
 void WardenSpawnIfPowered(void) {
-    if(!CampaignWardenImmediate() && !MonsterEligible(SPAWN_WARDEN,currentLevel))return;
+    if(protocolRun.story!=8 && !CampaignWardenImmediate() && !MonsterEligible(SPAWN_WARDEN,currentLevel))return;
 
 
 
@@ -446,7 +448,7 @@ void WardenSpawnIfPowered(void) {
     if (!breakerOpen) return;
     if (!breaker.active) {
         /* v6 战役第 3 关：只要通电，不等 breaker.active 的防守计时 */
-        if (!CampaignWardenImmediate()) return;
+        if (protocolRun.story!=8 && !CampaignWardenImmediate()) return;
     }
     if (warden.active) return;          /* v2.4.42：已经在了就别重置 */
 
@@ -689,7 +691,7 @@ static int WardenTickState(float dt) {
 
         /* 玩家走进出口区域 → 送回起点 */
         float pdx = posX - exitX, pdy = posY - exitY;
-        if (pdx * pdx + pdy * pdy < WARDEN_EXIT_R * WARDEN_EXIT_R) {
+        if (!protocolRun.story && pdx * pdx + pdy * pdy < WARDEN_EXIT_R * WARDEN_EXIT_R) {
             SendPlayerToStart();
             (void)0; /* Enemy encounter narration removed. */
             (void)0; /* No encounter-toast timer. */
@@ -840,6 +842,7 @@ static int WardenObservePlayer(float dt) {
          * ============================================================ */
         float sightR = (playerMoveSpeedNow >= WARDEN_SPRINT_SPEED)
                      ? WARDEN_SIGHT_SPRINT : WARDEN_SIGHT_WALK;
+        sightR+=.35f*CurrentRunThreatTier();
         int inCone = 0;
         if (md2 < sightR * sightR) {
             float angTo = atan2f(mdy, mdx);
@@ -871,6 +874,7 @@ static int WardenObservePlayer(float dt) {
             float hearR = (playerMoveSpeedNow >= WARDEN_SPRINT_SPEED) ? WARDEN_HEAR_SPRINT
                         : (playerMoveSpeedNow > WARDEN_MOVE_EPS)      ? WARDEN_HEAR_WALK
                         : 0.0f;
+            if (hearR>0) hearR+=.4f*CurrentRunThreatTier();
             warden.hearNow = hearR;
             /* 2026-11-03：**耳朵以前完全不吃烟**。
                听觉本来就是「全向、穿墙」，所以烟雾弹对守门人一点用都没有 ——
@@ -915,7 +919,8 @@ static int WardenObservePlayer(float dt) {
             warden.spotT += dt;
         } else {
             warden.sightHold = 0.0f;
-            warden.spotT = 0.0f;              /* 一脱离感知就放弃锁定 */
+            static const float fade[]={3.5f,3.f,2.5f,2.f};
+            warden.spotT=fmaxf(0,warden.spotT-dt*fade[CurrentRunThreatTier()]);
         }
         { float spotMax = wdSpotTimeNow();
           if (warden.spotT > spotMax) warden.spotT = spotMax; }

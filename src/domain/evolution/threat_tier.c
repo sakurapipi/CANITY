@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "loop_api.h"
 /* A confirmed plan is frozen before wallet withdrawal; floor entry is the
  * only live difficulty commit. Preview is never an AI input. */
@@ -39,7 +40,7 @@ void CommitThreatTierForFloor(int floor) {
     activeTier =
         trainingMode
             ? 0
-            : ThreatTierFromPressure(fmaxf(GoldPressure(GoldTier()) + ThreatValue() * .45f, confirmedPlan));
+            : ProtocolTier(ThreatTierFromPressure(fmaxf(GoldPressure(GoldTier()) + ThreatValue() * .45f, protocolRun.story ? 0 : confirmedPlan)));
 }
 void ThreatTierRestore(int floor, int tier, float plan) {
     activeFloor = floor > 0 ? floor : 0;

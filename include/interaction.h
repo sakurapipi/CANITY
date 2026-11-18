@@ -4,6 +4,7 @@
 
 #include "common.h"
 
+enum { INTERACT_STORY_DEVICE = 5 };
 void InteractionRefreshTargets(void);
 
 #endif

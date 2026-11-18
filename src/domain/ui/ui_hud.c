@@ -1,3 +1,5 @@
+#include "protocol.h"
+#include "interaction.h"
 #include "tactical_tools.h"
 #include "threat_tier.h"
 /* 2026-11-16：从 ui.c 拆出的**局内 HUD**（域内解耦，行为不变）。
@@ -331,7 +333,7 @@ static void DrawHudVitalsAndStatus(int effDetail) {
 
     /* 2026-11-08：Minimal 档只留 4 项（LEVEL/GOLD/SANITY/THREAT）。
        保险丝进度从 Normal 起显示。 */
-    if (effDetail >= 1) {
+    if (effDetail >= 1 && !(protocolRun.flags&PROTOCOL_MISSIONS)) {
         if (breakerOpen) sprintf(buf, "POWER ON");
         else sprintf(buf, "FUSES %d/%d", fusesHeld, fusesNeeded);
         DrawTextWin(UIS(20), hudY2, buf, breakerOpen ? 0x0030FF60u : UI_ACCENT);
@@ -453,7 +455,41 @@ static void DrawHudVitalsAndStatus(int effDetail) {
              * 现在改成**贴着底部的 LIGHT 条往上放** —— 那块区域永远是空的。
              * ============================================================ */
             {
-                DrawTextWin(UIS(20), winH - UIS(140), wb, wc);
+                int x=UIS(20), y=winH-UIS(140);
+                DrawTextWin(x,y,wb,wc);
+                if (currentState==STATE_PLAYING && !calibActive) {
+                    char skill[128],effect[112];
+                    const char *name=ProtocolAbilityName(protocolRun.role);
+                    const char *key=VkName(g_bindings[ACT_DECOY]);
+                    float remaining=ProtocolAbilityRemaining();
+                    if (remaining>0) {
+                        snprintf(skill,sizeof skill,Tr("%s  ACTIVE %.1fs","%s  生效 %.1f秒"),name,remaining);
+                        ProtocolAbilityEffect(effect,sizeof effect);
+                    } else if (protocolRun.cooldown>0) {
+                        snprintf(skill,sizeof skill,Tr("%s  CD %.0fs","%s  冷却 %.0f秒"),name,ceilf(protocolRun.cooldown));
+                        effect[0]=0;
+                    } else {
+                        snprintf(skill,sizeof skill,Tr("%s  %s","%s  %s"),key,name);
+                        effect[0]=0;
+                    }
+                    x+=TextWidthWin(wb)+UIS(13);
+                    int width=winW*73/100-x-UIS(6);
+                    unsigned color=remaining>0?0x92dcb3u:protocolRun.cooldown>0?0x00806060u:0x0060d0ffu;
+                    if (width>UIS(12) && TextWidthWin(skill)<=width) {
+                        DrawTextWin(x,y,skill,color);
+                    } else if (width>UIS(12)) {
+                        while (skill[0] && TextMediumLiteralWidth(skill)>width) {
+                            size_t i=strlen(skill)-1;
+                            while (i && ((unsigned char)skill[i]&0xc0)==0x80) i--;
+                            skill[i]=0;
+                        }
+                        DrawTextMediumLiteralWin(x,y+(TextHeightWin()-TextMediumLiteralHeight())/2,skill,color);
+                    }
+                    if (width>UIS(12) && effect[0]) {
+                        UiTrimSmallText(effect,width);
+                        DrawTextSmallLiteralWin(x,y-FONT_H-UIS(4),effect,color);
+                    }
+                }
             }
         }
     }
@@ -1156,7 +1192,7 @@ static void DrawHudInteractionHints(const HudBarLayout* layout) {
     /* 交互提示 + 长按进度 */
     int roomDevice=(hoverKind==4 && RoomThemeIsCurrent(hoverIndex)) ||
         (hoverKind==3 && hoverIndex>=0 && hoverIndex<roomPropCount && RoomPropIsControl(roomProps[hoverIndex].kind));
-    if (hoverKind != 0 && !roomDevice) {
+    if (hoverKind != 0 && hoverKind!=INTERACT_STORY_DEVICE && !roomDevice) {
         char pbuf[192];   /* 2026-11-06：舱门门槛文案最长（含数字）要 96 字节，64 会溢出 */
         /* v2.7：提示要用当前绑定，改过键之后写死 E 就是骗人 */
         if (hoverKind == 1)
@@ -1183,6 +1219,8 @@ static void DrawHudInteractionHints(const HudBarLayout* layout) {
             const char* action=(hoverIndex>=0 && hoverIndex<roomPropCount && roomProps[hoverIndex].kind>=ROOMPROP_THEME_FIRST)?Tr("INSPECT DEVICE","检修装置"):Tr("SEARCH","搜查");
             snprintf(pbuf,sizeof(pbuf),Tr("HOLD %s  %s  (%d LEFT)","按住%s  %s（剩%d次）"),VkName(g_bindings[ACT_INTERACT]),action,left);
         }
+        else if (protocolRun.story && !ProtocolBreakerReady())
+            snprintf(pbuf,sizeof pbuf,"%s",Tr("Connect the teaching capacitor first","先接通教学蓄电器"));
         else if (fusesHeld >= fusesNeeded)
             sprintf(pbuf, "HOLD %s  POWER ON", VkName(g_bindings[ACT_INTERACT]));
         else sprintf(pbuf, "NEED %d MORE FUSE", fusesNeeded - fusesHeld);
@@ -1292,8 +1330,10 @@ static void DrawHudChargeHints(const HudBarLayout* layout) {
             char ub[64];
             if (!ultUsed) sprintf(ub, "Q: %s", nm);
             else          sprintf(ub, "%s USED", nm);
-            int uw = TextWidthWin(ub);
-            DrawTextWin(winW - UIS(24) - uw, y1 - UIS(3), ub,
+            UiTrimSmallText(ub,winW/3);
+            int uw = TextSmallLiteralWidth(ub);
+            int y=winH-UIS(138)-TextHeightWin()-UIS(8)-FONT_H;
+            DrawTextSmallLiteralWin(winW-UIS(24)-uw,y,ub,
                         ultUsed ? 0x00606060u : UI_ACCENT);
         }
     }
@@ -1422,4 +1462,27 @@ void DrawHUD(void) {
     DrawHudLightBar(&bars);
     DrawHudPerception();
     DrawHudActionHints(&bars);
+    if (currentState==STATE_PLAYING && !calibActive && hiddenIn<0 &&
+        !isCharging && protocolRun.story) {
+        char text[192];
+        const char *hint=ProtocolExitHint();
+        unsigned color=UI_INFO;
+        if (hoverKind==INTERACT_STORY_DEVICE) {
+            int ready;
+            hint=ProtocolDeviceHint(hoverIndex,&ready);
+            color=ready?UI_ACCENT:UI_GOLD;
+            if (ready) {
+                snprintf(text,sizeof text,"%s  %s",VkName(g_bindings[ACT_INTERACT]),hint);
+                hint=text;
+            }
+        }
+        if (hint) {
+            char line[192];
+            snprintf(line,sizeof line,"%s",hint);
+            UiTrimSmallText(line,winW*3/5);
+            int tw=TextSmallLiteralWidth(line),x=(winW-tw)/2,y=winH*56/100;
+            BlendRectWin(x-UIS(8),y-UIS(5),x+tw+UIS(8),y+FONT_H+UIS(5),UI_BG_PANEL,.96f);
+            DrawTextSmallLiteralWin(x,y,line,color);
+        }
+    }
 }

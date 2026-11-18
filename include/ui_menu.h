@@ -21,6 +21,7 @@ typedef struct {
     int  firstY, rowH;
     int  footRuleY, footY;
     int  padX;
+    RECT detail;
 } MainMenuLayout;
 
 
@@ -32,7 +33,6 @@ void UiCornerMarks(int x0, int y0, int x1, int y1);
 void UiSectionRule(int cx, int y, int w);
 void UiFooterRule(int x0, int x1, int y);
 void UiRowSel(int x0, int y0, int x1, int y1, float alpha);
-int MainMenuLegacySelection(void);
 void DrawPageTabs(void);
 void ShopBackButtonRect(int* x0, int* y0, int* x1, int* y1);
 void DrawCalibBar(int bx, int by, int barW, int barH);

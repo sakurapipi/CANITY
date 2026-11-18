@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "save.h"
 #include "evolution_art.h"
 #include "monster_evolution.h"
@@ -1019,7 +1020,7 @@ static void DistributeFloorLoot(void) {
     MimicTrySpawn(currentLevel, containerCount);
     ApplyLockboxes();
     for(int i=0;i<containerCount;i++){int x=(int)containers[i].x,y=(int)containers[i].y;
-        if(x>=0 && y>=0 && x<MAP_WIDTH && y<MAP_HEIGHT && cellMeta[y][x].roomId){containers[i].locked=1;containers[i].lockType=(currentLevel+cellMeta[y][x].themeId)%LOCK_TYPE_COUNT;containers[i].lockCode=(int)(rng_world_next()&0xFFF);}}
+        if(x>=0 && y>=0 && x<MAP_WIDTH && y<MAP_HEIGHT && cellMeta[y][x].roomId && !containers[i].mimicHost){containers[i].locked=1;containers[i].lockType=(currentLevel+cellMeta[y][x].themeId)%LOCK_TYPE_COUNT;containers[i].lockCode=(int)(rng_world_next()&0xFFF);}}
 
 
         /* 修复死局 Bug：优先保证能通关（放满 fusesNeeded）。
@@ -1124,7 +1125,7 @@ static void DistributeFloorLoot(void) {
 
 static void SpawnFloorPopulation(void) {
         {
-        GenerateThemeTextures(RoomThemeMaterialForFloor(currentLevel));
+        GenerateThemeTextures(ProtocolFloorMaterial());
     }
     SpawnMonster();
     /* ================================================================
@@ -1157,6 +1158,10 @@ static void SpawnFloorPopulation(void) {
     /* 2026-11-06：用户要求追光怪 +1 只 */
     SpawnLightBeast();
     SpawnLightBeast2();
+    if (protocolRun.story==1 && !(protocolRun.flags&PROTOCOL_MISSIONS)) {
+        for (int i=0;i<LIGHTBEAST_MAX;i++) lightBeasts[i].active=0;
+        Hunter0()->active=0;
+    }
     /* ==================================================================
      * 2026-11-06（审计补）：**换层必须重置"场内系统"**
      * ------------------------------------------------------------------
@@ -1186,7 +1191,7 @@ static void SpawnFloorPopulation(void) {
        后面的 ExtrasSpawnForLevel() 清空，玩家只能看到速度/理智修正。 */
     ExtrasSpawnForLevel(currentLevel);
     levelEvent = -1;
-    if (currentLevel >= 2 && (rand() % 100) < EVENT_CHANCE)
+    if (!protocolRun.story && currentLevel >= 2 && (rand() % 100) < EVENT_CHANCE)
         {   /* v6：按权重抽（血月/空投更常见，幸运更少见） */
             unsigned int sd = (unsigned int)rand();
             levelEvent = EventPickRandom(&sd);
@@ -1233,73 +1238,18 @@ static void SpawnFloorPopulation(void) {
 
     /* Retired extras/bosses have no current catalog identity. */
 
-    /* v2.0 CARTOGRAPHER：开局就把安全屋和配电箱的位置标在小地图上 */
     if (SkillCartoUnlock()) {
-        for (int dy = -2; dy <= 2; dy++) {
-            for (int dx = -2; dx <= 2; dx++) {
-                int ax = (int)safeRoom.x + dx, ay = (int)safeRoom.y + dy;
-                if (safeRoom.active && ax > 0 && ax < MAP_WIDTH - 1 && ay > 0 && ay < MAP_HEIGHT - 1)
-                    explored[ay][ax] = 1;
-                ax = (int)breaker.x + dx; ay = (int)breaker.y + dy;
-                if (ax > 0 && ax < MAP_WIDTH - 1 && ay > 0 && ay < MAP_HEIGHT - 1)
-                    explored[ay][ax] = 1;
-            }
+        if (breaker.active && breaker.x>0 && breaker.x<MAP_WIDTH && breaker.y>0 && breaker.y<MAP_HEIGHT)
+            explored[(int)breaker.y][(int)breaker.x]=1;
+        int nearest=-1;
+        float best=1e9f;
+        for(int i=0;i<hideSpotCount;i++) if (hideSpots[i].active && !hideSpots[i].broken) {
+            float d=Dist2(posX,posY,hideSpots[i].x,hideSpots[i].y);
+            if(d<best){best=d;nearest=i;}
         }
+        if(nearest>=0)
+            explored[(int)hideSpots[nearest].y][(int)hideSpots[nearest].x]=1;
     }
-    { 
-      BestiaryMarkSeen(BST_ID_HUNTER); BestiaryNoteFloor(BST_ID_HUNTER, currentLevel); }   /* 寻声鬼：每层都有 */
-    /* Discovery is recorded silently in the archive. */
-    if (lightBeast.active) { BestiaryMarkSeen(BST_ID_LIGHT); BestiaryNoteFloor(BST_ID_LIGHT, currentLevel); }           /* 追光鬼 */
-    /* Leeches and spiders are live entities without catalog rows; never borrow IDs 2/3. */
-
-    /* 记录本局见过的词条种类（算难度乘子用） */
-    if (levelMod >= 0) {
-        int bit = 1 << levelMod;
-        if (!(modsSeenMask & bit)) { modsSeenMask |= bit; modsSeenCount++; }
-    }
-    /* 跳脸虫：第 3 层起按概率出现，不是每关必出 ——
-       稀有才有惊吓感。触发时机也随机（进关 8~20 秒后），
-       不然一进关就跳出来太突兀。 */
-    /* ==================================================================
-     * 2026-11-06（用户要求）：**一局总量受控**
-     * ------------------------------------------------------------------
-     * 用户原话：「刷新频率为一局只有上限 4 只，随着层数增加上限 4 只」。
-     *
-     * 旧逻辑是"每层 35% 概率出 1 只"，一局打 10 层可能遇 3~4 次，
-     * 而且完全随机 —— 有的局一次没有，有的局连着来。
-     *
-     * 新逻辑：把**一局的总量**当预算来花。
-     *   本局上限 = min(4, 1 + 层数/2)
-     *     第 3 层 → 2 只，第 5 层 → 3 只，第 7 层起 → 4 只
-     *   已经出过的数量达到上限 → 本层不再安排
-     * ================================================================ */
-    {
-        /* ==================================================================
-         * 2026-11-06（用户要求）：**跳脸怪彻底删除**
-         * ------------------------------------------------------------------
-         * 用户原话：「把那个跳脸怪给彻底删除」。
-         *
-         * 这里原来按"一局总量"排程（min(4, 1+层数/2) 只）。
-         * 现在恒为 -1 —— 本层不会出现爆脸怪。
-         * 它的角色由缚丝蛛接管（第 4 层起、30%、每层最多 1 只）。
-         * ================================================================ */
-        jumperTrigger = -1.0f;
-    }
-    jumperPhase = JMP_IDLE;
-    jumperTimer = 0.0f;
-    parasite.active = 0;
-    /* 2026-11-06：一局的总量预算与控制计时由 StartGame 负责清零 */
-    {  
-      jumperSpawnedRun = 0; jumperControlT = 0.0f; }
-    for (int i = 0; i < MAX_THROWN; i++) thrown[i].active = 0;
-
-    /* ===== v6 **删除旧安全区** =====
-       用户：「安全区是旧版本遗物，隐藏点才是主流机制」。
-       核实：商店（T 键）、操作提示、校准小游戏三处的判定
-       早就写成了 `inSafe || hiddenIn >= 0` —— 也就是说
-       **藏在藏身点里已经能做安全区能做的全部事情**。
-       安全区那半边是纯冗余，而且它的模型会顶掉配电箱的位置。
-       现在 safeRoom.active 恒为 0，不再生成、不再绘制。 */
 }
 
 static void PlaceFloorBreaker(const LevelBuildWorkspace* work) {
@@ -1384,7 +1334,9 @@ static void PlaceFloorBreaker(const LevelBuildWorkspace* work) {
 
 void GenerateLevel(void) {
     static LevelBuildWorkspace work;
+    if (protocolRun.story) currentLevel=protocolRun.story;
     ResetFloorSystems();
+    ProtocolFloorReset();
     echoScanT = 0;
     CommitThreatTierForFloor(currentLevel);if(!SaveEvolutionCanPersist())ThreatTierRestore(currentLevel,0,0);EvolutionResetFloor();TacticalResetFloor();SpritesSetEvolutionTier(CurrentRunThreatTier());
     memset(&roomTheme,0,sizeof(roomTheme));
@@ -1392,7 +1344,21 @@ void GenerateLevel(void) {
         TrainingBuildArena();
         return;
     }
-    GenerateThemeTextures(RoomThemeMaterialForFloor(currentLevel));
+    GenerateThemeTextures(ProtocolFloorMaterial());
+    if (protocolRun.story) {
+        ProtocolBuildFloor();
+        if (ProtocolPeacefulStory()) {
+            ProtocolClearStoryActors();
+            ControlReset();
+            FlareHealReset();
+            PhaseResetPlacement();
+            ResetLeeches();
+        } else {
+            MimicReset();
+            SpawnFloorPopulation();
+        }
+        return;
+    }
     GenerateMazeTopology();
     if(campaignMode)CampaignBuildFloor();
     /* Pure topology gate. An invalid random layout falls back to a connected

@@ -140,24 +140,20 @@ static void test_phase_price(void) {
     int savedGold = carryGold;
     int savedLevel = currentLevel;
 
-    /* ==================================================================
-     * 2026-11-06 修正后的契约：**随层数递增的百分比**
-     *   当前用户规则：所有层数均为携带金币的5%，向上取整，最低1金
-     * 固定 70% 的旧契约太狠（用户实测："价格过于昂贵"）。
-     * ================================================================ */
+    /* Beacon quote starts at 5%, increases 1 point per floor, and caps at 15%. */
     carryGold = 1000;
 
     currentLevel = 1;
     CHECK(ShopPriceAt(8) == 50, "beacon costs 5% of carried gold");
 
     currentLevel = 5;
-    CHECK(ShopPriceAt(8) == 50, "depth does not alter the 5% beacon quote");
+    CHECK(ShopPriceAt(8) == 90, "floor five quotes 9% of carried gold");
 
     currentLevel = 11;
-    CHECK(ShopPriceAt(8) == 50, "deep floors retain the 5% beacon quote");
+    CHECK(ShopPriceAt(8) == 150, "floor eleven reaches the 15% cap");
 
     currentLevel = 30;
-    CHECK(ShopPriceAt(8) == 50, "the percentage stays fixed on deep floors");
+    CHECK(ShopPriceAt(8) == 150, "deep floors do not exceed the 15% cap");
 
     /* 下限：身上没钱时仍有一个真实价格，不是 0 也不至于买不起到离谱 */
     currentLevel = 1;

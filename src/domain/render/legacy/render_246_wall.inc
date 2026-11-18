@@ -7,8 +7,9 @@ static void RenderWallSurfaceLegacy246(int x, int halfH, const WallRay* ray) {
     int mapX = ray->mapX;
     int mapY = ray->mapY;
     int architectureMaterial=-1;
-    if(mapX>=0 && mapY>=0 && mapX<MAP_WIDTH && mapY<MAP_HEIGHT &&
-       (cellMeta[mapY][mapX].flags&CELLFLAG_ROOM_V2))architectureMaterial=cellMeta[mapY][mapX].themeId;
+    if(!storyMaterialActive && mapX>=0 && mapY>=0 && mapX<MAP_WIDTH && mapY<MAP_HEIGHT &&
+       (cellMeta[mapY][mapX].flags&(CELLFLAG_ROOM_V2|CELLFLAG_ROOMWALL)))
+        architectureMaterial=SceneMaterialAt(mapX,mapY);
     int side = ray->side;
     float perpWallDist = ray->perpWallDist;
     /* v1.13 真俯仰：墙的下沿(v=-眼高)与上沿(v=1-眼高)各自旋转后投影。
@@ -114,7 +115,7 @@ static void RenderWallSurfaceLegacy246(int x, int halfH, const WallRay* ray) {
     {
 
         int tr = 0, tg = 0, tb = 0;
-        if (architectureMaterial<0 && CellTintRGB(mapX, mapY, &tr, &tg, &tb)) {
+        if (!storyMaterialActive && architectureMaterial<0 && CellTintRGB(mapX, mapY, &tr, &tg, &tb)) {
             float k = smokeDim;          /* 浓烟里补光同样被压 */
             addR += (int)(tr * k);
             addG += (int)(tg * k);
@@ -154,7 +155,9 @@ static void RenderWallSurfaceLegacy246(int x, int halfH, const WallRay* ray) {
         int texY = ((int)texPos) & (TEX_HEIGHT - 1);
         texPos += step;
         /* v2.0：走了 mip 就按低位采样（lod 0 时与原路径完全等价） */
-        unsigned int t = mipSrc[((texY >> mipShift) & mipMaskY) * mipW + (texX >> mipShift)];
+        unsigned int t = architectureMaterial>=0
+            ?sceneTexture[architectureMaterial][0][texY&~1][texX&~1]
+            :mipSrc[((texY >> mipShift) & mipMaskY) * mipW + (texX >> mipShift)];
         int vy = (int)(((float)(y - drawStart) * 64.0f) / (float)(drawEnd - drawStart + 1));
         /* The current room's lighting is attached to the actual wall, not
            the clipped viewport span: walking closer cannot stretch the wash. */

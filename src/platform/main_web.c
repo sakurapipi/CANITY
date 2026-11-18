@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include "tactical_tools.h"
 /*
  * Canity — 网页版入口（Emscripten）
@@ -267,6 +268,7 @@ static const ActionNameRow kActionNames[] = {
     { "MENU_CANCEL",  ACT_MENU_CANCEL },
     { "DODGE",        ACT_DODGE },
     { "SWING",        ACT_CANCEL_CHARGE },
+    { "ABILITY",      ACT_DECOY },
     { "DECOY",        ACT_DECOY },
     { "PHASE_TELE",   ACT_PHASE_TELE },
     { "SELECT_1",     ACT_SELECT_1 },

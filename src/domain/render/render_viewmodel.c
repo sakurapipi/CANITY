@@ -1,4 +1,5 @@
 #include "tactical_tools.h"
+#include "protocol.h"
 /* 2026-11-16：从 render.c 拆出的**第一人称手持模型**（域内解耦，行为不变）。 */
 #include "threat_telegraph.h"
 #include "room_theme.h"
@@ -34,6 +35,24 @@
 #include "lang.h"
 #include "state.h"
 #include "plat.h"
+
+static int DrawAbilityHand(float sway,float lift) {
+    int role=protocolRun.role;
+    float age=ProtocolAbilityAge(), remaining=ProtocolAbilityRemaining();
+    float impact=ProtocolShieldImpact();
+    float show=role==3?fmaxf(remaining,impact):fminf(remaining,.85f-age);
+    if (show<=0) return 0;
+    float raise=fminf(1,age*8.f)*fminf(1,show*8.f);
+    float ease=raise*raise*(3.f-2.f*raise);
+    static const int hands[]={SPR_ABILITY_WRIST,SPR_ABILITY_EMITTER,
+                              SPR_ABILITY_PROJECTOR,SPR_ABILITY_SHIELD};
+    int size=(int)(renderH*(role==3?.54f:.39f));
+    int x=(int)(renderW*(role==3?.28f:.37f)-size*.5f-sway*.55f);
+    int y=(int)(renderH-size*ease+size*.2f+lift*.4f);
+    if (impact>0) y+=(int)(size*impact*.35f);
+    DrawSprite(hands[role],x,y,size,size,1.f+impact*.9f,1,0,0);
+    return 1;
+}
 
 void DrawViewModel(void) {
     /* v3.0：**藏进柜子还举着扳手**是最出戏的一处 ——
@@ -198,8 +217,8 @@ void DrawViewModel(void) {
     }
 
     if(tactical.prismFlicker>0 && flashlightOn){int size=renderH/24;if(size<4)size=4;for(int y=0;y<size;y++)for(int x=0;x<size;x++)PutPixelBlend(renderW/2+x,renderH-size*2+y,0x10202A,.7f);}
-    /* 左手：托着当前选中的投掷物 */
-    {
+    /* The ability model occupies the same hand as the held throwable. */
+    if (!DrawAbilityHand(sway,lift)) {
 
            /* 2026-11-06 相位投掷物 */
         /* v6 **槽位表必须和 ITEM_SLOT_COUNT(6) 一致** ——

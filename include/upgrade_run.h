@@ -11,7 +11,9 @@
 #ifndef CANITY_UPGRADE_RUN_H
 #define CANITY_UPGRADE_RUN_H
 
-#define RUN_UPG_COUNT 6   /* 2026-11-05：+1 条 MINIMAP（小地图耗电） */
+#define RUN_UPG_MINIMAP 5
+#define RUN_UPG_ROLE 6
+#define RUN_UPG_COUNT 7
 #define RUN_UPG_MAX   3
 
 void  RunUpgReset(void);
