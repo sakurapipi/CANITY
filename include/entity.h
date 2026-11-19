@@ -90,6 +90,7 @@ void MakeNoise(float x, float y, float radius);
 typedef enum { NOISE_WORLD, NOISE_WALK, NOISE_SPRINT, NOISE_SEARCH, NOISE_CRANK } NoiseKind;
 void MakeActionNoise(float x,float y,float radius,NoiseKind kind);
 void MakeFootstepNoise(float x,float y,float radius);
+float HunterHearMulAt(int index);
 extern float noiseDisplay;        /* v3.0：HUD 噪音条 0..1 */
 extern float noiseDisplayTimer;
 extern float noiseSrcX, noiseSrcY;

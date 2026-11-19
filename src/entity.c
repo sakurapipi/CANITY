@@ -33,7 +33,6 @@
 float ThreatChaseBonus(void);
 float ThreatSpawnAdvance(void);
 float ThreatSpeedCap(void);
-float ThreatHearMul(void);
 #include "suspicion.h"
 #include "upgrade_run.h"
 #include "bench.h"
@@ -390,6 +389,7 @@ void MakeActionNoise(float x,float y,float radius,NoiseKind kind) {
 
     const EventDef *event=EventDefinition(levelEvent);
     if(event)radius*=event->hearing;
+    radius *= EconomyHearMul() * CampaignNoiseAlertMul() * RelicNoiseMul() * modNoiseMul;
     if(radius<=0)return;
 #if CANITY_SOUND_EVENT
     {
@@ -415,32 +415,6 @@ void MakeActionNoise(float x,float y,float radius,NoiseKind kind) {
     }
 #endif
 
-    /* Light beasts have no hearing: sound events never assign their targets. */
-
-    /* v6 **金币招怪**：携带金币越多，怪物听得越远。
-       这是「奖励就是风险」原则在 CANITY 的落点 ——
-       钱让你变强，同时也让你更容易被听见。 */
-    {
-
-        radius *= EconomyHearMul() * CampaignNoiseAlertMul();   /* v6：金币 + 威胁 + 战役 */
-    }
-    radius *= RelicNoiseMul() * modNoiseMul;
-    if (!Hunter0()->active) return;
-    if (Dist2(x, y, Hunter0()->x, Hunter0()->y) > radius * radius) return;
-    Hunter0()->state = 1;
-    Hunter0()->tx = x;
-    Hunter0()->ty = y;
-    Hunter0()->repath = 0.0f;
-    Hunter0()->stateTimer = 0.0f;
-    /* v3.0：记录一次噪音事件，供 HUD 显示 */
-    {
-
-        float k = radius / 22.0f;
-        if (k > 1.0f) k = 1.0f;
-        if (k > noiseDisplay) noiseDisplay = k;
-        noiseDisplayTimer = 2.2f;
-        noiseSrcX = x; noiseSrcY = y;
-    }
 }
 void MakeNoise(float x,float y,float radius){MakeActionNoise(x,y,radius,NOISE_WORLD);}
 void MakeFootstepNoise(float x,float y,float radius){MakeActionNoise(x,y,radius,sprinting?NOISE_SPRINT:NOISE_WALK);}
@@ -980,18 +954,15 @@ static void HunterPerceive(Monster* M, float dt) {
            → msvcrt 里 memcpy/memset 越界，c0000005 崩溃
        现在：只在「游荡中」才接新线索，且冷却 1.5 秒，路径只在真正换目标时清。 */
     int hunter=HunterIndex(M);
-    int closeSprint=hunter==2 && sprinting && hiddenIn<0 && !playerInSafe &&
-        Dist2(posX,posY,M->x,M->y)<16 && HasLOS(M->x,M->y,posX,posY) &&
-        TacticalFootstepMul(posX,posY,1)>.5f;
     if (M->active && (M->state==0 || (hunter==2 && M->state==2))) {
-        if (M->suspCool > 0.0f && !closeSprint) {
+        if (M->suspCool > 0.0f) {
             M->suspCool -= dt;
         } else {
 #if CANITY_SOUND_PROP
             /* v2.4-beta B03：隔墙的线索有效强度会掉下来。
                距离也用路径步数，所以"绕一大圈"的点不会被选中。 */
             float reach = 0.0f;
-            int idx = SuspicionBestReach(M->x, M->y, 0.9f, EvolutionHearingRange(22.0f*ThreatHearMul()), &reach);
+            int idx = SuspicionBestReach(M->x, M->y, 0.9f, EvolutionHearingRange(22.0f), &reach);
 #else
             int idx = SuspicionBest(M->x, M->y, 0.9f);
             float reach = 1.0f;
@@ -1021,13 +992,10 @@ static void HunterPerceive(Monster* M, float dt) {
              *   第 3 只  阈 30  → **正常走路听不见**，只有摇电/玩偶
              * 这才是「第一只听力最好」，而且第 3 只靠速度而不是耳朵。
              * ============================================================ */
-            float need = 15.0f / (HunterHearMulAt(HunterIndex(M))*ThreatHearMul());
+            float need = 15.0f / HunterHearMulAt(hunter);
             /* B03：比较的是**有效强度**（强度 × 可达度），不是原始强度 */
             float effStrength = (idx >= 0) ? susp[idx].strength * reach : 0.0f;
-            if (closeSprint && (idx<0 || effStrength<=need)) {
-                M->state=1;M->tx=posX;M->ty=posY;
-                M->repath=0;M->stateTimer=0;M->suspTarget=-1;M->suspCool=1.5f;
-            } else if (idx >= 0 && effStrength > need) {
+            if (idx >= 0 && effStrength > need) {
                 M->state = 1;
                 EvolutionHunterHeard(HunterIndex(M),idx);
                 M->tx = susp[idx].x;

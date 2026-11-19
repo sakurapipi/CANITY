@@ -248,7 +248,7 @@ static void test_no_unwired_api(void) {
         { "DailySetProgress",        "src/loop_frame.c" },
         /* 威胁值：五项效果 */
         { "ThreatSpeedCap",          "src/entity.c" },
-        { "ThreatHearMul",           "src/entity.c" },
+        { "ThreatHearMul",           "src/economy.c" },
         { "ThreatChaseBonus",        "src/entity.c" },
         { "ThreatSpawnAdvance",      "src/entity.c" },
         { "ThreatReset",             "src/loop_start.c" },
