@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "protocol.h"
 #include "monster_evolution.h"
 #include "threat_tier.h"
@@ -396,7 +397,7 @@ void ScavengerTickTrigger(float dt) {
 
     /* 2026-11-08：**不再用本层累计时间**（那会永久上锁）。
        现在要求"安静满 180 秒"才由时间触发。 */
-    int timeUp  = (s_quietT >= SCAV_TRIGGER_TIME);
+    int timeUp  = (s_quietT >= SCAV_TRIGGER_TIME*(EventBloodMoon()?.90f:1));
     /* **连续躲 3 次**清道夫才出发。
        （我在这条上反复过两次：2 → 3 → 2 → 3，是我不该擅自改。
          现在定死 3，并写清楚：躲 1 次安全，躲 2 次安全，第 3 次它来。） */

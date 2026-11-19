@@ -86,8 +86,16 @@ const char *ProtocolRoleAbility(int role) {
     };
     return LangTr(detail[role][0],detail[role][1]);
 }
+int ProtocolRoleUnlocked(int role) {
+    return role>=0 && role<=3 && (role==0 || (protocolProfile.unlocked&(1u<<role)));
+}
+int ProtocolFreeRoleReward(void) {
+    return (protocolProfile.endings&PROTOCOL_STORY_COMPLETE) &&
+           !(protocolProfile.endings&PROTOCOL_STORY_ROLE_CLAIMED) &&
+           (protocolProfile.unlocked&PROTOCOL_SPECIAL_ROLE_MASK)!=PROTOCOL_SPECIAL_ROLE_MASK;
+}
 int ProtocolSelectRole(int role) {
-    if (role < 0 || role > 3 || (role && !(protocolProfile.unlocked & (1u<<role)))) return 0;
+    if (!ProtocolRoleUnlocked(role)) return 0;
     protocolProfile.selected = (unsigned)role;
     return 1;
 }
@@ -416,11 +424,11 @@ void ProtocolRestore(void) {
     ProtocolFloorReset();
     protocolRun.used=restoreUsed&15u;
     protocolRun.role = (protocolRun.role >= 0 && protocolRun.role <= 3) ? protocolRun.role : 0;
-    if (protocolRun.story<0 || protocolRun.story>8) protocolRun.story=0;
+    if (protocolRun.story<1 || protocolRun.story>3 || !(protocolRun.flags&PROTOCOL_MISSIONS)) protocolRun.story=0;
     protocolRun.flags &= PROTOCOL_STORY_FLAG_MASK;
     if (protocolRun.story<1 || protocolRun.story>3) protocolRun.flags &= ~(PROTOCOL_MISSIONS|PROTOCOL_MISSION_SOLVED|PROTOCOL_EVAC_LAYOUT|PROTOCOL_STORY_PAID);
     if (protocolRun.flags&PROTOCOL_MISSIONS) protocolRun.role=protocolRun.story;
-    else if ((protocolRun.role && !(protocolProfile.unlocked & (1u<<protocolRun.role))) || dailyMode) protocolRun.role=0;
+    else if (!ProtocolRoleUnlocked(protocolRun.role) || dailyMode) protocolRun.role=0;
     protocolRun.cooldown=isfinite(protocolRun.cooldown)?fmaxf(0,fminf(45,protocolRun.cooldown)):0;
     unsigned mask=0;
     if (!dailyMode) for (int i=0;i<10;i++) {

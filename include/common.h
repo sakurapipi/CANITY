@@ -175,7 +175,7 @@ typedef struct { LONG x, y; } POINT;
 
 /* v2.4.2：双端稳定性补丁 —— 旧档迁移 / 运行段隔离 / 相位与舱门 /
    网页动作绑定与存档导出。存档结构**未变**（仍是 v34）。 */
-#define CANITY_VERSION_STR "2.5.0 RC3"
+#define CANITY_VERSION_STR "2.5.0 RC4"
 
 /* ---- 游戏状态机（所有模块共用，定义放在公共头最前面） ---- */
 typedef enum {
@@ -869,23 +869,23 @@ typedef struct { float x, y; int active; } Breaker;
 #define THEME_ENABLED THEME_COUNT   /* 7 种已全部启用（崩溃点是 themeNames[4] 越界） */
 
 /* ---- v1.8 随机事件（通过本层 → 本局结算加分） ---- */
-#define EVENT_COUNT 10    /* v6：事件 7→10，表驱动（见 events.c） */
-#define EVENT_CHANCE 35          /* 每层触发概率（百分比），第 2 层起 */
+#define EVENT_COUNT 10
+#define EVENT_CHANCE 35
+/* Stable event IDs used by the floor save chunk. */
 enum {
-    EV_BLOOD_MOON = 0,   /* 血月：怪更快，+1500 */
-    EV_BLACKOUT,         /* 断电：本层电量上限减半，+1000 */
-    EV_SILENCE,          /* 死寂：噪声减半，+800 */
-    EV_SUPPLY,           /* 补给空投：多给瓶+棒，+600 */
-    EV_FLOOD,            /* v2.0 涨水：耗电翻倍，+1200 */
-    EV_WHISPER,          /* v2.0 低语：理智流失 +50%，但金币 +50%，+1300 */
-    EV_MIRROR,           /* v2.0 镜像：怪物成倍出现，+1600 */
-    EV_HEAT,             /* v6 热浪：电池上限 -30%，怪速 +10% */
-    EV_FOG,              /* v6 浓雾：视野 -40%，听觉 -20% */
-    EV_LUCKY             /* v6 幸运：本层金币 ×2（纯正面） */
+    EV_BLOOD_MOON = 0,
+    EV_BLACKOUT,
+    EV_SILENCE,
+    EV_SUPPLY,
+    EV_FLOOD,
+    EV_WHISPER,
+    EV_MIRROR,
+    EV_GRID_SURGE,
+    EV_FOG,
+    EV_GOLD_RESONANCE
 };
 extern int levelEvent;       /* 本层事件，-1 = 无 */
 extern int eventBonus;       /* 本局累计的事件加分 */
-/* v6：事件名改用 events.c 的 kEvents 表（EventNameEn/EventNameZh） */
 
 /* 升级项：Battery / Speed / Quiet / Calm / Eco / Rest */
 #define UPGRADE_COUNT 6

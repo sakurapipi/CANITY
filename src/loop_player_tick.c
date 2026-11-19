@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "protocol.h"
 #include "monster_evolution.h"
 /* Player stages; callers preserve pause/lock/transition ordering. */
@@ -46,7 +47,7 @@ int PlayerTickVitals(float dt,int inSafe){
     if (ProtocolPeacefulStory()) return 1;
     float drain=SanityDrainRate()*PositiveDrainFactor(SkillCalmMul())*
         PositiveDrainFactor(modSanityMul)*(1+fmaxf(0,FxStrength(FX_DRAIN))*1.5f)*
-        PositiveDrainFactor(RelicSanityMul());
+        PositiveDrainFactor(RelicSanityMul())*EventSanityScale();
     if(hiddenIn<0 && Hunter0()->active && Hunter0()->state==1){
         float range=flashlightOn?MONSTER_SIGHT:MONSTER_SIGHT_DARK;
         if(Dist2(posX,posY,Hunter0()->x,Hunter0()->y)<range*range)drain+=SEEN_SANITY_EXTRA*ProtocolPursuitDrain();

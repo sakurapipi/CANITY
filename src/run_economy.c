@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "common.h"
 #include "run_economy.h"
 #include "entity.h"
@@ -61,6 +62,7 @@ void RunEconomyFloorGold(void){
     BindFloor();if(paidMask&0x80000000u)return;
     int reward=(int)(GoldExitAt(currentLevel)*BenchExitGoldMul()*RelicShardMul()*modShardMul*RoomThemeLootMul()*SkillGoldMul()+.5f);
     reward+=containerCount*GOLD_NEWROOM;
+    reward+=EventGoldCredit(EVENT_EXIT,reward,0);
     if(reward>0){WalletAddRun(reward);totalGoldEarned+=reward;}
     paidMask|=0x80000000u;
 }

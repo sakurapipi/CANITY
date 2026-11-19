@@ -79,8 +79,6 @@ extern float healFlash;             /* 回血白闪剩余秒数 */
 /* ---- 关卡词条 ---- */
 extern int levelEvent;
 extern int eventBonus;
-extern const char* const eventNames[EVENT_COUNT];
-int EventScore(int ev);
 extern int levelMod;
 extern float modSanityMul;
 extern float modSpeedMul;

@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "progression.h"
 #include "monster_evolution.h"
 #include "threat_tier.h"
@@ -89,6 +90,10 @@ int   CollectorBounty(void)   { return collector.bounty; }
 /* v6：图鉴读这里，保证"改速度 → 图鉴自动变" */
 float CollectorSpeedNow(void) { return fminf(MonsterMovementCap(),COLLECTOR_SPEED*MonsterThreatScale(SPAWN_COLLECTOR)); }
 
+static float CollectorFleeSpeed(void) {
+    float base=MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED;
+    return base*(EventBloodMoon()?1.08f:1);
+}
 int   CollectorHasMoney(void) { return collector.bounty > 0; }
 
 static short colB[MAP_HEIGHT][MAP_WIDTH];
@@ -363,8 +368,8 @@ static void UpdateCollectorMotion(float dt) {
                 float ddx = tx - collector.x, ddy = ty - collector.y;
                 float dd = sqrtf(ddx * ddx + ddy * ddy);
                 if (dd > 0.001f) {
-                    float nx = collector.x + (ddx / dd) * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
-                    float ny = collector.y + (ddy / dd) * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
+                    float nx = collector.x + (ddx / dd) * CollectorFleeSpeed() * dt;
+                    float ny = collector.y + (ddy / dd) * CollectorFleeSpeed() * dt;
                     if (!Blocked(nx, ny)) { collector.x = nx; collector.y = ny; moved = 1; }
                     else if (!Blocked(nx, collector.y)) { collector.x = nx; moved = 1; }
                     else if (!Blocked(collector.x, ny)) { collector.y = ny; moved = 1; }
@@ -377,8 +382,8 @@ static void UpdateCollectorMotion(float dt) {
             float dx = collector.x - posX, dy = collector.y - posY;
             float d = sqrtf(dx * dx + dy * dy);
             if (d > 0.001f) {
-                float nx = collector.x + (dx / d) * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
-                float ny = collector.y + (dy / d) * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
+                float nx = collector.x + (dx / d) * CollectorFleeSpeed() * dt;
+                float ny = collector.y + (dy / d) * CollectorFleeSpeed() * dt;
                 if (!Blocked(nx, ny)) { collector.x = nx; collector.y = ny; }
                 else if (!Blocked(nx, collector.y)) collector.x = nx;
                 else if (!Blocked(collector.x, ny)) collector.y = ny;
@@ -387,8 +392,8 @@ static void UpdateCollectorMotion(float dt) {
                     static const float ax4[4] = { 1, -1, 0, 0 };
                     static const float ay4[4] = { 0, 0, 1, -1 };
                     for (int i = 0; i < 4; i++) {
-                        float tx2 = collector.x + ax4[i] * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
-                        float ty2 = collector.y + ay4[i] * (MonsterTierAtLeast(2)?2.34f:COLLECTOR_FLEE_SPEED) * dt;
+                        float tx2 = collector.x + ax4[i] * CollectorFleeSpeed() * dt;
+                        float ty2 = collector.y + ay4[i] * CollectorFleeSpeed() * dt;
                         if (!Blocked(tx2, ty2)) { collector.x = tx2; collector.y = ty2; break; }
                     }
                 }

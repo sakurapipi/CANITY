@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 /* Theme-room runtime owns identity, ambience and expiring effects.
  * Costs and control interactions live in domain/rooms/room_actions.c. */
 #include "common.h"
@@ -221,7 +222,7 @@ void RoomThemePlaceVault(void){
         if(HatchNearest(x+.5f,y+.5f,1.5f)>=0)continue;
         int clash=0;for(int i=0;i<containerCount;i++)if(Dist2(x+.5f,y+.5f,containers[i].x,containers[i].y)<2)clash=1;
         if(clash)continue;
-        int index=containerCount<MAX_CONTAINERS?containerCount:-1;
+        int index=containerCount<MAX_CONTAINERS-(levelEvent==EV_SUPPLY)?containerCount:-1;
         if(index<0)for(int i=containerCount-1;i>=0;i--)if(containers[i].content!=1 && !containers[i].searched){index=i;break;}
         if(index<0)return;
         Container* c=&containers[index];int fuse=index<containerCount && c->content==1;memset(c,0,sizeof(*c));c->x=x+.5f;c->y=y+.5f;c->active=1;c->locked=1;

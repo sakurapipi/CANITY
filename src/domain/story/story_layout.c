@@ -15,46 +15,6 @@ typedef struct {
 /* Each site is a usable room. Links are service corridors, with shortcuts
    and loops around key stations so pursuit does not demand a single route. */
 static const Layout levels[]={
-    { /* Recovery, power distribution and rescue radio. */
-     {{5,20},{26,21},{26,8},{13,21},{10,12},{20,27},{18,8},{31,16}},
-     {2,2,2,2,2,3,3,2},{2,2,2,2,2,2,2,2},3,5,ACOUSTIC_HARD,
-     {{0,3,0},{0,4,1},{4,6,1},{4,3,0},{6,2,0},{2,7,0},{2,1,1},
-      {3,5,1},{5,1,0},{3,6,0},{1,7,0},{5,7,0}}},
-    { /* Broadcast switch, acoustic booths and equipment aisle. */
-     {{5,27},{11,22},{26,10},{8,10},{15,14},{25,25},{18,6},{31,19}},
-     {2,2,2,2,3,2,2,2},{2,2,2,2,2,3,2,2},5,4,ACOUSTIC_METAL,
-     {{0,1,0},{0,3,1},{1,4,0},{1,5,1},{3,4,0},{3,6,1},{4,6,1},
-      {4,2,0},{6,2,0},{2,7,0},{5,7,0},{4,5,0}}},
-    { /* Identity archives around a dark, inaccessible records stack. */
-     {{6,18},{25,8},{25,26},{10,7},{14,13},{14,25},{24,17},{31,18}},
-     {2,3,2,2,2,2,2,2},{2,2,2,2,2,3,3,2},4,3,ACOUSTIC_DEFAULT,
-     {{0,3,1},{0,5,0},{0,4,0},{3,1,1},{4,3,0},{4,6,0},{1,6,1},
-      {6,2,1},{5,2,0},{2,7,0},{1,7,0},{5,4,1}}},
-    { /* Decontamination, separate patient bays and a guard station. */
-     {{6,28},{27,21},{19,7},{9,16},{13,6},{19,26},{27,10},{31,27}},
-     {2,3,2,2,2,2,3,2},{2,2,2,2,2,2,3,2},4,1,ACOUSTIC_HARD,
-     {{0,3,1},{0,5,0},{3,4,1},{4,2,0},{3,2,0},{2,6,0},{2,5,1},
-      {6,1,1},{3,1,0},{5,1,0},{1,7,0},{5,7,0}}},
-    { /* Reward vault. Teller windows and counter access form two circuits. */
-     {{5,19},{18,17},{28,11},{9,26},{12,10},{23,26},{22,8},{31,22}},
-     {2,4,2,2,3,3,2,2},{2,3,2,2,2,2,2,2},5,0,ACOUSTIC_METAL,
-     {{0,4,1},{0,3,0},{4,6,0},{4,1,1},{3,1,0},{3,5,0},{1,5,1},
-      {1,6,1},{6,2,0},{2,7,0},{5,7,0},{1,2,0}}},
-    { /* Detention. The observation corridor bypasses the narrow cell block. */
-     {{5,7},{24,26},{11,24},{8,16},{16,8},{18,17},{27,11},{31,23}},
-     {2,2,2,2,3,2,2,2},{2,2,3,2,2,3,2,2},1,2,ACOUSTIC_HARD,
-     {{0,3,1},{0,4,0},{3,2,1},{3,5,0},{4,5,1},{4,6,0},{6,5,0},
-      {2,1,0},{5,1,1},{6,7,0},{1,7,0},{5,7,0}}},
-    { /* Generator banks, a ring bus, service cable route and core logs. */
-     {{5,24},{23,18},{26,7},{11,13},{15,7},{18,26},{27,26},{31,14}},
-     {2,3,2,2,2,3,2,2},{2,2,2,2,3,2,2,2},2,6,ACOUSTIC_METAL,
-     {{0,3,1},{0,5,0},{3,4,1},{3,1,0},{4,2,0},{4,5,1},{2,7,0},
-      {2,1,1},{1,5,1},{1,6,0},{5,6,0},{6,7,0}}},
-    { /* Signal box above the service route, two platforms and the reset core. */
-     {{5,18},{24,10},{14,7},{9,25},{14,16},{18,26},{24,22},{31,14}},
-     {2,2,2,3,2,3,2,2},{2,2,2,2,2,2,2,2},5,6,ACOUSTIC_METAL,
-     {{0,4,0},{0,3,1},{3,5,0},{4,2,1},{4,5,0},{2,1,0},{4,1,0},
-      {1,6,1},{5,6,0},{1,7,0},{6,7,0},{3,4,0}}},
     { /* Switching works: a return duct goes around the live bus. */
      {{5,22},{26,12},{16,12},{9,29},{8,12},{23,28},{19,19},{31,22}},
      {2,2,2,2,2,3,2,2},{2,2,2,2,2,1,2,2},5,2,ACOUSTIC_METAL,
@@ -131,30 +91,22 @@ void StoryLayOut(int floor) {
         Cell c=l->site[i];
         int w=l->width[i],h=l->height[i];
         Open(c.x-w,c.y-h,c.x+w,c.y+h);
-        int accent=i==SITE_RECORD || i==SITE_POWER || i==SITE_TERMINAL;
-        int theme=accent && floor<=8?l->accent:l->material;
+        int theme=l->material;
         unsigned flags=i==SITE_POWER?CELLFLAG_POWER:0;
         CellMetaFillRoom(c.x-w,c.y-h,2*w+1,2*h+1,i+1,theme,l->acoustics,flags);
         for (int y=c.y-h-1;y<=c.y+h+1;y++) for (int x=c.x-w-1;x<=c.x+w+1;x++)
             if (worldMap[y][x]) CellMetaFillRoom(x,y,1,1,0,theme,l->acoustics,CELLFLAG_ROOMWALL);
     }
-    if(floor==8) {
-        Open(24,22,31,22);Open(31,22,31,29);Open(29,27,33,29);
-        Furnish(l,SITE_RETURN,ROOMPROP_CONSOLE);
-    }
-    if (floor>=12) return; /* Role-specific scenery is drawn from story fixtures. */
-    if (floor>8) {
+    if (floor>=4) return; /* Role-specific scenery is drawn from story fixtures. */
+    {
         static const int fixtures[3][3]={
             {ROOMPROP_CONSOLE,ROOMPROP_THEME_FIRST,ROOMPROP_CRATES},
             {ROOMPROP_SHELF,ROOMPROP_CONSOLE,ROOMPROP_SHELF},
             {ROOMPROP_CRATES,ROOMPROP_THEME_FIRST+2,ROOMPROP_CONSOLE},
         };
-        const int *f=fixtures[(floor-9)%3];
+        const int *f=fixtures[floor-1];
         Furnish(l,SITE_ENTRY,f[0]);
         Furnish(l,SITE_RECORD,f[1]);
         Furnish(l,SITE_TERMINAL,f[2]);
-        return;
     }
-    Furnish(l,SITE_SERVICE,floor==2 || floor==3 || floor==5?ROOMPROP_SHELF:ROOMPROP_CONSOLE);
-    Furnish(l,SITE_RECORD,floor==2 || floor==3?ROOMPROP_SHELF:ROOMPROP_CONSOLE);
 }

@@ -15,8 +15,6 @@ extern int currentLevel;
 extern float exitX, exitY;
 extern int levelEvent;
 extern int eventBonus;
-extern const char* const eventNames[EVENT_COUNT];
-int EventScore(int ev);
 extern int levelMod;
 extern float modSanityMul;
 extern float modSpeedMul;

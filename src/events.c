@@ -1,151 +1,58 @@
-/*
- * Canity — 特殊事件表（v6）
- *
- * 10 个事件，每个都真的改一条规则。
- * 加事件 = 在 kEvents[] 里加一行，别处不用动。
- */
 #include "common.h"
 #include "events.h"
 
-#define NONE  1.0f   /* 不变 */
-#define P100  100
-
-/* 顺序必须和 common.h 的 EV_ 枚举一致 */
-const EventDef kEvents[] = {
-    /* ---- EV_BLOOD_MOON 血月：怪更快，钱更多 ---- */
-    {
-        "BLOOD MOON", "血月", "BLOOD",
-        "Monsters move 20% faster. Gold +50%.",
-        "怪物速度 +20%，金币 +50%。",
-        12, 1500,
-        { 1.20f, 1.00f, NONE, NONE, 1.50f, NONE, NONE, P100 }
-    },
-    /* ---- EV_BLACKOUT 停电：电量吃紧，视野变差 ---- */
-    {
-        "BLACKOUT", "停电", "BLACK",
-        "Battery drains 80% faster. Battery cap halved.",
-        "耗电 +80%，本层电池上限砍半。",
-        12, 1000,
-        { NONE, NONE, 1.80f, NONE, NONE, NONE, NONE, 50 }
-    },
-    /* ---- EV_SILENCE 死寂：你更安静，但它们更灵敏 ---- */
-    {
-        "DEAD SILENCE", "死寂", "SILENT",
-        "Your noise -60%, but monster hearing +40%.",
-        "你的噪音 -60%，但怪物听觉 +40%。",
-        10, 800,
-        { NONE, 1.40f, NONE, NONE, NONE, 0.40f, NONE, P100 }
-    },
-    /* ---- EV_SUPPLY 空投：纯正面，金币和道具都多 ---- */
-    {
-        "SUPPLY DROP", "空投", "SUPPLY",
-        "Gold +30%. Extra throwables this floor.",
-        "金币 +30%，本层多给投掷物。",
-        12, 600,
-        { NONE, NONE, NONE, NONE, 1.30f, NONE, NONE, P100 }
-    },
-    /* ---- EV_FLOOD 洪水：走不快，声音传得远 ---- */
-    {
-        "FLOOD", "洪水", "FLOOD",
-        /* v7 第 60 轮：**删掉"你更慢"**
-           事件结构里根本没有"玩家移速"字段，
-           而 noiseMul=1.40f 是真的生效的。留着一半假话只会让玩家学错策略。 */
-        "You are 40% louder on the wet floor.",
-        "地板积水：噪音 +40%。",
-        10, 1200,
-        { NONE, NONE, NONE, NONE, NONE, 1.40f, NONE, P100 }
-    },
-    /* ---- EV_WHISPER 低语：拿理智换钱 ---- */
-    {
-        "WHISPERS", "低语", "WHISPER",
-        "Sanity drains 50% faster. Gold +40%.",
-        "理智流失 +50%，金币 +40%。",
-        10, 1300,
-        { NONE, NONE, NONE, 1.50f, 1.40f, NONE, NONE, P100 }
-    },
-    /* ---- EV_MIRROR 镜像：加快怪物和理智流失 ---- */
-    {
-        "MIRROR", "镜像", "MIRROR",
-        "Monsters 10% faster. Sanity drains 10% faster.",
-        "本层怪速 +10%，理智流失 +10%。",
-        8, 1600,
-        { 1.10f, NONE, NONE, 1.10f, NONE, NONE, NONE, P100 }
-    },
-    /* ---- EV_HEAT 热浪：电池难受，怪略快 ---- */
-    {
-        "HEAT WAVE", "热浪", "HEAT",
-        "Battery cap -30%. Monsters 10% faster.",
-        "电池上限 -30%，怪速 +10%。",
-        10, 1100,
-        { 1.10f, NONE, NONE, NONE, NONE, NONE, NONE, 70 }
-    },
-    /* ---- EV_FOG 浓雾：不容易被听见（"看不远"那条没实现，描述已删） ---- */
-    {
-        "FOG", "浓雾", "FOG",
-        "Monster hearing -20% this floor.",
-        "本层怪物听觉 -20%。",
-        10, 1400,
-        { NONE, 0.80f, NONE, NONE, NONE, NONE, NONE, P100 }
-    },
-    /* ---- EV_LUCKY 幸运：纯正面，低权重 ---- */
-    {
-        "LUCKY FIND", "幸运", "LUCKY",
-        "Gold doubled this floor.",
-        "本层金币翻倍。",
-        8, 300,
-        { NONE, NONE, NONE, NONE, 2.00f, NONE, NONE, P100 }
-    },
+/* Keep the original EV_* order for save compatibility. */
+static const EventDef events[EVENT_COUNT] = {
+    {"BLOOD MOON","血月","BLOOD","血月",
+     "Hostile creatures gain stronger tracking and pursuit.",
+     "敌对生物获得更强的追踪与追击能力。",
+     "Break line of sight and use decoys before looting.",
+     "先脱离视线，再用诱饵掩护搜刮。",4,8,1500,15,1.12f,0xD77779},
+    {"TOTAL BLACKOUT","全面停电","BLACKOUT","停电",
+     "Half your current battery is lost once. The floor is darker.",
+     "入层时当前电量减半，环境变暗，充电上限不变。",
+     "Recharge before entering a dark corridor.",
+     "进入暗廊前先手摇充电。",2,10,1000,10,1,0x65BDD0},
+    {"DEAD SILENCE","死寂","SILENCE","死寂",
+     "Walking is 40% quieter. Sprinting, searching and cranking are 20% louder.",
+     "步行声减四成，冲刺、搜查和手摇声增两成；怪物听觉提高。",
+     "Walk near hunters and move away before searching or charging.",
+     "遇到听声鬼时慢走，拉开距离后再搜查或充电。",2,10,900,0,1.08f,0xACE0DE},
+    {"ANOMALOUS CACHE","异常补给","CACHE","补给",
+     "One optional supply crate makes a loud noise when opened.",
+     "一只可选补给箱，领取物资会发出明显声响。",
+     "Find the orange marker in explored areas. Full inventories can leave it unopened.",
+     "在已探索区域寻找橙色标记，物资已满时可留箱不领。",2,14,600,0,1,0xF4B265},
+    {"FLOODED CORRIDORS","积水回廊","WATER","积水",
+     "Sprinting on wet tiles increases footstep range by 50%.",
+     "在浅水中冲刺，脚步声传播距离增加五成。",
+     "Walk through shallow water or sprint around it.",
+     "慢走过水，或绕过积水再冲刺。",3,12,950,10,1,0x67A9FE},
+    {"WHISPER EROSION","低语侵蚀","WHISPER","低语",
+     "Sanity drains 25% faster, or 40% near the active broadcast.",
+     "理智流失加快两成半，靠近异常广播时加快四成。",
+     "Follow the directional cue, then hide or use a flare to recover.",
+     "留意方向提示，远离广播，进藏身点或用荧光棒恢复。",3,10,1100,12,1,0xD0A2EB},
+    {"MIRROR RESIDUE","镜像残影","MIRROR","残影",
+     "Brief silhouettes have no collision, footsteps or attacks.",
+     "短暂出现没有碰撞、脚步或攻击的假影。",
+     "Look for the violet outline before spending a throwable.",
+     "先看清紫色轮廓，再决定是否投掷。",5,6,1200,0,1,0xC6A3EF},
+    {"GRID SURGE","电网躁动","GRID","电网",
+     "Every 20 seconds: six seconds of +25% crank charge and +35% noise.",
+     "每二十秒有六秒增压窗，手摇回电加两成半，噪声加三成半。",
+     "A cue sounds two seconds before the window. Check the area first.",
+     "窗口前两秒有提示音，先确认周围安全。",3,10,850,0,1,0xF2CA75},
+    {"DENSE FOG","浓雾","FOG","浓雾",
+     "Distant terrain and creatures lose contrast. Enemy hearing is 10% weaker.",
+     "远处地形与怪物对比下降，怪物听觉下降一成。",
+     "The nearest four tiles stay clear; use your map for longer routes.",
+     "近四格保持清楚，远处路线可用小地图确认。",2,10,800,0,.90f,0xA5C6DB},
+    {"GOLD RESONANCE","黄金回响","GOLD","回响",
+     "Eligible gold pays more. Carrying 350+ gold can make up to three signals.",
+     "指定来源的金币增收；携带至少350金时可能产生信号，每层最多三次。",
+     "Each signal has a two-second warning. Hiding prevents it.",
+     "信号提前两秒预警，躲入藏身点可避免暴露。",3,10,1000,20,1,0xF4CD69}
 };
 
-typedef char kEvents_count_check[(sizeof(kEvents)/sizeof(kEvents[0])==EVENT_COUNT) ? 1 : -1];
-
-/* 越界时用的"无效果" */
-static const EventEffect kNoEffect = {
-    NONE, NONE, NONE, NONE, NONE, NONE, NONE, P100
-};
-
-/* v7：给 entity.c 用的取值函数（避免把结构体类型暴露出去） */
-float EventMonsterHearMul(int ev) {
-    const EventEffect* fx = EventEffectFor(ev);
-    return fx ? fx->monsterHearMul : 1.0f;
-}
-
-const EventEffect* EventEffectFor(int ev) {
-    if (ev < 0 || ev >= EVENT_COUNT) return &kNoEffect;
-    return &kEvents[ev].fx;
-}
-
-const char* EventNameEn(int ev) {
-    return (ev < 0 || ev >= EVENT_COUNT) ? "" : kEvents[ev].nameEn;
-}
-const char* EventNameZh(int ev) {
-    return (ev < 0 || ev >= EVENT_COUNT) ? "" : kEvents[ev].nameZh;
-}
-const char* EventShortEn(int ev) {
-    return (ev < 0 || ev >= EVENT_COUNT) ? "?" : kEvents[ev].shortEn;
-}
-const char* EventDescEn(int ev) {
-    return (ev < 0 || ev >= EVENT_COUNT) ? "" : kEvents[ev].descEn;
-}
-const char* EventDescZh(int ev) {
-    return (ev < 0 || ev >= EVENT_COUNT) ? "" : kEvents[ev].descZh;
-}
-int EventScoreOf(int ev) {
-    return (ev < 0 || ev >= EVENT_COUNT) ? 0 : kEvents[ev].score;
-}
-
-/* 按权重抽；用调用方给的种子，保证可复现 */
-int EventPickRandom(unsigned int* seed) {
-    if (!seed) return -1;
-    int total = 0;
-    for (int i = 0; i < EVENT_COUNT; i++) total += kEvents[i].weight;
-    if (total <= 0) return -1;
-
-    unsigned int r = (*seed = *seed * 1664525u + 1013904223u) % (unsigned int)total;
-    int acc = 0;
-    for (int i = 0; i < EVENT_COUNT; i++) {
-        acc += kEvents[i].weight;
-        if ((int)r < acc) return i;
-    }
-    return EVENT_COUNT - 1;
-}
+const EventDef *EventDefinition(int id) { return (unsigned)id < EVENT_COUNT ? &events[id] : NULL; }

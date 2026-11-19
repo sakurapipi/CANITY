@@ -1,3 +1,5 @@
+#include "event_runtime.h"
+#include "events.h"
 #include "protocol.h"
 #include "monster_evolution.h"
 #include "monster_rules.h"
@@ -191,7 +193,7 @@ static int UpdatePreflight(float dt) {
     if(currentState==STATE_PLAYING && !exitChoiceOpen && !ProtocolPeacefulStory()) { UpdateCollector(dt); }
     {   /* v7：清道夫 */
 
-        if (currentState == STATE_PLAYING) floorTime += dt;
+        if (currentState == STATE_PLAYING) { floorTime += dt; if(!exitChoiceOpen)EventTick(dt); }
         if(currentState==STATE_PLAYING && !exitChoiceOpen && !ProtocolPeacefulStory()) { ScavengerTickTrigger(dt); UpdateScavenger(dt); }
     }
     /* v7：扳手冷却递减 */
@@ -335,6 +337,7 @@ static int UpdateSurvival(float dt, int inSafe) {
             ScoreInput si = { currentLevel, 0, isEndlessRun, runSearched,
                               bottlesKilled, runTime, modsSeenCount };
             ComputeScore(&si, &lastScore);
+            lastScore.score+=eventBonus;
             if (isEndlessRun && lastScore.score > bestEndlessScore) bestEndlessScore = lastScore.score;
             if (!isEndlessRun && lastScore.score > bestMainScore) bestMainScore = lastScore.score;
         }
@@ -505,7 +508,6 @@ static int UpdateCoverInput(void) {
                 posX = hideSpots[hiddenIn].x;
                 posY = hideSpots[hiddenIn].y;
                 UnstickPlayer();   /* 柜子中心被判阻塞时别卡死 */
-                ProtocolEnterShelter();
 
                 /* v3.0：**当着他的面钻进去 = 他会来翻** ——
                    原来钻进柜子怪物 100% 立刻丢目标，太安全了。
@@ -846,14 +848,14 @@ static void UpdatePhaseAndCrank(float dt) {
         if (crankClick >= 0.30f) {
             crankClick = 0.0f;
             PlaySfx(SFX_CRANK, 0.45f);
-            MakeNoise(posX, posY, (SkillOwned(SK_SILENT_CRANK) && battery<BatteryMax()*.25f?0.0f:12.0f) * RunCrankNoiseMul()*(SkillOwned(SK_APPRENTICE)?0.5f:1.0f));   /* v2.2：FAST CRANK 的 +15% 噪声 */
+            MakeNoise(posX, posY, (SkillOwned(SK_SILENT_CRANK) && battery<BatteryMax()*.25f?0.0f:12.0f) * EventCrankNoiseScale() * RunCrankNoiseMul()*(SkillOwned(SK_APPRENTICE)?0.5f:1.0f));   /* v2.2：FAST CRANK 的 +15% 噪声 */
         }
         /* v3.4：SPARE CELL 满级时摇电时间 -30%（2.4 → 1.68 秒） */
         if (crankTimer >= 2.4f * RunCrankTimeMul() * SkillCrankTimeMul() * BenchCrankTimeMul()) {
             crankTimer = 0.0f;
             int wasDead = (battery <= 0.5f);
             /* v3.4：SPARE CELL 满级 → 一次 +55（基础 32） */
-            battery += SkillCrankBonus()*ProtocolCrankMul();
+            battery += SkillCrankBonus()*ProtocolCrankMul()*EventCrankScale();
             crankTimeTotal += 3;  /* 2.4 秒算 3 秒，累计用于成就 */
             crankSecondsTotal += 3.0f;   /* v3.3：CRANK ADDICT 用的是这个 */
             if (battery > (float)BatteryMax()) battery = (float)BatteryMax();
@@ -1017,6 +1019,15 @@ static void CompleteHeldContainer(void) {
 
                 Container* c = &containers[hoverIndex];
                 if(c->searched)return;
+                if(c->content==EVENT_CACHE_CONTENT) {
+                    int claimed=EventClaimCache();
+                    if(claimed) c->searched=1;
+                    pickupMsg=claimed?Tr("SUPPLIES TAKEN","已领取异常补给"):
+                                      Tr("NO ROOM FOR SUPPLIES","物资已满，补给留在箱内");
+                    pickupMsgTimer=2;
+                    uiDirty=1;
+                    return;
+                }
                 int vault=RoomThemeVaultChest(hoverIndex);
                 int vaultReward=vault?RoomThemeVaultReward(hoverIndex):-1;
                 if(vault && vaultReward<0){RoomThemeNotify(Tr("INVEST AT THE CENTRAL VAULT FIRST", "先在中央密库装置确认投资"));return;}
@@ -1061,6 +1072,7 @@ static void CompleteHeldContainer(void) {
                   int storyDepth=currentLevel-1;
                   shardGain = protocolRun.story?(int)((int)(6.f+1.1f*storyDepth+.5f)*modShardMul):
                       (int)(shardGain * CampaignGoldMulNow()); }
+                shardGain+=EventGoldCredit(EVENT_SEARCH,shardGain,hoverIndex);
                 WalletAddRun(shardGain);    /* v1.8：先记在待上缴里 */
                 /* 2026-11-08（第 4 轮）：HINT_GOLD 文案写好了却从没触发过 ——
                    第一次拿到金币时教一句"钱在结算时进银行"。 */
@@ -1111,6 +1123,7 @@ static void CompleteHeldContainer(void) {
                 else if (c->content == 10) {
                     int gld = (int)(GoldSearchAt(currentLevel) * SkillScavengerShardMul() * SkillCrateGoldMul() * BenchCrateGoldMul()
                                     * RelicShardMul() * modShardMul * RoomThemeLootMul() + 0.5f);
+                    gld+=EventGoldCredit(EVENT_CRATE,gld,hoverIndex);
                     WalletAddRun(gld);
                     totalGoldEarned += gld;
                     {
@@ -1142,6 +1155,7 @@ static void CompleteHeldContainer(void) {
         if (c->mimicShell) {
             int bigGold = MIM_GOLD_BASE + MIM_GOLD_STEP * currentLevel;
             bigGold = (int)((float)bigGold * RelicShardMul() * modShardMul * RoomThemeLootMul() * SkillGoldMul() + 0.5f);
+            bigGold+=EventGoldCredit(EVENT_MIMIC,bigGold,hoverIndex);
             WalletAddRun(bigGold);
             totalGoldEarned += bigGold;
 
@@ -1174,11 +1188,6 @@ static void CompleteHeldContainer(void) {
 }
 
 static void CompleteHeldBreaker(void) {
-    if (!ProtocolBreakerReady()) {
-        pickupMsg=ProtocolObjective();pickupMsgTimer=2;
-        return;
-    }
-
                 /* v3.0：**NO_COMBAT 下没有 BOSS 可打** ——
                    bossDefeated 只在 #else 分支赋值（怪不可杀），
                    这里永远为 0，于是第 6/12/18 层「BOSS STILL ALIVE」
@@ -1195,8 +1204,11 @@ static void CompleteHeldBreaker(void) {
                 {  WardenSpawnIfPowered(); }   /* v7 B1: 通电 -> 守门人出现 */
         SpawnParticles(breaker.x, breaker.y, 0);   /* v2.1：通电火花 */
                     fusesHeld -= fusesNeeded;
-                    WalletAddRun(protocolRun.story?25+3*(currentLevel-1):(int)(GoldBreakerAt(currentLevel) * RelicShardMul() * modShardMul * RoomThemeLootMul() * SkillGoldMul() + 0.5f));   /* v2.0 */
-                    totalGoldEarned += (int)GoldBreakerAt(currentLevel);
+                    int reward=(int)(GoldBreakerAt(currentLevel)*RelicShardMul()*modShardMul*
+                                     RoomThemeLootMul()*SkillGoldMul()+.5f);
+                    reward+=EventGoldCredit(EVENT_BREAKER,reward,0);
+                    WalletAddRun(reward);
+                    totalGoldEarned+=reward;
                     PlaySfx(SFX_POWER, 0.75f);
                 }
 }
@@ -1215,7 +1227,7 @@ static void UpdateHeldInteraction(float dt) {
             if(hoverKind==3 && hoverIndex>=0 && hoverIndex<roomPropCount && RoomPropIsControl(roomProps[hoverIndex].kind))
                 AudioPlayWorld(SFX_CRANK,roomProps[hoverIndex].x,roomProps[hoverIndex].y,.3f,9,2);
             else PlaySfx(SFX_SEARCH, 0.55f);
-            MakeNoise(posX, posY, 10.0f * SkillSearchNoiseMul() * RunSearchNoiseMul2());   /* v2.2：FAST SEARCH 的 +10% */  /* 比走路大一点，比跑步小 */
+            MakeNoise(posX, posY, 10.0f * SkillSearchNoiseMul() * RunSearchNoiseMul2() * (levelEvent==EV_SILENCE?1.20f:1));   /* v2.2：FAST SEARCH 的 +10% */  /* 比走路大一点，比跑步小 */
         }
         /* 2026-11-05：宝箱怪在翻找进度 60% 时咬人。
            低于 45% 松手完全安全 —— 所以"起疑就松手"是有效解法。
@@ -1258,7 +1270,7 @@ static int UpdateThrowInput(float dt) {
          按住 = 蓄力，松手 = 击退，低于死区 = 什么都不做。
          只有这一条路径，没有"敲"，没有和投掷抢键。 */
     WrenchKnockUpdate(dt);
-    { if (!ProtocolPeacefulStory() && (protocolRun.story!=1 || ProtocolBreakerReady())) TickSecondSpawn(dt); }   /* v2.4.94 第二只 */
+    { if (!ProtocolPeacefulStory()) TickSecondSpawn(dt); }   /* v2.4.94 第二只 */
     WrenchTick(dt);
 
     /* 投掷：数字键选槽位，鼠标左键蓄力投掷 */
@@ -1784,23 +1796,16 @@ static void UpdateExitProgression(float dt) {
 
     if (protocolRun.story && atExit) {
         if (!ProtocolExitReady() || WardenBlocking()) return;
-        int cleared=protocolRun.story;
-        int exitGold=30+6*(cleared-1)+5*containerCount;
         int advance=ProtocolAdvance();
         if (!advance) return;
-        if (!ProtocolPeacefulStory()) WalletAddRun(exitGold);
         if (advance==2) {
             gameWon=1;runInProgress=0;
             ScoreInput result={currentLevel,1,0,runSearched,bottlesKilled,runTime,modsSeenCount};
             ComputeScore(&result,&lastScore);
-            if (ProtocolPeacefulStory()) {
-                lastRunGold=WalletRun();lastRunCaught=CatchCountThisRun();
-                lastRunKept=ProtocolStoryPayout();
-                WalletStealRun(WalletRun());
-                SaveGame();
-            } else {
-                BankSettleWithBonus(1,ProtocolClaimLegacyEndingBonus());
-            }
+            lastRunGold=WalletRun();lastRunCaught=CatchCountThisRun();
+            lastRunKept=ProtocolStoryPayout();
+            WalletStealRun(WalletRun());
+            SaveGame();
             hasSave=SaveHasPendingRun();
             currentState=STATE_GAMEOVER;menuSelection=0;
             ProtocolCinematicTransition(1);
@@ -1811,11 +1816,11 @@ static void UpdateExitProgression(float dt) {
             exitChoiceOpen=0;exitGoDeeper=0;
             resetInputState=1;firstMouseMove=1;
             SaveStoryEntry();
-            if ((protocolRun.flags&PROTOCOL_MISSIONS) || cleared==1 || cleared==3 || cleared==4 || cleared==7) ProtocolCinematicTransition(0);
+            ProtocolCinematicTransition(0);
         }
         return;
     }
-    if(!trainingMode && atExit)RunEconomyFloorGold();
+    if(!trainingMode && atExit && !WardenBlocking()){RunEconomyFloorGold();EventClearFloor();}
 
     /* v6 **出口二选一：弹窗** ——
        只有「还没弹过、也不是刚选了深入」才弹。 */
@@ -1845,7 +1850,6 @@ static void UpdateExitProgression(float dt) {
         if (!runLightUse) floorsNoLight++;
         if (WardenActive() && !floorTookDamage) wardenCleanFloors++; else wardenCleanFloors=0;
         DailyObserve(DQ_NOHIT,floorsNoSanityLoss);
-        int evThisLevel = levelEvent;   /* v1.8：GenerateLevel 会重置 levelEvent，先存 */
         /* Floor gold already paid once on reaching the powered exit. */
         /* v6 **探索奖励** —— 按本层容器数折算，补上之前缺失的 GOLD_NEWROOM 渠道。
            原来 GOLD_NEWROOM 只定义不发放，「首次进新房间 +5」这条收入是空的。 */
@@ -1870,6 +1874,7 @@ static void UpdateExitProgression(float dt) {
                 /* v1.8：主线固定分 + 通关给 1 个核心 */
                 ScoreInput si = { currentLevel, 1, 0, runSearched, bottlesKilled, runTime, modsSeenCount };
                 ComputeScore(&si, &lastScore);
+                lastScore.score+=eventBonus;
                 if (lastScore.score > bestMainScore) bestMainScore = lastScore.score;
                 if (!dailyMode) WalletAddRun(GOLD_PER_CORE);
             }
@@ -1943,8 +1948,6 @@ static void UpdateExitProgression(float dt) {
         floorStartTime = runTime;
         LoopCheckAchievements();
 
-        /* v1.8：通过本层 → 事件加分进本局总分 */
-        if (evThisLevel >= 0) eventBonus += EventScore(evThisLevel);
 
         /* v3.3：取消每层/每两层的三选一。玩家明确要求不再弹 CHOOSE ONE。 */
 
@@ -1958,6 +1961,7 @@ static void UpdateExitProgression(float dt) {
         for (int i = 0; i < MAX_SHOTS; i++) shot[i].active = 0;
         flashTime = 0.15f;
         UpdateExplored();
+        if(levelEvent>=0 || eventBonus>0) SaveGame();
     }
 
     /* 新手教程：放在最后，保证所有交互/移动状态都已经更新完 */
@@ -1978,7 +1982,6 @@ void Update(float dt) {
     if (!UpdateSurvival(dt, inSafe)) return;
     if (PlatFocused()) ProtocolTickAbilityInput();
     if (!UpdateCoverInput()) return;
-    ProtocolCommitShelter();
     if (!UpdateEarlyActions(dt)) return;
     EvolutionTick(dt);TacticalTick(dt);
     UpdateTimers(dt);   /* v8: 回声扫描 / 锁定窗口 / 周期自动存档（src/uptimers.c） */

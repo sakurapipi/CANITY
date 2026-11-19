@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "protocol.h"
 #include "monster_evolution.h"
 #include "threat_tier.h"
@@ -168,7 +169,7 @@ int MimicOnSearchStep(int containerIdx, float progress) {
         /* 只有"已经离场"的才不参与；DISGUISED / SEEN 都还能咬 */
         if (m->state == MIM_NONE || m->state == MIM_ANGRY || m->state == MIM_GONE) continue;
         if (m->containerIdx != containerIdx) continue;
-        if (progress < MIM_REVEAL_PCT) return 0;
+        if (EventEntranceProtected() || progress < MIM_REVEAL_PCT-(EventBloodMoon()?.08f:0)) return 0;
         MimicReveal(m, 1);
         return 1;
     }

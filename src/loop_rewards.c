@@ -311,7 +311,11 @@ static void ExtractCurrentRun(void) {
     exitChoiceOpen=0;exitChoiceConfirm=0;
     lastExtractDepthMul=ExtractDepthMul(currentLevel);runInProgress=0;
     dailyEscapeCount++;DailyObserve(DQ_ESCAPE,dailyEscapeCount);
-    gameWon=1;gameCleared=1;LoopCheckAchievements();BankSettle(1);hasSave=0;
+    gameWon=1;gameCleared=1;
+    ScoreInput score={currentLevel,1,isEndlessRun,runSearched,bottlesKilled,runTime,modsSeenCount};
+    ComputeScore(&score,&lastScore);
+    lastScore.score+=eventBonus;
+    LoopCheckAchievements();BankSettle(1);hasSave=0;
     currentState=STATE_GAMEOVER;menuSelection=0;ForceCursor(1);uiDirty=1;
     memset(keyPressed,0,sizeof(keyPressed));resetInputState=1;
 }

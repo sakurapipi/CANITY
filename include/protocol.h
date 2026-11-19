@@ -4,6 +4,10 @@
 #define PROTOCOL_NODE_COUNT 10
 #define PROTOCOL_STORY_SUPPLIES 150
 #define PROTOCOL_STORY_BANK_CAP 220
+#define PROTOCOL_ROLE_PRICE 10000
+#define PROTOCOL_SPECIAL_ROLE_MASK 14u
+#define PROTOCOL_STORY_COMPLETE 4u
+#define PROTOCOL_STORY_ROLE_CLAIMED 8u
 #define PROTOCOL_MISSIONS 128u
 #define PROTOCOL_MISSION_SOLVED 256u
 #define PROTOCOL_EVAC_LAYOUT 512u
@@ -42,6 +46,8 @@ float ProtocolPursuitDrain(void);
 float ProtocolWrenchStunBonus(void);
 int ProtocolSprintGrace(float dt,int requested);
 const char *ProtocolAbilityName(int role);
+int ProtocolRoleUnlocked(int role);
+int ProtocolFreeRoleReward(void);
 int ProtocolSelectRole(int role);
 int ProtocolBase(int resource);
 void ProtocolBegin(int story, int fixedRole);
@@ -85,7 +91,6 @@ int ProtocolTrialVisual(float *x,float *y,float *signal);
 int ProtocolFieldContains(float x,float y);
 void ProtocolReleaseStoryNodes(void);
 int ProtocolStoryPayout(void);
-int ProtocolClaimLegacyEndingBonus(void);
 int ProtocolTier(int tier);
 int ProtocolFloorMaterial(void);
 float ProtocolMonsterThreat(float threat);
@@ -93,12 +98,8 @@ enum { PROTOCOL_TERMINAL, PROTOCOL_RELAY, PROTOCOL_CORE, PROTOCOL_TRACE, PROTOCO
 int ProtocolNearestDevice(void);
 const char *ProtocolDeviceHint(int id,int *ready);
 int ProtocolInteract(int id);
-void ProtocolEnterShelter(void);
-void ProtocolCommitShelter(void);
 const char *ProtocolExitHint(void);
 const char *ProtocolRadioLine(void);
-int ProtocolBreakerReady(void);
-int ProtocolShelterPowered(void);
 int ProtocolExitReady(void);
 int ProtocolAdvance(void);
 const char *ProtocolObjective(void);

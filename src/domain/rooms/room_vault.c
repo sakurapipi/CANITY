@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 /* Paid vault chest pool: no ordinary crate rolls, bonuses or re-roll on load.
  * Ledger uses the current landmark's existing saved integer fields only. */
 #include "common.h"
@@ -116,7 +117,7 @@ void RoomThemePopulateVault(void) {
         if(InRoom(x+.5f,y+.5f) && CratePositionFree(x+.5f,y+.5f))spots[n++]=y*MAP_WIDTH+x;
     for(int i=n-1;i>0;i--){int j=(int)(rng_world_next()%(unsigned)(i+1));int swap=spots[i];spots[i]=spots[j];spots[j]=swap;}
     for(int p=0;p<n && count<target;p++) {
-        int slot=containerCount<MAX_CONTAINERS?containerCount:-1;
+        int slot=containerCount<MAX_CONTAINERS-(levelEvent==EV_SUPPLY)?containerCount:-1;
         if(slot<0)for(int i=containerCount-1;i>=0;i--) {
             Container* c=&containers[i];
             if(c->active && !InRoom(c->x,c->y) && c->content!=1 && !c->searched && !c->mimicHost && !c->mimicShell){slot=i;break;}

@@ -1,3 +1,4 @@
+#include "events.h"
 #include "loop_api.h"
 #include "state.h"
 #include "world_api.h"
@@ -20,25 +21,29 @@
 #include "render.h"
 #include "lang.h"
 #include "present_api.h"
-static int archiveTab=ARCHIVE_MONSTERS,roomSelection=0;
-static int roomScroll=0,roomScrollMax=0;
+static int archiveTab=ARCHIVE_MONSTERS,roomSelection=0,eventSelection=0;
+static int detailScroll=0,detailScrollMax=0;
 static int portraitTier=-1;
 int UiArchiveTab(void){return archiveTab;}
-int UiArchiveEntryCount(void){return archiveTab==ARCHIVE_ROOMS?ROOM_ARCHETYPE_COUNT:BESTIARY_COUNT;}
-int UiArchiveSelection(void){return archiveTab==ARCHIVE_ROOMS?roomSelection:bestiarySel;}
+int UiArchiveEntryCount(void){return archiveTab==ARCHIVE_ROOMS?ROOM_ARCHETYPE_COUNT:archiveTab==ARCHIVE_EVENTS?EVENT_COUNT:BESTIARY_COUNT;}
+int UiArchiveSelection(void){return archiveTab==ARCHIVE_ROOMS?roomSelection:archiveTab==ARCHIVE_EVENTS?eventSelection:bestiarySel;}
 void UiArchiveSelect(int entry){
     if(entry<0 || entry>UiArchiveEntryCount())return;
-    if(archiveTab==ARCHIVE_ROOMS){if(roomSelection!=entry){roomScroll=roomScrollMax=0;}roomSelection=entry;}
+    if(archiveTab==ARCHIVE_ROOMS){if(roomSelection!=entry){detailScroll=detailScrollMax=0;}roomSelection=entry;}
+    else if(archiveTab==ARCHIVE_EVENTS){
+        if(eventSelection!=entry)detailScroll=detailScrollMax=0;
+        eventSelection=entry;
+    }
     else bestiarySel=entry;
     uiDirty=1;
 }
 void UiArchiveSetTab(int tab){
-    if(tab<ARCHIVE_MONSTERS || tab>ARCHIVE_ROOMS || tab==archiveTab)return;
-    archiveTab=tab;roomScroll=roomScrollMax=0;menuScrollOffsets[STATE_BESTIARY]=0;uiDirty=1;
+    if(tab<ARCHIVE_MONSTERS || tab>=ARCHIVE_TAB_COUNT || tab==archiveTab)return;
+    archiveTab=tab;detailScroll=detailScrollMax=0;menuScrollOffsets[STATE_BESTIARY]=0;uiDirty=1;
 }
 void UiArchiveOpen(void){
     portraitTier=-1;
-    archiveTab=ARCHIVE_MONSTERS;bestiarySel=0;roomSelection=0;roomScroll=roomScrollMax=0;
+    archiveTab=ARCHIVE_MONSTERS;bestiarySel=0;roomSelection=eventSelection=0;detailScroll=detailScrollMax=0;
     menuScrollOffsets[STATE_BESTIARY]=0;uiDirty=1;
 }
 MenuGeo UiArchiveGeometry(void){
@@ -50,6 +55,18 @@ MenuGeo UiArchiveGeometry(void){
     g.panel=(RECT){pad,pad,winW-pad,winH-pad};g.titleY=g.panel.top+pad;
     g.firstY=g.titleY+th*2+UIS(28);g.count=UiArchiveEntryCount()+1;
     int available=g.panel.bottom-g.firstY-th-UIS(16);
+    if(archiveTab==ARCHIVE_EVENTS) {
+        available=g.panel.bottom-g.firstY-pad;
+        g.rowH=th+UIS(8);
+        if(available/g.count>g.rowH)g.rowH=available/g.count;
+        g.maxVisibleRows=available/g.rowH;
+        if(g.maxVisibleRows>g.count)g.maxVisibleRows=g.count;
+        if(g.maxVisibleRows<0)g.maxVisibleRows=0;
+        g.scrollOffset=UiArchiveSelection()-g.maxVisibleRows+1;
+        if(g.scrollOffset>g.count-g.maxVisibleRows)g.scrollOffset=g.count-g.maxVisibleRows;
+        if(g.scrollOffset<0)g.scrollOffset=0;
+        return g;
+    }
     g.rowH=available/g.count;
     if(g.rowH<th+UIS(10))g.rowH=th+UIS(10);
     g.maxVisibleRows=available/g.rowH;
@@ -62,23 +79,37 @@ MenuGeo UiArchiveGeometry(void){
     return g;
 }
 RECT UiArchiveTabRect(MenuGeo g,int tab){
-    int pad=UIS(10),th=TextHeightWin(),width=(g.panel.right-g.panel.left-pad*3)/2;
+    int pad=UIS(10),th=TextHeightWin(),width=(g.panel.right-g.panel.left-pad*(ARCHIVE_TAB_COUNT+1))/ARCHIVE_TAB_COUNT;
     int left=g.panel.left+pad+(width+pad)*tab;
     return (RECT){left,g.titleY+th+UIS(6),left+width,g.firstY-UIS(8)};
 }
+static int ArchiveSplit(MenuGeo g) {
+    int width=g.panel.right-g.panel.left;
+    return g.panel.left+width*32/100;
+}
+int UiArchiveRowAt(int x,int y) {
+    MenuGeo g=UiArchiveGeometry();
+    for(int i=g.scrollOffset;i<g.count && i<g.scrollOffset+g.maxVisibleRows;i++) {
+        RECT row=RowRect(g,i);
+        if(x>=row.left && x<row.right && y>=row.top && y<row.bottom)return i;
+    }
+    return -1;
+}
+int UiArchiveInDetail(int x) { return x>=ArchiveSplit(UiArchiveGeometry()); }
+
 int UiArchiveTabAt(int x,int y){
     MenuGeo g=UiArchiveGeometry();
-    for(int tab=0;tab<2;tab++){
+    for(int tab=0;tab<ARCHIVE_TAB_COUNT;tab++){
         RECT r=UiArchiveTabRect(g,tab);
-        if(x>=r.left && x<=r.right && y>=r.top && y<=r.bottom)return tab;
+        if(x>=r.left && x<r.right && y>=r.top && y<r.bottom)return tab;
     }
     return -1;
 }
 void UiArchiveScrollDetail(int lines){
-    if(archiveTab!=ARCHIVE_ROOMS)return;
-    roomScroll+=lines;
-    if(roomScroll<0)roomScroll=0;
-    if(roomScroll>roomScrollMax)roomScroll=roomScrollMax;
+    if(archiveTab==ARCHIVE_MONSTERS)return;
+    detailScroll+=lines;
+    if(detailScroll<0)detailScroll=0;
+    if(detailScroll>detailScrollMax)detailScroll=detailScrollMax;
     uiDirty=1;
 }
 static RECT DetailButtonRect(MenuGeo g,int down){
@@ -86,7 +117,7 @@ static RECT DetailButtonRect(MenuGeo g,int down){
     return (RECT){right-(2-down)*w-UIS(8),g.panel.bottom-h-UIS(8),right-(1-down)*w-UIS(12),g.panel.bottom-UIS(8)};
 }
 int UiArchiveDetailButtonAt(int x,int y){
-    if(archiveTab!=ARCHIVE_ROOMS || roomSelection>=ROOM_ARCHETYPE_COUNT)return 0;
+    if(archiveTab==ARCHIVE_MONSTERS || UiArchiveSelection()>=UiArchiveEntryCount() || (archiveTab==ARCHIVE_EVENTS && !detailScrollMax))return 0;
     MenuGeo g=UiArchiveGeometry();
     for(int down=0;down<2;down++){
         RECT r=DetailButtonRect(g,down);
@@ -228,7 +259,7 @@ static void DrawMonsterArchive(MenuGeo g) {
 }
 
 /* The scrolling text pass never touches gameplay state or the live room event timer. */
-static int RoomGuideText(const char* text,int x,int y,int width,int top,int bottom,unsigned color,int draw){
+static int ArchiveDetailText(const char* text,int x,int y,int width,int top,int bottom,unsigned color,int draw){
     int height=TextMediumLiteralHeight(),step=height+UIS(4);
     if(!text || width<=0)return y;
     while(*text){
@@ -269,15 +300,15 @@ static int RoomGuideBody(int theme,int x,int y,int width,int top,int bottom,int 
         "契约持续本局且无法撤销；启动中央装置前可在另一侧控制台取消确认。",
         "静止期间心脏安静，结束时尖啸会吸引注意；请提前规划逃生路线。"
     };
-    y=RoomGuideText(Tr("EFFECT / COST","效果与代价"),x,y,width,top,bottom,UI_ACCENT,draw);
-    y=RoomGuideText(RoomThemeGuideEffect(theme),x,y,width,top,bottom,UI_INK,draw)+UIS(6);
-    y=RoomGuideText(Tr("PREPARE / ACTIVATE","准备与启动"),x,y,width,top,bottom,UI_ACCENT,draw);
-    y=RoomGuideText(RoomThemeGuideControl(theme,0),x,y,width,top,bottom,UI_INK,draw);
-    y=RoomGuideText(RoomThemeGuideControl(theme,1),x,y,width,top,bottom,UI_INK,draw);
-    y=RoomGuideText(Tr("Then hold INTERACT at the special hatch. Controls never charge or grant supplies.",
+    y=ArchiveDetailText(Tr("EFFECT / COST","效果与代价"),x,y,width,top,bottom,UI_ACCENT,draw);
+    y=ArchiveDetailText(RoomThemeGuideEffect(theme),x,y,width,top,bottom,UI_INK,draw)+UIS(6);
+    y=ArchiveDetailText(Tr("PREPARE / ACTIVATE","准备与启动"),x,y,width,top,bottom,UI_ACCENT,draw);
+    y=ArchiveDetailText(RoomThemeGuideControl(theme,0),x,y,width,top,bottom,UI_INK,draw);
+    y=ArchiveDetailText(RoomThemeGuideControl(theme,1),x,y,width,top,bottom,UI_INK,draw);
+    y=ArchiveDetailText(Tr("Then hold INTERACT at the special hatch. Controls never charge or grant supplies.",
                        "完成准备后，在特殊舱门长按交互。控制台本身不扣费，也不发放补给。"),x,y,width,top,bottom,UI_INK_DIM,draw)+UIS(6);
-    y=RoomGuideText(Tr("RISK / COUNTERPLAY","风险与应对"),x,y,width,top,bottom,0x00DB997Du,draw);
-    return RoomGuideText(g_lang==LANG_ZH?riskZh[theme]:riskEn[theme],x,y,width,top,bottom,UI_INK,draw);
+    y=ArchiveDetailText(Tr("RISK / COUNTERPLAY","风险与应对"),x,y,width,top,bottom,0x00DB997Du,draw);
+    return ArchiveDetailText(g_lang==LANG_ZH?riskZh[theme]:riskEn[theme],x,y,width,top,bottom,UI_INK,draw);
 }
 static void DrawRoomBlueprint(int theme,int variant,RECT box){
     RoomTemplate layout;
@@ -290,6 +321,16 @@ static void DrawRoomBlueprint(int theme,int variant,RECT box){
     for(int y=0;y<layout.h;y++)for(int x=0;x<layout.w;x++){
         unsigned color=layout.tiles[y][x]==ROOM_TILE_PILLAR?0x0089A9BBu:0x001E3443u;
         BlendRectWin(left+x*cell,top+y*cell,left+(x+1)*cell-1,top+(y+1)*cell-1,color,1);
+    }
+}
+static void DrawDetailButtons(MenuGeo g) {
+    for(int down=0;down<2;down++){
+        RECT button=DetailButtonRect(g,down);
+        int enabled=down?detailScroll<detailScrollMax:detailScroll>0;
+        BlendRectWin(button.left,button.top,button.right,button.bottom,enabled?UI_BG_SEL:UI_BG_PANEL,.98f);
+        FrameRectWin(button.left,button.top,button.right,button.bottom,UI_EDGE_HOT,.9f,1);
+        const char* label=down?Tr("DOWN","下翻"):Tr("UP","上翻");
+        DrawTextCenterWin((button.left+button.right)/2,button.top+UIS(3),label,enabled?UI_ACCENT:UI_INK_DIM);
     }
 }
 static void DrawRoomArchive(MenuGeo g){
@@ -332,30 +373,84 @@ static void DrawRoomArchive(MenuGeo g){
     }
     int step=TextMediumLiteralHeight()+UIS(4);
     int end=RoomGuideBody(theme,x,y,right-x,y,bottom,0);
-    roomScrollMax=end>bottom?(end-bottom+step-1)/step:0;
-    if(roomScroll>roomScrollMax)roomScroll=roomScrollMax;
-    RoomGuideBody(theme,x,y-roomScroll*step,right-x,y,bottom,1);
-    for(int down=0;down<2;down++){
-        RECT button=DetailButtonRect(g,down);
-        int enabled=down?roomScroll<roomScrollMax:roomScroll>0;
-        BlendRectWin(button.left,button.top,button.right,button.bottom,enabled?UI_BG_SEL:UI_BG_PANEL,.98f);
-        FrameRectWin(button.left,button.top,button.right,button.bottom,UI_EDGE_HOT,.9f,1);
-        const char* label=down?Tr("DOWN","下翻"):Tr("UP","上翻");
-        DrawTextCenterWin((button.left+button.right)/2,button.top+UIS(3),label,enabled?UI_ACCENT:UI_INK_DIM);
-    }
+    detailScrollMax=end>bottom?(end-bottom+step-1)/step:0;
+    if(detailScroll>detailScrollMax)detailScroll=detailScrollMax;
+    RoomGuideBody(theme,x,y-detailScroll*step,right-x,y,bottom,1);
+    DrawDetailButtons(g);
     RECT firstButton=DetailButtonRect(g,0);
     char hint[96];snprintf(hint,sizeof(hint),"%s",Tr("PGUP / PGDN","上下翻页"));
     UiTrimSmallText(hint,firstButton.left-x-UIS(8));
     if(firstButton.left-x>UIS(24))DrawTextSmallWin(x,g.panel.bottom-th-UIS(6),hint,UI_INK_DIM);
 }
+static int EventArchiveBody(const EventDef *event,int x,int y,int width,int top,int bottom,int draw) {
+    char facts[128];
+    snprintf(facts,sizeof facts,Tr("From floor %d   Clear score +%d","第 %d 层起出现   通过后 +%d 分"),
+             event->unlock,event->score);
+    y=ArchiveDetailText(facts,x,y,width,top,bottom,UI_INFO,draw)+UIS(9);
+    y=ArchiveDetailText(Tr("WHAT CHANGES","事件效果"),x,y,width,top,bottom,event->color,draw);
+    y=ArchiveDetailText(Tr(event->descEn,event->descZh),x,y,width,top,bottom,UI_INK,draw)+UIS(8);
+    y=ArchiveDetailText(Tr("HOW TO RESPOND","应对方法"),x,y,width,top,bottom,event->color,draw);
+    y=ArchiveDetailText(Tr(event->tipEn,event->tipZh),x,y,width,top,bottom,UI_INK,draw)+UIS(8);
+    if(event->goldPct){
+        snprintf(facts,sizeof facts,Tr("Eligible gold +%d%%, up to the floor limit.","指定来源的金币增加 %d%%，受本层上限限制。"),
+                 event->goldPct);
+        y=ArchiveDetailText(facts,x,y,width,top,bottom,UI_GOLD,draw);
+    }
+    return y;
+}
+
+static void DrawEventArchive(MenuGeo g) {
+    int pad=UIS(10),split=ArchiveSplit(g),right=g.panel.right-pad;
+    int x=split+UIS(16),bottom=g.panel.bottom-pad,y=g.firstY;
+    int th=TextHeightWin();
+    BlendRectWin(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,UI_BG_PANEL,.99f);
+    FrameRectWin(g.panel.left,g.panel.top,g.panel.right,g.panel.bottom,UI_EDGE_HOT,1,1);
+    DrawTextWin(g.panel.left+pad,g.titleY,Tr("FIELD GUIDE","图鉴"),UI_ACCENT);
+    BlendRectWin(split,y-UIS(8),split+1,bottom,UI_EDGE_HOT,.9f);
+
+    for(int i=g.scrollOffset;i<g.count && i<g.scrollOffset+g.maxVisibleRows;i++){
+        RECT row=RowRect(g,i);
+        const EventDef *event=EventDefinition(i);
+        int selected=i==eventSelection;
+        if(selected)BlendRectWin(row.left,row.top,row.right,row.bottom,UI_BG_SEL,.96f);
+        int width=row.right-row.left-UIS(12);
+        char label[96];
+        if(event){
+            snprintf(label,sizeof label,"%02d  %s",i+1,Tr(event->nameEn,event->nameZh));
+            if(TextWidthWin(label)>width)
+                snprintf(label,sizeof label,"%02d  %s",i+1,Tr(event->shortEn,event->shortZh));
+        }else snprintf(label,sizeof label,"< %s",Tr("BACK","返回"));
+        ClampRowText(label,width);
+        DrawTextWin(row.left+UIS(6),row.top+(row.bottom-row.top-th)/2,
+                    label,selected?UI_ACCENT:UI_INK_DIM);
+    }
+
+    const EventDef *event=EventDefinition(eventSelection);
+    if(!event)return;
+    int width=right-x;
+    int titleY=y;
+    int titleEnd=UiDossierText(Tr(event->nameEn,event->nameZh),x,titleY,width,bottom,event->color);
+    int top=titleEnd+pad;
+    BlendRectWin(x,top-UIS(4),right,top-UIS(3),event->color,.55f);
+    int step=TextMediumLiteralHeight()+UIS(4);
+    int end=EventArchiveBody(event,x,top,width,top,bottom-pad,0);
+    int limit=bottom-pad;
+    if(end>limit)limit=DetailButtonRect(g,0).top-UIS(4);
+    detailScrollMax=end>limit?(end-limit+step-1)/step:0;
+    if(detailScroll>detailScrollMax)detailScroll=detailScrollMax;
+    EventArchiveBody(event,x,top-detailScroll*step,width,top,limit,1);
+    if(detailScrollMax)DrawDetailButtons(g);
+}
 void UiDrawArchivePage(MenuGeo g){
     g=UiArchiveGeometry(); /* Hit testing and drawing use the same geometry. */
-    if(archiveTab==ARCHIVE_ROOMS)DrawRoomArchive(g);else DrawMonsterArchive(g);
-    for(int tab=0;tab<2;tab++){
+    if(archiveTab==ARCHIVE_ROOMS)DrawRoomArchive(g);
+    else if(archiveTab==ARCHIVE_EVENTS)DrawEventArchive(g);
+    else DrawMonsterArchive(g);
+    for(int tab=0;tab<ARCHIVE_TAB_COUNT;tab++){
         RECT r=UiArchiveTabRect(g,tab);
         BlendRectWin(r.left,r.top,r.right,r.bottom,tab==archiveTab?UI_BG_SEL:UI_BG_PANEL,1);
         FrameRectWin(r.left,r.top,r.right,r.bottom,UI_EDGE_HOT,.95f,1);
-        char label[96];snprintf(label,sizeof(label),"%s",tab==ARCHIVE_MONSTERS?Tr("MONSTERS","怪物图鉴"):Tr("THEME ROOMS","主题房间图鉴"));
+        char label[96];snprintf(label,sizeof(label),"%s",tab==ARCHIVE_MONSTERS?Tr("MONSTERS","怪物图鉴"):tab==ARCHIVE_ROOMS?Tr("THEME ROOMS","主题房间"):Tr("SPECIAL EVENTS","特殊事件"));
         ClampRowText(label,r.right-r.left-UIS(12));
         DrawTextCenterWin((r.left+r.right)/2,r.top+(r.bottom-r.top-TextHeightWin())/2,label,tab==archiveTab?UI_ACCENT:UI_INK_DIM);
     }

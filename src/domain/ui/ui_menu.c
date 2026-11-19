@@ -1,3 +1,5 @@
+#include "audio.h"
+#include "events.h"
 #include "protocol.h"
 #include "threat_tier.h"
 /* src/domain/ui/ui_menu.c —— 主菜单页（含改造树 / 银行页 / 校准条）
@@ -61,6 +63,7 @@ static const char* kBranchNameZh[7] = { "沉寂", "节流", "藏匿",
                                         "塑形", "冒险", "跨支", "起点" };
 
 static int InRoleDossier(void);
+static void OpenMenu(int page,MainMenuAction focus);
 
 void MainMenuCompute(MainMenuLayout* L) {
     memset(L,0,sizeof(*L));
@@ -87,8 +90,8 @@ static int MainMenuRowCount(void) {
     return MainMenuCount();
 }
 
-enum { PM_ROOT, PM_MORE, PM_ROLES };
-static int InRoleDossier(void) { return mainMenuMore==PM_ROLES; }
+enum { PM_ROOT, PM_MORE, PM_ROLES, PM_ROLE_REWARD };
+static int InRoleDossier(void) { return mainMenuMore==PM_ROLES || mainMenuMore==PM_ROLE_REWARD; }
 static const MainMenuAction rootActions[]={
     MENU_CONTINUE,MENU_STORY,MENU_CLASSIC,MENU_ROLES,MENU_TRAINING,
     MENU_UPGRADES,MENU_BANK,MENU_MORE,MENU_QUIT,MENU_NONE
@@ -100,6 +103,9 @@ static const MainMenuAction moreActions[]={
 static const MainMenuAction roleActions[]={
     MENU_ROLE_0,MENU_ROLE_1,MENU_ROLE_2,MENU_ROLE_3,MENU_BACK,MENU_NONE
 };
+static const MainMenuAction roleRewardActions[]={
+    MENU_ROLE_1,MENU_ROLE_2,MENU_ROLE_3,MENU_BACK,MENU_NONE
+};
 static const MainMenuAction welcomeActions[]={
     MENU_FIRST_STORY,MENU_WELCOME_PRACTICE,MENU_WELCOME_SKIP,MENU_NONE
 };
@@ -107,6 +113,7 @@ static int WelcomeOpen(void) { return protocolProfile.briefSeen==0; }
 static const MainMenuAction *CurrentActions(void) {
     if (WelcomeOpen()) return welcomeActions;
     if (mainMenuMore==PM_ROLES) return roleActions;
+    if (mainMenuMore==PM_ROLE_REWARD) return roleRewardActions;
     if (mainMenuMore==PM_MORE) return moreActions;
     return rootActions;
 }
@@ -150,6 +157,10 @@ static const char* MenuLabel(int i) {
             static char bb[192];
             if (i >= UiArchiveEntryCount()) return "Back";
             if (UiArchiveTab()==ARCHIVE_ROOMS) return RoomThemeName(i,g_lang==LANG_ZH);
+            if (UiArchiveTab()==ARCHIVE_EVENTS) {
+                const EventDef *event=EventDefinition(i);
+                return event?Tr(event->nameEn,event->nameZh):"";
+            }
             if (!BestiaryIsSeen(i)) {
                 sprintf(bb, "???   [LOCKED]");
             } else {
@@ -318,6 +329,8 @@ static const char* MenuLabel(int i) {
             return hb;
         }
         case STATE_GAMEOVER:
+            if(protocolRun.story && gameWon && ProtocolFreeRoleReward())
+                return Tr("Choose your free character","选择免费角色");
             return protocolRun.story && !gameWon?Tr("Retry floor checkpoint","从楼层检查点重试"):Tr("Return to Menu","返回主菜单");
         case STATE_ACHIEVEMENTS: {
             /* v6：**按分类筛选 + 用表里的真实奖励**
@@ -614,6 +627,12 @@ y - TH/2，主菜单第 10 行「Quit」正好被这条线横切
     }
 }
 
+static int DossierRole(void) {
+    if(currentState!=STATE_MAIN_MENU || WelcomeOpen() || !InRoleDossier())return -1;
+    MainMenuAction action=MenuActionAt(menuSelection);
+    return action>=MENU_ROLE_0 && action<=MENU_ROLE_3?(int)action-MENU_ROLE_0:-1;
+}
+
 static const unsigned roleColors[]={0x84c7b3,0x8dbbe2,0xb7a4d2,0xe3b770};
 
 static RECT RoleTrialRect(RECT card) {
@@ -622,20 +641,48 @@ static RECT RoleTrialRect(RECT card) {
                   card.right-pad,card.bottom-pad};
 }
 int MainMenuTrialRole(int x,int y) {
-    if (currentState!=STATE_MAIN_MENU || WelcomeOpen() || mainMenuMore!=PM_ROLES ||
-        menuSelection<0 || menuSelection>3) return -1;
-    if (x<0) return menuSelection;
+    int role=DossierRole();
+    if(role<0 || x<0)return role;
     MainMenuLayout layout;MainMenuCompute(&layout);
     RECT button=RoleTrialRect(layout.detail);
-    return x>=button.left && x<button.right && y>=button.top && y<button.bottom?menuSelection:-1;
+    return x>=button.left && x<button.right && y>=button.top && y<button.bottom?role:-1;
+}
+static RECT RoleUnlockRect(RECT card) {
+    RECT trial=RoleTrialRect(card);
+    int height=trial.bottom-trial.top;
+    trial.bottom=trial.top-UIS(4);
+    trial.top=trial.bottom-height;
+    return trial;
+}
+int MainMenuUnlockRole(int x,int y) {
+    int role=DossierRole();
+    if(role<1 || ProtocolRoleUnlocked(role))return 0;
+    if(x>=0){
+        MainMenuLayout layout;MainMenuCompute(&layout);
+        RECT button=RoleUnlockRect(layout.detail);
+        if(x<button.left || x>=button.right || y<button.top || y>=button.bottom)return 0;
+    }
+    if(!ProtocolFreeRoleReward() && !WalletCanPayBank(PROTOCOL_ROLE_PRICE))
+        UiShowActionError(Tr("You need 10,000 bank gold.","银行金币不足，需要 10,000。"));
+    else if(!SaveUnlockRole(role))
+        UiShowActionError(Tr("Character unlock could not be saved.","角色解锁保存失败。"));
+    else {
+        PlaySfx(SFX_PICKUP,.55f);
+        if(mainMenuMore==PM_ROLE_REWARD)OpenMenu(PM_ROLES,MENU_ROLE_0+role);
+    }
+    uiDirty=1;
+    return 1;
 }
 static void DrawRoleDetails(RECT card,int role) {
     int pad=UIS(10),th=TextMediumLiteralHeight();
     int x=card.left+pad,right=card.right-pad,y=card.top+pad;
     int width=right-x;
     RECT button=RoleTrialRect(card);
-    int bottom=button.top-UIS(8);
-    if (width<UIS(60) || y+th>bottom) return;
+    int locked=!ProtocolRoleUnlocked(role),freeReward=ProtocolFreeRoleReward();
+    RECT unlock=RoleUnlockRect(card);
+    int bottom=(locked?unlock.top:button.top)-UIS(8);
+    if(locked)bottom-=th+UIS(4);
+    if (width<UIS(60)) return;
     unsigned color=roleColors[role];
     int portrait=width/4;
     if (portrait>bottom-y) portrait=bottom-y;
@@ -651,14 +698,28 @@ static void DrawRoleDetails(RECT card,int role) {
     snprintf(line,sizeof line,Tr("SAN %d   CELL %d   STA %d","理智 %d   电量 %d   体力 %d"),
              ProtocolRoleBase(role,0),ProtocolRoleBase(role,1),ProtocolRoleBase(role,2));
     y=UiDossierText(line,x,y,width,bottom,UI_INK)+UIS(7);
-    if (role && !(protocolProfile.unlocked&(1u<<role)))
-        snprintf(line,sizeof line,Tr("Unlocks after chapter %d","完成第%d章后解锁"),role);
-    else snprintf(line,sizeof line,"%s",protocolProfile.selected==(unsigned)role?
-                  Tr("Selected for the next run","已选为下一局角色"):Tr("Enter to select","回车选择此角色"));
-    y=UiDossierText(line,x,y,width,bottom,UI_INK_DIM)+UIS(12);
+    if (!locked) {
+        const char *status=protocolProfile.selected==(unsigned)role?
+            Tr("Selected for the next run","已选为下一局角色"):Tr("Enter to select","回车选择此角色");
+        y=UiDossierText(status,x,y,width,bottom,UI_INK_DIM)+UIS(12);
+    }
     y=UiDossierText(ProtocolAbilityName(role),x,y,width,bottom,color)+UIS(5);
     y=UiDossierText(ProtocolRoleAbility(role),x,y,width,bottom,UI_INK)+UIS(10);
     UiDossierText(ProtocolRoleBio(role),x,y,width,bottom,UI_INK_DIM);
+    if(locked){
+        const char *hint=freeReward?Tr("Choose one character as your story reward.","剧情已通关，可免费选择一位角色。"):
+            (protocolProfile.endings&PROTOCOL_STORY_ROLE_CLAIMED)?
+            Tr("Your free story character has been claimed.","本档已领取剧情赠送角色。"):
+            Tr("Finish the story to unlock one character free.","通关剧情可免费解锁一位角色。");
+        UiDossierText(hint,unlock.left,bottom,unlock.right-unlock.left,unlock.top-2,UI_INK_DIM);
+        int affordable=freeReward || WalletCanPayBank(PROTOCOL_ROLE_PRICE);
+        unsigned edge=affordable?color:UI_INK_DIM;
+        BlendRectWin(unlock.left,unlock.top,unlock.right,unlock.bottom,UI_BG_SEL,1);
+        FrameRectWin(unlock.left,unlock.top,unlock.right,unlock.bottom,edge,.85f,1);
+        const char *action=freeReward?Tr("U / CLAIM FREE","U / 免费解锁"):
+            Tr("U / BUY FOR 10,000 GOLD","U / 购买：10,000 银行金币");
+        UiDossierText(action,unlock.left+pad,unlock.top+UIS(5),unlock.right-unlock.left-2*pad,unlock.bottom,edge);
+    }
     BlendRectWin(button.left,button.top,button.right,button.bottom,0x183039,1);
     FrameRectWin(button.left,button.top,button.right,button.bottom,color,.65f,1);
     DrawTextSmallLiteralWin(button.left+pad,button.top+(button.bottom-button.top-FONT_H)/2,
@@ -712,11 +773,12 @@ static void DrawFacilityArt(RECT art) {
 static void DrawMainMenuDetails(const MainMenuLayout *M) {
     RECT card=M->detail;
     if (card.right<=card.left || card.bottom<=card.top) return;
-    if (!WelcomeOpen() && mainMenuMore==PM_ROLES) {
-        if (menuSelection<4) {
+    if (!WelcomeOpen() && InRoleDossier()) {
+        int role=DossierRole();
+        if (role>=0) {
             BlendRectWin(card.left,card.top,card.right,card.bottom,0x0e1b26,1);
             FrameRectWin(card.left,card.top,card.right,card.bottom,UI_EDGE,.75f,1);
-            DrawRoleDetails(card,menuSelection);
+            DrawRoleDetails(card,role);
         }
         return;
     }
@@ -863,8 +925,7 @@ static void DrawGenericMenuRows(MenuGeo g, int sel, int popupOpen, const int* id
         if (currentState == STATE_GAMEOVER && i > 0) {
             if (protocolRun.story) {
                 char settlement[112];
-                const char *ending=ProtocolPeacefulStory()?Tr("EVIDENCE TRANSMITTED","证词已传出"):
-                    protocolRun.ending==1?Tr("DEPARTURE","离开设施"):Tr("PROTOCOL RESET","协议归零");
+                const char *ending=Tr("EVIDENCE TRANSMITTED","证词已传出");
                 snprintf(settlement,sizeof settlement,Tr("%s   BANK +%d","%s   银行入账 +%d"),ending,lastRunKept);
                 const char *label=i==1?ProtocolFloorName():
                     !gameWon?Tr("Escape: return to main menu","按 Esc 返回主菜单"):settlement;
@@ -1493,9 +1554,15 @@ static void OpenMenu(int page,MainMenuAction focus) {
     mainMenuMore=page;menuSelection=0;uiDirty=1;
     for (int i=0;i<MainMenuCount();i++) if (MenuActionAt(i)==focus) {menuSelection=i;break;}
 }
+void MainMenuOpenRoleReward(void) {
+    int role=1;
+    while(role<3 && ProtocolRoleUnlocked(role))role++;
+    OpenMenu(PM_ROLE_REWARD,MENU_ROLE_0+role);
+}
+
 int MainMenuBack(void) {
     if (WelcomeOpen() || mainMenuMore==PM_ROOT) return 0;
-    OpenMenu(PM_ROOT,mainMenuMore==PM_ROLES?MENU_ROLES:MENU_MORE);
+    OpenMenu(PM_ROOT,InRoleDossier()?MENU_ROLES:MENU_MORE);
     return 1;
 }
 MainMenuAction MainMenuResolve(void) {

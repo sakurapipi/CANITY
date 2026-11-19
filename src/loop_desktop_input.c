@@ -195,25 +195,7 @@ if (currentState == STATE_HUB) {
     }
 
     if (currentState == STATE_BESTIARY) {
-        if(UiArchiveTierClick(mx,my))return;
-        int tab=UiArchiveTabAt(mx,my);
-        if(tab>=0){UiArchiveSetTab(tab);return;}
-        int scroll=UiArchiveDetailButtonAt(mx,my);
-        if(scroll){UiArchiveScrollDetail(scroll*2);return;}
-        MenuGeo g = GetMenuGeo();
-        for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
-            RECT r = RowRect(g, i);
-            if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
-                UiArchiveSelect(i);
-                if (i >= UiArchiveEntryCount()) {
-                    /* 点 Back 直接退出 */
-                    currentState = STATE_MAIN_MENU;
-                    menuSelection = 0;
-                }
-                uiDirty = 1;
-                return;
-            }
-        }
+        CanityMouseClick(mx,my);
         return;
     }
 
@@ -330,9 +312,8 @@ void CanityMouseWheel(int delta, int mx, int my) {
     if (currentState == STATE_HELP) { HelpBookKey(delta>0?VK_UP:VK_DOWN); return; }
 
     if(currentState==STATE_BESTIARY){
-        MenuGeo g=UiArchiveGeometry();
-        int split=g.panel.left+(g.panel.right-g.panel.left)*32/100;
-        if(UiArchiveTab()==ARCHIVE_ROOMS && mx>=split)UiArchiveScrollDetail(delta>0?-2:2);
+        if(UiArchiveTab()!=ARCHIVE_MONSTERS && UiArchiveInDetail(mx))
+            UiArchiveScrollDetail(delta>0?-2:2);
         else {
             int count=UiArchiveEntryCount()+1;
             UiArchiveSelect((UiArchiveSelection()+(delta>0?count-1:1))%count);
@@ -400,6 +381,15 @@ void CanityPointerDown(int x,int y) {
 void CanityPointerMove(int x,int y) {
     if(!pointerActive){CanityMouseMove(x,y);return;}
     if(currentState!=pointerState || (currentState==STATE_SAFEHOUSE && shopPage!=pointerPage)){CanityPointerCancel();return;}
+    if(currentState==STATE_BESTIARY && UiArchiveTab()==ARCHIVE_EVENTS){
+        int threshold=UIS(20),dy=y-pointerY;
+        if(dy>=threshold || dy<=-threshold){
+            CanityMouseWheel(dy>0?120:-120,pointerX,pointerY);
+            pointerY=y;
+            pointerDragged=1;
+        }
+        return;
+    }
     int tree=currentState==STATE_HUB || (currentState==STATE_SAFEHOUSE && shopPage==SHP_TREE);
     if(tree && (pointerDragged || abs(x-pointerX)+abs(y-pointerY)>UIS(6))) {
         if(!pointerDragged){
@@ -467,13 +457,27 @@ static void BenchClick(int node, int button) {
 void CanityMouseClick(int mx, int my) {
     if(ProtocolCinematicSkip()) return;
     if (currentState != STATE_SAFEHOUSE || shopPage != SHP_TREE) benchClickNode = -1;
-    if(TacticalInputClick(mx,my) || UiArchiveTierClick(mx,my))return;
+    if(TacticalInputClick(mx,my))return;
+    if(currentState==STATE_BESTIARY){
+        if(UiArchiveTierClick(mx,my))return;
+        int tab=UiArchiveTabAt(mx,my);
+        if(tab>=0){UiArchiveSetTab(tab);return;}
+        int scroll=UiArchiveDetailButtonAt(mx,my);
+        if(scroll){UiArchiveScrollDetail(scroll*2);return;}
+        int row=UiArchiveRowAt(mx,my);
+        if(row>=0){
+            UiArchiveSelect(row);
+            if(row==UiArchiveEntryCount()){currentState=STATE_MAIN_MENU;menuSelection=0;}
+        }
+        return;
+    }
     if(exitChoiceOpen && currentState==STATE_PLAYING){
         for(int i=0;i<2;i++){RECT r;ExitChoiceButtonRect(i,&r);if(mx>=r.left && mx<r.right && my>=r.top && my<r.bottom){RunExitChoiceKey(i?'2':'1');break;}}return;
     }
     if(LoopRunReplacementPending()){
         for(int i=0;i<2;i++){RECT r;RunReplacementButtonRect(i,&r);if(mx>=r.left && mx<r.right && my>=r.top && my<r.bottom){LoopResolveRunReplacement(i);return;}}return;
     }
+    if(currentState==STATE_GAMEOVER){ActivateMenuItem();return;}
     if(currentState==STATE_SKILL_PICK){int i=SkillPickAt(mx,my);if(i>=0){skillPickSel=i;CloseSkillPick();}return;}
     if(currentState==STATE_HELP){HelpBookClick(mx,my);return;}
     if(currentState==STATE_SAFEHOUSE && shopPage==SHP_SHOP){RECT r;ShopRefreshButtonRect(&r);
@@ -498,6 +502,7 @@ void CanityMouseClick(int mx, int my) {
         return;
     }
 
+    if(MainMenuUnlockRole(mx,my))return;
     int trial=MainMenuTrialRole(mx,my);
     if (trial>=0) {LoopQueueStart(START_TRAINING,trial+1);StartGame();return;}
 
@@ -593,7 +598,7 @@ void CanityMouseClick(int mx, int my) {
     }
     if (currentState == STATE_SETTINGS || currentState == STATE_HUB ||
         currentState == STATE_SAFEHOUSE || currentState == STATE_ACHIEVEMENTS ||
-        currentState == STATE_BESTIARY || currentState == STATE_BANK) {
+        currentState == STATE_BANK) {
         HitTestMenu(mx, my);
         uiDirty = 1;
     }
@@ -654,6 +659,7 @@ static void KeyHandleMainMenu(const MenuKeyInput* key) {
     const int menuDown = key->down;
     const int menuConfirm = key->confirm;
     if (!key->repeat && key->cancel && MainMenuBack()) return;
+    if (!key->repeat && vk=='U' && MainMenuUnlockRole(-1,-1))return;
     if (!key->repeat && vk=='T') {
         int role=MainMenuTrialRole(-1,-1);
         if (role>=0) {LoopQueueStart(START_TRAINING,role+1);StartGame();return;}
@@ -952,9 +958,9 @@ static void KeyHandleBank(const MenuKeyInput* key) {
 
 static void KeyHandleBestiary(const MenuKeyInput* key) {
     if(key->cancel){currentState=STATE_MAIN_MENU;menuSelection=0;uiDirty=1;return;}
-    if(!key->repeat && key->vk==VK_TAB){UiArchiveSetTab(1-UiArchiveTab());return;}
-    if(key->left){UiArchiveSetTab(ARCHIVE_MONSTERS);return;}
-    if(key->right){UiArchiveSetTab(ARCHIVE_ROOMS);return;}
+    if(!key->repeat && key->vk==VK_TAB){UiArchiveSetTab((UiArchiveTab()+1)%ARCHIVE_TAB_COUNT);return;}
+    if(key->left){UiArchiveSetTab((UiArchiveTab()+ARCHIVE_TAB_COUNT-1)%ARCHIVE_TAB_COUNT);return;}
+    if(key->right){UiArchiveSetTab((UiArchiveTab()+1)%ARCHIVE_TAB_COUNT);return;}
     if(key->vk==VK_PRIOR){UiArchiveScrollDetail(-2);return;}
     if(key->vk==VK_NEXT){UiArchiveScrollDetail(2);return;}
     int count=UiArchiveEntryCount()+1,selected=UiArchiveSelection();

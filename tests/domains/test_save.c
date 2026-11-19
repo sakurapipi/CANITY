@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 /* tests/domains/test_save.c —— save 域的集成测试
  *
  * 第 5 轮（2026-11-08）从 test_runtime.c 原样搬过来，断言一条没改。
@@ -6,6 +7,7 @@
 #include "../test_common.h"
 #include "plat.h"
 #include "threat_tier.h"
+#include "throwing.h"
 #include <stddef.h>
 
 static void test_legacy_fixture_one(const char* file, int oldVer, int wantPayload,
@@ -992,6 +994,63 @@ static void test_daily_clear_reward_persists(void) {
           "another date has an independent final clear reward");
 }
 
+static void test_floor_rules_and_flare_roundtrip(void) {
+    clear_meta();
+    StartFreshTestRun();
+    int normalCap=BatteryMax();
+    unsigned char event[EVENT_WIRE_BYTES]={0};
+    event[0]=1;event[4]=(unsigned char)currentLevel;
+    event[8]=EV_BLACKOUT+1;
+    CHECK(EventWireRestore(event,sizeof event,currentLevel),"blackout fixture restores");
+    battery=120;
+    EventActivateFloor();
+    CHECK(battery==60 && BatteryMax()==normalCap,"blackout halves charge once without lowering its cap");
+
+    sanity = 25.0f;
+    thrown[0] = (Thrown){.active=1, .type=0, .x=posX, .y=posY,
+                         .life=FLARE_LIFE_SECONDS - 2.0f};
+    FlareHealTick(1.0f);
+    float remaining = FlareHealBudgetLeft();
+    CHECK(remaining < FLARE_HEAL_FLOOR_BUDGET, "landed flare spends part of the floor budget");
+
+    SaveGame();
+    CHECK(g_saveState == 1, "floor rules save successfully");
+    FlareHealReset();
+    memset(thrown, 0, sizeof thrown);
+    levelEvent = -1;
+
+    CHECK(LoadSettings(), "floor rules save can be loaded");
+    ContinueRun();
+    EventActivateFloor();
+    CHECK(levelEvent==EV_BLACKOUT && BatteryMax()==normalCap && battery==60,
+          "continue restores blackout without repeating the entry charge penalty");
+    CHECK(fabsf(FlareHealBudgetLeft() - remaining) < 0.001f,
+          "continue retains the spent flare healing budget");
+    CHECK(thrown[0].active && thrown[0].type == 0 &&
+          thrown[0].life == FLARE_LIFE_SECONDS - 2.0f && thrown[0].z == 0.0f,
+          "continue retains the landed flare and its remaining life");
+}
+
+static void test_role_reward_persists_once(void) {
+    clear_meta();
+    ResetRunModeFlags();
+    currentState=STATE_MAIN_MENU;
+    bankGold=2*PROTOCOL_ROLE_PRICE;
+    protocolProfile=(ProtocolProfile){.briefSeen=1};
+    SaveGame();
+    CHECK(SaveUnlockRole(1) && WalletBank()==PROTOCOL_ROLE_PRICE,
+          "buying a character without completing the story charges exactly one price");
+    protocolProfile.endings|=PROTOCOL_STORY_COMPLETE;
+    SaveGame();
+    CHECK(ProtocolFreeRoleReward() && SaveUnlockRole(2) && WalletBank()==PROTOCOL_ROLE_PRICE,
+          "the completed story grants one unowned character for free");
+    LoadSettings();
+    CHECK(ProtocolRoleUnlocked(1) && ProtocolRoleUnlocked(2) && !ProtocolFreeRoleReward(),
+          "role ownership and the spent free choice persist");
+    CHECK(SaveUnlockRole(3) && WalletBank()==0 && !SaveUnlockRole(3),
+          "the remaining character has a separate price and cannot be bought again");
+}
+
 void TestSuite_save(void) {
     test_full_chunk_capacity_and_schemas();
     test_rc246_delete_results();
@@ -1004,6 +1063,7 @@ void TestSuite_save(void) {
     test_v37_prefix_is_migrated_to_current();
     test_continue_rejects_invalid_exit_and_facing();
     test_save_v34_items();
+    test_floor_rules_and_flare_roundtrip();
     test_training_items_do_not_leak();
     test_menu_save_keeps_run();
     test_corrupt_save_is_never_overwritten();
@@ -1013,6 +1073,7 @@ void TestSuite_save(void) {
     test_difficulty_roundtrips_through_save();
     test_wallet_save();
     test_daily_clear_reward_persists();
+    test_role_reward_persists_once();
     test_save_unknown_chunk_roundtrip();
     test_save_backend_errors();
 }

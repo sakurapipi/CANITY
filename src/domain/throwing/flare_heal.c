@@ -23,6 +23,9 @@ static float s_floorFlareHealed = 0.0f;
 
 void FlareHealReset(void) { s_floorFlareHealed = 0.0f; }
 float FlareHealBudgetLeft(void) { return FLARE_HEAL_FLOOR_BUDGET - s_floorFlareHealed; }
+void FlareHealRestoreBudget(float remaining) {
+    s_floorFlareHealed = FLARE_HEAL_FLOOR_BUDGET - fminf(FLARE_HEAL_FLOOR_BUDGET, fmaxf(0, remaining));
+}
 
 void FlareHealTick(float dt) {
 

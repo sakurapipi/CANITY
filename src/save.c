@@ -1,3 +1,5 @@
+#include "save_legacy.h"
+#include "event_runtime.h"
 #include "story_visual.h"
 #include "protocol.h"
 #include "evolution_save.h"
@@ -53,6 +55,7 @@ extern int carryAtRunStart;
 #include "lockbox.h"   /* v3.0：读档要关锁盘 */
 
 static SaveBlob g_save;
+static void ContinueSavedRun(int fromCheckpoint);
 
 /* ------------------------------------------------------------------ */
 /* 存档路径                                                            */
@@ -703,7 +706,7 @@ static void CopyDisplaySettings(SaveBlob* s) {
 
 /* 训练场里 SaveGame 会整份跳过；但设置是在训练场里改的也得存。
    把当前存档读出来（没有就新建一份空档），只覆盖设置字段。 */
-static void SaveSettingsOnly(void) {
+static void SaveProfileAndSettings(int saveBank) {
     SaveBlob tmp = g_save;
     if (tmp.magic != SAVE_MAGIC || tmp.version != SAVE_VERSION ||
         tmp.saveSlot != g_saveSlot) {
@@ -715,6 +718,10 @@ static void SaveSettingsOnly(void) {
     }
     CopyDisplaySettings(&tmp);
     tmp.protocolProfileSave=protocolProfile;
+    if(saveBank) {
+        tmp.bankGoldSave=WalletBank();
+        tmp.bankHistMaxSave=bankHistMax;
+    }
     /* 训练场不写进度，但「通关过」和「无尽已解锁」是跨局记录，
        不能被一次只写设置的存档覆盖掉。 */
     tmp.gameClearedSave = gameCleared;
@@ -742,6 +749,7 @@ static void SaveSettingsOnly(void) {
     SaveDiag("SETTINGS FAILED all %d candidates", (int)SAVE_CAND_COUNT);
     g_saveState = 2;
 }
+static void SaveSettingsOnly(void) { SaveProfileAndSettings(0); }
 
 /* 训练/教程退出后，菜单要知道「真正的存档里还有没有一局」。
    直接读 g_save.hasRun，而不是沿用训练局强行置上的 hasSave。 */
@@ -1163,9 +1171,82 @@ static int CaptureStoryEntry(void) {
     return 1;
 }
 
+static int FloorRulesIndex(void) {
+    for (int i = 0; i < s_carryCount; i++)
+        if (s_carry[i].id == SC_FLOOR_RULES) return i;
+    return -1;
+}
+
+static int CaptureFloorRules(void) {
+    if (!g_save.hasRun || !runInProgress) return 1;
+    int index = FloorRulesIndex();
+    float budget = FlareHealBudgetLeft();
+    if (index < 0) {
+        if (budget == FLARE_HEAL_FLOOR_BUDGET) return 1;
+        int hasLegacy = 0;
+        for (int i = 0; i < s_carryCount; i++)
+            hasLegacy |= s_carry[i].id == SC_LEGACY29;
+        if (s_carryCount + !hasLegacy >= SAVE_CARRY_MAX) return 0;
+    } else if (s_carry[index].schema != 1) {
+        return 0;
+    }
+
+    unsigned char *bytes = malloc(SAVE_FLOOR_RULES_BYTES);
+    if (!bytes) return 0;
+    bytes[0] = 0; /* Older builds must not reinterpret a V1 event. */
+    memcpy(bytes + 1, &budget, sizeof budget);
+    if (index < 0) index = s_carryCount++;
+    else free(s_carry[index].data);
+    s_carry[index] = (SaveCarryChunk){SC_FLOOR_RULES, 1, SAVE_FLOOR_RULES_BYTES, bytes};
+    return 1;
+}
+
+static void RestoreFloorRules(int fromCheckpoint) {
+    EventResetRun();
+    FlareHealReset();
+    if (fromCheckpoint) return; /* Story checkpoints capture a fresh chapter. */
+    int index = FloorRulesIndex();
+    if (index < 0) return;
+    const SaveCarryChunk *chunk = &s_carry[index];
+    if (chunk->schema != 1 || chunk->size != SAVE_FLOOR_RULES_BYTES) return;
+    float budget;
+    memcpy(&budget, chunk->data + 1, sizeof budget);
+    FlareHealRestoreBudget(budget);
+}
+
+static int CaptureEvents(void) {
+    if (!g_save.hasRun || !runInProgress) return 1;
+    int index=-1, legacy=0;
+    for(int i=0;i<s_carryCount;i++) {
+        if(s_carry[i].id==SC_EVENT_V1) index=i;
+        if(s_carry[i].id==SC_LEGACY29) legacy=1;
+    }
+    unsigned char bytes[EVENT_WIRE_BYTES];
+    if (!EventWireEncode(bytes)) return 1;
+    if(index>=0 && s_carry[index].schema!=1) return levelEvent<0;
+    if(index<0 && s_carryCount+!legacy>=SAVE_CARRY_MAX) return levelEvent<0 && eventBonus==0;
+    unsigned char *copy=malloc(sizeof bytes);
+    if(!copy)return 0;
+    memcpy(copy,bytes,sizeof bytes);
+    if(index<0)index=s_carryCount++;
+    else free(s_carry[index].data);
+    s_carry[index]=(SaveCarryChunk){SC_EVENT_V1,1,sizeof bytes,copy};
+    return 1;
+}
+
+static void RestoreEvents(int fromCheckpoint) {
+    if(fromCheckpoint || trainingMode || campaignMode || dailyMode || protocolRun.story) return;
+    for(int i=0;i<s_carryCount;i++) {
+        const SaveCarryChunk *chunk=&s_carry[i];
+        if(chunk->id!=SC_EVENT_V1 || chunk->schema!=1)continue;
+        if(EventWireRestore(chunk->data,(int)chunk->size,currentLevel)) EventPlaceFloor();
+        return;
+    }
+}
+
 static void WriteSaveCandidates(void) {
     if(!CaptureEvolutionChunks()){g_saveState=2;g_saveError=SaveEvolutionSchemaSupported()?SAVE_ERR_CAPACITY:SAVE_ERR_PAYLOAD;return;}
-    if (captureStoryEntry && !CaptureStoryEntry()) {
+    if (!CaptureFloorRules() || !CaptureEvents() || (captureStoryEntry && !CaptureStoryEntry())) {
         g_saveState=2;g_saveError=SAVE_ERR_CAPACITY;return;
     }
     /* 逐个候选试写，第一个成功的就用它 */
@@ -1270,7 +1351,7 @@ void SaveGame(void) {
      * 后果：玩家回主菜单改个设置再 Continue，房间会重新生成、
      *       已用舱门复位、三类投掷物与爆脸怪计数清零。
      * ================================================================ */
-    enum { RUN_SPAN_COUNT = 4 };
+    enum { RUN_SPAN_COUNT = 5 };
     typedef struct { size_t off, len; } RunSpan;
     RunSpan runSpans[RUN_SPAN_COUNT];
     runSpans[0].off = offsetof(SaveBlob, hasRun);
@@ -1279,6 +1360,8 @@ void SaveGame(void) {
     runSpans[1].len = sizeof(int);
     runSpans[3].off=offsetof(SaveBlob,roomEventSpent);
     runSpans[3].len=offsetof(SaveBlob,protocolProfileSave)-runSpans[3].off;
+    runSpans[4].off = offsetof(SaveBlob, modBatteryMul);
+    runSpans[4].len = offsetof(SaveBlob, weaponAttach) - runSpans[4].off;
     runSpans[2].off = offsetof(SaveBlob, roomSeed);
     /* 第 6 轮：末尾多了 rngVersion —— 它也是"运行态"（读档重放要用），
        所以这一段必须把它包进来，否则回主菜单存盘会把它清成 0（旧序列），
@@ -1328,11 +1411,12 @@ void SaveStoryEntry(void) {
 
 int SaveRetryStory(void) {
     int i=StoryCheckpointIndex();
-    if (i<0 || s_carry[i].schema!=1 || s_carry[i].size!=sizeof g_save) return 0;
+    if (!ProtocolPeacefulStory() || i<0 || s_carry[i].schema!=1 || s_carry[i].size!=sizeof g_save) return 0;
     SaveBlob entry;
     memcpy(&entry,s_carry[i].data,sizeof entry);
     if (entry.magic!=SAVE_MAGIC || entry.version!=SAVE_VERSION || !entry.hasRun ||
-        entry.saveSlot!=g_saveSlot || entry.protocolRunSave.story!=protocolRun.story) return 0;
+        entry.saveSlot!=g_saveSlot || !(entry.protocolRunSave.flags&PROTOCOL_MISSIONS) ||
+        entry.protocolRunSave.story!=protocolRun.story) return 0;
 
     /* Retry restores the run. Profile grants and the player's settings remain committed. */
     memcpy(&g_save.hasRun,&entry.hasRun,offsetof(SaveBlob,hudDetail)-offsetof(SaveBlob,hasRun));
@@ -1343,7 +1427,7 @@ int SaveRetryStory(void) {
     g_save.campaignMode=0;
     g_save.bankGoldSave=WalletBank();
     g_save.bankHistMaxSave=bankHistMax;
-    ContinueRun();
+    ContinueSavedRun(1);
     ThreatTierRestore(currentLevel,ProtocolTier(0),0);
     CommitThreatTierForFloor(currentLevel);
     EvolutionResetFloor();
@@ -1523,128 +1607,6 @@ typedef struct {
 
 typedef char container_must_be_40[(sizeof(Container) == 40) ? 1 : -1];
 typedef char map_must_be_at_least_24[((MAP_WIDTH >= 24) && (MAP_HEIGHT >= 24)) ? 1 : -1];
-
-/* 计算"老布局"各段的偏移与长度。返回 0 = 不合理。 */
-static int LegacySpan(int containerBytes, int containerCount, int mapW, int mapH,
-                      size_t* preLen, size_t* oldContSz, size_t* oldMapSz,
-                      size_t* oldExplSz, size_t* oldTailOff) {
-    if (containerBytes != 32 && containerBytes != (int)sizeof(Container)) return 0;
-    if (containerCount <= 0 || containerCount > MAX_CONTAINERS) return 0;
-    if (mapW <= 0 || mapH <= 0 || mapW > MAP_WIDTH || mapH > MAP_HEIGHT) return 0;
-
-    size_t pre = offsetof(SaveBlob, cont);
-    size_t contSz = (size_t)containerBytes * (size_t)containerCount;
-    size_t mapSz  = (size_t)mapW * (size_t)mapH * sizeof(int);
-    size_t explSz = mapSz;
-
-    if (preLen)     *preLen = pre;
-    if (oldContSz)  *oldContSz = contSz;
-    if (oldMapSz)   *oldMapSz = mapSz;
-    if (oldExplSz)  *oldExplSz = explSz;
-    if (oldTailOff) *oldTailOff = pre + contSz + mapSz + explSz;
-    return 1;
-}
-
-static int LoadLegacyBlob(const unsigned char* src, size_t size,
-                          int containerBytes, int containerCount,
-                          int mapW, int mapH, SaveBlob* out) {
-    size_t preLen = 0, oldContSz = 0, oldMapSz = 0, oldExplSz = 0, oldTailOff = 0;
-    if (!src || !out || size < 16) return 0;
-    if (!LegacySpan(containerBytes, containerCount, mapW, mapH,
-                    &preLen, &oldContSz, &oldMapSz, &oldExplSz, &oldTailOff)) return 0;
-
-    memset(out, 0, sizeof(*out));
-
-    /* ---- ① 前缀（cont 之前两种布局完全相同） ---- */
-    memcpy(out, src, (preLen < size) ? preLen : size);
-
-    /* ---- ② cont[] 逐字段展开 ---- */
-    {
-        size_t off = preLen;
-        for (int i = 0; i < containerCount && i < MAX_CONTAINERS; i++) {
-            if (off + (size_t)containerBytes > size) break;
-            const unsigned char* p = src + off;
-            if (containerBytes == (int)sizeof(Container)) {
-                memcpy(&out->cont[i], p, sizeof(Container));
-            } else {
-                memcpy(&out->cont[i].x,        p + 0,  sizeof(float));
-                memcpy(&out->cont[i].y,        p + 4,  sizeof(float));
-                memcpy(&out->cont[i].active,   p + 8,  sizeof(int));
-                memcpy(&out->cont[i].searched, p + 12, sizeof(int));
-                memcpy(&out->cont[i].content,  p + 16, sizeof(int));
-                memcpy(&out->cont[i].locked,   p + 20, sizeof(int));
-                memcpy(&out->cont[i].lockType, p + 24, sizeof(int));
-                memcpy(&out->cont[i].lockCode, p + 28, sizeof(int));
-                out->cont[i].mimicShell = 0;
-                out->cont[i].mimicHost  = 0;
-            }
-            off += (size_t)containerBytes;
-        }
-    }
-
-    /* ---- ③ worldMap：24 宽 -> 36 宽，逐格重排 ---- */
-    {
-        size_t oldMapOff = preLen + oldContSz;
-        size_t newMapOff = offsetof(SaveBlob, worldMap);
-        if (oldMapOff != newMapOff && oldMapSz != 0) {
-            /* 偏移不同也没关系：我们从 src 的 oldMapOff 读、写到结构里的 worldMap */
-        }
-        for (int y = 0; y < mapH; y++) {
-            for (int x = 0; x < mapW; x++) {
-                size_t o = oldMapOff + ((size_t)y * (size_t)mapW + (size_t)x) * sizeof(int);
-                if (o + sizeof(int) > size) continue;
-                int v = 0;
-                memcpy(&v, src + o, sizeof(int));
-                out->worldMap[y][x] = v;
-            }
-        }
-        /* 新地图多出来的区域：一律当作**墙** —— 老档没有那些格子，
-           给 0 会造出一片穿越地图边界的空地。 */
-        for (int y = 0; y < MAP_HEIGHT; y++)
-            for (int x = 0; x < MAP_WIDTH; x++) {
-                if (x < mapW && y < mapH) continue;
-                out->worldMap[y][x] = 1;
-            }
-    }
-
-    /* ---- ④ explored：同样逐格重排，多出来的留 0（未探索） ---- */
-    {
-        size_t oldExplOff = preLen + oldContSz + oldMapSz;
-        for (int y = 0; y < mapH; y++)
-            for (int x = 0; x < mapW; x++) {
-                size_t o = oldExplOff + ((size_t)y * (size_t)mapW + (size_t)x) * sizeof(int);
-                if (o + sizeof(int) > size) continue;
-                int v = 0;
-                memcpy(&v, src + o, sizeof(int));
-                out->explored[y][x] = v;
-            }
-    }
-
-    /* ---- ⑤ 尾部整体后移 ---- */
-    {
-        size_t newTailOff = offsetof(SaveBlob, flares);
-        if (size > oldTailOff) {
-            size_t n = size - oldTailOff;
-            size_t cap = sizeof(SaveBlob) - newTailOff;
-            if (n > cap) n = cap;
-            memcpy((unsigned char*)out + newTailOff, src + oldTailOff, n);
-        }
-    }
-    return 1;
-}
-
-/* 迁移之后，"当前布局里有多少字节是有效的" */
-static size_t LegacyValidBytes(size_t oldSize, int containerBytes, int containerCount,
-                               int mapW, int mapH) {
-    size_t oldTailOff = 0;
-    if (!LegacySpan(containerBytes, containerCount, mapW, mapH,
-                    NULL, NULL, NULL, NULL, &oldTailOff)) return 0;
-    size_t newTailOff = offsetof(SaveBlob, flares);
-    size_t tail = (oldSize > oldTailOff) ? (oldSize - oldTailOff) : 0;
-    size_t v = newTailOff + tail;
-    if (v > sizeof(SaveBlob)) v = sizeof(SaveBlob);
-    return v;
-}
 
 typedef char legacySave24_must_fit[(sizeof(LegacySaveV24) <= sizeof(SaveBlob)) ? 1 : -1];
 
@@ -1936,6 +1898,10 @@ static void ApplyLoadedSettings(const LoadedSaveInfo* info) {
 }
 
 static void RestoreLoadedProgress(const LoadedSaveInfo* info) {
+    if (g_save.protocolRunSave.story &&
+        (!(g_save.protocolRunSave.flags&PROTOCOL_MISSIONS) ||
+         g_save.protocolRunSave.story<1 || g_save.protocolRunSave.story>3))
+        g_save.hasRun=0; /* Retired story: retain the profile, bank and unlocks. */
     InventoryOrderRestore(NULL,0);
     for (int i=0;i<s_carryCount;i++) if(s_carry[i].id==SC_INVENTORY_ORDER && s_carry[i].schema==1){
         InventoryOrderRestore(s_carry[i].data,(int)s_carry[i].size);
@@ -1944,8 +1910,8 @@ static void RestoreLoadedProgress(const LoadedSaveInfo* info) {
     protocolProfile=g_save.protocolProfileSave;
     if (info->fileSize < offsetof(SaveBlob,protocolProfileSave)+sizeof(ProtocolProfile))
         protocolProfile.briefSeen=1;
-    protocolProfile.unlocked &= 14u;
-    protocolProfile.endings &= 7u;
+    protocolProfile.unlocked &= PROTOCOL_SPECIAL_ROLE_MASK;
+    protocolProfile.endings &= 3u|PROTOCOL_STORY_COMPLETE|PROTOCOL_STORY_ROLE_CLAIMED;
     if (protocolProfile.guide<0 || protocolProfile.guide>2) protocolProfile.guide=0;
     if (!ProtocolSelectRole((int)protocolProfile.selected)) protocolProfile.selected=0;
     /* v7 新增：恢复成就数据（如果存档里有）。
@@ -2226,7 +2192,6 @@ static void RestoreRunInventory(void) {
     if (!(modSpeedMul > 0.0f)) modSpeedMul = 1.0f;
     themeId = g_save.themeId;
     if (themeId < 0 || themeId >= THEME_COUNT) themeId = 0;
-    for (int i = 0; i < MAX_THROWN; i++) thrown[i] = g_save.thr[i];
 
     /* v9：把新存的进度接回来（顺手夹一下，坏存档不至于把数量弄成负数） */
     bricks      = g_save.bricks;      CLAMP_ITEM_RARE(bricks);
@@ -2329,8 +2294,19 @@ static void RestoreUsableHideSpots(void){
 
 static void ResumeRestoredRun(void) {
     DecoyResetFloor();
-    memset(thrown,0,sizeof thrown);
-    FlareHealReset();
+    memset(thrown, 0, sizeof thrown);
+    for (int i = 0; i < MAX_THROWN; i++) {
+        const Thrown *flare = &g_save.thr[i];
+        if (!flare->active || flare->type != 0 || !isfinite(flare->z) ||
+            flare->z < 0 || flare->z > SHOT_HEIGHT ||
+            !(flare->life > 0 && flare->life <= FLARE_LIFE_SECONDS) ||
+            !(fabsf(flare->vx) <= SHOT_MAX_SPEED && fabsf(flare->vy) <= SHOT_MAX_SPEED &&
+              fabsf(flare->vz) <= SHOT_MAX_SPEED) ||
+            !(flare->x >= 0 && flare->x < MAP_WIDTH && flare->y >= 0 && flare->y < MAP_HEIGHT) ||
+            ShotBlocked(flare->x, flare->y))
+            continue;
+        thrown[i] = *flare;
+    }
     /* 读档不重掷跳脸虫：本关不会突然蹦出来。
        触发器留成 -1，等下一层进关时再掷。 */
     jumperTrigger = -1.0f;
@@ -2366,7 +2342,7 @@ static void ResumeRestoredRun(void) {
     #undef CLAMP_ITEM_RARE
 }
 
-void ContinueRun(void) {
+static void ContinueSavedRun(int fromCheckpoint) {
     if (!SaveEvolutionSchemaSupported()) {
         g_saveState = 2;
         g_saveError = SAVE_ERR_PAYLOAD;
@@ -2403,6 +2379,7 @@ void ContinueRun(void) {
         return;
     }
     ResetRunModeFlags();
+    RestoreFloorRules(fromCheckpoint);
     { 
 
 
@@ -2481,6 +2458,7 @@ void ContinueRun(void) {
     RestoreUsableHideSpots();
     RestoreRunInventory();
     RestoreRunEquipment();
+    RestoreEvents(fromCheckpoint);
     roomTheme.spent=g_save.roomEventSpent?1:0;
     RoomThemeSetMadness(g_save.runMadness);
     RoomThemeLoadEvent(g_save.roomEventKindV43,g_save.roomEventTimeV43);
@@ -2512,6 +2490,8 @@ void ContinueRun(void) {
         SaveGame();
     }
 }
+
+void ContinueRun(void) { ContinueSavedRun(0); }
 
 void DeleteSave(void) {
     int error = SaveBackendDeleteSlot(g_saveSlot);
@@ -2567,6 +2547,22 @@ int SaveAwardDailyClear(void) {
     s_carry[index] = previous;
     if (appended) s_carryCount--;
     free(bytes);
+    return 0;
+}
+
+int SaveUnlockRole(int role) {
+    if(role<1 || role>3 || ProtocolRoleUnlocked(role))return 0;
+    ProtocolProfile before=protocolProfile;
+    int bankBefore=WalletBank();
+    int freeReward=ProtocolFreeRoleReward();
+    if(!freeReward && !WalletSpendBank(PROTOCOL_ROLE_PRICE))return 0;
+    if(freeReward)protocolProfile.endings|=PROTOCOL_STORY_ROLE_CLAIMED;
+    protocolProfile.unlocked|=1u<<role;
+    ProtocolSelectRole(role);
+    SaveProfileAndSettings(1);
+    if(g_saveState==1)return 1;
+    protocolProfile=before;
+    bankGold=bankBefore;
     return 0;
 }
 

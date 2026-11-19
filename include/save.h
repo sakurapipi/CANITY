@@ -32,6 +32,7 @@
 #ifndef SAVE_FILE
 #define SAVE_FILE "canity.sav"
 int SaveAwardTrainingGraduation(void);
+
 int SaveAwardDailyClear(void);
 #endif
 
@@ -384,6 +385,7 @@ int SaveRetryStory(void);
 void DeleteSave(void);
 
 int SaveAwardTrainingGraduation(void);
+int SaveUnlockRole(int role);
 /* 2026-11-16：存档诊断（只读记录，写入 canity_save.log）。 */
 void SaveDiag(const char* fmt, ...);
 /* Actual diagnostics destination, or empty when no writable sink was found. */

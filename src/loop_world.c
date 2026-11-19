@@ -83,9 +83,6 @@ int EndlessUnlocked(void) {
     return (bestLevel >= 10) || gameCleared || (gameWon && !ProtocolPeacefulStory());
 }
 
-int EventScore(int ev) {
-    return EventScoreOf(ev);   /* v6：查 events.c 的表 */
-}
 
 int UpgradeLevel(int kind) {
     switch (kind) {

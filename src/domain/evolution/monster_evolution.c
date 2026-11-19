@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 /* Bounded sidecars: no SaveBlob layout changes and no hidden player tracking. */
 #include "common.h"
 #include "monster_evolution.h"
@@ -112,10 +113,10 @@ void EvolutionWebMiss(float x, float y, int anchors) {
         return;
     if (anchors && !Blocked(x - .8f, y) && !Blocked(x + .8f, y) && !Blocked(x, y - 1) &&
         !Blocked(x, y + 1)) {
-        evolution.zones[0] = (EvoZone){x - .65f, y, .70f, 2.5f, EVO_ZONE_WEB};
-        evolution.zones[1] = (EvoZone){x + .65f, y, .70f, 2.5f, EVO_ZONE_WEB};
+        evolution.zones[0] = (EvoZone){x - .65f, y, .70f, 2.5f*(EventBloodMoon()?1.10f:1), EVO_ZONE_WEB};
+        evolution.zones[1] = (EvoZone){x + .65f, y, .70f, 2.5f*(EventBloodMoon()?1.10f:1), EVO_ZONE_WEB};
     } else
-        evolution.zones[0] = (EvoZone){x, y, .6f, 2, EVO_ZONE_WEB};
+        evolution.zones[0] = (EvoZone){x, y, .6f, 2*(EventBloodMoon()?1.10f:1), EVO_ZONE_WEB};
 }
 float EvolutionWebSlow(float x, float y) {
     float mul = 1;

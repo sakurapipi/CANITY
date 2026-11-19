@@ -8,6 +8,8 @@ void UpdateShots(float dt);               /* 每帧飞行 + 落地分派 */
 void FlareHealTick(float dt);
 
 void FlareHealReset(void);
+float FlareHealBudgetLeft(void);
+void FlareHealRestoreBudget(float remaining);
 
 int ThrowableActorNear(float x, float y, float radius);
 

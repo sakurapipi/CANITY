@@ -4,11 +4,13 @@
 
 一款以探索、声音、光线与资源取舍为核心的第一人称像素恐怖逃生游戏，使用 C99 编写。
 
-**当前预发布版 v2.5.0 RC3，当前正式版 v2.4.9。** 地图为 36×36，容器槽为 12。RC3 使用 v46 存档，升级前请备份旧档。
+**当前预发布版 v2.5.0 RC4，当前正式版 v2.4.9。** 地图为 36×36，容器槽为 12。RC4 使用 v46 存档，升级前请备份旧档。
 
-[下载 v2.5.0 RC3](https://github.com/sakurapipi/CANITY/releases/tag/v2.5.0-RC3) · [RC3 更新与兼容说明](docs/RELEASE-v2.5.0-RC3.md)
+[下载 v2.5.0 RC4](https://github.com/sakurapipi/CANITY/releases/tag/v2.5.0-RC4) · [RC4 更新与兼容说明](docs/RELEASE-v2.5.0-RC4.md)
 
-「失序协议」新增三章剧情。分别用维修员的过载防线、档案员的记忆替身和隔离警卫的战术防御推进故事。三章没有游荡怪物，包含独立的场景材质、装置、现场记录和地图地标。经典探索保留生存玩法，局外技能对所有角色通用。
+「失序协议」新增三章剧情。分别用维修员的过载防线、档案员的记忆替身和隔离警卫的战术防御推进故事。三章没有游荡怪物，包含独立的场景材质、装置、现场记录和地图地标。经典探索保留生存玩法，局外技能对所有角色通用。旧八层剧情已退役，旧跑局无法继续，银行余额及已解锁内容保留。
+
+RC4 在经典和无尽模式中重做十种特殊事件，图鉴可查看规则与应对方法。剧情通关后可免费选一名特殊角色，其余可在角色档案中每人花 10,000 银行金币购买。也可跳过剧情，逐个购买。
 
 本轮加入冷蓝／蓝紫／琥珀黄／血红四色进化、七种战术工具、四个快捷槽，以及从游戏模型生成的分档图鉴。两棵技能树同步更新：局外侧重声障连线、偏振引导、反制断线等机制；局内侧重工具范围、时长和恢复数值。旧扳手次数制及相关技能已移除，所有等级统一冷却。
 
@@ -150,7 +152,7 @@ python -X utf8 tools/build_web.py --single
 先完成对应平台构建，再打包；下列命令使用最近一次完整验证报告：
 
 ```sh
-python -X utf8 tools/package_playable.py --include-web --label CANITY_v2.5.0-RC3 --notes docs/RELEASE-v2.5.0-RC3.md --acceptance-report work/codex-build/validation-summary.json --source-commit <完整提交SHA>
+python -X utf8 tools/package_playable.py --include-web --label CANITY_v2.5.0-RC4 --notes docs/RELEASE-v2.5.0-RC4.md --acceptance-report work/codex-build/validation-summary.json --source-commit <完整提交SHA>
 ```
 
 `--include-web` 要求网页构建已存在。默认打包 **Lite**：复制 EXE 与 `music/`、谱面和清单；只有用 `--embed-music` 构建 Full 版后，才可加 `--single-exe --embed-music` 打单文件 EXE 包。运行包记录源码、资源和验证摘要；报告与当前验证输入不匹配时拒绝套用。生成安装包不等于已经完成真实桌面或手机验收。

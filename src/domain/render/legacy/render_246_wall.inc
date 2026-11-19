@@ -74,7 +74,9 @@ static void RenderWallSurfaceLegacy246(int x, int halfH, const WallRay* ray) {
     float flash = flashTab[x];
     float torch = lightOnW ? (flash * reach * 0.62f) : 0.0f;
 
-    float lit = (amb * (lightOnW?.26f:.045f) + torch) * smokeDim;
+    float ambientMul=levelEvent==EV_BLACKOUT?.60f:1;
+    unsigned eventFog=EventFogAmount(perpWallDist);
+    float lit = (amb * (lightOnW?.26f:.045f)*ambientMul + torch) * smokeDim;
     if (side == 1) lit *= 0.62f;
 
     float cone = flash - 0.35f;
@@ -179,7 +181,9 @@ static void RenderWallSurfaceLegacy246(int x, int halfH, const WallRay* ray) {
         if (r > 255) r = 255;
         if (g > 255) g = 255;
         if (b > 255) b = 255;
-        *dst = (unsigned int)((r << 16) | (g << 8) | b);
+        unsigned color=(unsigned)((r<<16)|(g<<8)|b);
+        if(levelEvent==EV_BLOOD_MOON)color=EventFogBlend(color,0x3d2429u,40);
+        *dst=eventFog?EventFogBlend(color,0x27363fu,eventFog):color;
         dst += renderW;
     }
 

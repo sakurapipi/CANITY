@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "skills.h"
 /* One semantic marker per entity, cell-bounded glyphs and no blinking resources. */
 #include "map_markers.h"
@@ -14,7 +15,7 @@
 unsigned MapIconColor(int kind) {
     static const unsigned colors[MAP_ICON_COUNT]={
         0xFFE3A1,0xFFB65F,0xE1F0FF,0x8CBDFF,0xADFFF0,0xFF7864,
-        0xE2BDFF,0x9985B0,0xFFFAD2,0xFF7465,0xFF9B8C,0xFFDA77,0x80F0FF,0xFFEFE0,0xABD1FF,0xFFE8A1
+        0xE2BDFF,0x9985B0,0xFFFAD2,0xFF7465,0xFF9B8C,0xFFDA77,0x80F0FF,0xFFEFE0,0xABD1FF,0xFFE8A1,0xF4B265
     };
     return kind>=0 && kind<MAP_ICON_COUNT?colors[kind]:0xFFFFFF;
 }
@@ -24,7 +25,7 @@ int MapIconPixel(int kind,int x,int y) {
         {4,14,31,17,21}, {17,17,31,17,17}, {17,10,4,10,17},
         {4,14,27,14,4}, {4,10,17,10,4}, {4,6,31,6,4},
         {0,14,21,14,0}, {31,21,17,10,4},
-        {5,6,31,12,20}, {17,10,21,10,17}, {31,21,17,21,31}, {31,17,31,4,14}, {30,17,29,21,31}
+        {5,6,31,12,20}, {17,10,21,10,17}, {31,21,17,21,31}, {31,17,31,4,14}, {30,17,29,21,31}, {31,17,21,17,31}
     };
     return kind>=0 && kind<MAP_ICON_COUNT && x>=0 && x<5 && y>=0 && y<5 &&
            (glyphs[kind][y]&(1u<<(4-x)));
@@ -33,10 +34,10 @@ static int Cell(float x,float y,int* cx,int* cy) {
     if(!isfinite(x) || !isfinite(y) || x<0 || y<0 || x>=MAP_WIDTH || y>=MAP_HEIGHT)return 0;
     *cx=(int)x;*cy=(int)y;return 1;
 }
-static void Mark(unsigned short grid[MAP_HEIGHT][MAP_WIDTH],float x,float y,int kind,int reveal) {
+static void Mark(unsigned int grid[MAP_HEIGHT][MAP_WIDTH],float x,float y,int kind,int reveal) {
     int gridReveal=RoomThemeMapRevealed();
     int cx,cy;if(!Cell(x,y,&cx,&cy) || (!reveal && !gridReveal && !explored[cy][cx]))return;
-    grid[cy][cx]|=(unsigned short)(1u<<kind);
+    grid[cy][cx]|=1u<<kind;
 }
 static void Glyph(int x,int y,int size,int kind) {
     for(int dy=0;dy<size;dy++)for(int dx=0;dx<size;dx++) {
@@ -46,10 +47,16 @@ static void Glyph(int x,int y,int size,int kind) {
     }
 }
 void DrawMapMarkers(int ox,int oy,int cellSize) {
-    unsigned short grid[MAP_HEIGHT][MAP_WIDTH]={{0}};
+    unsigned int grid[MAP_HEIGHT][MAP_WIDTH]={{0}};
     for(int i=0;i<containerCount;i++) {
         Container* c=&containers[i];
         if(!c->active || c->searched)continue;
+        if(levelEvent==EV_SUPPLY && c->content==EVENT_CACHE_CONTENT) {
+            int x=(int)c->x,y=(int)c->y;
+            if((unsigned)x<MAP_WIDTH && (unsigned)y<MAP_HEIGHT && explored[y][x])
+                Mark(grid,c->x,c->y,MAP_ICON_CACHE,0);
+            continue;
+        }
         int kind=c->content==1?MAP_ICON_FUSE:MAP_ICON_CRATE;
         /* Echo is an alternate observation of this same crate, not another icon. */
         for(int j=0;j<ECHO_MARK_MAX;j++)if(echoMarkActive[j] && echoMarkT[j]>0 && echoMarkKind[j]!=0 &&
@@ -92,7 +99,7 @@ void DrawMapMarkers(int ox,int oy,int cellSize) {
         }
     }
     static const int priority[]={MAP_ICON_RECORD,MAP_ICON_COIL,MAP_ICON_RECEIVER,MAP_ICON_SHUTTER,MAP_ICON_TERMINAL,MAP_ICON_DEVICE,MAP_ICON_EXIT,MAP_ICON_BROKEN,MAP_ICON_THREAT,
-        MAP_ICON_MIMIC,MAP_ICON_HIDE,MAP_ICON_FUSE,MAP_ICON_BREAKER,MAP_ICON_SAFE,MAP_ICON_CRATE,MAP_ICON_SPENT};
+        MAP_ICON_CACHE,MAP_ICON_MIMIC,MAP_ICON_HIDE,MAP_ICON_FUSE,MAP_ICON_BREAKER,MAP_ICON_SAFE,MAP_ICON_CRATE,MAP_ICON_SPENT};
     int size=cellSize>=7?cellSize-2:cellSize;if(size>7)size=7;if(size<1)size=1;
     for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++) {
         unsigned mask=grid[y][x];if(!mask)continue;

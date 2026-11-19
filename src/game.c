@@ -1239,11 +1239,13 @@ void ActivateMenuItem(void) {
         }
     } else if (currentState == STATE_GAMEOVER) {
         if (protocolRun.story && !gameWon && menuSelection==0 && SaveRetryStory()) return;
+        int chooseRole=protocolRun.story && gameWon && ProtocolFreeRoleReward();
         /* 结算已落盘：清掉本局模式标志，避免带进下一次开局/继续。 */
         ResetRunModeFlags();
         hasSave=SaveHasPendingRun();
         currentState = STATE_MAIN_MENU;
         menuSelection = 0;
+        if(chooseRole)MainMenuOpenRoleReward();
         uiDirty = 1;
     }
 }
@@ -1410,19 +1412,9 @@ void HitTestMenu(int mx, int my) {
         return;
     }
 
-    /* v2.1：图鉴页以前**没有接鼠标** —— 悬停走的是最后的兜底分支，
-       改的是 menuSelection（跟这一页没关系），所以鼠标在这一页等于失效。
-       注意别让它掉进最后那个兜底：那里会调 ActivateMenuItem()，
-       用菜单那套下标去执行，在图鉴页上可能直接开始一局新游戏。 */
     if (currentState == STATE_BESTIARY) {
-        MenuGeo g = GetMenuGeo();
-        for (int i = g.scrollOffset; i < g.count && i < g.scrollOffset + g.maxVisibleRows; i++) {
-            RECT r = RowRect(g, i);
-            if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
-                if (UiArchiveSelection() != i) UiArchiveSelect(i);
-                return;
-            }
-        }
+        int row=UiArchiveRowAt(mx,my);
+        if(row>=0 && UiArchiveSelection()!=row)UiArchiveSelect(row);
         return;
     }
 

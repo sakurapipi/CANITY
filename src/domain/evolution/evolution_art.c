@@ -47,7 +47,7 @@ const char *EvolutionGuideText(int id, int tier) {
          "Remembers the last visible light point for 0.9s; does not track your new route.",
          "Afterimage + at most 5% more flashlight range; absolute cap 20 cells. Thrown lights "
          "unchanged.",
-         "After 1.8s continuous light: 0.40s warning, direction-locked 1.8-cell dash, 0.8s "
+         "After 1.8s continuous light: 0.60s warning, direction-locked 1.8-cell dash, 0.8s "
          "recovery / 14s cooldown. Cut light to cancel windup."},
         {"0.8s windup; timed web control; wrench disperses it for 30s. No damage.",
          "A missed shot leaves a 2s ground trace: -10% movement, no hard control.",
@@ -85,7 +85,7 @@ const char *EvolutionGuideText(int id, int tier) {
          "保留复查与限幅听觉；延迟1.2秒向一个同伴分享一个模糊声源点，不共享玩家实时位置。"},
         {"追随光源，关灯与遮挡仍有效。", "保留最后可见光点0.9秒，不读取关灯后的新位置。",
          "残光记忆＋主手电感光距离最多增加5%，绝对上限20格，投掷光球不变。",
-         "持续照射1.8秒后，前摇0.40秒，锁方向冲1.8格，后摇0.8秒，冷却14秒；前摇时关灯可取消。"},
+         "持续照射1.8秒后，前摇0.60秒，锁方向冲1.8格，后摇0.8秒，冷却14秒；前摇时关灯可取消。"},
         {"前摇0.8秒，定时蛛网控制；扳手驱散30秒，不造成伤害。",
          "落空留下2秒丝痕，移速降低10%，不触发强制束缚。",
          "保留丝痕；吐丝冷却由8秒降至7.5秒，挣脱规则不变。",

@@ -74,6 +74,8 @@ typedef struct {
     unsigned int   size;    /* 块数据字节数 */
 } SaveChunkDesc;
 
+#define SAVE_FLOOR_RULES_BYTES (1 + sizeof(float))
+
 /* ---- 已知块 id ---- */
 enum {
     SC_SETTINGS = 0x0001,   /* 显示 / 音频 / 键位 / 语言 —— 改设置时才变 */
@@ -84,6 +86,8 @@ enum {
     SC_DAILY_CLEAR = 0x0007, /* Profile clear reward date, four little-endian bytes */
     SC_PROTOCOL_CHECKPOINT = 0x000C,
     SC_INVENTORY_ORDER = 0x000D,
+    SC_EVENT_V1 = 0x000F,
+    SC_FLOOR_RULES = 0x000E, /* Schema 1: retired event byte, then float flare budget. */
     SC_WORLD    = 0x0004,   /* worldMap + explored */
     SC_LEGACY29 = 0x00FF,   /* 过渡期：整份 SaveBlob 原样字节 */
     SC_MAX_ID   = 0x00FF

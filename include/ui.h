@@ -32,6 +32,8 @@ typedef enum {
 MainMenuAction MainMenuResolve(void);
 int MainMenuBack(void);
 int MainMenuTrialRole(int x,int y);
+int MainMenuUnlockRole(int x,int y);
+void MainMenuOpenRoleReward(void);
 void UiDrawCharacterPortrait(int role,int cx,int cy,int pixel);
 int MainMenuCount(void);
 

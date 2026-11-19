@@ -1,7 +1,7 @@
 #ifndef CANITY_UI_ARCHIVE_H
 #define CANITY_UI_ARCHIVE_H
 #include "common.h"
-enum { ARCHIVE_MONSTERS=0, ARCHIVE_ROOMS=1 };
+enum { ARCHIVE_MONSTERS=0, ARCHIVE_ROOMS=1, ARCHIVE_EVENTS=2, ARCHIVE_TAB_COUNT };
 int UiArchiveTab(void);
 void UiArchiveOpen(void);
 void UiArchiveSetTab(int tab);
@@ -11,6 +11,8 @@ void UiArchiveSelect(int entry);
 MenuGeo UiArchiveGeometry(void);
 RECT UiArchiveTabRect(MenuGeo geometry,int tab);
 int UiArchiveTabAt(int x,int y);
+int UiArchiveRowAt(int x,int y);
+int UiArchiveInDetail(int x);
 void UiArchiveScrollDetail(int lines);
 int UiArchiveDetailButtonAt(int x,int y);
 void UiDrawArchivePage(MenuGeo geometry);

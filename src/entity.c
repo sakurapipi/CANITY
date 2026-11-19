@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "protocol.h"
 #include "monster_evolution.h"
 #include "threat_tier.h"
@@ -369,23 +370,11 @@ static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
             radius *= RoomThemeNoiseMul();
         radius *= TacticalNoiseMul(x, y);
     }
+    radius *= EventNoiseScale(walkingSource,sprinting,x,y);
     if (sourceRadius <= 14)
         RoomThemeRedirectNoise(&x, &y);
-    /* ==================================================================
-     * v7 第 ㊿ 轮：**事件的「怪物听觉」倍率一直是死的**
-     * ==================================================================
-     * events.h 里定义了 monsterHearMul，但全工程 0 个读取点。
-     * 于是「浓雾：怪物听觉 -20%」和「死寂：怪物听觉 +40%」
-     * 这两个描述**一个字都没发生** —— 玩家还会按它调整策略。
-     *
-     * 这里把它接进噪音半径：听觉倍率直接缩放"能传多远"。
-     * ================================================================ */
-    {
-
-           /* events.c 提供的取值函数 */
-        float h = EventMonsterHearMul(levelEvent);
-        if (h > 0.01f && h != 1.0f) radius *= h;
-    }
+    const EventDef *event=EventDefinition(levelEvent);
+    if(event)radius*=event->hearing;
 
     /* 听觉差异**不再在这里做** ——
        2026-11-03 用户改成分只在个体上（100/75/50%）。
@@ -530,7 +519,7 @@ void SpawnLightBeast2(void) {
 /* 2026-11-06：参数化成"更新指定那只"。
    照抄听声鬼 UpdateOneHunter(Monster* M, float dt) 的做法。 */
 static void UpdateOneLightBeast(Monster* L, float dt) {
-    if (L->active) L->speed = MonsterSpeedFor(currentLevel,LIGHTBEAST_SPEED_BASE,modSpeedMul);
+    if (L->active) L->speed = MonsterSpeedFor(currentLevel,LIGHTBEAST_SPEED_BASE,modSpeedMul*(EventBloodMoon()?1.06f:1));
     /* v3.0：**光敏怪也要更新朝向和步频** ——
        原来它从不更新 facing/walkPhase，画出来永远是朝 +X、双腿不动。 */
     {
@@ -546,7 +535,7 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
         L->prevY = L->y;
     }
 
-    if (!L->active) return;
+    if (!L->active || EventEntranceProtected()) return;
 
     /* 硬直：被玻璃瓶砸中后短暂不能动 */
     if (L->stun > 0.0f) {
@@ -582,6 +571,7 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
         float ax=tx+side,ay=ty-side;
         if(ax>1 && ay>1 && ax<MAP_WIDTH-1 && ay<MAP_HEIGHT-1 && !Blocked(ax,ay) && HasLOS(tx,ty,ax,ay)){tx=ax;ty=ay;}
         L->state = 1;
+        L->stateTimer = 0;
         L->tx = tx; L->ty = ty;
         L->repath -= dt;
         if (L->repath <= 0.0f) {
@@ -589,9 +579,13 @@ static void UpdateOneLightBeast(Monster* L, float dt) {
             MonPathFor(L, (int)L->x, (int)L->y, (int)tx, (int)ty);
         }
     } else if (L->state == 1) {
-        L->state = 0;
-        L->wanderTimer = 0.0f;
-        L->pathLen = 0;
+        if(EventBloodMoon() && L->stateTimer < .5f) {
+            L->stateTimer += dt;
+        } else {
+            L->state = 0;
+            L->wanderTimer = 0;
+            L->pathLen = 0;
+        }
     } else {
         L->wanderTimer -= dt;
         if (L->wanderTimer <= 0.0f && L->pathLen == 0) {
@@ -1181,7 +1175,7 @@ static int HunterUpdateState(Monster* M, float dt) {
         if(!playerInSafe && hiddenIn<0 && ultTimer<=0 && M->sightHold>0){M->tx=posX;M->ty=posY;M->huntTimer=0;}
         else M->huntTimer += dt;
         if (!CampaignNoGiveUp() && M->huntTimer > (HUNT_CHASE_MAX + ThreatChaseBonus())
-                        * (HunterIndex(M) == 2 ? HUNTER3_CHASE_MUL : 1.0f)) {
+                        * (HunterIndex(M) == 2 ? HUNTER3_CHASE_MUL : 1.0f)+(EventBloodMoon()?1:0)) {
             /* v7 第 50 轮：战役第 5 关的「永不放弃」原来只对第一只猎手生效
                （第一只在上面有 CampaignNoGiveUp 判断，这只没有）
                → 第 5 关实际上只有一半是"永不放弃"。 */
@@ -1420,7 +1414,8 @@ static void UpdateOneHunter(Monster* M, float dt) {
         M->stun = fmaxf(0, M->stun - dt);
         return;
     }
-    if (M->active) M->speed = HunterMoveSpeed((int)(M-monHunters),currentLevel,modSpeedMul,ThreatEffective());
+    if (EventEntranceProtected()) return;
+    if (M->active) M->speed = HunterMoveSpeed((int)(M-monHunters),currentLevel,modSpeedMul*(EventBloodMoon()?1.06f:1),ThreatEffective());
     HunterPerceive(M, dt);
     if(M->stun<=0 && EvolutionHunterOverride(M,dt))return;
     if (!HunterUpdateState(M, dt)) return;

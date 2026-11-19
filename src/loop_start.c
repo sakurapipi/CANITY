@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "protocol.h"
 #include "monster_evolution.h"
 #include "threat_tier.h"
@@ -217,6 +218,7 @@ static void InitializeRunScene(void) {
     fusesCollectedRun = 0;
     searchedCount = 0;
     sanity = SanityMax();
+    EventResetRun();
     battery = (float)BatteryMax();
     flashlightOn = DailyForbidLight() || HasKeystone(SK_SALVAGE) ? 0 : 1;
     stamina = StaminaMax();
@@ -231,8 +233,6 @@ static void InitializeRunScene(void) {
     /* v1.8：重置本局状态 */
     /* carryGold already contains the bank withdrawal. */
     bankStreak = 0;
-    eventBonus = 0;
-    levelEvent = -1;
     modsSeenMask = 0;
     modsSeenCount = 0;
     runSearched = 0;

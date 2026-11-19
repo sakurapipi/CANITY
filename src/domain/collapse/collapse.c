@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 /* src/domain/collapse/collapse.c —— 崩塌层
  *
  * 第 3 轮（2026-11-08）从 game.c 原样搬过来，逻辑一行没改。
@@ -19,6 +20,7 @@
 #include "map_rooms.h"    /* RoomProp / MAX_ROOM_PROPS */
 #include "hatch.h"        /* Hatch（快照要存舱门）*/
 #include "wallet.h"
+#include "item_effects.h"
 #include "map_validator.h" /* MapCheck / MapValidate */
 #include "render.h"        /* texture/themeId 等渲染侧全局（崩塌重掷要看）*/
 
@@ -53,7 +55,12 @@ typedef struct {
     /* 审计·中 7：这几项也会被 GenerateLevel 改掉，回滚时必须还原，
        否则地图回来了、墙面贴图/词条/事件却还是新层的。 */
     int   themeIdSave;
-    int   levelModSave;
+    int   levelModSave, levelEventSave;
+    int   flaresSave, bottlesSave;
+    float batterySave;
+    Thrown thrownSave[MAX_THROWN];
+    unsigned char eventState[EVENT_WIRE_BYTES];
+    int hasEventState;
     float modSanityMulSave, modSpeedMulSave;
     float modBatteryMulSave, modShardMulSave, modNoiseMulSave;
 } CollapseSnapshot;
@@ -81,6 +88,12 @@ static void CollapseSnapshotTake(void) {
     s_collapseSnap->posX  = posX;  s_collapseSnap->posY  = posY;
     s_collapseSnap->themeIdSave     = themeId;
     s_collapseSnap->levelModSave    = levelMod;
+    s_collapseSnap->levelEventSave  = levelEvent;
+    s_collapseSnap->hasEventState=EventWireEncode(s_collapseSnap->eventState);
+    s_collapseSnap->flaresSave      = flares;
+    s_collapseSnap->bottlesSave     = bottles;
+    s_collapseSnap->batterySave     = battery;
+    memcpy(s_collapseSnap->thrownSave, thrown, sizeof thrown);
     s_collapseSnap->modSanityMulSave = modSanityMul;
     s_collapseSnap->modSpeedMulSave  = modSpeedMul;
     s_collapseSnap->modBatteryMulSave = modBatteryMul;
@@ -111,6 +124,13 @@ static void CollapseSnapshotRestore(void) {
     fusesHeld = s_collapseSnap->fusesHeld;
     themeId      = s_collapseSnap->themeIdSave;
     levelMod     = s_collapseSnap->levelModSave;
+    if (s_collapseSnap->hasEventState &&
+        EventWireRestore(s_collapseSnap->eventState,EVENT_WIRE_BYTES,currentLevel)) EventPlaceFloor();
+    else {EventResetRun();levelEvent=s_collapseSnap->levelEventSave;}
+    flares       = s_collapseSnap->flaresSave;
+    bottles      = s_collapseSnap->bottlesSave;
+    battery      = s_collapseSnap->batterySave;
+    memcpy(thrown, s_collapseSnap->thrownSave, sizeof thrown);
     modSanityMul = s_collapseSnap->modSanityMulSave;
     modSpeedMul  = s_collapseSnap->modSpeedMulSave;
     modBatteryMul= s_collapseSnap->modBatteryMulSave;

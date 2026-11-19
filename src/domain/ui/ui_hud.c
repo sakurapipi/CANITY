@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "protocol.h"
 #include "interaction.h"
 #include "tactical_tools.h"
@@ -188,72 +189,6 @@ static void DrawHudRunHeader(int effDetail) {
         sprintf(buf, "%s", modNames[levelMod]);
         DrawTextWin(lx, UIS(18), buf, 0x00C08040u);
     }
-    /* v1.8：本层的随机事件（通过本层会给本局加分） */
-    /* v1.8：事件**不再单独占一行**。
-       原来画在 y=UIS(36)，而文字高度在小窗口下就有 30 多逻辑像素，
-       结果和 LEVEL / SANITY 叠在一起（截图里就是这样）。
-       现在并到首行右侧，跟词条同一行，永远不会撞。 */
-    if (effDetail >= 2 && levelEvent >= 0 && levelEvent < EVENT_COUNT) {
-        int ex = goldRowEnd;
-        if (levelMod >= 0 && levelMod < MOD_COUNT) {
-            char mb[32];
-            sprintf(mb, "%s", modNames[levelMod]);
-            ex += TextWidthWin(mb) + UIS(14);
-        }
-        /* 宽度不够时自动缩写，别让文字被窗口裁掉 */
-        /* ==================================================================
-         * v7 第 61 轮：**EventNameZh / EventDescZh 全工程 0 调用点**
-         * ==================================================================
-         * 中文界面下事件横幅永远是英文名，而且**每一层的规则说明
-         * 从来没有显示过** —— 玩家只能靠死来学"这层到底怎么了"。
-         *
-         * 现在：中文用中文名；横幅放不下时，把说明塞进底部提示行。
-         * ================================================================ */
-
-
-        int avail = winW - ex - UIS(12);
-        {
-            const char* en = (g_lang == LANG_ZH) ? EventNameZh(levelEvent) : EventNameEn(levelEvent);
-            sprintf(buf, "EVENT: %s +%d", en, EventScore(levelEvent));
-        }
-        if (TextWidthWin(buf) > avail) {
-            sprintf(buf, "EV: %s +%d", EventShortEn(levelEvent), EventScore(levelEvent));
-            if (TextWidthWin(buf) > avail) sprintf(buf, "+%d", EventScore(levelEvent));
-        }
-        DrawTextWin(ex, UIS(18), buf, 0x00E060C0u);
-
-        /* v7 第 62 轮：CampaignRule 全工程 0 调用点 —— 每关改的规则从没告诉过玩家 */
-        {
-
-
-            if (campaignMode && levelBanner > 3.0f) {
-                const char* r = (g_lang == LANG_ZH) ? CampaignRuleZh(campaignStage)
-                                                    : CampaignRule(campaignStage);
-                if (r && r[0]) {
-                    char rb[180];
-                    snprintf(rb, sizeof(rb), "%s", r);
-                    ClampRowText(rb, winW - UIS(32));
-                    DrawTextCenterWin(winW / 2, winH / 2 + UIS(40), rb, 0x0060D0FFu);
-                }
-            }
-        }
-
-        /* 规则说明：只在**本层刚开始的 6 秒**显示，不长期占屏 */
-        {
-
-            if (levelBanner > 3.0f) {
-                const char* desc = (g_lang == LANG_ZH) ? EventDescZh(levelEvent)
-                                                       : EventDescEn(levelEvent);
-                if (desc && desc[0]) {
-                    char db[160];
-                    snprintf(db, sizeof(db), "%s", desc);
-                    ClampRowText(db, winW - UIS(32));
-                    DrawTextCenterWin(winW / 2, winH / 2 + UIS(70), db, 0x00E060C0u);
-                }
-            }
-        }
-    }
-
     {
         int hy = UIS(18) + 5 * (TextHeightWin() + UIS(4));
         if (dailyMode) {
@@ -287,6 +222,36 @@ static void DrawHudRunHeader(int effDetail) {
 
 }
 
+static int DrawHudFloorEvent(int y,int effDetail) {
+    const EventDef *event=EventDefinition(levelEvent);
+    if(!event)return 0;
+    int x=UIS(20),pad=UIS(6),row=TextHeightWin()+UIS(4),maxWidth=winW*47/100;
+    int fit=(maxWidth-2*pad)*renderW/(winW>0?winW:1);
+    int textHeight=(FONT_H*winH+renderH-1)/(renderH>0?renderH:1);
+    char title[120];
+    const char *name=Tr(event->nameEn,event->nameZh);
+    snprintf(title,sizeof title,Tr("EVENT: %s","特殊事件：%s"),name);
+    if(TextSmallLiteralWidth(title)>fit)
+        snprintf(title,sizeof title,Tr("EVENT: %s","特殊事件：%s"),Tr(event->shortEn,event->shortZh));
+    UiTrimSmallText(title,fit);
+    int width=TextSmallLiteralWidth(title)*winW/(renderW>0?renderW:1)+2*pad;
+    BlendRectWin(x,y,x+width,y+row,UI_BG_PANEL,.76f);
+    BlendRectWin(x,y,x+UIS(2),y+row,event->color,.95f);
+    DrawTextSmallLiteralWin(x+pad,y+(row-textHeight)/2,title,event->color);
+
+    const char *line=EventPhaseLine();
+    if(!line && (EventElapsed()<2.5f || (isMapOpen && effDetail>=1)))
+        line=Tr(event->descEn,event->descZh);
+    if(!line)return row;
+    char detail[300];
+    snprintf(detail,sizeof detail,"%s",line);
+    UiTrimSmallText(detail,fit);
+    int detailWidth=TextSmallLiteralWidth(detail)*winW/(renderW>0?renderW:1)+2*pad;
+    BlendRectWin(x,y+row,x+detailWidth,y+2*row,UI_BG_PANEL,.70f);
+    DrawTextSmallLiteralWin(x+pad,y+row+(row-textHeight)/2,detail,UI_INK);
+    return 2*row;
+}
+
 static void DrawHudVitalsAndStatus(int effDetail) {
     char buf[96];
     /* v2.9：左列改用文字高累加，不再写死 18/52/86 ——
@@ -308,6 +273,8 @@ static void DrawHudVitalsAndStatus(int effDetail) {
         DrawTextWin(UIS(20), hudY2, buf, breakerOpen ? 0x0030FF60u : UI_ACCENT);
     }
 
+    int eventHeight=DrawHudFloorEvent(hudY2+hudTH+UIS(4),effDetail);
+
     /* ===== v3.4 左上角新增两行（用户要求）=====
        ① 带入金币 —— 这局手上还有多少可花
        ② 强度加成 —— 携带额占历史最高的百分比，
@@ -315,7 +282,7 @@ static void DrawHudVitalsAndStatus(int effDetail) {
        放在 FUSES 下面，和上面三行同一列。 */
     {
 
-        int hudY3 = hudY2 + hudTH + UIS(4);
+        int hudY3 = hudY2 + hudTH + UIS(4) + eventHeight;
         /* ===== v2.4.30 **新怪状态行（只保留能改变玩家决定的）** =====
            用户问「这行字有没有实用价值，没有就删掉」，判断标准定成一条：
 
@@ -510,7 +477,7 @@ static void DrawHudVitalsAndStatus(int effDetail) {
            所以 SLOWED 还是压在 BOOST 上（用户截图）。
            现在直接跟 BOOST 那一行对齐：
              BOOST 在 hudY3 + hudTH + UIS(4)，效果就从下一行开始。 */
-        int fy = UIS(18) + (hudTH + UIS(4)) * 6 + UIS(6);   /* 6 行 HUD 之后的下一行 */
+        int fy = UIS(18) + (hudTH + UIS(4)) * 6 + UIS(6) + eventHeight;   /* 6 行 HUD 之后的下一行 */
         for (int i = 0; i < FX_COUNT; i++) {
             float s = FxStrength(i);
             if (s <= 0.0f) continue;
@@ -1181,8 +1148,6 @@ static void DrawHudInteractionHints(const HudBarLayout* layout) {
             const char* action=(hoverIndex>=0 && hoverIndex<roomPropCount && roomProps[hoverIndex].kind>=ROOMPROP_THEME_FIRST)?Tr("INSPECT DEVICE","检修装置"):Tr("SEARCH","搜查");
             snprintf(pbuf,sizeof(pbuf),Tr("HOLD %s  %s  (%d LEFT)","按住%s  %s（剩%d次）"),VkName(g_bindings[ACT_INTERACT]),action,left);
         }
-        else if (protocolRun.story && !ProtocolBreakerReady())
-            snprintf(pbuf,sizeof pbuf,"%s",Tr("Connect the teaching capacitor first","先接通教学蓄电器"));
         else if (fusesHeld >= fusesNeeded)
             sprintf(pbuf, "HOLD %s  POWER ON", VkName(g_bindings[ACT_INTERACT]));
         else sprintf(pbuf, "NEED %d MORE FUSE", fusesNeeded - fusesHeld);

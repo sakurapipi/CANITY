@@ -1193,6 +1193,21 @@ static void DrawRunReplacement(void){
     }
 }
 
+static void DrawEventReferenceCard(int map) {
+    const EventDef *d=EventDefinition(levelEvent);
+    if(!d)return;
+    int pad=UIS(10),width=winW*36/100;
+    int bottom=map?winH/2:winH-UIS(16);
+    int step=TextMediumLiteralHeight()+UIS(4);
+    int x=winW-width-pad*2,y=bottom-5*step-pad;
+    if(y<pad)y=pad;
+    BlendRectWin(x-pad,y-pad,winW-pad,bottom,UI_BG_PANEL,.91f);
+    FrameRectWin(x-pad,y-pad,winW-pad,bottom,d->color,.8f,1);
+    y=UiDossierText(Tr(d->nameEn,d->nameZh),x,y,width,bottom-pad,d->color);
+    y=UiDossierText(Tr(d->descEn,d->descZh),x,y,width,bottom-pad,UI_INK);
+    UiDossierText(Tr(d->tipEn,d->tipZh),x,y,width,bottom-pad,UI_INK_DIM);
+}
+
 static void RenderFrameMenus(void) {
     /* 文字也在这一层，先合成再一次性呈现；弹窗必须在列表文字之后画 */
     if (currentState != STATE_PLAYING) {
@@ -1209,6 +1224,7 @@ static void RenderFrameMenus(void) {
         }
         UiDreamFrame(); /* Collage belongs above the menu backdrop, below labels. */
         UiDrawMenuPages();   /* Menu composition has one shared entry point. */
+        if(currentState==STATE_PAUSED) DrawEventReferenceCard(0);
         if (popupOpen) {
             DrawPopupPanel();
             DrawPopupText();
@@ -1221,6 +1237,7 @@ static void RenderFrameMenus(void) {
     } else if (isMapOpen && mapFullScreen) {
         /* 全屏地图：不画 HUD —— 整个屏幕就是地图，别在上面压一堆数值。
            小窗地图则照常画 HUD（它只是右下角一个叠加层）。 */
+        DrawEventReferenceCard(1);
     } else {
         DrawHUD();
         /* The course board is composited after cover occlusion. */

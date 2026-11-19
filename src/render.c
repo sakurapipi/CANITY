@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "render_story.h"
 #include "tactical_tools.h"
 #include "skills.h"
@@ -373,6 +374,10 @@ static void DrawCrateSprite(int i) {
     int state=c->searched?1:c->locked?2:0;
     int sprite=storyMaterialActive?SPR_MISSION_CASE+2*(protocolRun.story-1)+!!c->searched:
         SPR_THEME_CRATE_BASE+material*3+state;
+    if(levelEvent==EV_SUPPLY && c->content==EVENT_CACHE_CONTENT && !c->searched) {
+        DrawBakedPropArt(SPR_THEME_CRATE_BASE+5*3,c->x,c->y,0,.38f,1.32f);
+        return;
+    }
     DrawBakedPropArt(sprite,c->x,c->y,0,.34f,c->searched?.78f:1.0f);
 }
 
@@ -405,10 +410,6 @@ static void DrawHideSpotSprite(int i) {
     if (!h->active) return;
     float k = (h->kind == 0) ? 1.00f : (h->kind == 1 ? 0.90f : 0.82f);
     int material=SceneMaterialAt((int)h->x,(int)h->y);
-    if (!(protocolRun.flags&PROTOCOL_MISSIONS) && protocolRun.story==1 && i==0) {
-        DrawBakedPropArt(SPR_STORY_PROP_BASE+STORY_POD*2+ProtocolShelterPowered(),h->x,h->y,0,.73f,1);
-        return;
-    }
     int sprite=storyMaterialActive?SPR_MISSION_COVER+2*(protocolRun.story-1):SPR_THEME_HIDE_BASE+material;
     DrawBakedPropArt(sprite,h->x,h->y,0,.67f,.9f*k);
 }
@@ -446,7 +447,8 @@ void DrawBakedProp(int spr, float wx, float wy, float baseZ, float halfH, float 
        烘焙图的画布是正方形的，按高度画才能保持半高参数的真实含义。 */
     int size = h;
 
-    float light = SpriteShade(s.ty, 0.12f) * PropProximityLight(wx, wy);   /* v2.4.3 距离衰减 */
+    float light = SpriteShade(s.ty, 0.12f) * PropProximityLight(wx, wy);
+    if(levelEvent==EV_FOG && s.ty>4)light*=fmaxf(.16f,1-(s.ty-4)*.12f);   /* v2.4.3 距离衰减 */
     DrawGroundShadow(s.centerX, s.baseY, w / 3, s.ty);
 
     /* ==================================================================
@@ -481,6 +483,7 @@ void DrawBakedPropArt(int spr, float wx, float wy, float baseZ, float halfH, flo
     if (boxW < 2 || h < 2) return;
 
     float light = SpriteShade(s.ty, 0.12f) * PropProximityLight(wx, wy);
+    if(levelEvent==EV_FOG && s.ty>4)light*=fmaxf(.16f,1-(s.ty-4)*.12f);
     DrawGroundShadow(s.centerX, s.baseY, boxW / 3, s.ty);
 
     /* ==================================================================
@@ -583,6 +586,7 @@ void DrawCreatureActor(int spr,float wx,float wy,float halfH,float lightK,
     float light=SpriteShade(box.ty,.10f)*ArtMonsterLight(wx,wy)*lightK;
     light+=FlareLightAt(wx,wy)*.85f;
     if(light>1.2f)light=1.2f;
+    if(levelEvent==EV_FOG && box.ty>4) light*=fmaxf(.16f,1-(box.ty-4)*.12f);
     DrawGroundShadow(box.centerX,box.baseY,w/3,box.ty);
     SpritePose pose={(float)g_timeSec+spr*.27f,stride,fminf(1,activity+EvolutionPoseSignal(spr)*.4f),mirror};
     DrawSpriteCreature(use,box.centerX-size/2,box.baseY-size,size,size,light,1,zTest,box.ty,tint,tintMix,&pose);
@@ -979,7 +983,6 @@ static void DrawExitBeamSprite(void) {
     if(w<3 || h<3)return;
     int open=breakerOpen && ProtocolExitReady();
     int sprite=storyMaterialActive?SPR_MISSION_EXIT+2*(protocolRun.story-1)+open:
-        protocolRun.story?SPR_STORY_PROP_BASE+STORY_HATCH*2+open:
         (open?SPR_PROP_EXIT_OPEN:SPR_PROP_EXIT);
     DrawBakedPropArt(sprite,exitX,exitY,0,1.0f,1);
     float light=SpriteShade(s.ty,0.12f)*ArtPropLight(exitX,exitY);
@@ -1248,19 +1251,12 @@ static void DrawSpriteEntries(const SpriteDrawEntry* list,int n,const StoryDecor
                     DrawBakedPropArt(state==1?SPR_ABILITY_FIELD:SPR_ABILITY_DOUBLE,x,y,0,
                                      state==1?.55f:.73f,pulse);
                 }
-                else if (protocolRun.flags&PROTOCOL_MISSIONS) {
+                else {
                     int stage=2*(protocolRun.story-1);
                     int sprite=id==PROTOCOL_TERMINAL?SPR_MISSION_TERMINAL+stage:
                         id==PROTOCOL_RELAY?SPR_MISSION_RECORD+stage:SPR_MISSION_COIL+stage;
                     float height=id==PROTOCOL_TERMINAL?.66f:protocolRun.story==3?.93f:.74f;
                     DrawBakedPropArt(sprite+state-1,x,y,0,height,light);
-                }
-                else {
-                    const int models[PROTOCOL_DEVICE_COUNT]={
-                        STORY_RADIO, STORY_CAPACITOR, STORY_CORE, STORY_RADIO, STORY_ROUTE, STORY_ROUTE
-                    };
-                    float height=id==PROTOCOL_RELAY?.45f:.65f;
-                    DrawBakedPropArt(SPR_STORY_PROP_BASE+models[id]*2+state-1,x,y,0,height,light);
                 }
             }
             break;
@@ -1528,6 +1524,14 @@ static unsigned StoryFloorMark(unsigned color,int cx,int cy,float wx,float wy) {
     unsigned light=width<.031f?0x62c3f0u:0x2d698bu;
     return ((color&0xfefefeu)>>1)+((light&0xfefefeu)>>1);
 }
+static unsigned EventFogBlend(unsigned color, unsigned tint, unsigned alpha) {
+    unsigned rb=(((color&0xff00ffu)*(256-alpha)+(tint&0xff00ffu)*alpha)>>8)&0xff00ffu;
+    unsigned g=(((color&0x00ff00u)*(256-alpha)+(tint&0x00ff00u)*alpha)>>8)&0x00ff00u;
+    return rb|g;
+}
+static unsigned EventFogAmount(float distance) {
+    return levelEvent==EV_FOG && distance>4?(unsigned)fminf(232,(distance-4)*27):0;
+}
 #include "domain/render/legacy/render_246_floor.inc"
 static void RenderFloorBand(int y0, int y1) {
     if(!pitchLookEnabled) { RenderFloorBandLegacy246(y0,y1); return; }
@@ -1569,7 +1573,9 @@ static void RenderFloorBand(int y0, int y1) {
         if (reachF < 0.0f) reachF = 0.0f;
         reachF *= reachF;
 
-        float shadow = (ambF * (lightOnF?.28f:.055f) + (lightOnF ? reachF * 0.95f : 0.0f)) * smokeDim;
+        float ambientMul=levelEvent==EV_BLACKOUT?.60f:1;
+        unsigned eventFog=EventFogAmount(rowDistance);
+        float shadow = (ambF * (lightOnF?.28f:.055f)*ambientMul + (lightOnF ? reachF * 0.95f : 0.0f)) * smokeDim;
         int shadowI = (int)(shadow * 256.0f);
         if (shadowI < 0) shadowI = 0;
         if (shadowI > 1023) shadowI = 1023;
@@ -1603,6 +1609,9 @@ static void RenderFloorBand(int y0, int y1) {
 
                 if(safeRoom.active)color=SafetyFloorMarker(color,fx,fy,safeRoom.x,safeRoom.y,1);
                 if (!storyMaterialActive) color=SafetyFloorMarker(color,fx,fy,exitX,exitY,breakerOpen);
+                if (levelEvent==EV_FLOOD && EventWetCell(cX,cY))
+                    color=EventFogBlend(color,0x204561u,52u+(unsigned)((tx2^ty2)&7)*4u);
+                if (levelEvent==EV_BLOOD_MOON)color=EventFogBlend(color,0x432228u,35);
                 if (storyFloorTrailActive) color=StoryFloorMark(color,cX,cY,fx,fy);
 
                 /* 雾 + 光球的暖光（简化：只按距离加暖色） */
@@ -1620,7 +1629,7 @@ static void RenderFloorBand(int y0, int y1) {
                 color = SurfaceTexel(material,2,tx2,ty2,cl);
             }
 
-            row[x] = color;
+            row[x] = eventFog?EventFogBlend(color,0x27363fu,eventFog):color;
             fx += stepX;
             fy += stepY;
         }
@@ -1739,7 +1748,9 @@ static void RenderWallSurface(int x, const WallRay* ray) {
     float flash = flashTab[x];
     float torch = lightOnW ? (flash * reach * 0.62f) : 0.0f;
 
-    float lit = (amb * (lightOnW?.26f:.045f) + torch) * smokeDim;
+    float ambientMul=levelEvent==EV_BLACKOUT?.60f:1;
+    unsigned eventFog=EventFogAmount(perpWallDist);
+    float lit = (amb * (lightOnW?.26f:.045f)*ambientMul + torch) * smokeDim;
     if (side == 1) lit *= 0.62f;
 
     float cone = flash - 0.35f;
@@ -1844,7 +1855,9 @@ static void RenderWallSurface(int x, const WallRay* ray) {
         if (r > 255) r = 255;
         if (g > 255) g = 255;
         if (b > 255) b = 255;
-        *dst = (unsigned int)((r << 16) | (g << 8) | b);
+        unsigned color=(unsigned)((r<<16)|(g<<8)|b);
+        if(levelEvent==EV_BLOOD_MOON)color=EventFogBlend(color,0x3d2429u,40);
+        *dst=eventFog?EventFogBlend(color,0x27363fu,eventFog):color;
         dst += renderW;
     }
 
@@ -2045,6 +2058,18 @@ void Render3D(void) {
     storyFloorTrailActive=PrepareStoryFloorTrail(storyFloorTrail);
     RunPhase(1);
     RunPhase(2);
+    if(levelEvent==EV_MIRROR) {
+        for(int i=0;i<2;i++){
+            float x,y;if(!EventResidue(i,&x,&y))continue;
+            SpriteBox b=ProjectSprite(x,y,0,.67f);
+            if(b.ok && b.ty>.6f){
+                int size=b.width>b.height?b.width:b.height;
+                SpritePose pose={0,0,0,0};
+                DrawSpriteCreature(SPR_MON_HUNTER,b.centerX-size/2,b.baseY-size,size,size,
+                                  .58f,.40f,1,b.ty,0x7850ADu,.74f,&pose);
+            }
+        }
+    }
     RenderSprites();
     DrawViewModel();                 /* v2.1 第一人称手持模型 */
     PrepareHorrorSource();

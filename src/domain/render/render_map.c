@@ -39,7 +39,7 @@ static void DrawMapLegend(void) {
         {MAP_ICON_BREAKER,"BREAKER","配电箱"}, {MAP_ICON_SAFE,"SAFE ROOM","安全屋"},
         {MAP_ICON_HIDE,"HIDE SPOT","隐藏点"}, {MAP_ICON_BROKEN,"BROKEN HIDE","损坏隐藏点"},
         {MAP_ICON_DEVICE,"ROOM DEVICE","主题装置"}, {MAP_ICON_SPENT,"DEVICE USED","装置已使用"},
-        {MAP_ICON_THREAT,"ECHO THREAT","回声威胁"}, {MAP_ICON_MIMIC,"MIMIC","宝箱怪"}
+        {MAP_ICON_THREAT,"ECHO THREAT","回声威胁"}, {MAP_ICON_MIMIC,"MIMIC","宝箱怪"},{MAP_ICON_CACHE,"SUPPLY CACHE","异常补给"}
     };
     int indices[sizeof(items)/sizeof(items[0])],count=0;
     for (unsigned i=0;i<sizeof(items)/sizeof(items[0]);i++) {

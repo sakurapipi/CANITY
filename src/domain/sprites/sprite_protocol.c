@@ -18,90 +18,6 @@ static void Lamp(float x,float y,float size,unsigned color,int on) {
     cvLine(x-size*.4f,y-size*.4f,x+size*.4f,y-size*.4f,2,0xe9f2e6,.55f);
 }
 
-static void Capacitor(int on,unsigned color) {
-    Face(31,104,194,130,0x69747a,0x18272f);
-    Rect(53,128,193,198,0x111e24);
-    Face(45,100,152,30,0x525f5e,0x213239);
-    for(int i=0;i<3;i++){
-        float x=76+i*49;
-        Face(x-16,133,32,58,0x2d4249,0x152025);
-        Rect(x-10,142,x+10,181,0x172e3a);
-        for (int j=0;j<4;j++) Rect(x-9,145+j*9,x+9,149+j*9,on?0x40857d:0x59432b);
-        Lamp(x,116,4,color,on);
-    }
-    cvLine(54,209,202,209,3,0xc69447,1);
-    for(int i=0;i<8;i++) cvLine(62+i*18,218,70+i*18,211,3,0xc69447,1);
-    Rect(43,231,78,244,0x131618);
-    Rect(177,231,211,244,0x131618);
-}
-
-static void Pod(int on,unsigned color) {
-    Face(41,25,174,213,0x606e75,0x14252b);
-    Face(55,40,147,181,0x374f56,0x233744);
-    float glass[]={75,71,96,51,164,51,187,73,187,181,167,207,94,207,75,180};
-    cvPolyGrad(glass,8,on?0x396e73:0x263747,on?0x172c33:0x111a24,1);
-    cvLine(81,77,98,58,3,0x91b5bb,.85f);
-    cvLine(82,86,82,174,3,0x79a4af,.65f);
-    cvEllipse(130,100,21,20,0x122332,.85f);
-    cvLine(130,129,130,177,37,0x152937,.75f);
-    Face(174,135,28,44,0x718080,0x29367c);
-    Lamp(187,148,5,color,on);
-    Rect(184,160,190,170,0x9eada4);
-    for(int i=0;i<5;i++) Rect(94+i*16,218,102+i*16,224,0x839797);
-    Rect(31,231,220,244,0x101c24);
-}
-
-static void Radio(int on,unsigned color) {
-    Face(53,194,150,48,0x58676a,0x161f22);
-    Face(83,120,90,85,0x536573,0x202f35);
-    Face(49,63,159,94,0x728189,0x27383a);
-    Rect(64,79,156,132,0x0d171a);
-    Rect(70,85,150,126,on?0x224b49:0x282c35);
-    for (int i=0;i<6;i++) {
-        float y=91+i*5;
-        cvLine(78,y,143-(i%3)*12,y,2,on?0x8bd2af:0x4a5359,.95f);
-    }
-    for(int i=0;i<6;i++) Rect(168,84+i*5,192,86+i*5,0x171c21);
-    Lamp(180,125,5,color,on);
-    cvLine(175,62,194,20,4,0x748088,1);
-    cvEllipse(194,20,4,4,0x9ca4a0,1);
-    cvLine(57,144,197,144,3,0x9a704b,1);
-}
-
-static void Core(int on,unsigned color) {
-    Face(65,27,126,210,0x53606a,0x202930);
-    Rect(79,48,177,165,0x141e27);
-    cvEllipse(128,105,40,39,0x697980,1);
-    cvEllipse(128,105,32,31,0x233637,1);
-    Lamp(128,105,17,color,on);
-    cvLine(89,192,165,192,5,0x9a7c51,1);
-    cvLine(110,203,on?147:111,on?176:168,9,0xcad4ca,1);
-    Rect(48,229,208,244,0x141c23);
-}
-
-static void Route(int on,unsigned color) {
-    Face(65,140,124,98,0x637175,0x1d2b33);
-    Face(45,88,166,78,0x4d5e61,0x263443);
-    Rect(61,104,194,150,0x142123);
-    cvLine(78,137,121,115,4,0x72abc5,1);
-    cvLine(121,115,173,115,4,0x72abc5,1);
-    cvLine(126,137,173,137,4,0xc5a461,1);
-    Lamp(176,137,5,color,on);
-    Lamp(176,115,5,0x67aaca,!on);
-    Rect(80,172,176,181,0x18282c);
-}
-
-static void Hatch(int open,unsigned color) {
-    Face(38,22,180,219,0x718189,0x203039);
-    Rect(57,48,199,233,0x10191d);
-    Face(61,54,open?45:135,176,0x526f76,0x28363c);
-    cvLine(62,124,open?103:195,124,4,0x25313a,1);
-    cvLine(62,183,open?103:195,183,4,0x25313a,1);
-    cvLine(open?110:176,59,open?110:176,224,5,0xb19461,.8f);
-    Lamp(128,35,5,color,open);
-    Rect(43,232,213,244,0x253039);
-}
-
 static void BakeBarrier(void) {
     cvClear();
     float mesh[]={36,105,220,105,236,230,20,230};
@@ -463,22 +379,6 @@ void BakeProtocolProps(void) {
     BakePhaseBeacon(SPR_PROP_PHASE,1);
     BakePhaseBeacon(SPR_PHASE_PROJECTILE,0);
     for(int chapter=0;chapter<3;chapter++) BakeTrialMachine(chapter);
-    for (int kind=STORY_CAPACITOR;kind<=STORY_HATCH;kind++) {
-        for (int on=0;on<2;on++) {
-            unsigned color=on?0x67e0c2:0xbe8350;
-            cvClear();
-            cvEllipse(128,236,100,11,0x071013,.85f);
-            switch(kind) {
-            case STORY_CAPACITOR: Capacitor(on,color);break;
-            case STORY_POD: Pod(on,color);break;
-            case STORY_RADIO: Radio(on,color);break;
-            case STORY_CORE: Core(on,color);break;
-            case STORY_ROUTE: Route(on,color);break;
-            case STORY_HATCH: Hatch(on,color);break;
-            }
-            cvFinish(SpriteBakeTarget(SPR_STORY_PROP_BASE+kind*2+on));
-        }
-    }
     BakeBarrier();
     BakeDouble();
     for (int id=SPR_ABILITY_EMITTER;id<=SPR_ABILITY_WRIST;id++) BakeRoleHand(id);

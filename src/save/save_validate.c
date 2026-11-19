@@ -68,6 +68,14 @@ int SaveValidateBytes(const void* bytes, size_t length) {
         if (!KnownSchemaSupported(desc.id, desc.schema) || !EvolutionChunkValid(desc.id,desc.schema,body,(int)desc.size)) return 0;
         if (desc.id == SC_PROTOCOL_CHECKPOINT && (desc.schema != 1 || !BlobValid(body, desc.size))) return 0;
         if (desc.id == SC_DAILY_CLEAR && desc.schema == 1 && desc.size != 4) return 0;
+        if (desc.id == SC_FLOOR_RULES && desc.schema == 1) {
+            if (desc.size != SAVE_FLOOR_RULES_BYTES || *(const unsigned char*)body > EVENT_COUNT)
+                return 0;
+            float budget;
+            memcpy(&budget, (const unsigned char*)body + 1, sizeof budget);
+            if (!isfinite(budget) || budget < 0 || budget > FLARE_HEAL_FLOOR_BUDGET)
+                return 0;
+        }
         used += desc.size;
         if (desc.id == SC_LEGACY29) {
             if (desc.schema != 1 || !BlobValid(body, desc.size)) return 0;

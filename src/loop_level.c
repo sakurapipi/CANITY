@@ -19,6 +19,7 @@
 #include "throwing.h"
 #include "wrench.h"
 #include "events.h"
+#include "event_runtime.h"
 #include "loop_api.h"
 #include "tutorial.h"
 #include "player_api.h"
@@ -324,6 +325,8 @@ static void ApplyCampaignRules(int stage) {
 
 static void ResetFloorSystems(void) {
     DecoyResetFloor();
+    memset(thrown, 0, sizeof thrown);
+    if (!s_collapseGen) FlareHealReset();
 
     /* ==================================================================
      * **崩塌标记的生命周期**
@@ -1159,10 +1162,6 @@ static void SpawnFloorPopulation(void) {
     /* 2026-11-06：用户要求追光怪 +1 只 */
     SpawnLightBeast();
     SpawnLightBeast2();
-    if (protocolRun.story==1 && !(protocolRun.flags&PROTOCOL_MISSIONS)) {
-        for (int i=0;i<LIGHTBEAST_MAX;i++) lightBeasts[i].active=0;
-        Hunter0()->active=0;
-    }
     /* ==================================================================
      * 2026-11-06（审计补）：**换层必须重置"场内系统"**
      * ------------------------------------------------------------------
@@ -1174,7 +1173,6 @@ static void SpawnFloorPopulation(void) {
      *   · 照明棒治疗预算按**局**累计，而不是设计里的按层 24 点
      * ================================================================ */
     {        ControlReset(); }
-    {      FlareHealReset(); }
     {  PhaseResetPlacement(); }
 
     /* 2026-11-06（第 11 轮）：拾光虫 —— 第 2 层起、30%、每层最多 1 只 */
@@ -1187,43 +1185,11 @@ static void SpawnFloorPopulation(void) {
 
     /* Battery leech is retired; clear any previous-floor transient state. */
     ResetLeeches();
-    /* v1.8：随机事件（第 2 层起，按概率） */
-    levelEvent = -1;
-    if (!protocolRun.story && currentLevel >= 2 && (rand() % 100) < EVENT_CHANCE)
-        {   /* v6：按权重抽（血月/空投更常见，幸运更少见） */
-            unsigned int sd = (unsigned int)rand();
-            levelEvent = EventPickRandom(&sd);
-        }
     /* v2.0：每日挑战的固定加成，每层都生效 */
     if (dailyMode) {
         modSanityMul *= 1.25f;
         modShardMul *= 1.25f;
     }
-    /* ===== v6：事件效果统一从表里取 =====
-       加一个事件只需要在 events.c 的 kEvents[] 里加一行，
-       这里永远不用改。 */
-    {
-
-        const EventEffect* fx = EventEffectFor(levelEvent);
-        modSpeedMul  *= fx->monsterSpeedMul;
-        modNoiseMul  *= fx->noiseMul;
-        modBatteryMul *= fx->batteryDrainMul;
-        modSanityMul *= fx->sanityDrainMul;
-        modShardMul  *= fx->goldMul;
-
-        /* 电池上限按百分比压 */
-        if (fx->batteryCapPct != 100 && fx->batteryCapPct > 0) {
-            float cap = (float)BatteryMax() * (float)fx->batteryCapPct / 100.0f;
-            if (battery > cap) battery = cap;
-        }
-
-        /* 空投：额外给投掷物 */
-        if (levelEvent == EV_SUPPLY) {
-            flares += 2;
-            if (bottles < BottleCap()) bottles += 2;
-        }
-    }
-
     /* Retired extras/bosses have no current catalog identity. */
 
     if (SkillCartoUnlock()) {
@@ -1323,28 +1289,25 @@ static void PlaceFloorBreaker(const LevelBuildWorkspace* work) {
 void GenerateLevel(void) {
     static LevelBuildWorkspace work;
     if (protocolRun.story) currentLevel=protocolRun.story;
+    int rebuild=s_collapseGen;
     ResetFloorSystems();
     ProtocolFloorReset();
     echoScanT = 0;
     CommitThreatTierForFloor(currentLevel);if(!SaveEvolutionCanPersist())ThreatTierRestore(currentLevel,0,0);EvolutionResetFloor();TacticalResetFloor();SpritesSetEvolutionTier(CurrentRunThreatTier());
     memset(&roomTheme,0,sizeof(roomTheme));
     if (trainingMode) {
+        EventResetRun();
         TrainingBuildArena();
         return;
     }
     GenerateThemeTextures(ProtocolFloorMaterial());
     if (protocolRun.story) {
+        EventResetRun();
         ProtocolBuildFloor();
-        if (ProtocolPeacefulStory()) {
-            ProtocolClearStoryActors();
-            ControlReset();
-            FlareHealReset();
-            PhaseResetPlacement();
-            ResetLeeches();
-        } else {
-            MimicReset();
-            SpawnFloorPopulation();
-        }
+        ProtocolClearStoryActors();
+        ControlReset();
+        PhaseResetPlacement();
+        ResetLeeches();
         return;
     }
     GenerateMazeTopology();
@@ -1364,11 +1327,15 @@ void GenerateLevel(void) {
         CollectFloorCandidates(&work);
     }
     work.contCap = ConfigureFloorResources();
+    EventPlanFloor(rebuild, CurrentRunThreatTier(), (unsigned)roomSeedUsed);
+    if (levelEvent==EV_SUPPLY && work.contCap>=MAX_CONTAINERS) work.contCap=MAX_CONTAINERS-1;
     PlaceFloorContainers(&work);
     DistributeFloorLoot();
     SpawnFloorPopulation();
     if(isEndlessRun && currentLevel>10){float pressure=fminf(.65f,(currentLevel-10)*.025f);modSanityMul*=1+pressure;modBatteryMul*=1+pressure*.6f;modNoiseMul*=1+pressure*.4f;}
     PlaceFloorBreaker(&work);
     RoomThemePlaceVault();
+    EventPlaceFloor();
+    EventActivateFloor();
     CollectorSpawnIfEligible();
 }

@@ -44,7 +44,9 @@ static void RenderFloorBandLegacy246(int y0, int y1) {
         if (reachF < 0.0f) reachF = 0.0f;
         reachF *= reachF;
 
-        float shadow = (ambF * (lightOnF?.28f:.055f) + (lightOnF ? reachF * 0.95f : 0.0f)) * smokeDim;
+        float ambientMul=levelEvent==EV_BLACKOUT?.60f:1;
+        unsigned eventFog=EventFogAmount(rowDistance);
+        float shadow = (ambF * (lightOnF?.28f:.055f)*ambientMul + (lightOnF ? reachF * 0.95f : 0.0f)) * smokeDim;
         int shadowI = (int)(shadow * 256.0f);
         if (shadowI < 0) shadowI = 0;
         if (shadowI > 1023) shadowI = 1023;
@@ -76,6 +78,9 @@ static void RenderFloorBandLegacy246(int y0, int y1) {
 
                 if(safeRoom.active)color=SafetyFloorMarker(color,fx,fy,safeRoom.x,safeRoom.y,1);
                 if (!storyMaterialActive) color=SafetyFloorMarker(color,fx,fy,exitX,exitY,breakerOpen);
+                if (levelEvent==EV_FLOOD && EventWetCell(cX,cY))
+                    color=EventFogBlend(color,0x204561u,52u+(unsigned)((tx2^ty2)&7)*4u);
+                if (levelEvent==EV_BLOOD_MOON)color=EventFogBlend(color,0x432228u,35);
                 if (storyFloorTrailActive) color=StoryFloorMark(color,cX,cY,fx,fy);
 
                 /* 雾 + 光球的暖光（简化：只按距离加暖色） */
@@ -93,7 +98,7 @@ static void RenderFloorBandLegacy246(int y0, int y1) {
                 color = SurfaceTexel(material,2,tx2,ty2,cl);
             }
 
-            row[x] = color;
+            row[x] = eventFog?EventFogBlend(color,0x27363fu,eventFog):color;
             fx += stepX;
             fy += stepY;
         }

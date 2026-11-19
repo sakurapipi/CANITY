@@ -1,3 +1,4 @@
+#include "event_runtime.h"
 #include "monster_evolution.h"
 #include "threat_tier.h"
 #include "tactical_tools.h"
@@ -745,7 +746,7 @@ static int WardenTickState(float dt) {
             wdPBfsBuild();
             wdPBRebuildT = 0.25f;
         }
-        wdStepAlongPlayerBfs(&warden.x, &warden.y, WARDEN_CHASE_SPEED, dt);
+        wdStepAlongPlayerBfs(&warden.x, &warden.y, fminf(MonsterMovementCap(),WARDEN_CHASE_SPEED*(EventBloodMoon()?1.10f:1)), dt);
         {
             float fx = posX - warden.x, fy = posY - warden.y;
             if (fx * fx + fy * fy > 0.01f) warden.facing = atan2f(fy, fx);
