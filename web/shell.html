@@ -669,7 +669,7 @@ body.touchControls #saveToggle{display:block}body.touchControls #entry.saveopen{
   // 而且控制台里只有一条不起眼的 CORS 报错。
   // 这是玩家最可能踩的坑，所以直接给一句能照做的话。
   // ==================================================================
-  if (location.protocol === 'file:') {
+  if (location.protocol === 'file:' && !globalThis.CANITY_SINGLE_FILE) {
     document.addEventListener('DOMContentLoaded', function () {
       var b = document.getElementById('boot');
       if (b) b.classList.remove('hidden');

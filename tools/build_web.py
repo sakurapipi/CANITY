@@ -139,7 +139,7 @@ def main(argv):
             tracks[i]='data:audio/mpeg;base64,'+base64.b64encode(mp3.read_bytes()).decode('ascii')
         html=DIST/'standalone.html'
         content=html.read_text(encoding='utf-8')
-        content=content.replace('<script','<script>globalThis.CANITY_MUSIC_TRACKS='+json.dumps(tracks,separators=(',',':'))+';</script><script',1)
+        content=content.replace('<script','<script>globalThis.CANITY_SINGLE_FILE=true;globalThis.CANITY_MUSIC_TRACKS='+json.dumps(tracks,separators=(',',':'))+';</script><script',1)
         html.write_text(content,encoding='utf-8')
 
     if (ROOT / 'music').is_dir():
