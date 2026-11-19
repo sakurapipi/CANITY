@@ -848,7 +848,7 @@ static void UpdatePhaseAndCrank(float dt) {
         if (crankClick >= 0.30f) {
             crankClick = 0.0f;
             PlaySfx(SFX_CRANK, 0.45f);
-            MakeNoise(posX, posY, (SkillOwned(SK_SILENT_CRANK) && battery<BatteryMax()*.25f?0.0f:12.0f) * EventCrankNoiseScale() * RunCrankNoiseMul()*(SkillOwned(SK_APPRENTICE)?0.5f:1.0f));   /* v2.2：FAST CRANK 的 +15% 噪声 */
+            MakeActionNoise(posX, posY, (SkillOwned(SK_SILENT_CRANK) && battery<BatteryMax()*.25f?0.0f:12.0f) * RunCrankNoiseMul()*(SkillOwned(SK_APPRENTICE)?0.5f:1.0f),NOISE_CRANK);   /* v2.2：FAST CRANK 的 +15% 噪声 */
         }
         /* v3.4：SPARE CELL 满级时摇电时间 -30%（2.4 → 1.68 秒） */
         if (crankTimer >= 2.4f * RunCrankTimeMul() * SkillCrankTimeMul() * BenchCrankTimeMul()) {
@@ -1036,7 +1036,7 @@ static void CompleteHeldContainer(void) {
                 if(vault) {
                     hideStreak=0;searchedCount++;runSearched++;
                     SpawnParticles(c->x,c->y,2);WalletAddRun(vaultReward);totalGoldEarned+=vaultReward;
-                    PlaySfx(SFX_PICKUP,.55f);MakeNoise(posX,posY,8.0f*SkillSearchNoiseMul());
+                    PlaySfx(SFX_PICKUP,.55f);MakeActionNoise(posX,posY,8.0f*SkillSearchNoiseMul(),NOISE_SEARCH);
                     static char vaultMessage[128];
                     snprintf(vaultMessage,sizeof(vaultMessage),Tr("VAULT CHEST: +%d GOLD / EXCLUSIVE POOL", "密库宝箱：金币+%d / 独立奖池"),vaultReward);
                     int bonus=RoomThemeVaultBonus(hoverIndex),supply=0;
@@ -1080,7 +1080,7 @@ static void CompleteHeldContainer(void) {
                   HintOnce(2); }
                 totalGoldEarned += shardGain;
                 PlaySfx(SFX_PICKUP, 0.55f);
-                MakeNoise(posX, posY, 8.0f * SkillSearchNoiseMul());
+                MakeActionNoise(posX,posY,8.0f*SkillSearchNoiseMul(),NOISE_SEARCH);
                 if (c->content == 1) { fusesHeld++; fusesCollectedRun++; pickupMsg = "+FUSE"; }
                 else if (c->content >= 4) {
                 /* v1.16：纯随机产出，酸瓶与烟雾明显稀有 */
@@ -1227,7 +1227,7 @@ static void UpdateHeldInteraction(float dt) {
             if(hoverKind==3 && hoverIndex>=0 && hoverIndex<roomPropCount && RoomPropIsControl(roomProps[hoverIndex].kind))
                 AudioPlayWorld(SFX_CRANK,roomProps[hoverIndex].x,roomProps[hoverIndex].y,.3f,9,2);
             else PlaySfx(SFX_SEARCH, 0.55f);
-            MakeNoise(posX, posY, 10.0f * SkillSearchNoiseMul() * RunSearchNoiseMul2() * (levelEvent==EV_SILENCE?1.20f:1));   /* v2.2：FAST SEARCH 的 +10% */  /* 比走路大一点，比跑步小 */
+            MakeActionNoise(posX,posY,10.0f*SkillSearchNoiseMul()*RunSearchNoiseMul2(),NOISE_SEARCH);   /* v2.2：FAST SEARCH 的 +10% */  /* 比走路大一点，比跑步小 */
         }
         /* 2026-11-05：宝箱怪在翻找进度 60% 时咬人。
            低于 45% 松手完全安全 —— 所以"起疑就松手"是有效解法。

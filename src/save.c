@@ -301,6 +301,7 @@ typedef struct {
 
 static SaveCarryChunk s_carry[SAVE_CARRY_MAX];
 static int            s_carryCount = 0;
+static int retiredStoryPending;
 static int            s_saveReadOnly = 0;   /* 读档发现结构异常 → 拒绝改写 */
 
 static void SaveCarryClear(void) {
@@ -374,20 +375,26 @@ static int SaveCarryCapture(const void* payload, int payLen) {
  * ================================================================ */
 /* A future known extension can be preserved, but cannot be played or rewritten
  * by this executable. This applies to settings-only writes as well. */
-static int SaveEvolutionSchemaSupported(void) {
+static int SaveCarriedSchemasSupported(void) {
     for (int i = 0; i < s_carryCount; i++) {
-        if ((s_carry[i].id == SC_EVOLUTION_V1 ||
-             s_carry[i].id == SC_TACTICAL_ITEMS_V1) && s_carry[i].schema != 1)
+        if (!SaveChunkSchemaSupported(s_carry[i].id,s_carry[i].schema))
             return 0;
     }
     return 1;
 }
 
+static int SaveWriteRestriction(void) {
+    if (retiredStoryPending) return SAVE_ERR_RETIRED_STORY;
+    if (s_saveReadOnly) return s_saveReadOnly < 0 ? s_saveReadOnly : SAVE_ERR_DUP_CHUNK;
+    if (!SaveCarriedSchemasSupported()) return SAVE_ERR_SCHEMA;
+    return 0;
+}
+
 static int SaveFileBytes(const SaveBlob* blob, unsigned char** out) {
     if (!blob || !out) return SAVE_ERR_CAPACITY;
     *out = NULL;
-    if (s_saveReadOnly) return SAVE_ERR_DUP_CHUNK;   /* 结构异常，拒绝改写 */
-    if (!SaveEvolutionSchemaSupported()) return SAVE_ERR_PAYLOAD;
+    int restriction = SaveWriteRestriction();
+    if (restriction) return restriction;
 
     int containsLegacy = 0;
     for (int i = 0; i < s_carryCount; i++)
@@ -461,9 +468,10 @@ static int ExtractSaveFile(const void* buf, long n, SaveBlob* out, int* isEnvelo
      * 这个标志描述的是"当前载入的这份存档可疑"，所以每次读档都要重算。
      * ================================================================ */
     s_saveReadOnly = 0;
-    if (!buf || n <= 0 || !out || !SaveValidateBytes(buf, (size_t)n)) {
-        s_saveReadOnly = 1;
-        g_saveError = SAVE_ERR_PAYLOAD;
+    int status=buf && n>0 && out?SaveValidateStatus(buf,(size_t)n):0;
+    if(status!=1) {
+        s_saveReadOnly = status<0?status:1;
+        g_saveError = status<0?status:SAVE_ERR_PAYLOAD;
         return 0;
     }
 
@@ -631,16 +639,16 @@ static long ReadSaveFile(const char* path, SaveBlob* out) {
     return ret;
 }
 
-static int SavePathValid(const char* path) {
+static int SavePathStatus(const char* path) {
     unsigned char* data = malloc(SAVE_MAX_FILE_BYTES);
     if (!data) return 0;
     long length = ReadWholeFile(path, data, SAVE_MAX_FILE_BYTES);
-    int valid = length > 0 && SaveValidateBytes(data, (size_t)length);
+    int valid = length > 0 ? SaveValidateStatus(data,(size_t)length) : 0;
     free(data);
     return valid;
 }
 static void BackupSavePath(const char* path){
-    if(!SavePathValid(path))return;
+    if(SavePathStatus(path)!=1)return;
     char backup[MAX_PATH+16];snprintf(backup,sizeof(backup),"%s.bak",path);
     PlatCopyPath(path,backup);
 }
@@ -735,6 +743,7 @@ static void SaveProfileAndSettings(int saveBank) {
         if(wn>0)BackupSavePath(p);
         int werr = (wn > 0) ? WriteWholeFile(p, wbuf, (size_t)wn) : wn;
         int wok = (wn > 0) && werr == 0;
+        if(!wok)g_saveError=werr;
         if (wbuf) { free(wbuf); wbuf = NULL; }
         SaveDiag("SETTINGS cand[%d]=%s bytes=%d err=%d ok=%d", i, p, wn, werr, wok);
         if (wok) {
@@ -750,6 +759,16 @@ static void SaveProfileAndSettings(int saveBank) {
     g_saveState = 2;
 }
 static void SaveSettingsOnly(void) { SaveProfileAndSettings(0); }
+
+int SaveRetiredStoryPending(void) { return retiredStoryPending; }
+int SaveConfirmRetiredStory(void) {
+    if(!retiredStoryPending)return 1;
+    retiredStoryPending=0;
+    SaveSettingsOnly();
+    if(g_saveState==1)return 1;
+    retiredStoryPending=1;
+    return 0;
+}
 
 /* 训练/教程退出后，菜单要知道「真正的存档里还有没有一局」。
    直接读 g_save.hasRun，而不是沿用训练局强行置上的 hasSave。 */
@@ -1035,7 +1054,7 @@ int SaveEvolutionCanPersist(void) {
     return s_carryCount + missing + !legacy <= SAVE_CARRY_MAX;
 }
 static int CaptureEvolutionChunks(void) {
-    if (!SaveEvolutionSchemaSupported()) return 0;
+    if (!SaveCarriedSchemasSupported()) return 0;
     if (!g_save.hasRun || !runInProgress)
         return 1;
     if (!SaveEvolutionCanPersist()) {
@@ -1222,8 +1241,16 @@ static int CaptureEvents(void) {
         if(s_carry[i].id==SC_LEGACY29) legacy=1;
     }
     unsigned char bytes[EVENT_WIRE_BYTES];
-    if (!EventWireEncode(bytes)) return 1;
-    if(index>=0 && s_carry[index].schema!=1) return levelEvent<0;
+    if (!EventWireEncode(bytes)) {
+        if (levelEvent >= 0 || eventBonus != 0) return 0;
+        if (index >= 0) {
+            free(s_carry[index].data);
+            --s_carryCount;
+            memmove(&s_carry[index], &s_carry[index + 1],
+                    (size_t)(s_carryCount - index) * sizeof(s_carry[0]));
+        }
+        return 1;
+    }
     if(index<0 && s_carryCount+!legacy>=SAVE_CARRY_MAX) return levelEvent<0 && eventBonus==0;
     unsigned char *copy=malloc(sizeof bytes);
     if(!copy)return 0;
@@ -1245,7 +1272,7 @@ static void RestoreEvents(int fromCheckpoint) {
 }
 
 static void WriteSaveCandidates(void) {
-    if(!CaptureEvolutionChunks()){g_saveState=2;g_saveError=SaveEvolutionSchemaSupported()?SAVE_ERR_CAPACITY:SAVE_ERR_PAYLOAD;return;}
+    if(!CaptureEvolutionChunks()){g_saveState=2;g_saveError=SaveCarriedSchemasSupported()?SAVE_ERR_CAPACITY:SAVE_ERR_PAYLOAD;return;}
     if (!CaptureFloorRules() || !CaptureEvents() || (captureStoryEntry && !CaptureStoryEntry())) {
         g_saveState=2;g_saveError=SAVE_ERR_CAPACITY;return;
     }
@@ -1309,6 +1336,12 @@ int SaveInventoryOrder(void) {
 }
 
 void SaveGame(void) {
+    int restriction = SaveWriteRestriction();
+    if (restriction) {
+        g_saveState = 2;
+        g_saveError = restriction;
+        return;
+    }
     /* 训练场不是正式进度：写进去的话 Continue 会读出一张走廊图。
        但设置项仍然要落盘，否则在教程里改完设置重开就白改了。 */
     if (trainingMode || (currentState==STATE_GAMEOVER && protocolRun.story && !gameWon)) {
@@ -1508,96 +1541,6 @@ static void RestoreBankFromSave(void) {
     {  if (carryGold < 0) carryGold = 0; }
 }
 
-/* ==================================================================
- * v24 存档布局（2.3.3 及更早）
- * ------------------------------------------------------------------
- * v26 重建了成就表（40 → 32）、技能树（20 → 26 + 4 个额外），
- * 还删掉了 pendingShards，所以 v24 的字节**不能**直接当新结构读。
- * 这里保留一份旧结构，只在版本号和文件长度都精确匹配时启用迁移。
- * ================================================================ */
-typedef struct {
-    unsigned int magic;
-    int version;
-    int gameVersion;
-    int resIndex, fullscreen, fpsCap, scale, fov, vignette, showFps;
-    float gamma, sens;
-    int shards, upgBattery, upgSpeed, upgQuiet, upgSanity;
-    int bestLevel;
-    float volume;
-    int hasRun, level, fusesHeld, fusesNeeded, breakerOpen, breakerActive, searchedCount, nContainers;
-    int flashlightOn;
-    float sanity, battery, stamina, posX, posY, dirX, dirY, exitX, exitY, breakerX, breakerY, runTime;
-    Container cont[MAX_CONTAINERS];
-    int worldMap[MAP_HEIGHT][MAP_WIDTH];
-    int explored[MAP_HEIGHT][MAP_WIDTH];
-    int flares, bottles;
-    int safeActive;
-    float safeX, safeY;
-    int levelMod;
-    float modSanityMul, modSpeedMul;
-    int themeId;
-    int nThrown;
-    Thrown thr[MAX_THROWN];
-    int hudDetail, qteHint;
-    int bindings[BINDING_SLOTS];
-    int upgEco, upgRest;
-    int achUnlocked[40];
-    int achProgress[40];
-    int bestEndlessLevel, bestEndlessScore, isEndlessRunSaved;
-    int skillRank[20];
-    int cores, activeKeystone, bestMainScore, seenMonsters;
-    int bricks, acids, smokeBombs;
-    int pendingShards;
-    unsigned int runSkillMask;
-    int lang, saveSlot;
-    int weaponRank[3], weaponXp[3];
-    int relicOwned[RELIC_COUNT], relicTotal;
-    int dailyMode, dailySeed;
-    int campaignMode, campaignStage;
-    int firePots, gluePots, mirrors;
-    int bankStreak;
-    float modBatteryMul, modShardMul, modNoiseMul;
-    int weaponAttach[3][2];
-    int attachOwned[10];
-    int curWeapon;
-    int runUltimate;
-    float energy;
-    unsigned int benchOwnedSave;
-    int runUpgSave[5];
-    int hideSpotSaveCount;
-    HideSpot hideSpotSave[6];
-    int hiddenInSave;
-    int safeHealLvSave, safeChargeLvSave, safeStaminaLvSave;
-    int achFloorsNoLight, achFloorsFlawless, achFloorsPacifist, achFloorsFast;
-    int achMapsExplored, achFusesRun, achLocksOpened;
-    int achHideCount, achTotalThrown;
-    float achCrankSecondsTotal, achLowSanitySeconds;
-    int bankGoldSave, bankHistMaxSave, bankCarryPctSave, carryGoldSave;
-} LegacySaveV24;
-
-/* 迁移只保留能一一对应的字段：
-   · 成就表从 40 条重建为 32 条，旧 ID 不保证对应 → 清零，避免误弹成就；
-   · 技能树前 20 项按位置保留（新树 20..29 级从 0 开始）；
-   · 其余大厅进度、金币、银行、遗物、藏身点原样带走。 */
-/* ==================================================================
- * 2026-11-06：**通用老存档重排**
- * ------------------------------------------------------------------
- * 两次布局变更叠在一起，所以做成一个参数化函数：
- *   v25 ~ v28 : Container 32 字节、地图 24x24
- *   v29 ~ v30 : Container 40 字节、地图 24x24
- *   v31       : Container 40 字节、地图 36x36   ← 当前
- *
- * 只靠 memcpy 是**不行**的，三处都要重排：
- *   ① cont[]     —— 每条 32 -> 40 字节（v29 加了 mimicShell/mimicHost）
- *   ② worldMap   —— 24 宽 -> 36 宽，**行宽变了，必须逐格重排**
- *   ③ explored   —— 同上
- *   后面跟着的尾部（flares 之后）整体后移。
- *
- * 为什么第 ② 步不能 memcpy：老档是 y*24+x 的行主序，
- * 新结构是 y*36+x。直接拷会把第 1 行的后半截读成第 0 行的一部分。
- *
- * 返回 1 = 成功；0 = 参数不合理或文件太小。
- * ================================================================ */
 #define LEGACY_CONTAINER_BYTES 32      /* v28 及以前的 Container 大小 */
 /* 2026-11-06：v31 及以前的槽位数。MAX_CONTAINERS 8 -> 12 之后，
    老档里仍然只有 8 条记录 —— 迁移必须知道这个数，不能读新常量。 */
@@ -1608,7 +1551,6 @@ typedef struct {
 typedef char container_must_be_40[(sizeof(Container) == 40) ? 1 : -1];
 typedef char map_must_be_at_least_24[((MAP_WIDTH >= 24) && (MAP_HEIGHT >= 24)) ? 1 : -1];
 
-typedef char legacySave24_must_fit[(sizeof(LegacySaveV24) <= sizeof(SaveBlob)) ? 1 : -1];
 
 typedef struct {
     size_t fileSize;
@@ -1619,24 +1561,39 @@ typedef struct {
 
 static int forcedSaveSlot=-1;
 static int ReadSettingsCandidate(LoadedSaveInfo* info) {
+    retiredStoryPending=0;
+    s_saveReadOnly=0;
+    g_saveState=g_saveError=0;
     for (int slot = 0; slot < SAVE_SLOTS; slot++) {
         int error = SaveBackendRecoverDelete(slot);
         if (error) { g_saveState = 2; g_saveError = error; s_saveReadOnly = 1; return 0; }
     }
     char p[MAX_PATH],best[MAX_PATH]={0};double newest=-1;
+    int protectedBackup=0;
     memset(&g_save,0,sizeof(g_save));
     if(forcedSaveSlot>=0)g_saveSlot=forcedSaveSlot;else FindNewestSaveSlot();
     for(int i=0;i<SAVE_CAND_COUNT;i++){
         SavePathCand(i,p,sizeof(p));
         for(int backup=0;backup<2;backup++){
             char path[MAX_PATH];if(backup){if(strlen(p)+4>=sizeof(path))continue;snprintf(path,sizeof(path),"%s.bak",p);}else snprintf(path,sizeof(path),"%s",p);
-            if(!SavePathValid(path))continue;
+            int status=SavePathStatus(path);
+            if(!backup && (status==SAVE_ERR_SCHEMA || status==SAVE_ERR_EVENT)){
+                g_saveState=2;g_saveError=s_saveReadOnly=status;
+                SaveCarryClear();
+                return 0;
+            }
+            if(backup && (status==SAVE_ERR_SCHEMA || status==SAVE_ERR_EVENT))protectedBackup=status;
+            if(status!=1)continue;
             double time=PathWriteTime(path);
             SaveDiag("LOAD cand[%d]%s exists time=%.0f", i, backup ? ".bak" : "", time, path);
             if(!best[0] || time>newest){newest=time;snprintf(best,sizeof(best),"%s",path);}
         }
     }
-    if(!best[0]){if(PlatSystemLanguageZh())g_lang=LANG_ZH;return 0;}
+    if(!best[0]){
+        if(protectedBackup){g_saveState=2;g_saveError=s_saveReadOnly=protectedBackup;}
+        if(PlatSystemLanguageZh())g_lang=LANG_ZH;
+        return 0;
+    }
     long size=ReadSaveFile(best,&g_save);
     SaveDiag("LOAD picked=%s size=%ld version=%d pitchLook=%d", best, size, g_save.version, g_save.pitchLook);
     if(size<=0)return 0;
@@ -1660,7 +1617,6 @@ static int MigrateSettingsCandidate(LoadedSaveInfo* info) {
        整段读错。与其用错误的迁移静默毁档，不如归档不解释 ——
        数据还在盘上（.v24.bak），可以人工回滚。 */
     if (g_save.version == 24) {
-        (void)sizeof(LegacySaveV24);   /* 结构保留，仅为文档与 static assert */
     }
     /* v25 / v26 / v27：新字段都追加在结构末尾，前缀可以直接读。
        v25 缺 runPrincipalSave，用本局本金兜底（和原来的迁移一致）；
@@ -1898,10 +1854,13 @@ static void ApplyLoadedSettings(const LoadedSaveInfo* info) {
 }
 
 static void RestoreLoadedProgress(const LoadedSaveInfo* info) {
-    if (g_save.protocolRunSave.story &&
-        (!(g_save.protocolRunSave.flags&PROTOCOL_MISSIONS) ||
-         g_save.protocolRunSave.story<1 || g_save.protocolRunSave.story>3))
-        g_save.hasRun=0; /* Retired story: retain the profile, bank and unlocks. */
+    if(g_save.hasRun && g_save.protocolRunSave.story &&
+       (!(g_save.protocolRunSave.flags&PROTOCOL_MISSIONS) || (unsigned)(g_save.protocolRunSave.story-1)>=3)){
+        int error=SaveBackendPreserveRetiredStory(info->usedPath);
+        if(error){g_saveState=2;g_saveError=s_saveReadOnly=SAVE_ERR_RETIRED_STORY;}
+        else retiredStoryPending=1;
+        g_save.hasRun=0;
+    }
     InventoryOrderRestore(NULL,0);
     for (int i=0;i<s_carryCount;i++) if(s_carry[i].id==SC_INVENTORY_ORDER && s_carry[i].schema==1){
         InventoryOrderRestore(s_carry[i].data,(int)s_carry[i].size);
@@ -2019,7 +1978,7 @@ int SaveSelectSlot(int slot){
     if(slot==g_saveSlot)return 1;
     if(runInProgress || trainingMode)return 0;
     int previous=g_saveSlot;
-    SaveSettingsOnly();if(g_saveState!=1)return 0;
+    if(!s_saveReadOnly){SaveSettingsOnly();if(g_saveState!=1)return 0;}
     g_saveSlot=slot;forcedSaveSlot=slot;
     LoadedSaveInfo info;memset(&info,0,sizeof(info));
     int found=ReadSettingsCandidate(&info);
@@ -2343,9 +2302,9 @@ static void ResumeRestoredRun(void) {
 }
 
 static void ContinueSavedRun(int fromCheckpoint) {
-    if (!SaveEvolutionSchemaSupported()) {
+    if (!SaveCarriedSchemasSupported()) {
         g_saveState = 2;
-        g_saveError = SAVE_ERR_PAYLOAD;
+        g_saveError = SAVE_ERR_SCHEMA;
         return;
     }
     LoopResetHuntAchievements();

@@ -359,8 +359,8 @@ float noiseSrcX = 0.0f, noiseSrcY = 0.0f;   /* v3.0：听觉用 */
    有的话，躲在里面更难被搜到 —— 柜门缝隙被外面的光晃着，怪不容易注意到。 */
 
 
-static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
-    int walkingSource = footsteps || radius <= 14.0f;
+void MakeActionNoise(float x,float y,float radius,NoiseKind kind) {
+    int footsteps=kind==NOISE_WALK || kind==NOISE_SPRINT;
     float sourceRadius = radius;
 
     if (footsteps)
@@ -370,12 +370,9 @@ static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
             radius *= RoomThemeNoiseMul();
         radius *= TacticalNoiseMul(x, y);
     }
-    radius *= EventNoiseScale(walkingSource,sprinting,x,y);
+    radius *= EventNoiseScale(kind,x,y);
     if (sourceRadius <= 14)
         RoomThemeRedirectNoise(&x, &y);
-    const EventDef *event=EventDefinition(levelEvent);
-    if(event)radius*=event->hearing;
-
     /* 听觉差异**不再在这里做** ——
        2026-11-03 用户改成分只在个体上（100/75/50%）。
        每只怪在挑可疑点时按自己的倍率抬阈值，见 UpdateOneHunter。 */
@@ -391,34 +388,14 @@ static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
         noiseSrcX = x; noiseSrcY = y;
     }
 
-    /* v3.0：**噪音要通知所有追捕者** ——
-       原来只写 monster，于是扔瓶子引开对追光鬼/影子/蜘蛛完全无效，
-       「用噪音控制敌人」这个逃生核心手法只对三分之一的怪成立。 */
-    /* ===== v7 **可疑点表** =====
-       原来这里直接把 monster.state 设成 1 —— 于是所有噪音源抢同一个字段，
-       谁后写谁赢。玩偶的叫声刚设好就被玩家自己的脚步顶掉，
-       这就是「发出声音的玩偶吸引不了听声怪」的根源。
-       现在改成写表：多个噪音源共存，怪物自己挑最强的那个。 */
+    const EventDef *event=EventDefinition(levelEvent);
+    if(event)radius*=event->hearing;
+    if(radius<=0)return;
 #if CANITY_SOUND_EVENT
-    /* ==================================================================
-     * 2026-11-06（v2.4-beta B01）：**改成提交一个声音事件**
-     * ------------------------------------------------------------------
-     * 旧写法用半径同时决定强度和类别：
-     *     st  = radius * 2.6
-     *     src = (radius <= 14) ? SUSP_WALK : SUSP_SEARCH   ← 类别被半径绑死
-     * 于是把破门石的 20 调到 14，它会从"敲击"变成"脚步"，
-     * 寿命从 6 秒砍到 3 秒 —— 那不是调数值，是换了东西。
-     *
-     * 现在类别由 kind 决定，强度单独给。兼容期用一段**等价换算**：
-     *     radius <= 14 → SK_WALK，否则 SK_SEARCH
-     *     strength = min(radius * 2.6, 100)
-     * 数值和旧算法一模一样，所以行为逐位不变。
-     * 新代码（破门石 / 诱饵 / 回声弹）直接用显式 kind，不再走这一段。
-     * ================================================================== */
     {
         SoundEvent ev;
         memset(&ev, 0, sizeof(ev));
-        ev.kind  = walkingSource ? SK_WALK : SK_SEARCH;
+        ev.kind  = footsteps ? SK_WALK : SK_SEARCH;
         ev.x = x; ev.y = y;
         ev.strength = radius * 2.6f;          /* 半径 14 → 36；半径 20 → 52 */
         ev.maxRadius = radius;
@@ -430,7 +407,7 @@ static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
     {
         float st = radius * 2.6f;              /* 半径 14 → 36；半径 20 → 52 */
         if (st > 100.0f) st = 100.0f;
-        int srcS = walkingSource ? SUSP_WALK : SUSP_SEARCH;
+        int srcS = footsteps ? SUSP_WALK : SUSP_SEARCH;
         /* 走路噪音衰减快、寿命短；翻箱/敲击衰减慢、寿命长 */
         float decS = (srcS == SUSP_WALK) ? 14.0f : 8.0f;
         float ttlS = (srcS == SUSP_WALK) ? 3.0f : 6.0f;
@@ -465,8 +442,8 @@ static void MakeNoiseTagged(float x, float y, float radius,int footsteps) {
         noiseSrcX = x; noiseSrcY = y;
     }
 }
-void MakeNoise(float x,float y,float radius){MakeNoiseTagged(x,y,radius,0);}
-void MakeFootstepNoise(float x,float y,float radius){MakeNoiseTagged(x,y,radius,1);}
+void MakeNoise(float x,float y,float radius){MakeActionNoise(x,y,radius,NOISE_WORLD);}
+void MakeFootstepNoise(float x,float y,float radius){MakeActionNoise(x,y,radius,sprinting?NOISE_SPRINT:NOISE_WALK);}
 
 
 

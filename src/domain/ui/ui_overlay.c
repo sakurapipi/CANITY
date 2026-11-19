@@ -162,10 +162,14 @@ void DrawSaveStatusBanner(void) {
        只要文字超宽需要截断就会命中，窗口一窄必崩。
        现在用可写缓冲区。 */
     static char msg[160];
-    snprintf(msg, sizeof(msg), "%s",
-             (g_lang == LANG_ZH)
-                ? "存档写入失败  -  进度只在本次运行有效"
-                : "SAVE FAILED  -  PROGRESS ONLY LASTS THIS SESSION");
+    const char *notice=g_saveError==SAVE_ERR_SCHEMA?
+        Tr("SAVE NEEDS A NEWER VERSION / READ-ONLY","存档需要更新版本，已设为只读"):
+        g_saveError==SAVE_ERR_EVENT?
+        Tr("EVENT DATA DAMAGED / SAVE READ-ONLY","存档的事件数据损坏，已设为只读"):
+        g_saveError==SAVE_ERR_RETIRED_STORY?
+        Tr("LEGACY STORY ARCHIVE COULD NOT BE SAVED","旧剧情归档无法保存，原档已保护"):
+        Tr("SAVE FAILED / PROGRESS ONLY LASTS THIS SESSION","存档写入失败，进度只在本次运行有效");
+    snprintf(msg,sizeof msg,"%s",notice);
     ClampRowText(msg, winW - UIS(20));
 
     /* v2.9：挪到屏幕**底部** —— 原来钉在最顶上，把安全屋的页签整行盖住了

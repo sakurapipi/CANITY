@@ -1184,11 +1184,20 @@ static void DrawRunReplacement(void){
     BlendRectWin(0,0,winW,winH,0x030609,.94f);
     int x=winW*12/100,y=winH*34/100,right=winW*88/100;
     UiPanel9(x,y,right,winH*72/100,1);
-    DrawTextMediumLiteralWin(x+UIS(18),y+UIS(16),Tr("A RUN IS ALREADY IN PROGRESS","当前有正在游玩的进度"),UI_ACCENT);
-    DrawTextSmallLiteralWin(x+UIS(18),y+UIS(57),Tr("Replace it with a new run? Cancel keeps your progress.","是否用新对局覆盖？取消将保留原有进度。"),UI_INK);
+    int retired=SaveRetiredStoryPending();
+    if(retired){
+        int pad=UIS(18);
+        int bodyY=UiDossierText(Tr("LEGACY STORY ARCHIVED","旧版剧情进度已归档"),
+                               x+pad,y+UIS(12),right-x-2*pad,winH*47/100,UI_ACCENT)+UIS(5);
+        UiDossierText(Tr("Bank gold and unlocks stay. Restore the archived save in RC3 to finish the old run.",
+                         "银行金币和已解锁内容会保留。可在 RC3 恢复归档，继续旧剧情。"),
+                      x+pad,bodyY,right-x-2*pad,winH*58/100,UI_INK);
+    }else DrawTextMediumLiteralWin(x+UIS(18),y+UIS(16),Tr("A RUN IS ALREADY IN PROGRESS","当前有正在游玩的进度"),UI_ACCENT);
+    if(!retired)DrawTextSmallLiteralWin(x+UIS(18),y+UIS(57),Tr("Replace it with a new run? Cancel keeps your progress.","是否用新对局覆盖？取消将保留原有进度。"),UI_INK);
     for(int i=0;i<2;i++){
         RECT r;RunReplacementButtonRect(i,&r);UiRow(r.left,r.top,r.right,r.bottom,LoopRunReplacementChoice()==i?UI_ROW_SEL:UI_ROW_NORMAL,1);
-        const char* label=i?Tr("REPLACE [Y]","覆盖进度 [Y]"):Tr("KEEP PROGRESS [ESC]","保留进度 [ESC]");
+        const char* label=retired?(i?Tr("CONTINUE [Y]","确认迁移 [Y]"):Tr("EXIT [ESC]","退出 [ESC]")):
+            i?Tr("REPLACE [Y]","覆盖进度 [Y]"):Tr("KEEP PROGRESS [ESC]","保留进度 [ESC]");
         DrawTextMediumLiteralWin(r.left+UIS(10),r.top+UIS(10),label,i?UI_DANGER:UI_OK);
     }
 }

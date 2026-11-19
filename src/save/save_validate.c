@@ -1,3 +1,4 @@
+#include "event_wire.h"
 #include "evolution_save.h"
 /* Pure validation shared by local loading and cloud admission. */
 #include "common.h"
@@ -38,15 +39,17 @@ static int BlobValid(const void* bytes, size_t length) {
            length >= MinimumBlobBytes(version) && length <= sizeof(SaveBlob);
 }
 
-static int KnownSchemaSupported(unsigned short id, unsigned short schema) {
+int SaveChunkSchemaSupported(unsigned short id, unsigned short schema) {
     switch (id) {
     case SC_SETTINGS: case SC_LOBBY: case SC_RUN: case SC_WORLD: case SC_LEGACY29:
+    case SC_EVOLUTION_V1: case SC_TACTICAL_ITEMS_V1: case SC_DAILY_CLEAR:
+    case SC_PROTOCOL_CHECKPOINT: case SC_INVENTORY_ORDER: case SC_EVENT_V1: case SC_FLOOR_RULES:
         return schema == 1;
     default: return 1; /* Unknown IDs remain opaque and byte-preserved. */
     }
 }
 
-int SaveValidateBytes(const void* bytes, size_t length) {
+int SaveValidateStatus(const void* bytes, size_t length) {
     if (!bytes || length < 8 || length > SAVE_MAX_FILE_BYTES) return 0;
     unsigned magic; memcpy(&magic, bytes, 4);
     if (magic == SAVE_MAGIC) return BlobValid(bytes, length);
@@ -59,28 +62,43 @@ int SaveValidateBytes(const void* bytes, size_t length) {
     if (count < 1 || count > SAVE_MAX_CHUNKS) return 0;
     unsigned short ids[SAVE_MAX_CHUNKS];
     size_t used = SAVE_PAYLOAD_HEAD_SIZE + (size_t)count * sizeof(SaveChunkDesc);
-    int legacy = 0;
+    int legacy = 0, eventFloor=0, activeFloor=0;
     for (int i = 0; i < count; i++) {
         SaveChunkDesc desc; const void* body = NULL;
         if (!SaveContainerAt(payload, payloadBytes, i, &desc, &body)) return 0;
         for (int j = 0; j < i; j++) if (ids[j] == desc.id) return 0;
         ids[i] = desc.id;
-        if (!KnownSchemaSupported(desc.id, desc.schema) || !EvolutionChunkValid(desc.id,desc.schema,body,(int)desc.size)) return 0;
+        if (!SaveChunkSchemaSupported(desc.id, desc.schema)) return SAVE_ERR_SCHEMA;
+        if (!EvolutionChunkValid(desc.id,desc.schema,body,(int)desc.size)) return 0;
+        if(desc.id==SC_EVENT_V1) {
+            eventFloor=EventWireFloor(body,(int)desc.size);
+            if(!eventFloor)return SAVE_ERR_EVENT;
+        }
+        if(desc.id==SC_INVENTORY_ORDER && desc.size!=ITEM_SLOT_COUNT)return 0;
         if (desc.id == SC_PROTOCOL_CHECKPOINT && (desc.schema != 1 || !BlobValid(body, desc.size))) return 0;
         if (desc.id == SC_DAILY_CLEAR && desc.schema == 1 && desc.size != 4) return 0;
         if (desc.id == SC_FLOOR_RULES && desc.schema == 1) {
             if (desc.size != SAVE_FLOOR_RULES_BYTES || *(const unsigned char*)body > EVENT_COUNT)
-                return 0;
+                return SAVE_ERR_EVENT;
             float budget;
             memcpy(&budget, (const unsigned char*)body + 1, sizeof budget);
             if (!isfinite(budget) || budget < 0 || budget > FLARE_HEAL_FLOOR_BUDGET)
-                return 0;
+                return SAVE_ERR_EVENT;
         }
         used += desc.size;
         if (desc.id == SC_LEGACY29) {
             if (desc.schema != 1 || !BlobValid(body, desc.size)) return 0;
+            if(desc.size==sizeof(SaveBlob)) {
+                SaveBlob blob;
+                memcpy(&blob,body,sizeof blob);
+                if(blob.hasRun && !blob.protocolRunSave.story && !blob.dailyMode && !blob.campaignMode)
+                    activeFloor=blob.level;
+            }
             legacy++;
         }
     }
+    if(eventFloor && activeFloor && eventFloor!=activeFloor)return SAVE_ERR_EVENT;
     return legacy == 1 && used == (size_t)payloadBytes;
 }
+
+int SaveValidateBytes(const void *bytes,size_t length) { return SaveValidateStatus(bytes,length)==1; }

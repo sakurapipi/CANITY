@@ -13,7 +13,6 @@
 #include "wallet.h"
 #include "world_api.h"
 
-enum { ACTIVATED=1, CLEARED=2, CACHE_CLAIMED=4, GOLD_WARNED=8 };
 static struct {
     int floor, last, gold, signals, cache, cue;
     uint32_t seed, runSeed, flags;
@@ -105,14 +104,39 @@ static void PopulateSites(int *cacheCell) {
     }
 }
 
+static int WetAllowed(int x,int y) {
+    if(x<1 || x>=MAP_WIDTH-1 || y<1 || y>=MAP_HEIGHT-1 || wet[y][x] || worldMap[y][x])return 0;
+    if((x<5 && y<5) || (abs(x-3)<=2 && abs(y-18)<=2) ||
+       Dist2(x+.5f,y+.5f,exitX,exitY)<4)return 0;
+    return (worldMap[y][x-1] && worldMap[y][x+1]) ||
+           (worldMap[y-1][x] && worldMap[y+1][x]);
+}
+
+static void PlaceFloodBands(void) {
+    memset(wet,0,sizeof wet);
+    int bands=2+(int)(runtime.seed%3u);
+    for(int band=0;band<bands;band++) {
+        uint32_t best=UINT32_MAX;
+        int startX=0,startY=0,axis=0,length=0;
+        for(int y=1;y<MAP_HEIGHT-1;y++)for(int x=1;x<MAP_WIDTH-1;x++) {
+            if(!WetAllowed(x,y))continue;
+            for(int d=0;d<2;d++) {
+                int n=1;
+                while(n<6 && WetAllowed(x+(d==0?n:0),y+(d==1?n:0)))n++;
+                if(n<3)continue;
+                uint32_t rank=Mix(runtime.seed ^ (uint32_t)(2*(y*MAP_WIDTH+x)+d));
+                if(rank<best){best=rank;startX=x;startY=y;axis=d;length=n;}
+            }
+        }
+        if(!length)break;
+        for(int i=0;i<length;i++)wet[startY+(axis==1?i:0)][startX+(axis==0?i:0)]=1;
+    }
+}
+
 void EventPlaceFloor(void) {
     int cell=-1;
     siteCount=0;
-    if (levelEvent==EV_FLOOD) {
-        for(int y=1;y<MAP_HEIGHT-1;y++) for(int x=1;x<MAP_WIDTH-1;x++)
-            wet[y][x]=!worldMap[y][x] &&
-                Mix(runtime.seed^(uint32_t)(y*MAP_WIDTH+x))%100u<13u;
-    }
+    if(levelEvent==EV_FLOOD)PlaceFloodBands();
     if (levelEvent==EV_SUPPLY && !(runtime.flags&CACHE_CLAIMED) && (!(runtime.flags&ACTIVATED) || generationOffset) && containerCount<MAX_CONTAINERS) {
         if (runtime.cache<0) {
             PopulateSites(&cell);
@@ -157,16 +181,18 @@ float EventElapsed(void){return runtime.time;}
 int EventBloodMoon(void){return levelEvent==EV_BLOOD_MOON;}
 int EventEntranceProtected(void){return levelEvent>=0 && runtime.time<3;}
 int EventWetCell(int x,int y){return (unsigned)x<MAP_WIDTH && (unsigned)y<MAP_HEIGHT && wet[y][x];}
-float EventNoiseScale(int walking,int sprint,float x,float y) {
-    if (levelEvent==EV_SILENCE && walking) return sprint?1.20f:.60f;
-    if (levelEvent==EV_FLOOD && sprint && walking && EventWetCell((int)x,(int)y)) return 1.50f;
-    return 1;
-}
-
 static float GridPhase(void){return fmodf(runtime.time,20);}
 static int GridLive(void){return levelEvent==EV_GRID_SURGE && GridPhase()>=8 && GridPhase()<14;}
 float EventCrankScale(void){return GridLive()?1.25f:1;}
-float EventCrankNoiseScale(void){return (GridLive()?1.35f:1)*(levelEvent==EV_SILENCE?1.20f:1);}
+float EventNoiseScale(NoiseKind kind,float x,float y) {
+    if(levelEvent==EV_SILENCE) {
+        if(kind==NOISE_WALK)return .60f;
+        if(kind==NOISE_SPRINT || kind==NOISE_SEARCH || kind==NOISE_CRANK)return 1.20f;
+    }
+    if(kind==NOISE_CRANK && GridLive())return 1.35f;
+    if(kind==NOISE_SPRINT && levelEvent==EV_FLOOD && EventWetCell((int)x,(int)y))return 1.50f;
+    return 1;
+}
 
 int EventResidue(int index,float *x,float *y) {
     if ((levelEvent!=EV_WHISPER && levelEvent!=EV_MIRROR) || (unsigned)index>=(unsigned)siteCount ||
@@ -258,7 +284,6 @@ const char *EventPhaseLine(void) {
     return NULL;
 }
 
-static int GoldCap(int floor){return 40+10*(floor<12?floor:12);}
 int EventGoldCredit(EventGoldSource source,int amount,int slot) {
     const EventDef *d=EventDefinition(levelEvent);
     if (!d || !d->goldPct || amount<=0 || (unsigned)source>EVENT_EXIT) return 0;
@@ -267,7 +292,7 @@ int EventGoldCredit(EventGoldSource source,int amount,int slot) {
     uint64_t bit=UINT64_C(1)<<tx;
     if(runtime.paid&bit)return 0;
     runtime.paid|=bit;
-    int available=GoldCap(runtime.floor)-runtime.gold;
+    int available=EventGoldCap(runtime.floor)-runtime.gold;
     int64_t raw=((int64_t)amount*d->goldPct+50)/100;
     int bonus=raw>available?available:(int)raw;
     runtime.gold+=bonus;
@@ -297,14 +322,6 @@ int EventWireEncode(unsigned char *out) {
     Put(out,12,(uint32_t)(runtime.cache+1));
     Put(out,13,(uint32_t)runtime.signals | ((uint32_t)runtime.cue<<2) | ((uint32_t)(generationOffset!=0)<<31u));
     return 1;
-}
-
-int EventWireValid(const void *body,int size) {
-    const unsigned char *p=body;
-    if(!p || size!=EVENT_WIRE_BYTES || Get(p,0)!=1 || Get(p,1)==0 || Get(p,1)>999 ||
-       Get(p,2)>EVENT_COUNT || Get(p,3)>EVENT_COUNT || Get(p,6)>15 || Get(p,7)>86400000u ||
-       Get(p,9)>2000000 || Get(p,12)>MAP_WIDTH*MAP_HEIGHT)return 0;
-    return Get(p,8)<=(unsigned)GoldCap((int)Get(p,1)) && ((Get(p,13)&0x7fffffffu)>>2)<=86402;
 }
 
 int EventWireRestore(const void *body,int size,int floor) {

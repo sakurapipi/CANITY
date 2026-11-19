@@ -81,10 +81,16 @@ void LoopQueueStart(int mode, int stage) {
 }
 
 static int replaceRunPending=0,replaceRunChoice=0,replaceRunApproved=0;
-int LoopRunReplacementPending(void){return replaceRunPending;}
+int LoopRunReplacementPending(void){return replaceRunPending || (currentState==STATE_MAIN_MENU && SaveRetiredStoryPending());}
 int LoopRunReplacementChoice(void){return replaceRunChoice;}
 void LoopToggleRunReplacement(void){replaceRunChoice=!replaceRunChoice;uiDirty=1;}
 void LoopResolveRunReplacement(int approve){
+    if(currentState==STATE_MAIN_MENU && SaveRetiredStoryPending()){
+        if(approve)SaveConfirmRetiredStory();
+        else PlatRequestQuit();
+        replaceRunChoice=0;uiDirty=1;LoopClearInputEdges();resetInputState=1;
+        return;
+    }
     if(!replaceRunPending)return;
     replaceRunPending=0;uiDirty=1;LoopClearInputEdges();resetInputState=1;
     if(approve){replaceRunApproved=1;StartGame();}

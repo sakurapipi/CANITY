@@ -35,6 +35,7 @@
 #include "test_common.h"
 void TestSuite_throwing(void);
 void TestSuite_evolution(void);
+void TestSuite_events(void);
 void TestSuite_core(void);
 void TestSuite_ui(void);
 void TestSuite_localization(void);
@@ -1036,6 +1037,7 @@ int main(int argc,char** argv) {
         const char* name=argv[2];
         if(!strcmp(name,"base")){test_cloud_decide_length();test_sound_event_center();test_audio_pan_math();}
         else if(!strcmp(name,"evolution"))TestSuite_evolution();
+        else if(!strcmp(name,"events"))TestSuite_events();
         else if(!strcmp(name,"phase"))TestSuite_phase();
         else if(!strcmp(name,"hatch"))TestSuite_hatch();
         else if(!strcmp(name,"collapse"))TestSuite_collapse();
@@ -1058,7 +1060,7 @@ int main(int argc,char** argv) {
         printf("CANITY runtime suite %s: PASS (%d checks)\n",name,checks);return 0;
     }
     test_cloud_decide_length();test_sound_event_center();test_audio_pan_math();
-    TestSuite_evolution();TestSuite_phase();TestSuite_hatch();TestSuite_collapse();TestSuite_throwing();
+    TestSuite_evolution();TestSuite_events();TestSuite_phase();TestSuite_hatch();TestSuite_collapse();TestSuite_throwing();
     TestSuite_core();TestSuite_ui();TestSuite_localization();TestSuite_update();TestSuite_progress();TestSuite_actors();TestSuite_world();TestSuite_warden();TestSuite_map_rooms();TestSuite_rooms();TestSuite_save();TestSuite_delivery();
     printf("CANITY runtime integration: PASS (%d checks)\n",checks);return 0;
 }

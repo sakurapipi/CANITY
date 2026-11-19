@@ -341,7 +341,7 @@ int SaveBackendResolveCloud(int slot, int choice) {
 }
 
 /* Keep a byte-identical pre-migration copy. Existing backups are never overwritten. */
-int SaveBackendPreserveVersion(const char* path,int version){
+static int PreserveOriginal(const char *path,const char *suffix) {
     size_t cap=16u*1024u*1024u;
     unsigned char* original=malloc(cap);unsigned char* prior=malloc(cap);
     if(!original || !prior){free(original);free(prior);return 8;}
@@ -349,17 +349,26 @@ int SaveBackendPreserveVersion(const char* path,int version){
     if(n<=0){free(original);free(prior);return SAVE_ERR_PAYLOAD;}
     char backup[MAX_PATH+64];unsigned hash=2166136261u;
     for(long i=0;i<n;i++)hash=(hash^original[i])*16777619u;
-    snprintf(backup,sizeof(backup),"%s.v%d.bak",path,version);
+    snprintf(backup,sizeof(backup),"%s.%s.bak",path,suffix);
     long old=SaveBackendRead(backup,prior,cap);
     if(old>=0 && (old!=n || memcmp(original,prior,(size_t)n))){
-        snprintf(backup,sizeof(backup),"%s.v%d-%08x.bak",path,version,hash);
+        snprintf(backup,sizeof(backup),"%s.%s-%08x.bak",path,suffix,hash);
         old=SaveBackendRead(backup,prior,cap);
     }
     int code=0;
     if(old>=0){if(old!=n || memcmp(original,prior,(size_t)n))code=SAVE_ERR_PAYLOAD;}
-    else code=SaveBackendWrite(backup,original,(size_t)n);
+    else code=PlatWriteFileExclusive(backup,original,(int)n);
     if(!code){old=SaveBackendRead(backup,prior,cap);if(old!=n || memcmp(original,prior,(size_t)n))code=SAVE_ERR_PAYLOAD;}
     free(original);free(prior);return code;
+}
+
+int SaveBackendPreserveVersion(const char* path,int version) {
+    char suffix[24];
+    snprintf(suffix,sizeof suffix,"v%d",version);
+    return PreserveOriginal(path,suffix);
+}
+int SaveBackendPreserveRetiredStory(const char *path) {
+    return PreserveOriginal(path,"retired-story");
 }
 
 #ifdef SAVE_BACKEND_TEST

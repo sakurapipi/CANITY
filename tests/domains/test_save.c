@@ -1051,6 +1051,56 @@ static void test_role_reward_persists_once(void) {
           "the remaining character has a separate price and cannot be bought again");
 }
 
+static void test_protected_event_schema_and_retired_story(void) {
+    SaveTestClearReadOnly();
+    g_saveSlot=0;
+    char path[MAX_PATH],archive[MAX_PATH+32];
+    SavePathForSlot(0,0,path,sizeof path);
+    snprintf(archive,sizeof archive,"%s.retired-story.bak",path);
+    SaveBlob blob=*SaveTestBlob();
+    blob.magic=SAVE_MAGIC;blob.version=SAVE_VERSION;blob.saveSlot=0;blob.hasRun=1;
+    blob.level=7;blob.protocolRunSave.story=7;blob.protocolRunSave.flags=0;
+    blob.bankGoldSave=3210;
+    unsigned char *original=NULL;
+    int n=SaveTestSerialize(&blob,&original);
+    CHECK(n>0 && original && SaveBackendWrite(path,original,(size_t)n)==0,"legacy story fixture writes");
+    CHECK(PlatSetFileTime(path,PlatFileTime(path)+60)==0,"legacy story becomes selected fixture");
+    CHECK(!LoadSettings() && SaveRetiredStoryPending() && WalletBank()==3210,"retired route archives before asking for consent");
+    unsigned char *copy=malloc((size_t)n);
+    CHECK(copy && SaveBackendRead(archive,copy,(size_t)n)==n && !memcmp(copy,original,(size_t)n),
+          "legacy backup is byte-for-byte identical");
+    SaveGame();
+    CHECK(SaveBackendRead(path,copy,(size_t)n)==n && !memcmp(copy,original,(size_t)n),
+          "save attempts before consent leave the original intact");
+    CHECK(SaveConfirmRetiredStory() && !SaveRetiredStoryPending() && !SaveHasPendingRun(),
+          "confirmation retires the active route");
+    free(copy);free(original);
+
+    const unsigned short ids[]={SC_EVENT_V1,SC_FLOOR_RULES,SC_INVENTORY_ORDER,
+        SC_EVOLUTION_V1,SC_TACTICAL_ITEMS_V1,SC_DAILY_CLEAR,SC_PROTOCOL_CHECKPOINT};
+    unsigned char data[sizeof(SaveBlob)+512],event[EVENT_WIRE_BYTES]={0};
+    const void* bodies[]={&blob,event};
+    SaveChunkDesc chunks[]={{SC_LEGACY29,1,sizeof blob},{0,2,sizeof event}};
+    for(unsigned i=0;i<sizeof ids/sizeof ids[0];i++){
+        chunks[1].id=ids[i];
+        int pay=SaveContainerPack(chunks,bodies,2,data+sizeof(SaveEnvelope),sizeof data-sizeof(SaveEnvelope),NULL);
+        SaveEnvelope h;SaveEnvelopeSeal(&h,data+sizeof h,pay,1000);memcpy(data,&h,sizeof h);
+        CHECK(SaveValidateStatus(data,sizeof h+pay)==SAVE_ERR_SCHEMA,"every known future schema is protected");
+    }
+    chunks[1]=(SaveChunkDesc){SC_EVENT_V1,1,sizeof event};
+    event[0]=1;event[4]=7;event[8]=99;
+    int pay=SaveContainerPack(chunks,bodies,2,data+sizeof(SaveEnvelope),sizeof data-sizeof(SaveEnvelope),NULL);
+    SaveEnvelope h;SaveEnvelopeSeal(&h,data+sizeof h,pay,1000);memcpy(data,&h,sizeof h);
+    CHECK(SaveValidateStatus(data,sizeof h+pay)==SAVE_ERR_EVENT,"sealed but invalid event wire is rejected");
+    CHECK(SaveBackendWrite(path,data,sizeof h+pay)==0 && !LoadSettings() && g_saveError==SAVE_ERR_EVENT,
+          "invalid primary event archive is protected even when a valid backup exists");
+    SaveGame();
+    unsigned char later[sizeof data];
+    CHECK(SaveBackendRead(path,later,sizeof later)==(long)(sizeof h+pay) && !memcmp(data,later,sizeof h+pay),
+          "invalid primary retains original bytes after write attempts");
+    SaveTestClearReadOnly();
+}
+
 void TestSuite_save(void) {
     test_full_chunk_capacity_and_schemas();
     test_rc246_delete_results();
@@ -1074,6 +1124,7 @@ void TestSuite_save(void) {
     test_wallet_save();
     test_daily_clear_reward_persists();
     test_role_reward_persists_once();
+    test_protected_event_schema_and_retired_story();
     test_save_unknown_chunk_roundtrip();
     test_save_backend_errors();
 }
