@@ -144,7 +144,7 @@ int SuspicionBestReach(float fromX, float fromY, float distPenalty,
             if (steps==PROP_UNREACHABLE || straight>=DECOY_SHOUT_R) continue;
             reach=1.f-.55f*straight/DECOY_SHOUT_R;
         } else {
-            reach=SoundReach(fromX,fromY,susp[i].x,susp[i].y,maxListen);
+            reach=SoundReachBuilt(fromX,fromY,susp[i].x,susp[i].y,maxListen);
         }
         if (reach <= 0.0f) continue;
         float score = susp[i].strength * reach - (decoy?fminf(d,DECOY_SHOUT_R):d) * distPenalty;

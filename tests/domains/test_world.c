@@ -1079,6 +1079,14 @@ static void test_sound_propagation(void) {
               "changing the source must rebuild the field exactly once");
     }
 
+    SoundPropBuild(2.5f, 5.5f);
+    worldMap[5][4] = 1;
+    SoundPropBuild(2.5f, 5.5f);
+    CHECK(SoundPropCostAt(7.5f,5.5f)==PROP_UNREACHABLE,"the same source must honor a new wall");
+    worldMap[5][4] = 0;
+    SoundPropBuild(2.5f, 5.5f);
+    CHECK(SoundPropCostAt(7.5f,5.5f)==5,"the same source follows a restored floor grid");
+
     /* ---- ⑥ 封死的格子：不可达 ---- */
     {
         /* (20,20) 四周全是墙，从来没被打通 */

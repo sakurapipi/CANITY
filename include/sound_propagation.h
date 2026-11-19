@@ -31,7 +31,7 @@
 
 /* 以 (sx,sy) 为源建立传播距离场（单位 = 步数）。
    源格本身记为 0；墙体与不可达格记为 PROP_UNREACHABLE。
-   重复用同一个源调用会命中缓存，不会重算。 */
+   同源格且地图未变时复用传播场。 */
 void SoundPropBuild(float sx, float sy);
 
 /* 某个格子的传播步数；PROP_UNREACHABLE = 走不到。
@@ -47,6 +47,9 @@ int SoundPropBuildCount(void);   /* 真正执行过几次 BFS */
    内部会确保以 (sx,sy) 建场（不重复建）。
    **这是 B03 对外的唯一入口** —— 上层不需要知道 BFS 细节。 */
 float SoundReach(float sx, float sy, float tx, float ty, float maxRadius);
+
+/* Reuse the just-built field while evaluating multiple clues for one listener. */
+float SoundReachBuilt(float sx, float sy, float tx, float ty, float maxRadius);
 
 /* 测试用：清掉缓存 */
 void SoundPropReset(void);

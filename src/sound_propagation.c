@@ -11,6 +11,7 @@
 #include "present_api.h"
 
 static int s_cost[PROP_CELLS];
+static int s_topology[MAP_HEIGHT][MAP_WIDTH];
 static int s_built = 0;          /* 场是否有效 */
 static int s_srcCell = -1;       /* 上次建场的源格 */
 static int s_buildCount = 0;     /* 真正跑过几次 BFS */
@@ -81,7 +82,9 @@ void SoundPropBuild(float sx, float sy) {
         return;
     }
     int si = CellIndex(scx, scy);
-    if (s_built && s_srcCell == si) return;      /* 命中缓存 */
+    if (s_built && s_srcCell == si && !memcmp(s_topology, worldMap, sizeof s_topology)) return;
+    /* The grid is shared by map generation, collapse rollback and save loading. */
+    memcpy(s_topology, worldMap, sizeof s_topology);
     BuildFrom(scx, scy);
 }
 
@@ -108,10 +111,12 @@ int SoundPropBuildCount(void) { return s_buildCount; }
  * 取两者的较大值当有效距离，正好是"要么近、要么直"。
  * ================================================================== */
 float SoundReach(float sx, float sy, float tx, float ty, float maxRadius) {
-    if (maxRadius <= 0.01f) return 0.0f;
-
     SoundPropBuild(sx, sy);
+    return SoundReachBuilt(sx, sy, tx, ty, maxRadius);
+}
 
+float SoundReachBuilt(float sx, float sy, float tx, float ty, float maxRadius) {
+    if (maxRadius <= 0.01f) return 0.0f;
     float dx = tx - sx, dy = ty - sy;
     float straight = sqrtf(dx * dx + dy * dy);
 
