@@ -222,6 +222,7 @@ jobs:
           generate_release_notes: false
           body_path: docs/RELEASE-${{ github.ref_name }}.md
           prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -231,6 +232,12 @@ jobs:
   pages:
     needs: [web]
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pages: write
+      id-token: write
+    env:
+      PAGES_ARTIFACT: github-pages-${{ github.run_attempt }}
     # ================================================================
     # 2026-11-07：**不要挂 github-pages 环境**
     # ----------------------------------------------------------------
@@ -262,9 +269,24 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: pagesroot
+          name: ${{ env.PAGES_ARTIFACT }}
+
+      - name: Wait for the Pages artifact to become visible
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in {1..12}; do
+            count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=$PAGES_ARTIFACT" --jq '.total_count') || count=0
+            if [ "$count" = 1 ]; then exit 0; fi
+            sleep 5
+          done
+          echo "Pages artifact did not become visible: $PAGES_ARTIFACT" >&2
+          exit 1
 
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: ${{ env.PAGES_ARTIFACT }}
 
       - name: Show page URL
         run: echo "deployed -> ${{ steps.deployment.outputs.page_url }}"
