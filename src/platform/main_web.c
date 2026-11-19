@@ -328,6 +328,11 @@ EMSCRIPTEN_KEEPALIVE int CanityProbeFlashlight(void) {
     return (flashlightOn ? 1 : 0) * 1000 + (int)battery;
 }
 
+EMSCRIPTEN_KEEPALIVE int CanityWebSaveStatus(const void *data, unsigned length) {
+    int status = SaveValidateStatus(data, length);
+    return SaveStatusProtected(status) ? -1 : status;
+}
+
 EMSCRIPTEN_KEEPALIVE int CanityProbeState(void) {
     return (int)currentState;      /* currentState 在 game.h 里已有正确类型 */
 }

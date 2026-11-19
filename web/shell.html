@@ -285,21 +285,35 @@ body.touchControls #saveToggle{display:block}body.touchControls #entry.saveopen{
       return b64ToBytes(v);
     }
 
+    function saveStatus(bytes) {
+      if (!bytes.length || bytes.length > 16 * 1024 * 1024) return 0;
+      var p = Module._malloc(bytes.length);
+      if (!p) return 0;
+      try {
+        Module.HEAPU8.set(bytes, p);
+        return Module._CanityWebSaveStatus(p, bytes.length);
+      } finally {
+        Module._free(p);
+      }
+    }
+
     /* 写入存档字节。返回：
          1  成功（并已备份旧档）
          0  成功（原本没有旧档）
         -1  不是可识别的存档（不写入）
-        -2  浏览器存储失败（配额 / 隐私模式） */
+        -2  浏览器存储失败（配额 / 隐私模式）
+        -3  当前或导入的存档已受保护
+        -4  游戏尚未加载 */
     function importBytes(arr) {
       var k=saveKeys(),KEY=k.key,TS=k.time,BAK=k.backup,BAK_TS=k.backupTime;
-      if (!arr || arr.length < 16) return -1;
-      /* 只做最外层的魔数检查：CSAV 信封 或 裸档 'CAN2'/'2NAC' */
-      var m = String.fromCharCode(arr[0], arr[1], arr[2], arr[3]);
-      var ok = (m === 'CSAV') ||
-               (m === 'CAN2') || (m === '2NAC') || (m === 'CANT');
-      if (!ok) return -1;
+      if (!Module._CanityWebSaveStatus) return -4;
+      if (!arr || arr.length < 8) return -1;
+      var status = saveStatus(arr);
+      if (status !== 1) return status < 0 ? -3 : -1;
       try {
-        var had = localStorage.getItem(KEY);
+        var had = localStorage.getItem(KEY), backup = localStorage.getItem(BAK);
+        if ((had && saveStatus(b64ToBytes(had)) < 0) ||
+            (backup && saveStatus(b64ToBytes(backup)) < 0)) return -3;
         if (had) {
           localStorage.setItem(BAK, had);
           localStorage.setItem(BAK_TS,
@@ -349,7 +363,9 @@ body.touchControls #saveToggle{display:block}body.touchControls #entry.saveopen{
         rd.onload = function () {
           var arr = new Uint8Array(rd.result);
           var r = importBytes(arr);
-          if (r === -1) { toast('这不是 CANITY 存档（魔数不符）'); return; }
+          if (r === -1) { toast('存档无效 / Invalid save'); return; }
+          if (r === -3) { toast('存档已保护 / Save is protected'); return; }
+          if (r === -4) { toast('请等游戏加载完成 / Wait for the game to load'); return; }
           if (r === -2) { toast('浏览器拒绝写入（存储已满或隐私模式）'); return; }
           toast('存档已导入，正在重新载入…');
           setTimeout(function () { location.reload(); }, 600);
