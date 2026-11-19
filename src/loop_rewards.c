@@ -1,5 +1,6 @@
 /* Run draft selection and chained reward lifecycle. */
 #include "common.h"
+#include "event_runtime.h"
 #include "wallet.h"
 #include "daily.h"
 #include "run_stats.h"
@@ -308,6 +309,7 @@ void RunExitChoiceOpen(void) {
     memset(keyPressed,0,sizeof(keyPressed));exitPointerVisible=1;ForceCursor(1);uiDirty=1;
 }
 static void ExtractCurrentRun(void) {
+    EventClearFloor();
     exitChoiceOpen=0;exitChoiceConfirm=0;
     lastExtractDepthMul=ExtractDepthMul(currentLevel);runInProgress=0;
     dailyEscapeCount++;DailyObserve(DQ_ESCAPE,dailyEscapeCount);

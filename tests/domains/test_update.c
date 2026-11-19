@@ -5,6 +5,8 @@
  * 不把 static 函数暴露出去，测试就盯"玩家能看到的结果"。
  */
 #include "../test_common.h"
+#include "event_runtime.h"
+#include "events.h"
 #include "loop_private.h"
 #include "loop_api.h"
 #include "present_api.h"
@@ -455,10 +457,15 @@ static void test_pitch_gate_and_near_wall_input(void) {
 static void test_exit_choices_require_confirmation(void) {
     StartFreshTestRun();currentState=STATE_PLAYING;trainingMode=0;runInProgress=1;exitGoDeeper=0;
     int bank=bankGold;
+    unsigned char event[EVENT_WIRE_BYTES]={0};
+    event[0]=1;event[4]=(unsigned char)currentLevel;event[8]=EV_FLOOD+1;
+    CHECK(EventWireRestore(event,sizeof event,currentLevel),"exit scoring fixture restores");
+    int previousScore=eventBonus;
     RunExitChoiceOpen();exitChoiceT=.25f;RunExitChoiceKey('2');
     CHECK(exitChoiceOpen && exitChoiceConfirm && runInProgress && bankGold==bank,"extract opens confirmation without ending the run or settling gold");
     exitChoiceT=.25f;RunExitChoiceKey(VK_SPACE);
     CHECK(exitChoiceOpen && !exitChoiceConfirm,"space safely cancels extraction confirmation");
+    CHECK(eventBonus==previousScore,"canceling extraction does not grant event completion score");
     exitChoiceT=.25f;RunExitChoiceKey(VK_SPACE);
     CHECK(!exitChoiceOpen && exitGoDeeper && currentState==STATE_PLAYING,"space on the main exit panel continues the run");
     exitGoDeeper=0;RunExitChoiceOpen();exitChoiceT=.25f;
@@ -471,6 +478,7 @@ static void test_exit_choices_require_confirmation(void) {
     exitGoDeeper=0;RunExitChoiceOpen();exitChoiceT=.25f;RunExitChoiceKey('2');
     exitChoiceT=.25f;RunExitChoiceKey('2');
     CHECK(currentState==STATE_GAMEOVER && !runInProgress && !exitChoiceOpen,"only explicit confirmed extraction ends and settles the run");
+    CHECK(eventBonus==previousScore+EventDefinition(EV_FLOOD)->score,"confirming extraction grants the event score once");
     StartFreshTestRun();
 }
 static void test_three_peaceful_missions(void) {

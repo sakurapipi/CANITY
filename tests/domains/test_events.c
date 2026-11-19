@@ -3,6 +3,8 @@
 #include "events.h"
 #include "monster_rules.h"
 #include "threat_tier.h"
+#include "economy.h"
+#include "monster_evolution.h"
 
 static void PutWord(unsigned char *bytes,int index,unsigned value) {
     for(int i=0;i<4;i++)bytes[4*index+i]=(unsigned char)(value>>(i*8));
@@ -29,6 +31,64 @@ static void CheckNoise(NoiseKind kind,float radius,float expected,int expectedKi
     CHECK(normal>0 && fabsf(SoundEventLastStrength()/normal-expected*1.08f)<.001f,
           "diegetic sound modifier and hearing gain apply exactly once");
     CHECK(SoundEventLastKind()==expectedKind,"radius does not determine sound category");
+}
+
+static void CheckHunterHearing(void) {
+    static void (*const update[])(float)={UpdateMonster,UpdateMonster2,UpdateMonster3};
+    posX=5.5f;posY=5.5f;playerInSafe=1;hiddenIn=-1;
+    levelEvent=-1;modNoiseMul=1;
+    for(int bend=0;bend<=1;bend++) {
+        for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)worldMap[y][x]=1;
+        for(int x=5;x<=19;x++)worldMap[5][x]=worldMap[7][x]=0;
+        worldMap[6][5]=worldMap[6][19]=0;
+        for(int tier=0;tier<4;tier++)for(int h=0;h<MON_HUNTER_MAX;h++) {
+            ThreatTierRestore(currentLevel,tier,0);
+            EvolutionResetFloor();
+            for(int distance=2;distance<=14;distance+=2) {
+                int heard[2];
+                for(int high=0;high<2;high++) {
+                    carryGold=high?90000:0;
+                    Monster *m=&monHunters[h];
+                    memset(m,0,sizeof *m);m->active=1;m->x=posX+distance;m->y=posY+2*bend;
+                    m->suspTarget=-1;
+                    SuspicionReset();
+                    MakeActionNoise(posX,posY,16,NOISE_SEARCH);
+                    CHECK(m->state==0,"a sound publishes a clue without directly assigning a hunter state");
+                    float effective=fminf(100,16*2.6f*EconomyHearMul());
+                    CHECK(fabsf(SoundEventLastStrength()-effective)<.001f,"shared hearing gets one economy multiplier");
+                    float reach=SoundReach(m->x,m->y,posX,posY,EvolutionHearingRange(22));
+                    update[h](.01f);
+                    heard[high]=m->suspTarget>=0;
+                    CHECK(heard[high]==(effective*reach>15/HunterHearMulAt(h)),
+                          "actual hunter update uses topology and the individual hearing threshold");
+                }
+                CHECK(heard[1]>=heard[0],"wealth makes the same sound at least as audible for each hunter");
+            }
+        }
+    }
+    playerInSafe=0;
+}
+
+static void CheckGeneratedEventFloors(void) {
+    static const int levels[]={2,4,8,10};
+    for(unsigned seed=1;seed<=1000;seed++) {
+        RunRngSeed(seed);
+        EventResetRun();
+        currentLevel=levels[(seed-1)%4];
+        GenerateLevel();
+        MapCheck map;
+        MapValidate(&map);
+        CHECK(map.spawnOpen && map.exitReachable,"generated event floor retains a usable route");
+        SetTestFloorEvent(EV_FLOOD);
+        EventPlaceFloor();
+        int count=0;
+        for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)
+            if(EventWetCell(x,y)) {
+                CHECK(!worldMap[y][x],"flood cannot add or replace walls");
+                count++;
+            }
+        CHECK(levelEvent==EV_FLOOD && count>=6,"generated floor supports a meaningful flooded section");
+    }
 }
 
 void TestSuite_events(void) {
@@ -94,6 +154,9 @@ void TestSuite_events(void) {
         CHECK(EventNoiseScale(NOISE_SPRINT,x+.5f,y+.5f)==1.50f &&
               EventNoiseScale(NOISE_WALK,x+.5f,y+.5f)==1,"only sprinting makes extra water noise");
     }
+    int wetCount=0;
+    for(int y=0;y<MAP_HEIGHT;y++)for(int x=0;x<MAP_WIDTH;x++)wetCount+=EventWetCell(x,y)!=0;
+    CHECK(levelEvent==EV_FLOOD && wetCount>=6,"a normal generated flood offers at least six wet tiles");
     for(unsigned seed=1;seed<=1000;seed++) {
         int prior=-1;
         EventResetRun();
@@ -105,4 +168,6 @@ void TestSuite_events(void) {
             prior=levelEvent;
         }
     }
+    CheckGeneratedEventFloors();
+    CheckHunterHearing();
 }

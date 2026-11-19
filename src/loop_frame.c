@@ -1820,7 +1820,7 @@ static void UpdateExitProgression(float dt) {
         }
         return;
     }
-    if(!trainingMode && atExit && !WardenBlocking()){RunEconomyFloorGold();EventClearFloor();}
+    if(!trainingMode && atExit && !WardenBlocking())RunEconomyFloorGold();
 
     /* v6 **出口二选一：弹窗** ——
        只有「还没弹过、也不是刚选了深入」才弹。 */
@@ -1836,6 +1836,7 @@ static void UpdateExitProgression(float dt) {
        所以整段「换下一层」永远不执行（按 2 只会重复弹窗）。
        现在：最终层直接前进；非最终层必须玩家确认过「深入」。 */
     if (!trainingMode && atExit && (isFinalFloor || exitGoDeeper)) {
+        EventClearFloor();
         exitGoDeeper = 0;
         /* NOCTURNAL：本层全程手电关着过关 */
         if (!flashlightOn) flashlightOffLevel = 1;

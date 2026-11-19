@@ -104,25 +104,32 @@ static void PopulateSites(int *cacheCell) {
     }
 }
 
-static int WetAllowed(int x,int y) {
-    if(x<1 || x>=MAP_WIDTH-1 || y<1 || y>=MAP_HEIGHT-1 || wet[y][x] || worldMap[y][x])return 0;
-    if((x<5 && y<5) || (abs(x-3)<=2 && abs(y-18)<=2) ||
-       Dist2(x+.5f,y+.5f,exitX,exitY)<4)return 0;
-    return (worldMap[y][x-1] && worldMap[y][x+1]) ||
-           (worldMap[y-1][x] && worldMap[y+1][x]);
+static int WetCellAllowed(int x,int y) {
+    return x>=1 && x<MAP_WIDTH-1 && y>=1 && y<MAP_HEIGHT-1 && !worldMap[y][x] &&
+           !(x<5 && y<5) && !(abs(x-3)<=2 && abs(y-18)<=2) &&
+           Dist2(x+.5f,y+.5f,exitX,exitY)>=4;
 }
 
-static void PlaceFloodBands(void) {
+static int WetAllowed(int x,int y,int axis) {
+    if(!WetCellAllowed(x,y) || wet[y][x])return 0;
+    return axis==0 ? worldMap[y-1][x] && worldMap[y+1][x] :
+                     worldMap[y][x-1] && worldMap[y][x+1];
+}
+
+/* A short floor can use connected patches when it runs out of straight corridors. */
+static int PlaceFloodBands(void) {
+    enum { MIN_WET_CELLS=6 };
+    int wetCount=0;
     memset(wet,0,sizeof wet);
     int bands=2+(int)(runtime.seed%3u);
     for(int band=0;band<bands;band++) {
         uint32_t best=UINT32_MAX;
         int startX=0,startY=0,axis=0,length=0;
         for(int y=1;y<MAP_HEIGHT-1;y++)for(int x=1;x<MAP_WIDTH-1;x++) {
-            if(!WetAllowed(x,y))continue;
             for(int d=0;d<2;d++) {
+                if(!WetAllowed(x,y,d))continue;
                 int n=1;
-                while(n<6 && WetAllowed(x+(d==0?n:0),y+(d==1?n:0)))n++;
+                while(n<6 && WetAllowed(x+(d==0?n:0),y+(d==1?n:0),d))n++;
                 if(n<3)continue;
                 uint32_t rank=Mix(runtime.seed ^ (uint32_t)(2*(y*MAP_WIDTH+x)+d));
                 if(rank<best){best=rank;startX=x;startY=y;axis=d;length=n;}
@@ -130,13 +137,34 @@ static void PlaceFloodBands(void) {
         }
         if(!length)break;
         for(int i=0;i<length;i++)wet[startY+(axis==1?i:0)][startX+(axis==0?i:0)]=1;
+        wetCount+=length;
     }
+    while(wetCount<MIN_WET_CELLS) {
+        uint32_t best=UINT32_MAX;
+        int bx=0,by=0,nx=0,ny=0;
+        for(int y=1;y<MAP_HEIGHT-1;y++)for(int x=1;x<MAP_WIDTH-1;x++) {
+            if(!WetCellAllowed(x,y) || wet[y][x])continue;
+            for(int axis=0;axis<2;axis++) {
+                int tx=x+(axis==0),ty=y+(axis==1);
+                if(!WetCellAllowed(tx,ty) || wet[ty][tx])continue;
+                uint32_t rank=Mix(runtime.seed ^ (uint32_t)(2*(y*MAP_WIDTH+x)+axis));
+                if(rank<best){best=rank;bx=x;by=y;nx=tx;ny=ty;}
+            }
+        }
+        if(!bx)break;
+        wet[by][bx]=wet[ny][nx]=1;
+        wetCount+=2;
+    }
+    return wetCount>=MIN_WET_CELLS;
 }
 
 void EventPlaceFloor(void) {
     int cell=-1;
     siteCount=0;
-    if(levelEvent==EV_FLOOD)PlaceFloodBands();
+    if(levelEvent==EV_FLOOD && !PlaceFloodBands() && !(runtime.flags&ACTIVATED)) {
+        levelEvent=-1;
+        memset(wet,0,sizeof wet);
+    }
     if (levelEvent==EV_SUPPLY && !(runtime.flags&CACHE_CLAIMED) && (!(runtime.flags&ACTIVATED) || generationOffset) && containerCount<MAX_CONTAINERS) {
         if (runtime.cache<0) {
             PopulateSites(&cell);
