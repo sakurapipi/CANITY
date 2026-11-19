@@ -302,6 +302,7 @@ typedef struct {
 static SaveCarryChunk s_carry[SAVE_CARRY_MAX];
 static int            s_carryCount = 0;
 static int retiredStoryPending;
+static char retiredStoryArchive[MAX_PATH+96];
 static int            s_saveReadOnly = 0;   /* 读档发现结构异常 → 拒绝改写 */
 
 static void SaveCarryClear(void) {
@@ -761,6 +762,11 @@ static void SaveProfileAndSettings(int saveBank) {
 static void SaveSettingsOnly(void) { SaveProfileAndSettings(0); }
 
 int SaveRetiredStoryPending(void) { return retiredStoryPending; }
+const char* SaveRetiredStoryArchiveName(void) {
+    const char *name = retiredStoryArchive;
+    for (const char *c = name; *c; c++) if (*c == '/' || *c == 92) name = c + 1;
+    return name;
+}
 int SaveConfirmRetiredStory(void) {
     if(!retiredStoryPending)return 1;
     retiredStoryPending=0;
@@ -1562,6 +1568,7 @@ typedef struct {
 static int forcedSaveSlot=-1;
 static int ReadSettingsCandidate(LoadedSaveInfo* info) {
     retiredStoryPending=0;
+    retiredStoryArchive[0]=0;
     s_saveReadOnly=0;
     g_saveState=g_saveError=0;
     for (int slot = 0; slot < SAVE_SLOTS; slot++) {
@@ -1569,7 +1576,6 @@ static int ReadSettingsCandidate(LoadedSaveInfo* info) {
         if (error) { g_saveState = 2; g_saveError = error; s_saveReadOnly = 1; return 0; }
     }
     char p[MAX_PATH],best[MAX_PATH]={0};double newest=-1;
-    int protectedBackup=0;
     memset(&g_save,0,sizeof(g_save));
     if(forcedSaveSlot>=0)g_saveSlot=forcedSaveSlot;else FindNewestSaveSlot();
     for(int i=0;i<SAVE_CAND_COUNT;i++){
@@ -1577,12 +1583,11 @@ static int ReadSettingsCandidate(LoadedSaveInfo* info) {
         for(int backup=0;backup<2;backup++){
             char path[MAX_PATH];if(backup){if(strlen(p)+4>=sizeof(path))continue;snprintf(path,sizeof(path),"%s.bak",p);}else snprintf(path,sizeof(path),"%s",p);
             int status=SavePathStatus(path);
-            if(!backup && (status==SAVE_ERR_SCHEMA || status==SAVE_ERR_EVENT)){
+            if(SaveStatusProtected(status)){
                 g_saveState=2;g_saveError=s_saveReadOnly=status;
                 SaveCarryClear();
                 return 0;
             }
-            if(backup && (status==SAVE_ERR_SCHEMA || status==SAVE_ERR_EVENT))protectedBackup=status;
             if(status!=1)continue;
             double time=PathWriteTime(path);
             SaveDiag("LOAD cand[%d]%s exists time=%.0f", i, backup ? ".bak" : "", time, path);
@@ -1590,7 +1595,6 @@ static int ReadSettingsCandidate(LoadedSaveInfo* info) {
         }
     }
     if(!best[0]){
-        if(protectedBackup){g_saveState=2;g_saveError=s_saveReadOnly=protectedBackup;}
         if(PlatSystemLanguageZh())g_lang=LANG_ZH;
         return 0;
     }
@@ -1856,7 +1860,7 @@ static void ApplyLoadedSettings(const LoadedSaveInfo* info) {
 static void RestoreLoadedProgress(const LoadedSaveInfo* info) {
     if(g_save.hasRun && g_save.protocolRunSave.story &&
        (!(g_save.protocolRunSave.flags&PROTOCOL_MISSIONS) || (unsigned)(g_save.protocolRunSave.story-1)>=3)){
-        int error=SaveBackendPreserveRetiredStory(info->usedPath);
+        int error=SaveBackendPreserveRetiredStory(info->usedPath, retiredStoryArchive, sizeof retiredStoryArchive);
         if(error){g_saveState=2;g_saveError=s_saveReadOnly=SAVE_ERR_RETIRED_STORY;}
         else retiredStoryPending=1;
         g_save.hasRun=0;

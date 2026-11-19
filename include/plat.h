@@ -131,6 +131,7 @@ int PlatExeDir(char* out, int cap);                                /* 返回写�
  * 网页端没有真实文件系统：这里的 path 只取**文件名部分**作为 localStorage
  * 的键，目录信息被丢弃。存档格式与调用方逻辑完全不变。
  * ------------------------------------------------------------------- */
+int PlatFileSize(const char* path);  /* Bytes, or negative on error. */
 int PlatReadFilePath(const char* path, void* buf, int cap);         /* 字节数，失败 <0 */
 /* 原子写：先写临时文件 + 落盘 + 改名。0 = 成功，否则平台错误码。 */
 int PlatWriteFileAtomic(const char* path, const void* data, int len);

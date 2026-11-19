@@ -1189,8 +1189,10 @@ static void DrawRunReplacement(void){
         int pad=UIS(18);
         int bodyY=UiDossierText(Tr("LEGACY STORY ARCHIVED","旧版剧情进度已归档"),
                                x+pad,y+UIS(12),right-x-2*pad,winH*47/100,UI_ACCENT)+UIS(5);
-        UiDossierText(Tr("Bank gold and unlocks stay. Restore the archived save in RC3 to finish the old run.",
-                         "银行金币和已解锁内容会保留。可在 RC3 恢复归档，继续旧剧情。"),
+        bodyY=UiDossierText(SaveRetiredStoryArchiveName(), x+pad,bodyY,right-x-2*pad,
+                            winH*51/100,UI_ACCENT)+UIS(4);
+        UiDossierText(Tr("Bank gold and unlocks stay. Restore this archive in RC3.",
+                         "银行金币和已解锁内容会保留。可在 RC3 恢复此归档。"),
                       x+pad,bodyY,right-x-2*pad,winH*58/100,UI_INK);
     }else DrawTextMediumLiteralWin(x+UIS(18),y+UIS(16),Tr("A RUN IS ALREADY IN PROGRESS","当前有正在游玩的进度"),UI_ACCENT);
     if(!retired)DrawTextSmallLiteralWin(x+UIS(18),y+UIS(57),Tr("Replace it with a new run? Cancel keeps your progress.","是否用新对局覆盖？取消将保留原有进度。"),UI_INK);

@@ -368,6 +368,14 @@ int PlatWriteFileBytes(const char* name, const void* buf, int len) {
  * 原子写仍是原来那一套：.tmp -> FlushFileBuffers -> 原子改名。
  * 这一段从 src/save/save_backend.c 原样搬过来 —— 存档后端从此只认平台层。
  * ------------------------------------------------------------------- */
+int PlatFileSize(const char* path) {
+    WIN32_FILE_ATTRIBUTE_DATA info;
+    if (!path || !GetFileAttributesExA(path, GetFileExInfoStandard, &info) ||
+        (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || info.nFileSizeHigh ||
+        info.nFileSizeLow > INT_MAX) return -1;
+    return (int)info.nFileSizeLow;
+}
+
 int PlatReadFilePath(const char* path, void* buf, int cap) {
     if (!path || !path[0] || !buf || cap <= 0) return -1;
     HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,

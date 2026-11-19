@@ -173,15 +173,20 @@ static int CloudInstallAt(const char* path, const void* data, int length) {
         unsigned char* old = malloc(SAVE_MAX_FILE_BYTES);
         if (!old) return 8;
         long n = SaveBackendRead(path, old, SAVE_MAX_FILE_BYTES);
-        int error = n >= 0 ? SaveBackendKeepSnapshot(path, "pre-cloud", old, (size_t)n, NULL, 0)
-                            : SAVE_ERR_CLOUD_BACKUP;
+        int status = n > 0 ? SaveValidateStatus(old, (size_t)n) : 0;
+        int error = SaveStatusProtected(status) ? status :
+                    n >= 0 ? SaveBackendKeepSnapshot(path, "pre-cloud", old, (size_t)n, NULL, 0)
+                           : SAVE_ERR_CLOUD_BACKUP;
         free(old);
-        if (error) return SAVE_ERR_CLOUD_BACKUP;
+        if (error) return SaveStatusProtected(error) ? error : SAVE_ERR_CLOUD_BACKUP;
     }
     return SaveBackendWrite(path, data, (size_t)length);
 }
 static int CloudInstall(int slot, const char* preferred, const void* data, int length) {
-    if (!CloudSaveValid(data, length)) return SAVE_ERR_PAYLOAD;
+    if (!CloudSaveValid(data, length)) {
+        int status = length > 0 ? SaveValidateStatus(data, (size_t)length) : 0;
+        return SaveStatusProtected(status) ? status : SAVE_ERR_PAYLOAD;
+    }
     int first = 0, tried = 0;
     char visited[SAVE_CAND_COUNT + 1][MAX_PATH];
     for (int i = -1; i < SAVE_CAND_COUNT; i++) {
@@ -200,6 +205,7 @@ static int CloudInstall(int slot, const char* preferred, const void* data, int l
         if (!error) { snprintf(g_savePath, sizeof(g_savePath), "%s", path); return 0; }
         /* Existing progress is authoritative on backup/write failure: never
            activate a different cloud copy through a newer fallback candidate. */
+        if (SaveStatusProtected(error)) return error;
         if (existed || error == SAVE_ERR_CLOUD_BACKUP) return SAVE_ERR_CLOUD_BACKUP;
         if (!first) first = error;
     }
@@ -254,11 +260,14 @@ void SaveBackendSyncAll(void) {
         unsigned char* data = malloc(SAVE_MAX_FILE_BYTES);
         if (!data) { CloudRecordError(&first, path, 8); continue; }
         long n = SaveBackendRead(path, data, SAVE_MAX_FILE_BYTES);
-        if (n <= (long)sizeof(SaveEnvelope)) {
+        int status = n > 0 ? SaveValidateStatus(data, (size_t)n) : 0;
+        if (SaveStatusProtected(status)) {
+            CloudRecordError(&first, path, status);
+        } else if (n <= (long)sizeof(SaveEnvelope)) {
             int exists = PlatPathExists(path);
             if (!exists) CloudRestoreNew(slot, path, data, &first);
             else CloudRecordError(&first, path, exists < 0 ? -exists : SAVE_ERR_PAYLOAD);
-        } else if (!SaveValidateBytes(data, (size_t)n)) {
+        } else if (status != 1) {
             CloudRecordError(&first, path, SAVE_ERR_PAYLOAD);
         } else if (CloudSaveValid(data, (int)n)) {
             void* remote = NULL; int remoteLength = 0;
@@ -322,8 +331,12 @@ int SaveBackendResolveCloud(int slot, int choice) {
         if (SteamZoneCloudExists(name)) {
             int n = 0;
             if (!SteamZoneCloudPullNew(name, data, (int)SAVE_MAX_FILE_BYTES, &n)) error = SAVE_ERR_CLOUD_SYNC;
-            else if (CloudSaveValid(data, n)) error = CloudKeepConflict(slot, path, data, n);
-            else error = SaveBackendKeepSnapshot(path, "invalid-cloud", data, (size_t)n, NULL, 0);
+            else {
+                int status = n > 0 ? SaveValidateStatus(data, (size_t)n) : 0;
+                if (SaveStatusProtected(status)) error = status;
+                else if (CloudSaveValid(data, n)) error = CloudKeepConflict(slot, path, data, n);
+                else error = SaveBackendKeepSnapshot(path, "invalid-cloud", data, (size_t)n, NULL, 0);
+            }
         }
         if (!error) {
             long n = SaveBackendRead(path, data, SAVE_MAX_FILE_BYTES);
@@ -340,35 +353,31 @@ int SaveBackendResolveCloud(int slot, int choice) {
     return error;
 }
 
-/* Keep a byte-identical pre-migration copy. Existing backups are never overwritten. */
-static int PreserveOriginal(const char *path,const char *suffix) {
-    size_t cap=16u*1024u*1024u;
-    unsigned char* original=malloc(cap);unsigned char* prior=malloc(cap);
-    if(!original || !prior){free(original);free(prior);return 8;}
-    long n=SaveBackendRead(path,original,cap);
-    if(n<=0){free(original);free(prior);return SAVE_ERR_PAYLOAD;}
-    char backup[MAX_PATH+64];unsigned hash=2166136261u;
-    for(long i=0;i<n;i++)hash=(hash^original[i])*16777619u;
-    snprintf(backup,sizeof(backup),"%s.%s.bak",path,suffix);
-    long old=SaveBackendRead(backup,prior,cap);
-    if(old>=0 && (old!=n || memcmp(original,prior,(size_t)n))){
-        snprintf(backup,sizeof(backup),"%s.%s-%08x.bak",path,suffix,hash);
-        old=SaveBackendRead(backup,prior,cap);
-    }
-    int code=0;
-    if(old>=0){if(old!=n || memcmp(original,prior,(size_t)n))code=SAVE_ERR_PAYLOAD;}
-    else code=PlatWriteFileExclusive(backup,original,(int)n);
-    if(!code){old=SaveBackendRead(backup,prior,cap);if(old!=n || memcmp(original,prior,(size_t)n))code=SAVE_ERR_PAYLOAD;}
-    free(original);free(prior);return code;
+/* Keep a byte-identical pre-migration copy without reserving the file size limit. */
+static int PreserveOriginal(const char *path, const char *base, const char *suffix,
+                            char *archive, size_t capacity) {
+    int length = PlatFileSize(path);
+    if (length <= 0 || (unsigned)length > SAVE_MAX_FILE_BYTES) return SAVE_ERR_PAYLOAD;
+    unsigned char *original = malloc((size_t)length + 1);
+    if (!original) return 8;
+    long n = SaveBackendRead(path, original, (size_t)length + 1);
+    int error = n == length ? SaveBackendKeepSnapshot(base, suffix, original, (size_t)n, archive, capacity)
+                            : SAVE_ERR_PAYLOAD;
+    free(original);
+    return error;
 }
 
 int SaveBackendPreserveVersion(const char* path,int version) {
     char suffix[24];
     snprintf(suffix,sizeof suffix,"v%d",version);
-    return PreserveOriginal(path,suffix);
+    return PreserveOriginal(path, path, suffix, NULL, 0);
 }
-int SaveBackendPreserveRetiredStory(const char *path) {
-    return PreserveOriginal(path,"retired-story");
+int SaveBackendPreserveRetiredStory(const char *path, char *archive, size_t capacity) {
+    char base[MAX_PATH];
+    int length = snprintf(base, sizeof base, "%s", path);
+    if (length < 0 || (size_t)length >= sizeof base) return SAVE_ERR_CAPACITY;
+    if (length > 4 && !strcmp(base + length - 4, ".bak")) base[length - 4] = 0;
+    return PreserveOriginal(path, base, "retired-story", archive, capacity);
 }
 
 #ifdef SAVE_BACKEND_TEST

@@ -31,12 +31,13 @@ static size_t MinimumBlobBytes(int version) {
     }
 }
 
-static int BlobValid(const void* bytes, size_t length) {
+static int BlobStatus(const void* bytes, size_t length) {
     unsigned magic; int version;
     if (!bytes || length < 8) return 0;
     memcpy(&magic, bytes, 4); memcpy(&version, (const char*)bytes + 4, 4);
-    return magic == SAVE_MAGIC && version >= 25 && version <= SAVE_VERSION &&
-           length >= MinimumBlobBytes(version) && length <= sizeof(SaveBlob);
+    if (magic != SAVE_MAGIC || version < 25) return 0;
+    if (version > SAVE_VERSION) return SAVE_ERR_FUTURE_BLOB;
+    return length >= MinimumBlobBytes(version) && length <= sizeof(SaveBlob);
 }
 
 int SaveChunkSchemaSupported(unsigned short id, unsigned short schema) {
@@ -52,7 +53,7 @@ int SaveChunkSchemaSupported(unsigned short id, unsigned short schema) {
 int SaveValidateStatus(const void* bytes, size_t length) {
     if (!bytes || length < 8 || length > SAVE_MAX_FILE_BYTES) return 0;
     unsigned magic; memcpy(&magic, bytes, 4);
-    if (magic == SAVE_MAGIC) return BlobValid(bytes, length);
+    if (magic == SAVE_MAGIC) return BlobStatus(bytes, length);
     if (magic != SAVE_ENVELOPE_MAGIC || length <= sizeof(SaveEnvelope)) return 0;
     SaveEnvelope envelope; memcpy(&envelope, bytes, sizeof(envelope));
     const unsigned char* payload = (const unsigned char*)bytes + sizeof(envelope);
@@ -75,7 +76,10 @@ int SaveValidateStatus(const void* bytes, size_t length) {
             if(!eventFloor)return SAVE_ERR_EVENT;
         }
         if(desc.id==SC_INVENTORY_ORDER && desc.size!=ITEM_SLOT_COUNT)return 0;
-        if (desc.id == SC_PROTOCOL_CHECKPOINT && (desc.schema != 1 || !BlobValid(body, desc.size))) return 0;
+        if (desc.id == SC_PROTOCOL_CHECKPOINT) {
+            int status = BlobStatus(body, desc.size);
+            if (status != 1) return status;
+        }
         if (desc.id == SC_DAILY_CLEAR && desc.schema == 1 && desc.size != 4) return 0;
         if (desc.id == SC_FLOOR_RULES && desc.schema == 1) {
             if (desc.size != SAVE_FLOOR_RULES_BYTES || *(const unsigned char*)body > EVENT_COUNT)
@@ -87,7 +91,8 @@ int SaveValidateStatus(const void* bytes, size_t length) {
         }
         used += desc.size;
         if (desc.id == SC_LEGACY29) {
-            if (desc.schema != 1 || !BlobValid(body, desc.size)) return 0;
+            int status = BlobStatus(body, desc.size);
+            if (status != 1) return status;
             if(desc.size==sizeof(SaveBlob)) {
                 SaveBlob blob;
                 memcpy(&blob,body,sizeof blob);
@@ -99,6 +104,10 @@ int SaveValidateStatus(const void* bytes, size_t length) {
     }
     if(eventFloor && activeFloor && eventFloor!=activeFloor)return SAVE_ERR_EVENT;
     return legacy == 1 && used == (size_t)payloadBytes;
+}
+
+int SaveStatusProtected(int status) {
+    return status == SAVE_ERR_SCHEMA || status == SAVE_ERR_EVENT || status == SAVE_ERR_FUTURE_BLOB;
 }
 
 int SaveValidateBytes(const void *bytes,size_t length) { return SaveValidateStatus(bytes,length)==1; }

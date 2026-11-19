@@ -1074,6 +1074,14 @@ static void test_protected_event_schema_and_retired_story(void) {
           "save attempts before consent leave the original intact");
     CHECK(SaveConfirmRetiredStory() && !SaveRetiredStoryPending() && !SaveHasPendingRun(),
           "confirmation retires the active route");
+    char backup[MAX_PATH+16];
+    snprintf(backup,sizeof backup,"%s.bak",path);
+    CHECK(SaveBackendWrite(backup,original,(size_t)n)==0 &&
+          PlatSetFileTime(backup,PlatFileTime(path)+60)==0,"old story can be the newer backup");
+    CHECK(!LoadSettings() && SaveRetiredStoryPending() &&
+          !strcmp(SaveRetiredStoryArchiveName(),"canity0.sav.retired-story.bak"),
+          "backup migration shows the real archive under the primary slot name");
+    CHECK(SaveConfirmRetiredStory(),"migrating a backup preserves the current profile");
     free(copy);free(original);
 
     const unsigned short ids[]={SC_EVENT_V1,SC_FLOOR_RULES,SC_INVENTORY_ORDER,
@@ -1098,6 +1106,25 @@ static void test_protected_event_schema_and_retired_story(void) {
     unsigned char later[sizeof data];
     CHECK(SaveBackendRead(path,later,sizeof later)==(long)(sizeof h+pay) && !memcmp(data,later,sizeof h+pay),
           "invalid primary retains original bytes after write attempts");
+    SaveTestClearReadOnly();
+
+    /* Test both the raw and enveloped prefix. Older valid backups cannot win. */
+    blob.version=SAVE_VERSION+1;
+    CHECK(SaveValidateStatus(&blob,sizeof blob)==SAVE_ERR_FUTURE_BLOB,"future raw blob is recognized");
+    chunks[1].id=60000;
+    pay=SaveContainerPack(chunks,bodies,2,data+sizeof h,sizeof data-sizeof h,NULL);
+    SaveEnvelopeSeal(&h,data+sizeof h,pay,1000);memcpy(data,&h,sizeof h);
+    CHECK(SaveValidateStatus(data,sizeof h+pay)==SAVE_ERR_FUTURE_BLOB,"future enveloped blob with unknown extension is recognized");
+    CHECK(SaveBackendWrite(path,data,sizeof h+pay)==0 && !LoadSettings() &&
+          g_saveError==SAVE_ERR_FUTURE_BLOB,"future primary cannot fall back to a valid older save");
+    SaveGame();
+    CHECK(SaveBackendRead(path,later,sizeof later)==(long)(sizeof h+pay) && !memcmp(data,later,sizeof h+pay),
+          "normal save leaves future primary untouched");
+    CHECK(PlatDeletePath(backup)==0 && !LoadSettings() && g_saveError==SAVE_ERR_FUTURE_BLOB,
+          "future primary stays protected without a backup");
+    SaveGame();
+    CHECK(SaveBackendRead(path,later,sizeof later)==(long)(sizeof h+pay) && !memcmp(data,later,sizeof h+pay),
+          "normal save leaves the only future file untouched");
     SaveTestClearReadOnly();
 }
 

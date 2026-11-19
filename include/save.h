@@ -53,6 +53,7 @@ extern char g_savePath[MAX_PATH];
 #define SAVE_ERR_CLOUD_CONFLICT (-4) /* Both snapshots preserved; user choice required. */
 #define SAVE_ERR_CLOUD_SYNC (-5)     /* Cloud transport/validation failure. */
 #define SAVE_ERR_CLOUD_BACKUP (-6)   /* Local snapshot could not be preserved. */
+#define SAVE_ERR_FUTURE_BLOB (-12) /* SaveBlob requires a newer game. */
 #define SAVE_ERR_SCHEMA     (-9)   /* An extension needs a newer version. */
 #define SAVE_ERR_RETIRED_STORY (-11) /* Legacy playthrough is awaiting a safe migration. */
 #define SAVE_ERR_EVENT      (-10)  /* An event extension payload is invalid. */
@@ -66,7 +67,7 @@ extern char g_savePath[MAX_PATH];
 /* ---- 存档分区后端（src/save/save_backend.c）----
    全工程**唯一**允许碰 canity*.sav 的地方。 */
 int   SaveBackendWrite(const char* path, const void* data, size_t n); /* 0 = 成功 */
-int SaveBackendPreserveRetiredStory(const char *path);
+int SaveBackendPreserveRetiredStory(const char *path, char *archive, size_t capacity);
 int SaveBackendPreserveVersion(const char* path,int version); /* 0 only after a recoverable original exists */
 long  SaveBackendRead(const char* path, void* buf, size_t cap);       /* 字节数 / -1 */
 void  SaveBackendUpload(const char* path);                            /* 交给 Steam 专区 */
@@ -74,6 +75,7 @@ void  SaveBackendSyncAll(void);                                       /* 云 <->
 /* Shared structural validation; raw legacy blobs remain supported. */
 int SaveValidateBytes(const void* data, size_t length);
 int SaveValidateStatus(const void* data, size_t length);
+int SaveStatusProtected(int status);
 int SaveChunkSchemaSupported(unsigned short id,unsigned short schema);
 /* Immutable, verified snapshots. Existing different bytes are never replaced. */
 int SaveBackendKeepSnapshot(const char* base, const char* kind, const void* data,
@@ -386,6 +388,7 @@ int SaveHasPendingRun(void);
 int SavePendingFloor(void);
 int SavePendingStory(void);
 int SaveRetiredStoryPending(void);
+const char* SaveRetiredStoryArchiveName(void);
 int SaveConfirmRetiredStory(void);
 int SavePendingRole(void);
 void SaveStoryEntry(void);

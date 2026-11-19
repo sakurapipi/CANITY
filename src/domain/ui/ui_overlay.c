@@ -162,7 +162,9 @@ void DrawSaveStatusBanner(void) {
        只要文字超宽需要截断就会命中，窗口一窄必崩。
        现在用可写缓冲区。 */
     static char msg[160];
-    const char *notice=g_saveError==SAVE_ERR_SCHEMA?
+    const char *notice=g_saveError==SAVE_ERR_FUTURE_BLOB?
+        Tr("NEWER SAVE VERSION / USE A NEWER GAME","存档来自更新版本，请升级游戏"):
+        g_saveError==SAVE_ERR_SCHEMA?
         Tr("SAVE NEEDS A NEWER VERSION / READ-ONLY","存档需要更新版本，已设为只读"):
         g_saveError==SAVE_ERR_EVENT?
         Tr("EVENT DATA DAMAGED / SAVE READ-ONLY","存档的事件数据损坏，已设为只读"):

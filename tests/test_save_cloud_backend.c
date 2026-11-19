@@ -66,6 +66,7 @@ double PlatFileTime(const char* path) { File* file=find(path);return file?file->
 int PlatSetFileTime(const char* path,double stamp) {
     File* file=find(path);if(!file)return 2;file->stamp=stamp;return 0;
 }
+int PlatFileSize(const char* path) { File* file=find(path); return file ? file->len : -1; }
 int PlatReadFilePath(const char* path,void* out,int cap) {
     File* file=find(path);if(!file || cap<file->len)return -1;
     memcpy(out,file->data,(size_t)file->len);return file->len;

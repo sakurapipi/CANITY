@@ -265,6 +265,15 @@ EM_JS(void, js_present, (const unsigned int* src, int w, int h), {
 });
 
 /* ---- localStorage 文件后端 ---- */
+EM_JS(int, js_file_size, (const char* name), {
+    try {
+        var value = localStorage.getItem('canity:' + UTF8ToString(name));
+        if (value === null || value.length % 4 !== 0) return -1;
+        var padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+        return value.length / 4 * 3 - padding;
+    } catch (e) { return -1; }
+});
+
 EM_JS(int, js_file_read, (const char* name, void* buf, int cap), {
     try {
         var key = 'canity:' + UTF8ToString(name);
@@ -553,6 +562,10 @@ int PlatReadFileBytes(const char* name, void* buf, int cap) {
 int PlatWriteFileBytes(const char* name, const void* buf, int len) {
     if (!name || (!buf && len > 0)) return -1;
     return js_file_write(BaseName(name), buf, len);
+}
+
+int PlatFileSize(const char* path) {
+    return path && path[0] ? js_file_size(BaseName(path)) : -1;
 }
 
 int PlatReadFilePath(const char* path, void* buf, int cap) {
